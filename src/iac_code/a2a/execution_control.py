@@ -995,9 +995,11 @@ class ExecutionController:
             async with self._condition:
                 self._commit_error = "state_commit_failed"
         if cleanup_error is not None:
-            await self._commit_blocked_backup_state("execution termination cleanup failed", cleanup_error)
-            async with self._condition:
-                self._termination_cleanup_inflight = False
+            await self._commit_blocked_backup_state(
+                "execution termination cleanup failed",
+                cleanup_error,
+                clear_cleanup_inflight=True,
+            )
             return
         await self._perform_backup()
 
@@ -1024,9 +1026,11 @@ class ExecutionController:
     async def _retry_termination_cleanup(self) -> None:
         error = await self._run_termination_cleanup(self._termination_cleanup)
         if error is not None:
-            await self._commit_blocked_backup_state("execution termination cleanup failed", error)
-            async with self._condition:
-                self._termination_cleanup_inflight = False
+            await self._commit_blocked_backup_state(
+                "execution termination cleanup failed",
+                error,
+                clear_cleanup_inflight=True,
+            )
             return
         await self._perform_backup()
 
@@ -1120,23 +1124,37 @@ class ExecutionController:
                 self._commit_error = None
                 self._backup_state_committed = True
 
-    async def _commit_blocked_backup_state(self, message: str, exc: BaseException) -> None:
+    async def _commit_blocked_backup_state(
+        self,
+        message: str,
+        exc: BaseException,
+        *,
+        clear_cleanup_inflight: bool = False,
+    ) -> None:
         async with self._condition:
             self.backup = {"status": "blocked", "error": f"{message}: {type(exc).__name__}"}
+            if clear_cleanup_inflight:
+                # A retry that observes the blocked state must also be able to
+                # claim cleanup. Publishing these two changes separately can
+                # lose a retry in the gap between them.
+                self._termination_cleanup_inflight = False
             self._backup_state_committed = False
             self.release_ready = False
             self.revision += 1
+            revision = self.revision
             snapshot = self.snapshot()
             snapshot["commitError"] = None
         try:
             await self._persist_snapshot(snapshot)
         except Exception:
             async with self._condition:
-                self._commit_error = "state_commit_failed"
+                if self.revision == revision and self.backup.get("status") == "blocked":
+                    self._commit_error = "state_commit_failed"
             return
         async with self._condition:
-            self._commit_error = None
-            self._backup_state_committed = True
+            if self.revision == revision and self.backup.get("status") == "blocked":
+                self._commit_error = None
+                self._backup_state_committed = True
 
     async def _persist_external_operations(self) -> None:
         if not self.external_operations or self.session_id is None:

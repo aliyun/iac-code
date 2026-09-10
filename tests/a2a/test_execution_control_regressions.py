@@ -42,7 +42,7 @@ def isolate_backup_environment(monkeypatch):
     monkeypatch.delenv("IAC_CODE_CONFIG_BACKUP_TMP_DIR", raising=False)
 
 
-async def wait_until(predicate, timeout=20):
+async def wait_until(predicate, timeout=10):
     async def wait():
         while not predicate():
             await asyncio.sleep(0.005)

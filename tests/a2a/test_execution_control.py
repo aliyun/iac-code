@@ -24,7 +24,7 @@ from iac_code.services.session_backup import BackupReason, BackupResult
 from iac_code.services.session_storage import SessionStorage
 
 
-async def _wait_for_phase(control: ExecutionController, phase: str, *, timeout: float = 20) -> None:
+async def _wait_for_phase(control: ExecutionController, phase: str, *, timeout: float = 5) -> None:
     async def wait() -> None:
         while control.phase != phase:
             await asyncio.sleep(0.005)
@@ -32,7 +32,7 @@ async def _wait_for_phase(control: ExecutionController, phase: str, *, timeout: 
     await asyncio.wait_for(wait(), timeout=timeout)
 
 
-async def _wait_for_condition(predicate, *, timeout: float = 20) -> None:
+async def _wait_for_condition(predicate, *, timeout: float = 5) -> None:
     async def wait() -> None:
         while not predicate():
             await asyncio.sleep(0.005)
@@ -1276,7 +1276,7 @@ async def test_new_execution_cannot_replace_another_owner_control(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_termination_cleanup_failure_is_retried_before_backup_release(tmp_path: Path) -> None:
+async def test_termination_cleanup_failure_is_retried_before_backup_release(tmp_path: Path, monkeypatch) -> None:
     calls = 0
 
     async def cleanup(context_id: str, task_id: str, reason: str) -> str:
@@ -1298,6 +1298,16 @@ async def test_termination_cleanup_failure_is_retried_before_backup_release(tmp_
         termination_cleanup=cleanup,
         execution_id="exec-1",
     )
+    blocked_committed = asyncio.Event()
+    allow_cleanup_failure_to_return = asyncio.Event()
+    commit_blocked = control._commit_blocked_backup_state
+
+    async def gated_commit_blocked(message: str, error: BaseException, **kwargs) -> None:
+        await commit_blocked(message, error, **kwargs)
+        blocked_committed.set()
+        await allow_cleanup_failure_to_return.wait()
+
+    monkeypatch.setattr(control, "_commit_blocked_backup_state", gated_commit_blocked)
     request = {
         "execution_id": "exec-1",
         "request_id": "terminate-request",
@@ -1305,10 +1315,12 @@ async def test_termination_cleanup_failure_is_retried_before_backup_release(tmp_
         "reason": "explicit_terminate",
     }
     await control.terminate(**request)
-    await _wait_for_condition(lambda: control.phase == "terminated" and control.backup["status"] == "blocked")
+    await asyncio.wait_for(blocked_committed.wait(), 3)
+    assert control.phase == "terminated" and control.backup["status"] == "blocked"
     assert control.release_ready is False
 
     await control.terminate(**request)
+    allow_cleanup_failure_to_return.set()
     await _wait_for_condition(lambda: control.release_ready)
     assert calls == 2
     assert control.execution_status == "canceled"
