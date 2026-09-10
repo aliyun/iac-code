@@ -71,7 +71,7 @@
       "expected_behavior": "只输出 1 个候选，不添加 ECS/RDS 等用户未提及的资源，仍然展示并等待用户选择",
       "assertions": [
         {"name": "single_candidate", "check": "candidates 数组长度为 1"},
-        {"name": "no_extra_resources", "check": "products 中只包含 VPC 相关资源（VPC/VSwitch/SecurityGroup），不含 ECS/RDS/SLB 等"},
+        {"name": "no_extra_resources", "check": "products 中只包含 VPC，不额外创建 VSwitch、SecurityGroup、ECS、RDS 或 SLB"},
         {"name": "still_awaits_selection", "check": "status 为 awaiting_selection，即使只有一个候选也要用户明确选择"},
         {"name": "shows_outline_batch", "check": "先调用一次 show_architecture_plan，candidates 仅含 candidate_name、summary、total_monthly_cost、key_tradeoff"},
         {"name": "shows_candidate_detail", "check": "再调用一次 show_candidate_detail，提交下标 0 的 topology_graph、resource_inventory、费用假设和 decision_notes"},

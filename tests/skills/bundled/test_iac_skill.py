@@ -72,6 +72,15 @@ class TestIacSkill:
         assert '"TemplateURL": "./ros-ecs-nginx-template.yml"' in iac_skill.content
         assert "/tmp/" not in iac_skill.content
 
+    def test_iac_skill_minimizes_resources_within_each_solution(self):
+        init_bundled_skills()
+        skills = get_bundled_skills()
+        iac_skill = next(s for s in skills if s.name == "iac-aliyun")
+
+        assert "每个方案都只包含实现其目标的最小必要资源集合" in iac_skill.content
+        assert "方案之间可以采用不同架构" in iac_skill.content
+        assert "不得添加非必要资源或堆叠功能重复的资源" in iac_skill.content
+
     def test_iac_skill_delegates_infraguard_work_to_pac_skill(self):
         init_bundled_skills()
         skills = get_bundled_skills()

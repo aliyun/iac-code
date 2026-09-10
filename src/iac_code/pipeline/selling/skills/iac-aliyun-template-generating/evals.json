@@ -5,17 +5,18 @@
     {
       "id": 1,
       "name": "simple-vpc-ecs",
-      "prompt": "根据架构方案生成 ROS 模板：VPC + 1台 ECS 实例部署 Nginx",
+      "prompt": "根据架构方案生成 ROS 模板：VPC + 1台 ECS 实例部署公网 Nginx 网站",
       "candidate_context": {
         "name": "轻量 Nginx 方案",
         "products": ["VPC", "ECS"],
-        "topology": "单可用区，VPC 内一台 ECS 部署 Nginx"
+        "topology": "单可用区，VPC 内一台 ECS 部署公网 Nginx 网站，ECS 直接公网 IP 是唯一入口"
       },
-      "expected_behavior": "生成 ROS YAML 模板，包含 VPC、VSwitch、SecurityGroup、ECS InstanceGroup，ZoneId/InstanceType/ImageId 等库存属性参数化为 Parameters",
+      "expected_behavior": "生成 ROS YAML 模板，包含 VPC、VSwitch、SecurityGroup、ECS InstanceGroup 和一种可用的公网入口，ZoneId/InstanceType/ImageId 等库存属性参数化为 Parameters",
       "assertions": [
         {"name": "is_ros_yaml", "check": "输出为 ROS YAML 格式，包含 ROSTemplateFormatVersion"},
         {"name": "has_vpc_resources", "check": "包含 ALIYUN::ECS::VPC 和 ALIYUN::ECS::VSwitch 资源"},
         {"name": "has_ecs_resource", "check": "包含 ALIYUN::ECS::InstanceGroup 或 ALIYUN::ECS::Instance 资源"},
+        {"name": "has_public_entry", "check": "按候选要求为网站启用 ECS 直接公网 IP，不额外创建 EIP 或公网负载均衡"},
         {"name": "inventory_params", "check": "ZoneId、InstanceType、ImageId 定义为 Parameters"},
         {"name": "no_terraform", "check": "不包含 Terraform 相关内容（如 provider、resource block、.tf 格式）"}
       ]
@@ -71,6 +72,23 @@
         {"name": "has_redis", "check": "包含 ALIYUN::REDIS::Instance 资源"},
         {"name": "redis_params", "check": "Redis 的 ZoneId 和 InstanceClass 定义为 Parameters"},
         {"name": "has_association_property", "check": "Parameters 中包含 AssociationProperty 定义"}
+      ]
+    },
+    {
+      "id": 5,
+      "name": "private-ecs-by-default",
+      "prompt": "根据架构方案生成 ROS 模板：在 VPC 中创建一台普通 ECS",
+      "candidate_context": {
+        "name": "普通私网 ECS",
+        "products": ["VPC", "ECS"],
+        "hard_constraints": [],
+        "topology": "单可用区，VPC 内一台 ECS，未要求网站、公开服务或其它公网访问"
+      },
+      "expected_behavior": "生成私网 ECS，不创建 EIP 或其它公网入口，并显式设置 AllocatePublicIP: false",
+      "assertions": [
+        {"name": "explicit_private_ecs", "check": "每个 ALIYUN::ECS::Instance 或 InstanceGroup 都显式设置 AllocatePublicIP: false"},
+        {"name": "no_eip", "check": "Resources 中不包含 ALIYUN::VPC::EIP 或 ALIYUN::VPC::EIPAssociation"},
+        {"name": "no_public_entry", "check": "不创建公网负载均衡或其它未在候选中要求的公网入口资源"}
       ]
     }
   ]

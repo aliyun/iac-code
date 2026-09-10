@@ -199,7 +199,7 @@ user_invocable: false
 | `rough_cost` | 架构粗估费用，含区间、假设和不含项 |
 | `decision_notes` | 方案说服力字段：`why_recommended`、`problems_solved`、`pros`、`cons` **必填**，另可含 `risks`、`tradeoffs`。详见「方案说服力」 |
 
-产品组合只包含实现需求所必需的资源，不要为了"看起来完整"添加用户没需要的东西。
+无论生成一个还是多个候选，每个候选都只包含实现该方案目标的最小必要资源集合；方案之间可以采用不同架构，但单个候选不得堆叠非必要或功能重复的资源。
 
 `candidate_id`、`output_path`、`products`、文字版 topology 和候选 hard_constraints 快照均由 Python
 根据候选下标、资源清单、拓扑图与 `intent.hard_constraints` 生成，不要在模型输入中提交。

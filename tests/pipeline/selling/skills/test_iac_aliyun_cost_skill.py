@@ -465,7 +465,7 @@ class TestReferencesExist:
         assert "参数必须一致" not in content
         assert "最终参数由 `CreateStack` 校验" in content
 
-    def test_ecs_reference_verifies_explicit_size_without_closest_fallback(self):
+    def test_ecs_reference_covers_size_and_scenario_driven_public_access(self):
         reference = _direct_references_dir_or_skip() / "cloud-products" / "ecs.md"
         content = reference.read_text(encoding="utf-8")
 
@@ -473,7 +473,10 @@ class TestReferencesExist:
         assert "CpuCoreCount" in content
         assert "MemorySize" in content
         assert "用户已明确 vCPU/内存时，不得选择最接近值" in content
-        assert "ECS 绑定 EIP 时，必须显式设置 `AllocatePublicIP: false`" in content
+        assert "普通 ECS 无明确公网需求时不创建 EIP" in content
+        assert "网站、公开 API 等场景配置一种必要的公网入口" in content
+        assert "AllocatePublicIP: false" in content
+        assert "避免重复公网入口" in content
 
 
 class TestSkillDiscovery:
