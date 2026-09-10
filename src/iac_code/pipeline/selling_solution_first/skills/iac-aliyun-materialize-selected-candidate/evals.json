@@ -9,22 +9,22 @@
       "candidate_context": {
         "candidate_id": "private-ecs",
         "name": "普通私网 ECS",
-        "products": ["VPC", "ECS"],
-        "topology": "单可用区，VPC 内一台 ECS 执行内网计算任务，无公网访问需求",
+        "products": ["ECS"],
+        "topology": "单可用区，一台 ECS 执行内网计算任务，无公网访问需求",
         "output_path": "templates/1-private-ecs.yml",
         "resource_intents": [
-          {"product": "VPC", "action": "create"},
           {"product": "ECS", "action": "create"}
         ],
         "hard_constraints": []
       },
-      "expected_behavior": "只生成一份私网 ECS ROS 模板并写入 selected_candidate.output_path，不添加 EIP 等非必要资源",
+      "expected_behavior": "只生成一份 VPC 网络内的私网 ECS ROS 模板并写入 selected_candidate.output_path，不添加 EIP 等非必要资源",
       "assertions": [
         {"name": "single_write_file", "check": "只调用一次 write_file 生成模板，路径为 templates/1-private-ecs.yml"},
         {"name": "no_other_candidate", "check": "不为其它候选生成模板、Preview 或询价，不重新规划架构"},
         {"name": "no_candidate_array_loop", "check": "不把单个方案包装成候选数组遍历，也没有并行候选实现"},
         {"name": "is_ros_yaml", "check": "输出为 ROS YAML 格式，包含 ROSTemplateFormatVersion"},
         {"name": "explicit_private_ecs", "check": "ECS 显式设置 AllocatePublicIP: false"},
+        {"name": "vpc_network_only", "check": "即使候选只要求创建 ECS，模板仍定义已有网络的 VpcId、VSwitchId Parameters，并由 ECS Properties 同时引用"},
         {"name": "no_eip", "check": "Resources 中不包含 ALIYUN::VPC::EIP 或 ALIYUN::VPC::EIPAssociation"},
         {"name": "inventory_params", "check": "ZoneId、InstanceType、ImageId 等库存属性定义为 Parameters 且带 AssociationProperty"}
       ]

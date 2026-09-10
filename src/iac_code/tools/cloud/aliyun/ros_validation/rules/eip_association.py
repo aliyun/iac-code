@@ -1,4 +1,4 @@
-"""Cross-resource checks for EIP associations."""
+"""Cross-resource checks for ECS networking and EIP associations."""
 
 from __future__ import annotations
 
@@ -115,6 +115,51 @@ class EipAssociationCheck:
 
 
 @dataclass(frozen=True)
+class EcsVpcNetworkCheck:
+    """Require every ECS instance resource to select a VPC and vSwitch."""
+
+    def check(self, context: Any) -> tuple[Diagnostic, ...]:
+        parsed = context.fact_store.get_required(_PARSED_TEMPLATE)
+        template = parsed.data
+        if not isinstance(template, Mapping):
+            return ()
+        resources = template.get("Resources")
+        if not isinstance(resources, Mapping):
+            return ()
+
+        diagnostics: list[Diagnostic] = []
+        for resource_name, definition in resources.items():
+            if (
+                not isinstance(resource_name, str)
+                or not isinstance(definition, Mapping)
+                or definition.get("Type") not in _ECS_TYPES
+            ):
+                continue
+            properties = definition.get("Properties")
+            missing = tuple(
+                name for name in ("VpcId", "VSwitchId") if not isinstance(properties, Mapping) or name not in properties
+            )
+            if not missing:
+                continue
+            diagnostics.append(
+                make_diagnostic(
+                    code="ROS5104",
+                    severity=Severity.ERROR,
+                    category=Category.COMPATIBILITY,
+                    summary=_("ECS resource {} must explicitly set both VpcId and VSwitchId.").format(resource_name),
+                    detail="",
+                    path=_path("Resources", resource_name, "Properties", missing[0]),
+                    source_map=parsed.source_map,
+                    subject=resource_name,
+                    stable_args=(resource_name, *missing),
+                    expected="VpcId,VSwitchId",
+                    actual="missing:" + ",".join(missing),
+                )
+            )
+        return tuple(diagnostics)
+
+
+@dataclass(frozen=True)
 class ResourceRelationshipRule:
     """Run checks that validate relationships between ROS resources."""
 
@@ -122,7 +167,7 @@ class ResourceRelationshipRule:
     phase: RulePhase = RulePhase.STRUCTURE
     requires: frozenset[str] = frozenset({_PARSED_TEMPLATE})
     optional_requires: frozenset[str] = frozenset()
-    checks: tuple[EipAssociationCheck, ...] = (EipAssociationCheck(),)
+    checks: tuple[EipAssociationCheck | EcsVpcNetworkCheck, ...] = (EipAssociationCheck(), EcsVpcNetworkCheck())
 
     def check(self, context: Any) -> tuple[Diagnostic, ...]:
         diagnostics: list[Diagnostic] = []

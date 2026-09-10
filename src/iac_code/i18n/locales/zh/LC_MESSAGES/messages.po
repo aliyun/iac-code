@@ -10310,6 +10310,11 @@ msgstr "EIPAssociation {} 提供公网入口；关联的 ECS 资源必须将 All
 msgid "Set AllocatePublicIP: false on the associated ECS resource."
 msgstr "请在关联的 ECS 资源上设置 AllocatePublicIP: false。"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "ECS resource {} must explicitly set both VpcId and VSwitchId."
+msgstr "ECS 资源 {} 必须显式设置 VpcId 和 VSwitchId。"
+
 #: src/iac_code/ui/banner.py
 #, python-brace-format
 msgid "Update available! {} -> {}"

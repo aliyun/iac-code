@@ -10518,6 +10518,11 @@ msgstr ""
 msgid "Set AllocatePublicIP: false on the associated ECS resource."
 msgstr "関連付けられた ECS リソースで AllocatePublicIP: false を設定してください。"
 
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "ECS resource {} must explicitly set both VpcId and VSwitchId."
+msgstr "ECS リソース {} では VpcId と VSwitchId の両方を明示的に設定する必要があります。"
+
 #: src/iac_code/ui/banner.py
 #, python-brace-format
 msgid "Update available! {} -> {}"
