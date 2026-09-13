@@ -189,12 +189,23 @@ class DiagramOptimizationCoordinator:
             multi = await asyncio.to_thread(
                 render_ros_template_architecture_views, target.template_content, semantic_plan=plan
             )
-            views: list[dict] = []
+            views: list[dict[str, Any]] = []
             for v in multi.views:
                 raw = v.mermaid_source
                 if not raw or raw.startswith(_ERROR_MERMAID_PREFIX) or raw.strip() == "graph TD":
                     continue
-                views.append({"id": v.id, "title": v.title, "mermaidSource": browser_mermaid_source(raw)})
+                view: dict[str, Any] = {
+                    "id": v.id,
+                    "title": v.title,
+                    "mermaidSource": browser_mermaid_source(raw),
+                }
+                purpose = getattr(v, "purpose", "")
+                if purpose:
+                    view["purpose"] = purpose
+                graph = getattr(v, "graph", None)
+                if isinstance(graph, dict) and graph.get("version") == 1:
+                    view["graph"] = graph
+                views.append(view)
             if not views:
                 raise RuntimeError("optimized render did not produce a usable diagram")
             await asyncio.to_thread(

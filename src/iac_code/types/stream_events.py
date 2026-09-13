@@ -427,7 +427,7 @@ class DiagramEvent(ToolEmittedEvent):
     candidate_index: int | None = None
     architecture_context: dict[str, Any] | None = None
     diagram_stage: Literal["draft", "optimized"] = "optimized"
-    views: list[dict[str, str]] = field(default_factory=list)
+    views: list[dict[str, Any]] = field(default_factory=list)
     candidate_set_id: str | None = None
     detail_stage: Literal["outline", "detail"] | None = None
     type: Literal["diagram"] = "diagram"

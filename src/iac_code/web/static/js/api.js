@@ -538,6 +538,17 @@ export function saveAppearance(theme) {
   });
 }
 
+export function getArchitectureDiagramRenderer() {
+  return jsonFetch("/api/settings/architecture-diagram");
+}
+
+export function saveArchitectureDiagramRenderer(renderer) {
+  return jsonFetch("/api/settings/architecture-diagram", {
+    method: "PUT",
+    body: JSON.stringify({ renderer }),
+  });
+}
+
 export function getUiLanguage() {
   return jsonFetch("/api/settings/ui-language");
 }

@@ -269,10 +269,37 @@ def test_p0_p1_route_inventory_has_no_501_secret_echoes_or_non_json_errors(tmp_p
                 "PUT /api/settings/appearance",
                 lambda: client.put("/api/settings/appearance", json={"theme": "graphite"}),
             ),
+            (
+                "GET /api/settings/architecture-diagram",
+                lambda: client.get("/api/settings/architecture-diagram"),
+            ),
+            (
+                "PUT /api/settings/architecture-diagram",
+                lambda: client.put("/api/settings/architecture-diagram", json={"renderer": "eraser"}),
+            ),
+            (
+                "POST /api/diagram-preview",
+                lambda: client.post(
+                    "/api/diagram-preview",
+                    json={
+                        "filename": "template.yaml",
+                        "content": (
+                            "ROSTemplateFormatVersion: '2015-09-01'\n"
+                            "Resources:\n"
+                            "  Vpc:\n"
+                            "    Type: ALIYUN::ECS::VPC\n"
+                            "    Properties: {}\n"
+                        ),
+                    },
+                ),
+            ),
         ]
 
         static_routes = [
             ("GET /", client.get("/"), "text/html"),
+            ("GET /diagram-preview", client.get("/diagram-preview"), "text/html"),
+            ("GET /static/diagram-preview.css", client.get("/static/diagram-preview.css"), "text/css"),
+            ("GET /static/js/diagram_preview.js", client.get("/static/js/diagram_preview.js"), "javascript"),
             ("GET /static/styles.css", client.get("/static/styles.css"), "text/css"),
             ("GET /static/js/app.js", client.get("/static/js/app.js"), "javascript"),
         ]

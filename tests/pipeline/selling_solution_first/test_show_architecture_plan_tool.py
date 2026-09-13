@@ -535,6 +535,21 @@ class TestSuccessfulRender:
         assert event.diagram_stage == "optimized"
         assert [view["id"] for view in event.views] == ["overview"]
         assert event.views[0]["mermaid_source"] == event.mermaid_source
+        assert "graph" not in event.architecture_context
+        graph = event.views[0]["graph"]
+        assert graph["version"] == 1
+        assert [(container["id"], container["parentId"]) for container in graph["containers"]] == [("group_vpc", None)]
+        assert {(node["id"], node["parentId"]) for node in graph["nodes"]} == {
+            ("slb", "group_vpc"),
+            ("ecs", "group_vpc"),
+            ("rds", "group_vpc"),
+            ("oss", None),
+        }
+        assert [(edge["from"], edge["to"], edge["label"]) for edge in graph["edges"]] == [
+            ("slb", "ecs", "HTTPS"),
+            ("ecs", "rds", "depends_on"),
+            ("ecs", "oss", ""),
+        ]
 
         lines = event.mermaid_source.splitlines()
         assert lines[0] == "flowchart TD"
@@ -759,6 +774,39 @@ class TestGroupContainerFolding:
         assert '    vpc["VPC"]' in lines
         assert '  subgraph group_vpc["vpc"]' in lines
         assert "  vpc -->|包含| vsw" in lines
+
+    @pytest.mark.asyncio
+    async def test_eraser_graph_folds_nested_group_anchors(self):
+        _result, events = await _run(
+            _tool_input(
+                nodes=[
+                    {"id": "vpc", "label": "专有网络 VPC", "product": "VPC", "role": "网络隔离"},
+                    {"id": "vswitch", "label": "交换机 VSwitch", "product": "VSwitch", "group": "vpc"},
+                    {"id": "ecs", "label": "Web 服务", "product": "ECS", "group": "vswitch"},
+                    {"id": "sg", "label": "安全组", "product": "SecurityGroup", "group": "vpc"},
+                    {"id": "user", "label": "公网用户", "product": "Internet"},
+                ],
+                edges=[
+                    {"source": "vpc", "target": "vswitch", "label": "包含"},
+                    {"source": "vswitch", "target": "ecs", "label": "包含"},
+                    {"source": "user", "target": "ecs", "label": "HTTP"},
+                    {"source": "sg", "target": "ecs", "label": "仅 8766"},
+                ],
+            )
+        )
+
+        graph = events[0].views[0]["graph"]
+        assert [node["id"] for node in graph["nodes"]] == ["ecs", "sg", "user"]
+        assert [(item["id"], item["parentId"]) for item in graph["containers"]] == [
+            ("group_vpc", None),
+            ("group_vswitch", "group_vpc"),
+        ]
+        assert graph["containers"][0]["label"] == "专有网络 VPC 网络隔离"
+        assert graph["containers"][1]["label"] == "交换机 VSwitch"
+        assert [(edge["from"], edge["to"], edge["label"]) for edge in graph["edges"]] == [
+            ("user", "ecs", "HTTP"),
+            ("sg", "ecs", "仅 8766"),
+        ]
 
 
 class TestDegradedEdges:

@@ -1,8 +1,8 @@
 """Step 1 candidate outline tool and the local planned-architecture renderer.
 
 ``show_architecture_plan`` now submits one complete, lightweight candidate outline batch.  Rich
-topology rendering remains in this module so the pipeline-local ``show_candidate_detail`` tool can
-reuse the existing sanitizing and Mermaid behavior without moving or duplicating it.
+topology validation and Mermaid rendering remain here for the pipeline-local
+``show_candidate_detail`` tool; renderer-neutral graph projection lives in the engine adapter.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from typing import Any
 from loguru import logger
 
 from iac_code.i18n import _
+from iac_code.pipeline.engine.diagram_graph import project_plan_diagram_graph
 from iac_code.pipeline.selling_solution_first.tools.candidate_planning_records import (
     latest_candidate_outline_batch,
     normalize_outline_candidates,
@@ -152,9 +153,7 @@ class ShowArchitecturePlanTool(Tool):
                 "Displayed {count} candidate outlines; candidateSetId={candidate_set_id}. "
                 "Do not repeat show_architecture_plan unless the user changes the candidate set; "
                 "continue with show_candidate_detail."
-            ).format(
-                count=len(candidates), candidate_set_id=candidate_set_id
-            ),
+            ).format(count=len(candidates), candidate_set_id=candidate_set_id),
             metadata={"candidate_set_id": candidate_set_id},
         )
 
@@ -169,13 +168,21 @@ class _ArchitecturePlan:
         self.warnings: list[str] = []
 
 
-def render_architecture_graph(topology_graph: Any) -> tuple[str, dict[str, Any], list[str]]:
-    """Validate one rich detail graph and return its Mermaid source and UI context."""
+def render_architecture_graph(topology_graph: Any) -> tuple[str, dict[str, Any], dict[str, Any], list[str]]:
+    """Validate a rich detail graph and return Mermaid, context, DiagramGraph, and warnings."""
 
     if not isinstance(topology_graph, dict):
         raise ValueError(_("topology_graph must be an object with nodes and edges"))
     plan = _build_architecture_plan(topology_graph.get("nodes"), topology_graph.get("edges"))
-    return _render_plan_mermaid(plan), _plan_architecture_context(plan), list(plan.warnings)
+    context = _plan_architecture_context(plan)
+    graph = project_plan_diagram_graph(
+        nodes=plan.nodes,
+        groups=plan.groups,
+        edges=plan.edges,
+        node_labels={node["id"]: _node_mermaid_label(node).replace("\\n", "\n") for node in plan.nodes},
+        group_anchor_labels={node["id"]: _group_mermaid_title(node) for node in plan.nodes},
+    )
+    return _render_plan_mermaid(plan), context, graph, list(plan.warnings)
 
 
 def _normalized_candidate_index(value: Any) -> int | None:

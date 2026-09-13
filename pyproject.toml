@@ -127,6 +127,7 @@ version = {attr = "iac_code.__version__"}
     "**/*.png",
     "**/*.svg",
     "**/*.LICENSE",
+    "**/*.NOTICE",
     "**/*.rego",
     "**/*.mo",
     "**/*.po",

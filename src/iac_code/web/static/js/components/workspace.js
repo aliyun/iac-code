@@ -4250,10 +4250,12 @@ function createOtherPanel(api, context) {
   const themeGrid = makeElement("div", { className: "workspace-theme-grid" });
   const themeSwatches = new Map();
   const setActiveTheme = (slug) => {
+    const changed = document.documentElement.dataset.theme !== slug;
     document.documentElement.dataset.theme = slug;
     for (const [key, el] of themeSwatches) {
       el.classList.toggle("is-active", key === slug);
     }
+    if (changed) window.dispatchEvent(new CustomEvent("iac-code:theme-changed"));
   };
   for (const option of THEME_OPTIONS) {
     const swatch = makeElement("button", {
@@ -4283,6 +4285,55 @@ function createOtherPanel(api, context) {
   languageSelect.addEventListener("change", async () => {
     await api.saveUiLanguage(languageSelect.value);
     location.reload();
+  });
+
+  const architectureRendererSelect = makeSelect("workspace-architecture-renderer-select");
+  for (const [value, label] of [["eraser", "Eraser"], ["mermaid", "Mermaid"]]) {
+    const option = makeElement("option");
+    option.value = value;
+    option.textContent = label;
+    architectureRendererSelect.append(option);
+  }
+  const architectureRendererField = makeField(
+    t("Architecture diagram renderer"),
+    architectureRendererSelect,
+    t("Choose how architecture diagrams are displayed; the change takes effect after saving."),
+  );
+  const architecturePreviewButton = makeButton(t("Open template preview"), "workspace-open-diagram-preview");
+  const architecturePreviewRow = makeElement("div", { className: "workspace-action-row" });
+  architecturePreviewRow.append(architecturePreviewButton);
+  architecturePreviewButton.addEventListener("click", () => {
+    window.open("/diagram-preview", "_blank", "noopener,noreferrer");
+  });
+  const effectiveArchitectureRenderer = () =>
+    document.body?.dataset.architectureDiagramRenderer === "mermaid" ? "mermaid" : "eraser";
+  const applyArchitectureRenderer = (renderer) => {
+    const normalized = renderer === "mermaid" ? "mermaid" : "eraser";
+    const changed = effectiveArchitectureRenderer() !== normalized;
+    document.body.dataset.architectureDiagramRenderer = normalized;
+    architectureRendererSelect.value = normalized;
+    if (changed) window.dispatchEvent(new CustomEvent("iac-code:architecture-renderer-changed"));
+  };
+
+  architectureRendererSelect.value = effectiveArchitectureRenderer();
+  architectureRendererSelect.addEventListener("change", async () => {
+    const previous = effectiveArchitectureRenderer();
+    const requested = architectureRendererSelect.value;
+    const token = ++requestToken;
+    architectureRendererSelect.disabled = true;
+    stamp(t("Saving…"));
+    try {
+      const saved = await api.saveArchitectureDiagramRenderer(requested);
+      applyArchitectureRenderer(saved?.renderer);
+      if (token === requestToken) stampSaved(token);
+    } catch (error) {
+      architectureRendererSelect.value = previous;
+      if (token === requestToken) {
+        stamp(t("Save failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+      }
+    } finally {
+      architectureRendererSelect.disabled = false;
+    }
   });
 
   let requestToken = 0;
@@ -4521,8 +4572,8 @@ function createOtherPanel(api, context) {
   }
   devModeToggle.input.addEventListener("change", persistDeveloperMode);
 
-  // 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 帮助改进 iac-code → 开发者模式。
-  // 界面语言(languageField)紧随配色方案,既保持外观类设置成组,也让所有分区标题的相邻关系
+  // 章节顺序:新会话默认 → 配色方案(含界面语言与架构图方案)→ 售卖流水线 → 外来会话可见性 → 帮助改进 iac-code → 开发者模式。
+  // 界面语言与架构图方案紧随配色方案,既保持外观类设置成组,也让所有分区标题的相邻关系
   // (h3→head、settings-group→head、field→head)仍被现有章节间距选择器覆盖,无需改 CSS。
   panel.append(
     heading,
@@ -4531,6 +4582,8 @@ function createOtherPanel(api, context) {
     themeGroupHead,
     themeGrid,
     languageField,
+    architectureRendererField,
+    architecturePreviewRow,
     reviewStepGroupHead,
     reviewStepCard,
     groupHead,
@@ -4584,6 +4637,12 @@ function createOtherPanel(api, context) {
         }
       } catch (error) {
         /* 主题加载失败保持首屏注入值,不覆盖 */
+      }
+      try {
+        const architectureRenderer = await api.getArchitectureDiagramRenderer();
+        if (token === requestToken) applyArchitectureRenderer(architectureRenderer?.renderer);
+      } catch (error) {
+        /* 架构图显示方案加载失败时保留首屏服务端注入值。 */
       }
       try {
         const uiLang = await api.getUiLanguage();
@@ -4641,6 +4700,8 @@ function createOtherPanel(api, context) {
       prereqRepairRequired = false;
       setPrereqInstalling(false);
       permissionSelect.value = "default";
+      architectureRendererSelect.disabled = false;
+      architectureRendererSelect.value = effectiveArchitectureRenderer();
       modeSelection = { mode: "normal", pipelineName: fallbackPipelineName };
       modeMenuOpen = false;
       pipelineSubmenuOpen = false;

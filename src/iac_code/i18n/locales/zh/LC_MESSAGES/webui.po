@@ -18,6 +18,66 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Architecture diagram preview"
+msgstr "架构图预览"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Choose or drop a ROS template to render its architecture diagram locally."
+msgstr "选择或拖入 ROS 模板，在本地渲染架构图。"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Back to conversations"
+msgstr "返回会话"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Template library"
+msgstr "模板库"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid ""
+"Select the local ros-templates folder once, then switch between the fixed"
+" corpus or random templates."
+msgstr "选择一次本地 ros-templates 目录，即可在固定样本和随机模板之间切换。"
+
+#: src/iac_code/web/static/diagram-preview.html
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "Select ros-templates folder"
+msgstr "选择 ros-templates 目录"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Fixed 30-template corpus"
+msgstr "固定 30 个模板样本"
+
+#: src/iac_code/web/static/diagram-preview.html
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "Select a template"
+msgstr "选择模板"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Random other template"
+msgstr "随机其他模板"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Single template"
+msgstr "单个模板"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Supports ROS YAML, YML, and JSON templates up to 2 MB."
+msgstr "支持最大 2 MB 的 ROS YAML、YML 和 JSON 模板。"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Choose or drop a ROS template"
+msgstr "选择或拖入 ROS 模板"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Drop a template here, or click to choose"
+msgstr "将模板拖到这里，或点击选择"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "The file is read for this preview and is not saved."
+msgstr "文件仅用于本次预览，不会保存。"
+
 #: src/iac_code/web/static/index.html
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session"
@@ -958,6 +1018,81 @@ msgstr "无法开始更新。请打开诊断目录查看详情。"
 msgid "Failed to start update: {error}"
 msgstr "更新启动失败:{error}"
 
+#: src/iac_code/web/static/js/architecture_diagram.js
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "架构图"
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+msgid "This historical diagram is shown with Mermaid."
+msgstr "这张历史架构图已用 Mermaid 显示。"
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+msgid "This diagram is temporarily shown with Mermaid."
+msgstr "这张架构图暂时使用 Mermaid 显示。"
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+#: src/iac_code/web/static/js/mermaid_render.js
+#, python-brace-format
+msgid "View {n}"
+msgstr "视图 {n}"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Renderer: {renderer}"
+msgstr "渲染器：{renderer}"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The fixed template corpus could not be loaded."
+msgstr "无法载入固定模板样本。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "No supported ROS templates were found in that folder."
+msgstr "所选目录中没有受支持的 ROS 模板。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} template loaded; {available} of 30 corpus templates available."
+msgstr "已载入 {count} 个模板；固定 30 个样本中有 {available} 个可用。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} templates loaded; {available} of 30 corpus templates available."
+msgstr "已载入 {count} 个模板；固定 30 个样本中有 {available} 个可用。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The template could not be rendered."
+msgstr "无法渲染该模板。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The template must be 2 MB or smaller."
+msgstr "模板大小不能超过 2 MB。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Rendering {filename}…"
+msgstr "正在渲染 {filename}…"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} architecture view"
+msgstr "{count} 个架构视图"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} architecture views"
+msgstr "{count} 个架构视图"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Rendered {filename}"
+msgstr "已渲染 {filename}"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "No templates remain outside the fixed corpus."
+msgstr "固定样本以外没有可用模板。"
+
 #: src/iac_code/web/static/js/events.js
 msgid "Local shell"
 msgstr "本地 Shell"
@@ -966,11 +1101,6 @@ msgstr "本地 Shell"
 #: src/iac_code/web/static/js/events.js
 msgid "Unknown error"
 msgstr "未知错误"
-
-#: src/iac_code/web/static/js/mermaid_render.js
-#, python-brace-format
-msgid "View {n}"
-msgstr "视图 {n}"
 
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "No pricing information"
@@ -1350,11 +1480,6 @@ msgstr "成功"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "In progress / failed"
 msgstr "进行中/失败"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "架构图"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
@@ -3848,6 +3973,20 @@ msgstr "界面语言"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Choose the interface language; the page reloads after saving."
 msgstr "选择界面语言,保存后页面自动刷新。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Architecture diagram renderer"
+msgstr "架构图渲染器"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Choose how architecture diagrams are displayed; the change takes effect "
+"after saving."
+msgstr "选择架构图的显示方式；保存后立即生效。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Open template preview"
+msgstr "打开模板预览"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Downloading…"

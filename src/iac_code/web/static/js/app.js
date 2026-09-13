@@ -1,14 +1,14 @@
-import * as api from "./api.js?v=web-repl-ui-312";
+import * as api from "./api.js?v=web-repl-ui-313";
 import { createComposerController } from "./components/composer.js?v=session-model-v20";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import {
   deploymentConfirmationKey,
   renderDeploymentConfirmationPanel,
   renderPipelineWorkspace,
-} from "./components/pipeline.js?v=pipeline-solution-confirm-v3";
+} from "./components/pipeline.js?v=pipeline-solution-confirm-v16";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v26";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v58";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v24";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v60";
+import { createOutputController } from "./components/output_panel.js?v=output-panel-v38";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-323";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";

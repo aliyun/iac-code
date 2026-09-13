@@ -1,5 +1,9 @@
 import { t } from "../i18n.js?v=web-repl-ui-277";
-import { renderMermaid, renderMermaidViews, renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v5";
+import {
+  disposeArchitectureDiagram,
+  renderArchitectureDiagram,
+} from "../architecture_diagram.js?v=eraser-browser-v14";
+import { renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v5";
 
 function text(value) {
   return value === undefined || value === null ? "" : String(value);
@@ -786,15 +790,20 @@ function appendCandidateDiagram(card, candidate, diagrams) {
   details.append(body);
   // 折叠默认收起;展开时才懒加载 + 渲染(避免一次渲染 N 张)
   details.addEventListener("toggle", async () => {
-    if (!details.open || body.dataset.rendered) return;
+    if (!details.open) {
+      const canvas = body.querySelector(".architecture-diagram-canvas");
+      if (canvas) disposeArchitectureDiagram(canvas);
+      body.replaceChildren();
+      delete body.dataset.rendered;
+      return;
+    }
+    if (body.dataset.rendered) return;
     body.dataset.rendered = "1";
-    if (match?.mermaidSource) {
-      // 必须先 await:renderMermaid 以 replaceChildren 收尾,不等它会抹掉后面 append 的询价块。
-      if (Array.isArray(match.views) && match.views.length > 1) {
-        await renderMermaidViews(body, match.views);
-      } else {
-        await renderMermaid(body, match.mermaidSource);
-      }
+    if (match && (match.mermaidSource || match.mermaid_source || match.graph || match.views?.length)) {
+      const canvas = document.createElement("div");
+      canvas.className = "architecture-diagram-canvas";
+      body.append(canvas);
+      await renderArchitectureDiagram(canvas, match);
       body.append(renderDiagramPrice(match));
     } else {
       body.textContent = t("No architecture diagram");

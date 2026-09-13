@@ -562,7 +562,7 @@ def test_diagram_items_prefers_cached_and_flags_optimized(monkeypatch, tmp_path)
 
 def test_diagram_items_uses_cached_views(monkeypatch, tmp_path):
     # 命中缓存时,entry 暴露完整 views 列表;mermaidSource 取第一视图;optimized=True。
-    # 未命中的候选不含 views 键,mermaidSource 为确定性草图,optimized=False。
+    # 未命中的候选也带确定性草图的 DiagramGraph 视图,optimized=False。
     monkeypatch.setattr(dc, "get_config_dir", lambda: tmp_path)
     monkeypatch.setattr("iac_code.web.diagrams.pipeline_candidate_costs", lambda m, s: {})
     session = SimpleNamespace(cwd=str(tmp_path), context_id="ctx-1")
@@ -580,6 +580,6 @@ def test_diagram_items_uses_cached_views(monkeypatch, tmp_path):
     assert items[1]["optimized"] is True
     assert items[1]["mermaidSource"] == views[0]["mermaidSource"]
     # 未命中的候选(index=0)
-    assert "views" not in items[0]
+    assert items[0]["views"][0]["graph"]["version"] == 1
     assert items[0]["optimized"] is False
     assert items[0]["mermaidSource"].startswith("graph")

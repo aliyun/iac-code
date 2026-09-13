@@ -15,6 +15,7 @@ from iac_code.config import get_config_dir
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir
 
 DIAGRAM_CACHE_DIR_NAME = "diagram-cache"
+DIAGRAM_CACHE_VERSION = 2
 
 logger = logging.getLogger(__name__)
 
@@ -49,15 +50,21 @@ def read_cached(context_id: str | None, candidate_index: int | str, template_con
         return None
     raw_views = data.get("views")
     if isinstance(raw_views, list):
-        views = [
-            {
+        views = []
+        for v in raw_views:
+            if not isinstance(v, dict) or not isinstance(v.get("mermaidSource"), str) or not v.get("mermaidSource"):
+                continue
+            view = {
                 "id": str(v.get("id") or ""),
                 "title": str(v.get("title") or ""),
                 "mermaidSource": v["mermaidSource"],
             }
-            for v in raw_views
-            if isinstance(v, dict) and isinstance(v.get("mermaidSource"), str) and v.get("mermaidSource")
-        ]
+            if "purpose" in v:
+                view["purpose"] = str(v.get("purpose") or "")
+            graph = v.get("graph")
+            if isinstance(graph, dict) and graph.get("version") == 1:
+                view["graph"] = graph
+            views.append(view)
         return views or None
     legacy = data.get("mermaidSource")
     if isinstance(legacy, str) and legacy:
@@ -78,6 +85,7 @@ def write_cached(
     thash = template_hash(template_content)
     path = cache_path(safe, candidate_index, thash)
     payload = {
+        "version": DIAGRAM_CACHE_VERSION,
         "candidateIndex": candidate_index,
         "templateHash": thash,
         "views": views,

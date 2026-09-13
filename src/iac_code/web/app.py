@@ -79,6 +79,7 @@ DEFAULT_PROJECT_SESSION_LIMIT = 5
 MAX_PROJECT_LIST_LIMIT = 1000
 MAX_PROJECT_SESSION_LIMIT = 200
 WEB_SHUTDOWN_TASK_TIMEOUT_SECONDS = 5.0
+MAX_DIAGRAM_PREVIEW_BYTES = 2 * 1024 * 1024
 
 
 class _SuppressAllRedactionMiddleware:
@@ -182,6 +183,7 @@ def create_app(
     from iac_code.web import mcp_settings
     from iac_code.web.cleanup import cleanup_blocks_normal_chat, session_cleanup_summary
     from iac_code.web.commands import WebCommandDispatcher, command_metadata
+    from iac_code.web.diagrams import TemplateDiagramPreviewError, render_template_diagram_views
     from iac_code.web.events import encode_sse, make_resync_event, normalize_event_payload, observe_published_events
     from iac_code.web.mcp_settings import MCPWebError
     from iac_code.web.memory import (
@@ -243,6 +245,7 @@ def create_app(
         clear_provider_config,
         developer_settings,
         get_appearance_theme,
+        get_architecture_diagram_renderer,
         get_session_defaults,
         get_ui_language,
         is_foreign_normal_visible,
@@ -252,6 +255,7 @@ def create_app(
         save_active_provider,
         save_aliyun_cloud,
         save_appearance_theme,
+        save_architecture_diagram_renderer,
         save_developer_settings,
         save_foreign_sessions_visibility,
         save_provider_config,
@@ -1997,17 +2001,86 @@ def create_app(
         # 把新会话默认(权限/模式)注入 <body>,让首屏创建的草稿即刻采用,避免异步拉取的闪烁。
         # 放在 <body> 而非 <html>,以免破坏对主题标签精确形态的既有断言。
         defaults = get_session_defaults()
+        architecture_renderer = get_architecture_diagram_renderer()
         html = html.replace(
             "<body>",
-            '<body data-default-permission-mode="{}" data-default-mode="{}" data-default-pipeline-name="{}"{}>'.format(
+            '<body data-default-permission-mode="{}" data-default-mode="{}" data-default-pipeline-name="{}" '
+            'data-architecture-diagram-renderer="{}"{}>'.format(
                 escape(defaults["permissionMode"], quote=True),
                 escape(defaults["mode"], quote=True),
                 escape(defaults["pipelineName"], quote=True),
+                escape(architecture_renderer, quote=True),
                 ' data-token-mode="true"' if token_mode else "",
             ),
             1,
         )
         return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+    async def diagram_preview(_request):
+        html = (STATIC_DIR / "diagram-preview.html").read_text(encoding="utf-8")
+        theme = get_appearance_theme()
+        lang = resolve_ui_language(get_ui_language())
+        catalog = load_webui_catalog(lang)
+        html = html.replace(
+            '<html lang="zh-CN">',
+            '<html lang="{}" data-theme="{}">'.format(lang, theme),
+            1,
+        )
+        i18n_script = "<script>window.__IAC_I18N__ = {};</script>".format(
+            json.dumps({"lang": lang, "messages": catalog}, ensure_ascii=False).replace("<", "\\u003c")
+        )
+        html = html.replace("</head>", i18n_script + "\n  </head>", 1)
+        html = html.replace(
+            "<body>",
+            '<body data-architecture-diagram-renderer="{}"{}>'.format(
+                escape(get_architecture_diagram_renderer(), quote=True),
+                ' data-token-mode="true"' if token_mode else "",
+            ),
+            1,
+        )
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
+
+    async def post_diagram_preview(request):
+        try:
+            data = await json_object_body(request)
+            filename = required_string(data, "filename")
+            content = required_string(data, "content")
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        if len(content.encode("utf-8")) > MAX_DIAGRAM_PREVIEW_BYTES:
+            return JSONResponse(
+                {"error": {"code": "template_too_large", "message": _("The template must be 2 MB or smaller.")}},
+                status_code=413,
+            )
+        suffix = Path(filename).suffix.lower()
+        try:
+            views = await run_in_threadpool(render_template_diagram_views, content, suffix)
+        except TemplateDiagramPreviewError as exc:
+            error_code = str(exc)
+            messages = {
+                "unsupported_template_format": _("Choose a ROS template in YAML, YML, or JSON format."),
+                "not_ros_template": _("The file does not look like a ROS template."),
+                "template_parse_failed": _("The ROS template could not be parsed."),
+                "template_is_not_mapping": _("The ROS template must contain a mapping at its root."),
+                "template_has_no_resources": _("The ROS template does not contain any resources."),
+                "template_has_no_supported_resources": _(
+                    "The ROS template does not contain resources supported by the architecture renderer."
+                ),
+                "template_render_failed": _("The ROS template could not be rendered."),
+            }
+            error_message = messages.get(error_code, messages["template_render_failed"])
+            return JSONResponse(
+                {"error": {"code": error_code, "message": error_message}},
+                status_code=400,
+            )
+        return JSONResponse(
+            {
+                "filename": Path(filename).name,
+                "format": "ros",
+                "mermaidSource": views[0]["mermaidSource"],
+                "views": views,
+            }
+        )
 
     async def create_session(request):
         try:
@@ -3815,6 +3888,17 @@ def create_app(
         except ValueError as exc:
             return json_error(str(exc), 400)
 
+    async def get_architecture_diagram_settings(request):
+        return JSONResponse({"renderer": get_architecture_diagram_renderer()})
+
+    async def put_architecture_diagram_settings(request):
+        try:
+            data = await json_object_body(request)
+            renderer = required_string(data, "renderer")
+            return JSONResponse(await state_transaction(save_architecture_diagram_renderer, renderer))
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+
     async def get_ui_language_settings(request):
         return JSONResponse(ui_language_payload())
 
@@ -5294,6 +5378,8 @@ def create_app(
             ]
         ),
         Route("/", index, methods=["GET"]),
+        Route("/diagram-preview", diagram_preview, methods=["GET"]),
+        Route("/api/diagram-preview", post_diagram_preview, methods=["POST"]),
         Route("/api/sessions", create_session, methods=["POST"]),
     ]
     if desktop_config is not None:
@@ -5352,6 +5438,8 @@ def create_app(
             ),
             Route("/api/settings/appearance", get_appearance_settings, methods=["GET"]),
             Route("/api/settings/appearance", put_appearance_settings, methods=["PUT"]),
+            Route("/api/settings/architecture-diagram", get_architecture_diagram_settings, methods=["GET"]),
+            Route("/api/settings/architecture-diagram", put_architecture_diagram_settings, methods=["PUT"]),
             Route("/api/settings/ui-language", get_ui_language_settings, methods=["GET"]),
             Route("/api/settings/ui-language", put_ui_language_settings, methods=["PUT"]),
             Route("/api/settings/session-defaults", get_session_defaults_settings, methods=["GET"]),
