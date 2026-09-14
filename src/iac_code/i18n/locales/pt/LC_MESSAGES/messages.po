@@ -6389,6 +6389,10 @@ msgid "Kimi (International)"
 msgstr "Kimi (Internacional)"
 
 #: src/iac_code/providers/registry.py
+msgid "Kimi Code"
+msgstr "Kimi Code"
+
+#: src/iac_code/providers/registry.py
 msgid "MiniMax (China)"
 msgstr "MiniMax (China)"
 

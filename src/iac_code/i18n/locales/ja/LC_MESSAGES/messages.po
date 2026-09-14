@@ -6048,6 +6048,10 @@ msgid "Kimi (International)"
 msgstr "Kimi（国際版）"
 
 #: src/iac_code/providers/registry.py
+msgid "Kimi Code"
+msgstr "Kimi Code"
+
+#: src/iac_code/providers/registry.py
 msgid "MiniMax (China)"
 msgstr "MiniMax（中国版）"
 

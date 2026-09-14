@@ -837,6 +837,47 @@ def test_validate_effort_still_enforces_known_spec(_isolate_config):
         web_settings._validate_effort("openai", "gpt-5.5", "definitely-not-an-effort")
 
 
+def test_deepseek_v41_payload_and_validation_use_documented_efforts(_isolate_config):
+    payload = web_settings.providers_payload()
+    dashscope = next(provider for provider in payload["providers"] if provider["key"] == "dashscope")
+    model = next(model for model in dashscope["models"] if model["id"] == "deepseek-v4.1-flash")
+
+    assert model["efforts"] == ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"]
+    assert model["defaultEffort"] is None
+    web_settings._validate_effort("dashscope", "deepseek-v4.1-flash", "minimal")
+    web_settings._validate_effort("dashscope", "deepseek-v4.1-flash", "ultra")
+    with pytest.raises(ValueError):
+        web_settings._validate_effort("dashscope", "deepseek-v4.1-flash", "1")
+    with pytest.raises(ValueError):
+        web_settings._validate_effort("dashscope", "deepseek-v4.1-flash", "100")
+
+
+def test_kimi_code_payload_exposes_k28_models_and_exact_efforts(_isolate_config):
+    payload = web_settings.providers_payload()
+    provider = next(item for item in payload["providers"] if item["key"] == "kimi_code")
+
+    assert provider["group"] == "Kimi"
+    assert provider["apiBase"] == "https://api.kimi.com/coding/v1"
+    assert provider["defaultModel"] == "kimi-for-coding"
+    assert [model["id"] for model in provider["models"]] == [
+        "kimi-for-coding",
+        "k3",
+        "k3-256k",
+        "kimi-for-coding-highspeed",
+    ]
+    by_id = {model["id"]: model for model in provider["models"]}
+    assert by_id["kimi-for-coding"]["efforts"] == ["low", "high", "max"]
+    assert by_id["kimi-for-coding"]["defaultEffort"] == "max"
+    assert by_id["k3"]["efforts"] == ["low", "high", "max"]
+    assert by_id["k3"]["defaultEffort"] == "high"
+    assert by_id["k3-256k"]["defaultEffort"] == "high"
+    assert by_id["kimi-for-coding-highspeed"]["efforts"] == []
+    assert by_id["kimi-for-coding-highspeed"]["thinkingDefault"] is True
+    web_settings._validate_effort("kimi_code", "kimi-for-coding", "max")
+    with pytest.raises(ValueError):
+        web_settings._validate_effort("kimi_code", "kimi-for-coding", "medium")
+
+
 def test_provider_payload_exposes_saved_fields(_isolate_config):
     key = _first_provider_key()
     model = _first_model(key)

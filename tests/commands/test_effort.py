@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from iac_code.commands.effort import effort_command
+from iac_code.providers.thinking import EffortLevel
 
 
 @pytest.mark.asyncio
@@ -76,6 +77,119 @@ async def test_effort_no_console_shows_current(monkeypatch):
 
     result = await effort_command(context=context, args=[], store=store)
     assert "max" in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["minimal", "ultra"])
+async def test_deepseek_v41_accepts_documented_effort_endpoints(monkeypatch, effort):
+    save = MagicMock()
+    monkeypatch.setattr("iac_code.commands.effort.get_active_provider_key", lambda: "dashscope")
+    monkeypatch.setattr("iac_code.commands.effort.get_provider_config", lambda key: {})
+    monkeypatch.setattr("iac_code.commands.effort.save_active_provider_config", save)
+
+    store = MagicMock()
+    store.get_state.return_value = MagicMock(model="deepseek-v4.1-flash")
+
+    result = await effort_command(context=None, args=[effort], store=store)
+
+    assert effort in result
+    assert save.call_args.kwargs["effort"] == effort
+    assert store.set_state.call_args.kwargs["effort_level"] is EffortLevel(effort)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("effort", ["1", "100", "ultra-plus"])
+async def test_deepseek_v41_rejects_unsupported_effort_values(monkeypatch, effort):
+    monkeypatch.setattr("iac_code.commands.effort.get_active_provider_key", lambda: "dashscope")
+    monkeypatch.setattr("iac_code.commands.effort.get_provider_config", lambda key: {})
+
+    store = MagicMock()
+    store.get_state.return_value = MagicMock(model="deepseek-v4.1-flash")
+
+    result = await effort_command(context=None, args=[effort], store=store)
+
+    assert "Invalid effort" in result
+    assert "minimal" in result
+    assert "ultra" in result
+    store.set_state.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_deepseek_v41_interactive_effort_lists_documented_values(monkeypatch):
+    captured = {}
+
+    def select_effort(title, options, default_index=0):
+        captured["title"] = title
+        captured["options"] = options
+        captured["default_index"] = default_index
+        return 6
+
+    save = MagicMock()
+    monkeypatch.setattr("iac_code.commands.effort.get_active_provider_key", lambda: "dashscope")
+    monkeypatch.setattr("iac_code.commands.effort.get_provider_config", lambda key: {})
+    monkeypatch.setattr("iac_code.commands.effort.save_active_provider_config", save)
+    monkeypatch.setattr("iac_code.commands.effort._select", select_effort)
+
+    store = MagicMock()
+    store.get_state.return_value = MagicMock(model="deepseek-v4.1-flash")
+    console = MagicMock()
+    context = MagicMock(store=store, console=console)
+
+    result = await effort_command(context=context, args=[])
+
+    assert result.endswith("ultra")
+    assert [option.rsplit("  ", 1)[-1] for option in captured["options"]] == [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max",
+        "ultra",
+    ]
+    assert captured["default_index"] == 0
+    assert save.call_args.kwargs["effort"] == "ultra"
+
+
+@pytest.mark.asyncio
+async def test_kimi_code_interactive_effort_lists_exact_supported_values(monkeypatch):
+    captured = {}
+
+    def select_effort(title, options, default_index=0):
+        captured["options"] = options
+        captured["default_index"] = default_index
+        return 0
+
+    save = MagicMock()
+    monkeypatch.setattr("iac_code.commands.effort.get_active_provider_key", lambda: "kimi_code")
+    monkeypatch.setattr("iac_code.commands.effort.get_provider_config", lambda key: {})
+    monkeypatch.setattr("iac_code.commands.effort.save_active_provider_config", save)
+    monkeypatch.setattr("iac_code.commands.effort._select", select_effort)
+
+    store = MagicMock()
+    store.get_state.return_value = MagicMock(model="kimi-for-coding")
+    context = MagicMock(store=store, console=MagicMock())
+
+    result = await effort_command(context=context, args=[])
+
+    assert [option.rsplit("  ", 1)[-1] for option in captured["options"]] == ["low", "high", "max"]
+    assert captured["default_index"] == 2
+    assert result.endswith("low")
+    assert save.call_args.kwargs["effort"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_kimi_code_rejects_server_aliases_from_user_effort_list(monkeypatch):
+    monkeypatch.setattr("iac_code.commands.effort.get_active_provider_key", lambda: "kimi_code")
+    monkeypatch.setattr("iac_code.commands.effort.get_provider_config", lambda key: {})
+    store = MagicMock()
+    store.get_state.return_value = MagicMock(model="kimi-for-coding")
+
+    result = await effort_command(context=None, args=["medium"], store=store)
+
+    assert "Invalid effort" in result
+    assert "low" in result and "high" in result and "max" in result
+    store.set_state.assert_not_called()
 
 
 class TestEffortPerProviderRouting:

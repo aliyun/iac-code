@@ -19,7 +19,7 @@ from iac_code.i18n import _
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 
 # Default LLM model used when no model is saved in settings
-DEFAULT_MODEL = "qwen3.8-max"
+DEFAULT_MODEL = "qwen3.8-max-0902"
 
 # Configuration directory
 _CONFIG_DIR_NAME = ".iac-code"
@@ -124,13 +124,22 @@ _MODEL_EXACT_TO_PROVIDER: dict[str, str] = {
     "glm-5.2-fast-preview": "dashscope",
     "kimi/kimi-k3": "dashscope",
     "minimax/minimax-m3": "dashscope",
+    "minimax/minimax-m2.7": "dashscope",
+    "minimax/minimax-m2.5": "dashscope",
+    "minimax/minimax-m2.1": "dashscope",
+    "k3": "kimi_code",
+    "k3-256k": "kimi_code",
+    "kimi-for-coding": "kimi_code",
+    "kimi-for-coding-highspeed": "kimi_code",
     "zhipu/glm-5.3": "dashscope",
+    "zhipu/glm-5.3-flash": "dashscope",
     "xiaomi/mimo-v2.5-pro": "dashscope",
     "stepfun/step-3.7-flash": "dashscope",
-    # Dated DeepSeek snapshots only exist on Bailian; the official DeepSeek
-    # endpoint keeps the undated model IDs.
+    # These DeepSeek snapshots/releases are Bailian-only; the official
+    # DeepSeek endpoint exposes a different, smaller model catalog.
     "deepseek-v4-pro-0813": "dashscope",
     "deepseek-v4-flash-0731": "dashscope",
+    "deepseek-v4.1-flash": "dashscope",
 }
 
 _MODEL_PREFIX_TO_PROVIDER: tuple[tuple[str, str], ...] = (

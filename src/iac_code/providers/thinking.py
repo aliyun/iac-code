@@ -24,6 +24,7 @@ class EffortLevel(Enum):
     HIGH = "high"
     XHIGH = "xhigh"
     MAX = "max"
+    ULTRA = "ultra"
     NONE = "none"
     AUTO = "auto"
 
@@ -36,6 +37,7 @@ EFFORT_ORDER: list[EffortLevel] = [
     EffortLevel.HIGH,
     EffortLevel.XHIGH,
     EffortLevel.MAX,
+    EffortLevel.ULTRA,
     EffortLevel.AUTO,
 ]
 
@@ -48,6 +50,7 @@ EFFORT_SYMBOLS: dict[EffortLevel, str] = {
     EffortLevel.HIGH: "◆◆◆",
     EffortLevel.XHIGH: "◆◆◆◆",
     EffortLevel.MAX: "◆◆◆◆◆",
+    EffortLevel.ULTRA: "◆◆◆◆◆◆",
     EffortLevel.AUTO: "◆",
 }
 
@@ -85,6 +88,15 @@ class ThinkingSpec:
         return bool(self.allowed_efforts)
 
     @property
+    def effort_values(self) -> tuple[str, ...]:
+        """Return every user-selectable effort as its persisted string value."""
+        return tuple(effort.value for effort in self.allowed_efforts)
+
+    @property
+    def default_effort_value(self) -> str | None:
+        return self.default_effort.value if self.default_effort is not None else None
+
+    @property
     def effort_range(self) -> tuple[EffortLevel, EffortLevel] | None:
         if not self.allowed_efforts:
             return None
@@ -106,6 +118,14 @@ _OPENAI_EFFORTS: tuple[EffortLevel, ...] = (
 
 _OPENAI_GPT56_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.NONE,
+    EffortLevel.LOW,
+    EffortLevel.MEDIUM,
+    EffortLevel.HIGH,
+    EffortLevel.XHIGH,
+    EffortLevel.MAX,
+)
+
+_OPENAI_GPT6_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.LOW,
     EffortLevel.MEDIUM,
     EffortLevel.HIGH,
@@ -182,6 +202,18 @@ _DASHSCOPE_DEEPSEEK_EFFORTS: tuple[EffortLevel, ...] = (
     EffortLevel.HIGH,
     EffortLevel.XHIGH,
     EffortLevel.MAX,
+)
+
+# DeepSeek V4.1 Flash exposes Bailian's complete semantic reasoning-effort
+# vocabulary. The endpoint rejects numeric values such as "1" and "100".
+_DASHSCOPE_DEEPSEEK_V41_EFFORTS: tuple[EffortLevel, ...] = (
+    EffortLevel.MINIMAL,
+    EffortLevel.LOW,
+    EffortLevel.MEDIUM,
+    EffortLevel.HIGH,
+    EffortLevel.XHIGH,
+    EffortLevel.MAX,
+    EffortLevel.ULTRA,
 )
 
 _GLM_EFFORTS: tuple[EffortLevel, ...] = (
@@ -322,6 +354,19 @@ _ANTHROPIC_ADAPTIVE_ALWAYS_ON_SPEC = ThinkingSpec(
     adaptive_always_on=True,
     supports_disable=False,
 )
+_ANTHROPIC_FABLE51_SPEC = ThinkingSpec(
+    ThinkingFamily.ANTHROPIC_ADAPTIVE,
+    (
+        EffortLevel.LOW,
+        EffortLevel.MEDIUM,
+        EffortLevel.HIGH,
+        EffortLevel.XHIGH,
+        EffortLevel.MAX,
+    ),
+    EffortLevel.HIGH,
+    adaptive_always_on=True,
+    supports_disable=False,
+)
 
 _OPENAI_GPT56_SPEC = ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_GPT56_EFFORTS, EffortLevel.MEDIUM)
 _OPENAI_GPT55_SPEC = ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_EFFORTS, EffortLevel.MEDIUM)
@@ -334,7 +379,35 @@ _DEEPSEEK_SPEC = ThinkingSpec(
     EffortLevel.HIGH,
     thinking_enabled_by_default=True,
 )
+_DASHSCOPE_DEEPSEEK_V41_SPEC = ThinkingSpec(
+    ThinkingFamily.DASHSCOPE,
+    _DASHSCOPE_DEEPSEEK_V41_EFFORTS,
+    uses_reasoning_effort_param=True,
+    thinking_enabled_by_default=True,
+)
 _KIMI_K3_SPEC = ThinkingSpec(ThinkingFamily.KIMI, _KIMI_K3_EFFORTS, EffortLevel.MAX)
+_KIMI_CODE_K3_SPEC = ThinkingSpec(
+    ThinkingFamily.KIMI,
+    _KIMI_K3_EFFORTS,
+    EffortLevel.HIGH,
+    thinking_enabled_by_default=True,
+)
+_KIMI_CODE_K28_SPEC = ThinkingSpec(
+    ThinkingFamily.KIMI,
+    _KIMI_K3_EFFORTS,
+    EffortLevel.MAX,
+    thinking_enabled_by_default=True,
+)
+_KIMI_ALWAYS_ON_SPEC = ThinkingSpec(
+    ThinkingFamily.KIMI,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
+)
+_MINIMAX_ALWAYS_ON_SPEC = ThinkingSpec(
+    ThinkingFamily.MINIMAX,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
+)
 _ZHIPU_GLM52_SPEC = ThinkingSpec(
     ThinkingFamily.ZHIPU,
     _ZHIPU_GLM52_EFFORTS,
@@ -353,6 +426,7 @@ _ZHIPU_GLM53_SPEC = ThinkingSpec(
 
 MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     "anthropic": {
+        "claude-fable-5-1": _ANTHROPIC_FABLE51_SPEC,
         "claude-fable-5": _ANTHROPIC_ADAPTIVE_ALWAYS_ON_SPEC,
         "claude-opus-5": _ANTHROPIC_OPUS5_SPEC,
         "claude-sonnet-5": _ANTHROPIC_ADAPTIVE_SPEC,
@@ -369,6 +443,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         ),
     },
     "openai": {
+        "gpt-6-astra": ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_GPT6_EFFORTS, EffortLevel.MEDIUM),
         "gpt-5.6": _OPENAI_GPT56_SPEC,
         "gpt-5.6-sol": _OPENAI_GPT56_SPEC,
         "gpt-5.6-terra": _OPENAI_GPT56_SPEC,
@@ -384,11 +459,13 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "o4-mini": _OPENAI_O_SERIES_SPEC,
     },
     "deepseek": {
+        "deepseek-flash": _DEEPSEEK_SPEC,
         "deepseek-v4-pro": _DEEPSEEK_SPEC,
         "deepseek-v4-flash": _DEEPSEEK_SPEC,
     },
     "dashscope": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
+        "qwen3.8-max-0902": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.8-max-prime": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.8-flash": _DASHSCOPE_QWEN_HYBRID_SPEC,
         "qwen3.8-2.4t-a95b": _DASHSCOPE_QWEN_HYBRID_SPEC,
@@ -415,8 +492,12 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "glm-5.2": _DASHSCOPE_GLM52_SPEC,
         "glm-5.1": _DASHSCOPE_GLM51_SPEC,
         "ZHIPU/GLM-5.3": _DASHSCOPE_ZHIPU_GLM53_SPEC,
+        "ZHIPU/GLM-5.3-Flash": _DASHSCOPE_ZHIPU_GLM53_SPEC,
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "MiniMax/MiniMax-M3": ThinkingSpec(ThinkingFamily.MINIMAX),
+        "MiniMax/MiniMax-M2.7": _MINIMAX_ALWAYS_ON_SPEC,
+        "MiniMax/MiniMax-M2.5": _MINIMAX_ALWAYS_ON_SPEC,
+        "MiniMax/MiniMax-M2.1": _MINIMAX_ALWAYS_ON_SPEC,
         "xiaomi/mimo-v2.5-pro": ThinkingSpec(
             ThinkingFamily.DASHSCOPE,
             thinking_enabled_by_default=True,
@@ -446,6 +527,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
             EffortLevel.HIGH,
             uses_reasoning_effort_param=True,
         ),
+        "deepseek-v4.1-flash": _DASHSCOPE_DEEPSEEK_V41_SPEC,
     },
     "dashscope_token_plan": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
@@ -459,6 +541,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "deepseek-v4-pro-0813": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
         "deepseek-v4-flash-0731": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
         "deepseek-v4-flash": ThinkingSpec(ThinkingFamily.DASHSCOPE, _DEEPSEEK_EFFORTS, EffortLevel.HIGH),
+        "deepseek-v4.1-flash": _DASHSCOPE_DEEPSEEK_V41_SPEC,
         "deepseek-v3.2": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "glm-5.1": _DASHSCOPE_GLM51_SPEC,
         "glm-5": _DASHSCOPE_GLM51_SPEC,
@@ -469,6 +552,12 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "glm-5.2": _DASHSCOPE_GLM52_SPEC,
     },
     "gemini": {
+        "gemini-3.8-flash": ThinkingSpec(
+            ThinkingFamily.GEMINI,
+            _GEMINI_37_EFFORTS,
+            EffortLevel.MEDIUM,
+            supports_disable=False,
+        ),
         "gemini-3.7-flash": ThinkingSpec(
             ThinkingFamily.GEMINI,
             _GEMINI_37_EFFORTS,
@@ -538,8 +627,14 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "kimi-k3": _KIMI_K3_SPEC,
         "kimi-k2.6": ThinkingSpec(ThinkingFamily.KIMI),
         "kimi-k2.5": ThinkingSpec(ThinkingFamily.KIMI),
-        "kimi-k2.7-code": ThinkingSpec(ThinkingFamily.KIMI),
-        "kimi-k2.7-code-highspeed": ThinkingSpec(ThinkingFamily.KIMI),
+        "kimi-k2.7-code": _KIMI_ALWAYS_ON_SPEC,
+        "kimi-k2.7-code-highspeed": _KIMI_ALWAYS_ON_SPEC,
+    },
+    "kimi_code": {
+        "k3": _KIMI_CODE_K3_SPEC,
+        "k3-256k": _KIMI_CODE_K3_SPEC,
+        "kimi-for-coding": _KIMI_CODE_K28_SPEC,
+        "kimi-for-coding-highspeed": _KIMI_ALWAYS_ON_SPEC,
     },
     "minimax_cn": {
         "MiniMax-M3": ThinkingSpec(ThinkingFamily.MINIMAX),

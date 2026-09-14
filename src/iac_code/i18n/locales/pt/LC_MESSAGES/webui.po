@@ -1327,6 +1327,10 @@ msgid "Max"
 msgstr "Máximo"
 
 #: src/iac_code/web/static/js/components/composer.js
+msgid "Ultra"
+msgstr "Extremo"
+
+#: src/iac_code/web/static/js/components/composer.js
 msgid "Auto"
 msgstr "Automático"
 
@@ -1403,6 +1407,11 @@ msgstr "Não foi possível salvar o botão de raciocínio"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Model"
 msgstr "Modelo"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reasoning effort"
+msgstr "Esforço de raciocínio"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Provider"
@@ -2885,10 +2894,6 @@ msgstr ""
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The model used for generation under this provider"
 msgstr "O modelo usado para geração neste provedor"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Reasoning effort"
-msgstr "Esforço de raciocínio"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "How deeply the model thinks; higher is slower but more detailed"

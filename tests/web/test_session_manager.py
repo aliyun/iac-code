@@ -114,9 +114,7 @@ def test_runtime_settings_payload_redacts_only_editable_cloud_credentials(monkey
         ("cancel", "Cancel"),
     ),
 )
-def test_solution_first_pipeline_user_display_text_hides_structured_control_json(
-    action: str, expected: str
-) -> None:
+def test_solution_first_pipeline_user_display_text_hides_structured_control_json(action: str, expected: str) -> None:
     raw = json.dumps({"action": action, "parameter_overrides": {"ZoneId": "cn-hangzhou-i"}})
 
     assert solution_first_pipeline_user_display_text("selling_solution_first", raw) == expected
@@ -1673,6 +1671,27 @@ def test_persist_pipeline_handoff_context_feeds_resume_but_hidden_in_transcript(
     transcript = manager.load_visible_transcript(session.session_id, cwd=cwd)
     dumped = json.dumps(transcript, ensure_ascii=False)
     assert "[Pipeline Handoff Context]" not in dumped
+
+
+def test_set_session_model_accepts_deepseek_v41_documented_effort(tmp_path) -> None:
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), mode="normal", session_id="numeric-effort-1")
+
+    result = manager.set_session_model(
+        session,
+        provider="dashscope",
+        model="deepseek-v4.1-flash",
+        effort="ultra",
+    )
+
+    assert result == {"provider": "dashscope", "model": "deepseek-v4.1-flash", "effort": "ultra"}
+    with pytest.raises(ValueError, match="unknown effort"):
+        manager.set_session_model(
+            session,
+            provider="dashscope",
+            model="deepseek-v4.1-flash",
+            effort="100",
+        )
 
 
 def test_clear_session_model_resets_override_persists_and_emits_event(tmp_path) -> None:

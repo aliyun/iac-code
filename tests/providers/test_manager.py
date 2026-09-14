@@ -2787,6 +2787,7 @@ class TestModelPrefixAutoMapping:
             ("qwen3.6-plus", "dashscope"),
             ("qwen3.8-max", "dashscope"),
             ("qwen-max", "dashscope"),
+            ("deepseek-flash", "deepseek"),
             ("deepseek-v4-pro", "deepseek"),
             ("deepseek-chat", "deepseek"),
         ],
@@ -2806,9 +2807,18 @@ class TestModelPrefixAutoMapping:
             ("glm-5.2-fast-preview", "dashscope"),
             ("kimi/kimi-k3", "dashscope"),
             ("MiniMax/MiniMax-M3", "dashscope"),
+            ("MiniMax/MiniMax-M2.7", "dashscope"),
+            ("MiniMax/MiniMax-M2.5", "dashscope"),
+            ("MiniMax/MiniMax-M2.1", "dashscope"),
+            ("k3", "kimi_code"),
+            ("k3-256k", "kimi_code"),
+            ("kimi-for-coding", "kimi_code"),
+            ("kimi-for-coding-highspeed", "kimi_code"),
             ("deepseek-v4-pro-0813", "dashscope"),
             ("deepseek-v4-flash-0731", "dashscope"),
+            ("deepseek-v4.1-flash", "dashscope"),
             ("ZHIPU/GLM-5.3", "dashscope"),
+            ("ZHIPU/GLM-5.3-Flash", "dashscope"),
             ("xiaomi/mimo-v2.5-pro", "dashscope"),
             ("stepfun/step-3.7-flash", "dashscope"),
             ("glm-5.3", "zhipu_cn"),
@@ -2849,6 +2859,8 @@ def test_static_provider_fallbacks_stay_within_each_model_catalog():
         models = {model.id: model for model in descriptor.models}
         for source_model, fallback_model in MODEL_FALLBACK_MAP.items():
             if source_model in models:
+                if source_model in _PROVIDER_MODEL_FALLBACK_MAP.get(provider_key, {}):
+                    continue
                 assert fallback_model in models, (
                     f"{provider_key} fallback {source_model} -> {fallback_model} leaves the provider catalog"
                 )
@@ -2859,9 +2871,8 @@ def test_static_provider_fallbacks_stay_within_each_model_catalog():
     for provider_key, fallbacks in _PROVIDER_MODEL_FALLBACK_MAP.items():
         models = {model.id: model for model in PROVIDER_REGISTRY[provider_key].models}
         for source_model, fallback_model in fallbacks.items():
-            assert source_model in models
             assert fallback_model in models
-            if models[source_model].support_multimodal:
+            if source_model in models and models[source_model].support_multimodal:
                 assert models[fallback_model].support_multimodal, (
                     f"{provider_key} fallback {source_model} -> {fallback_model} loses image support"
                 )
@@ -2880,6 +2891,19 @@ def test_qwen36_fallback_is_available_on_each_endpoint(provider_key, expected_fa
     assert _PROVIDER_MODEL_FALLBACK_MAP[provider_key]["qwen3.6-plus"] == expected_fallback
     assert expected_fallback in {model.id for model in PROVIDER_REGISTRY[provider_key].models}
     assert "qwen3.6-plus" not in MODEL_FALLBACK_MAP
+
+
+def test_token_plan_hides_qwen36_plus_but_keeps_legacy_fallback():
+    assert "qwen3.6-plus" not in PROVIDER_REGISTRY["dashscope_token_plan"].model_ids
+    assert _PROVIDER_MODEL_FALLBACK_MAP["dashscope_token_plan"]["qwen3.6-plus"] == "qwen3.6-flash"
+
+
+def test_kimi_code_fallbacks_stay_on_the_subscription_endpoint():
+    assert _PROVIDER_MODEL_FALLBACK_MAP["kimi_code"] == {
+        "k3": "kimi-for-coding",
+        "k3-256k": "kimi-for-coding",
+        "kimi-for-coding-highspeed": "kimi-for-coding",
+    }
 
 
 def test_qwen38_flash_fallback_is_available_on_each_endpoint():

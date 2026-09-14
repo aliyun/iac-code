@@ -2174,9 +2174,9 @@ def _resolve_semantic_plan_effort(model: str, effort_override: str | None) -> st
     if not provider_key:
         return effort_override
     spec = get_thinking_spec(provider_key, model)
-    if spec.supports_disable or not spec.allowed_efforts:
+    if spec.supports_disable or not spec.effort_values:
         return effort_override
-    return spec.allowed_efforts[0].value
+    return spec.effort_values[0]
 
 
 async def create_semantic_plan_for_architecture_with_llm(

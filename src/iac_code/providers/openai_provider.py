@@ -143,11 +143,11 @@ class OpenAIProvider(Provider):
         kwargs: dict[str, Any] = {"extra_body": extra_body}
         if spec.uses_reasoning_effort_param:
             effort = normalize_effort(self._effort)
-            allowed = {e.value for e in spec.allowed_efforts}
+            allowed = set(spec.effort_values)
             if effort in allowed:
                 kwargs["reasoning_effort"] = effort
-            elif effort not in {None, "auto"} and spec.default_effort is not None:
-                kwargs["reasoning_effort"] = spec.default_effort.value
+            elif effort not in {None, "auto"} and spec.default_effort_value is not None:
+                kwargs["reasoning_effort"] = spec.default_effort_value
         return kwargs
 
     def _effective_thinking_budget(self) -> int | None:
@@ -198,9 +198,7 @@ class OpenAIProvider(Provider):
         reasoning = getattr(message_or_delta, "reasoning_content", None)
         return reasoning if isinstance(reasoning, str) else ""
 
-    def _create_stream_response_adapter(
-        self, tools: list[ToolDefinition] | None
-    ) -> OpenAIStreamResponseAdapter:
+    def _create_stream_response_adapter(self, tools: list[ToolDefinition] | None) -> OpenAIStreamResponseAdapter:
         return OpenAIStreamResponseAdapter(self, tools)
 
     # -- Message conversion ----------------------------------------------------

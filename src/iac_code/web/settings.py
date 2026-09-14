@@ -878,8 +878,8 @@ def _model_payload(provider_key: str, model, provider_config: dict[str, Any] | N
         "id": model.id,
         "default": model.is_default,
         "supportsMultimodal": model.support_multimodal,
-        "efforts": [effort.value for effort in thinking.allowed_efforts],
-        "defaultEffort": thinking.default_effort.value if thinking.default_effort is not None else None,
+        "efforts": list(thinking.effort_values),
+        "defaultEffort": thinking.default_effort_value,
         # 无会话级覆盖时该模型是否默认思考(家族相关):新会话草稿据此点亮「思考」按钮。
         "thinkingDefault": resolve_thinking_active(provider_key, model.id, None),
         # 「思考预算」字段仅对支持独立预算的模型可见(能力门控);其余家族走 effort 推导。
@@ -903,7 +903,7 @@ def _validate_effort(provider_key: str, model: str, effort: str) -> None:
     if normalized is None:
         raise ValueError(_("unknown effort"))
     thinking = get_thinking_spec(provider_key, model)
-    allowed = {item.value for item in thinking.allowed_efforts}
+    allowed = set(thinking.effort_values)
     # 无已知推理强度规格(手动输入模型/兼容模式等)时放行任意合法强度,
     # 支持前端组合框的自由输入;有规格时仍强制校验。
     if allowed and normalized not in allowed:

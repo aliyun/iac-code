@@ -1,5 +1,5 @@
 import * as api from "./api.js?v=web-repl-ui-313";
-import { createComposerController } from "./components/composer.js?v=session-model-v20";
+import { createComposerController } from "./components/composer.js?v=session-model-v22";
 import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
 import {
   deploymentConfirmationKey,

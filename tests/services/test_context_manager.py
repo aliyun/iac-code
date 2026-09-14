@@ -43,14 +43,15 @@ class TestContextWindowConfig:
         assert config.context_window == 1_000_000
         assert config.max_output_tokens == 8_192
 
-    @pytest.mark.parametrize("model", ["gpt-5.6-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"])
+    @pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-5.6-sol", "gpt-5.6", "gpt-5.6-terra", "gpt-5.6-luna"])
     def test_gpt56_models_use_documented_capacity(self, model):
         config = get_context_window_config(model)
         assert config.context_window == 1_050_000
         assert config.max_output_tokens == 128_000
 
-    def test_claude_fable5_uses_documented_capacity(self):
-        config = get_context_window_config("claude-fable-5")
+    @pytest.mark.parametrize("model", ["claude-fable-5-1", "claude-fable-5"])
+    def test_claude_fable5_uses_documented_capacity(self, model):
+        config = get_context_window_config(model)
         assert config.context_window == 1_000_000
         assert config.max_output_tokens == 128_000
 
@@ -74,6 +75,7 @@ class TestContextWindowConfig:
     @pytest.mark.parametrize(
         "model",
         [
+            "gemini-3.8-flash",
             "gemini-3.6-flash",
             "gemini-3.5-flash",
             "gemini-3.5-flash-lite",
@@ -100,7 +102,20 @@ class TestContextWindowConfig:
     @pytest.mark.parametrize(
         ("model", "context_window"),
         [
+            ("k3", 1_048_576),
+            ("k3-256k", 262_144),
+            ("kimi-for-coding", 1_048_576),
+            ("kimi-for-coding-highspeed", 262_144),
+        ],
+    )
+    def test_kimi_code_models_use_documented_context_capacity(self, model, context_window):
+        assert get_context_window_config(model).context_window == context_window
+
+    @pytest.mark.parametrize(
+        ("model", "context_window"),
+        [
             ("qwen3.8-max", 1_000_000),
+            ("qwen3.8-max-0902", 1_000_000),
             ("qwen3.8-max-prime", 1_000_000),
             ("qwen3.8-flash", 1_000_000),
             ("qwen3.8-2.4t-a95b", 1_000_000),
@@ -112,13 +127,18 @@ class TestContextWindowConfig:
             ("qwen3.6-flash", 1_000_000),
             ("qwen3.6-35b-a3b", 262_144),
             ("qwen3.6-27b", 262_144),
+            ("deepseek-flash", 1_000_000),
             ("deepseek-v4-pro", 1_000_000),
             ("deepseek-v4-pro-0813", 1_000_000),
             ("deepseek-v4-flash-0731", 1_000_000),
             ("deepseek-v4-flash", 1_000_000),
+            ("deepseek-v4.1-flash", 1_000_000),
             ("glm-5.1", 202_752),
             ("MiniMax-M3", 1_000_000),
             ("MiniMax/MiniMax-M3", 196_608),
+            ("MiniMax/MiniMax-M2.7", 196_608),
+            ("MiniMax/MiniMax-M2.5", 196_608),
+            ("MiniMax/MiniMax-M2.1", 196_608),
             ("xiaomi/mimo-v2.5-pro", 1_048_576),
             ("stepfun/step-3.7-flash", 262_144),
         ],
@@ -127,7 +147,15 @@ class TestContextWindowConfig:
         assert get_context_window_config(model).context_window == context_window
 
     @pytest.mark.parametrize(
-        "model", ["deepseek-v4-pro", "deepseek-v4-pro-0813", "deepseek-v4-flash", "deepseek-v4-flash-0731"]
+        "model",
+        [
+            "deepseek-flash",
+            "deepseek-v4.1-flash",
+            "deepseek-v4-pro",
+            "deepseek-v4-pro-0813",
+            "deepseek-v4-flash",
+            "deepseek-v4-flash-0731",
+        ],
     )
     def test_deepseek_v4_models_use_documented_output_capacity(self, model):
         assert get_context_window_config(model).max_output_tokens == 393_216
@@ -152,6 +180,11 @@ class TestContextWindowConfig:
         assert config.context_window == 1_048_576
         assert config.max_output_tokens == 131_072
 
+    def test_dashscope_zhipu_glm53_flash_uses_hosted_capacity(self):
+        config = get_context_window_config("ZHIPU/GLM-5.3-Flash")
+        assert config.context_window == 1_048_576
+        assert config.max_output_tokens == 131_072
+
     def test_dashscope_glm52_fast_preview_uses_documented_capacity(self):
         config = get_context_window_config("glm-5.2-fast-preview")
         assert config.context_window == 1_048_576
@@ -165,6 +198,10 @@ class TestContextWindowConfig:
     @pytest.mark.parametrize(
         ("model", "max_output_tokens"),
         [
+            ("qwen3.8-max", 128_000),
+            ("qwen3.8-max-0902", 128_000),
+            ("qwen3.8-max-prime", 128_000),
+            ("qwen3.8-flash", 128_000),
             ("qwen3.8-2.4t-a95b", 131_072),
             ("qwen3.8-27b", 131_072),
             ("qwen3.6-35b-a3b", 65_536),

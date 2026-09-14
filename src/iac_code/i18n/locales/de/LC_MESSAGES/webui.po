@@ -1332,6 +1332,10 @@ msgid "Max"
 msgstr "Maximal"
 
 #: src/iac_code/web/static/js/components/composer.js
+msgid "Ultra"
+msgstr "Extrem"
+
+#: src/iac_code/web/static/js/components/composer.js
 msgid "Auto"
 msgstr "Automatisch"
 
@@ -1412,6 +1416,11 @@ msgstr "Denk-Umschalter konnte nicht gespeichert werden"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Model"
 msgstr "Modell"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reasoning effort"
+msgstr "Reasoning-Aufwand"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Provider"
@@ -2894,10 +2903,6 @@ msgstr ""
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The model used for generation under this provider"
 msgstr "Das Modell, das bei diesem Anbieter zur Generierung verwendet wird"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Reasoning effort"
-msgstr "Reasoning-Aufwand"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "How deeply the model thinks; higher is slower but more detailed"

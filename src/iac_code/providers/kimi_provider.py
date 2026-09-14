@@ -41,8 +41,11 @@ class KimiProvider(OpenAIProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.KIMI:
             return {}
-        if self._model == "kimi-k3":
+        effort_models = {"kimi-k3", "k3", "k3-256k", "kimi-for-coding"}
+        if self._model in effort_models:
             if self._thinking_disabled():
+                if self._PROVIDER_KEY == "kimi_code":
+                    return {"extra_body": {"thinking": {"type": "disabled"}}}
                 return {}
             effort = self._effective_effort(spec)
             if effort is None:
@@ -53,7 +56,7 @@ class KimiProvider(OpenAIProvider):
                     return {}
                 effort = spec.default_effort.value
             return {"reasoning_effort": effort}
-        if self._model in {"kimi-k2.7-code", "kimi-k2.7-code-highspeed"}:
+        if self._model in {"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-for-coding-highspeed"}:
             # K2.7 thinking is always on. Sending type=disabled is rejected;
             # omit the switch and let the model keep all reasoning history.
             return {}

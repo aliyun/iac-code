@@ -242,6 +242,10 @@ class ModelPicker:
             return
 
         allowed = spec.allowed_efforts
+        # Numeric ranges use the dedicated /effort selector; this legacy model
+        # picker only renders symbolic EffortLevel values.
+        if not allowed:
+            return
         current = self._efforts.get(pair)
         if current is None:
             new_idx = 0 if direction >= 0 else len(allowed) - 1

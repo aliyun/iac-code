@@ -1305,6 +1305,10 @@ msgid "Max"
 msgstr "最大"
 
 #: src/iac_code/web/static/js/components/composer.js
+msgid "Ultra"
+msgstr "極限"
+
+#: src/iac_code/web/static/js/components/composer.js
 msgid "Auto"
 msgstr "自動"
 
@@ -1375,6 +1379,11 @@ msgstr "思考トグルを保存できませんでした"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Model"
 msgstr "モデル"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reasoning effort"
+msgstr "推論の強度"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Provider"
@@ -2851,10 +2860,6 @@ msgstr "左側でプロバイダーを選択すると、その設定を表示お
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The model used for generation under this provider"
 msgstr "このプロバイダーで生成に使用するモデル"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Reasoning effort"
-msgstr "推論の強度"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "How deeply the model thinks; higher is slower but more detailed"
