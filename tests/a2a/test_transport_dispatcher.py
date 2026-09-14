@@ -50,6 +50,7 @@ from iac_code.a2a.pipeline_transport_delivery import (
 )
 from iac_code.a2a.request_scoped_active_task import (
     DirectPipelineRouteGateCarrier,
+    PipelineLifecycleEventQueueCarrier,
     RequestScopedActiveTask,
     RequestScopedActiveTaskRegistry,
 )
@@ -88,6 +89,7 @@ async def test_setup_active_task_attaches_admission_to_the_queued_request_contex
 
     assert result_context is request_context
     assert RecoverableInputAdmissionCarrier.read(request_context) == "recovery-1"
+    assert PipelineLifecycleEventQueueCarrier.read(request_context) is True
     assert call_context.state == {"iac_code.recoverable_input_admission": "recovery-1"}
 
 
@@ -2044,6 +2046,98 @@ async def test_message_stream_queues_input_required_followup_instead_of_routing_
 
     assert events == [update]
     assert sdk_stream_called is True
+
+
+@pytest.mark.asyncio
+async def test_input_required_base_stream_rebinds_publisher_after_sdk_lifecycle_finished() -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    owner_release = asyncio.Event()
+    domain_owner = asyncio.create_task(owner_release.wait())
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = domain_owner
+    stale_queue = FakeEventQueue()
+    runtime = pipeline_executor_module.A2APipelineRuntime(
+        agent_runtime=SimpleNamespace(),
+        publisher=SimpleNamespace(event_queue=stale_queue),
+    )
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    observed: dict[str, object] = {}
+
+    class Executor:
+        async def execute(self, request_context, event_queue) -> None:
+            gate = DirectPipelineRouteGateCarrier.read(request_context)
+            observed["gate"] = gate
+            observed["registered"] = await pipeline_executor_module._register_active_interrupt(
+                runtime,
+                event_queue=event_queue,
+                direct_route_gate=gate,
+                bind_publisher_event_queue=PipelineLifecycleEventQueueCarrier.read(request_context),
+            )
+            try:
+                await runtime.publisher.event_queue.enqueue_event(update)
+            finally:
+                await pipeline_executor_module._settle_active_interrupt_safely(runtime)
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    handler = IacCodeRequestHandler(
+        agent_executor=Executor(),
+        task_store=store,
+        agent_card=SimpleNamespace(capabilities=SimpleNamespace(streaming=True, extensions=[])),
+    )
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    assert await handler._active_task_registry.get("task-1") is None
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text='{"selected_candidate_index": 0}')],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline"}}, message.metadata)
+
+    try:
+        events = await asyncio.wait_for(
+            _collect_async(
+                handler.on_message_send_stream(
+                    SendMessageRequest(message=message),
+                    call_context,
+                )
+            ),
+            timeout=_STREAM_TEST_TIMEOUT,
+        )
+    finally:
+        owner_release.set()
+        await domain_owner
+        await handler._active_task_registry.retire_for_recovery("task-1")
+
+    assert observed == {"gate": None, "registered": True}
+    assert events == [update]
+    assert stale_queue.events == []
 
 
 @pytest.mark.asyncio

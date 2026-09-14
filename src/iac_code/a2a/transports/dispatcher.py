@@ -96,6 +96,7 @@ from iac_code.a2a.request_scoped_active_task import (
     DirectPipelineRouteGate,
     DirectPipelineRouteGateCarrier,
     DirectPipelineRouteOutcome,
+    PipelineLifecycleEventQueueCarrier,
     RequestScopedActiveTask,
     RequestScopedActiveTaskRegistry,
 )
@@ -537,6 +538,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
 
     async def _setup_active_task(self, params: SendMessageRequest, call_context):
         active_task, request_context = await super()._setup_active_task(params, call_context)
+        PipelineLifecycleEventQueueCarrier.attach(request_context)
         admission = self._peek_recoverable_input_admission(call_context)
         lease = None
         if admission is not None and isinstance(self.task_store, A2ATaskStore):

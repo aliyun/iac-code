@@ -47,7 +47,10 @@ from iac_code.a2a.pipeline_stream import (
     pending_backup_publication_envelope,
 )
 from iac_code.a2a.pipeline_transport_delivery import PipelineTransportDeliveryClosedError
-from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGate
+from iac_code.a2a.request_scoped_active_task import (
+    DirectPipelineRouteGate,
+    PipelineLifecycleEventQueueCarrier,
+)
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -699,6 +702,7 @@ class IacCodeA2APipelineExecutor:
                             pipeline_input=pipeline_input,
                             preserve_task_record=preserve_active_task,
                             direct_route_gate=direct_route_gate,
+                            bind_publisher_event_queue=PipelineLifecycleEventQueueCarrier.read(context),
                         )
                     if routed:
                         return True
@@ -727,10 +731,17 @@ class IacCodeA2APipelineExecutor:
         try:
             await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
         except TimeoutError:
+            if direct_route_gate is not None:
+                direct_route_gate.require_recovery()
             await self._fail_already_active(event_queue, task=task, task_id=task_id, context_id=context_id)
             return
 
         try:
+            if direct_route_gate is not None:
+                # The SDK lifecycle can outlive the Pipeline's internal owner at
+                # an input boundary.  Fence the new continuation before it
+                # publishes into that still-active lifecycle.
+                await direct_route_gate.activate(event_queue)
             owner_task = asyncio.current_task()
             task_persistence_started = False
 
@@ -1267,6 +1278,7 @@ class IacCodeA2APipelineExecutor:
         pipeline_input: PipelineUserInput,
         preserve_task_record: bool,
         direct_route_gate: DirectPipelineRouteGate | None = None,
+        bind_publisher_event_queue: bool = False,
     ) -> bool:
         runtime = ctx.runtime
         if getattr(runtime, "pipeline", None) is None:
@@ -1275,8 +1287,21 @@ class IacCodeA2APipelineExecutor:
             runtime,
             event_queue=event_queue,
             direct_route_gate=direct_route_gate,
+            bind_publisher_event_queue=bind_publisher_event_queue,
         ):
             logger.info("Ignoring A2A pipeline interrupt after terminal publication started")
+            # Direct routing has a recovery gate that makes the dispatcher
+            # recreate the request lifecycle.  A base SDK lifecycle needs an
+            # explicit non-terminal frame so the caller does not mistake an
+            # empty stream (or a terminal retry) for this request's result.
+            if direct_route_gate is None and bind_publisher_event_queue:
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                    text=_retry_text(),
+                )
             return True
 
         interrupt_registered = True
@@ -5201,6 +5226,7 @@ async def _register_active_interrupt(
     *,
     event_queue: Any | None = None,
     direct_route_gate: DirectPipelineRouteGate | None = None,
+    bind_publisher_event_queue: bool = False,
 ) -> bool:
     async with _outbound_lock(runtime):
         if bool(getattr(runtime, "terminal_publication_started", False)):
@@ -5214,6 +5240,7 @@ async def _register_active_interrupt(
                 if event_queue is None:
                     raise RuntimeError("Direct Pipeline route gate requires an event queue")
                 await direct_route_gate.activate(event_queue)
+            if event_queue is not None and (direct_route_gate is not None or bind_publisher_event_queue):
                 runtime.bind_publisher_event_queue(event_queue)
         except BaseException:
             runtime.active_interrupt_count = max(0, _active_interrupt_count(runtime) - 1)

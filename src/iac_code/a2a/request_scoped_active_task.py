@@ -287,6 +287,20 @@ class DirectPipelineRouteGateCarrier:
         return gate if isinstance(gate, DirectPipelineRouteGate) else None
 
 
+class PipelineLifecycleEventQueueCarrier:
+    """Mark a RequestContext whose SDK lifecycle owns its event queue."""
+
+    _ATTRIBUTE = "_iac_code_pipeline_lifecycle_event_queue"
+
+    @classmethod
+    def attach(cls, request_context: Any) -> None:
+        setattr(request_context, cls._ATTRIBUTE, True)
+
+    @classmethod
+    def read(cls, request_context: Any) -> bool:
+        return getattr(request_context, cls._ATTRIBUTE, False) is True
+
+
 class DirectPipelineRecoveryRequiredError(RuntimeError):
     """The old owner won terminal publication, so this request must recover."""
 
