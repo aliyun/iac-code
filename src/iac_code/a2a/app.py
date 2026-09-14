@@ -653,6 +653,7 @@ def create_app(
                 reason=required_string(payload, "reason"),
                 reconnect_timeout_seconds=float(timeout),
             )
+            state = control.protocol_snapshot(state)
             return JSONResponse(state, status_code=200 if state["phase"] == "paused" else 202)
         except Exception as exc:
             return await execution_error_response(exc)
@@ -669,7 +670,7 @@ def create_app(
                 raise ExecutionControlConflictError("executionId does not identify the current execution")
             if pause_id is not None and pause_id != control.pause_id:
                 raise ExecutionControlConflictError("pauseId does not identify the current pause")
-            return JSONResponse(control.snapshot())
+            return JSONResponse(control.protocol_snapshot(control.snapshot()))
         except Exception as exc:
             return await execution_error_response(exc)
 
@@ -684,6 +685,7 @@ def create_app(
                 request_id=validate_protocol_id(required_string(payload, "requestId")),
                 connection_epoch=required_epoch(payload),
             )
+            state = control.protocol_snapshot(state)
             return JSONResponse(state, status_code=200 if state["phase"] == "running" else 202)
         except Exception as exc:
             return await execution_error_response(exc)
@@ -708,6 +710,7 @@ def create_app(
                 reason=reason,
                 pause_id=pause_id,
             )
+            state = control.protocol_snapshot(state)
             return JSONResponse(state, status_code=200 if state["phase"] == "terminated" else 202)
         except Exception as exc:
             return await execution_error_response(exc)
@@ -752,7 +755,7 @@ def create_app(
                 "outputText": list(task_record.output_text),
                 "task": MessageToDict(task, preserving_proto_field_name=False),
                 "messages": [message.to_dict() for message in messages],
-                "executionControl": control.snapshot(),
+                "executionControl": control.protocol_snapshot(control.snapshot()),
             }
             return JSONResponse(project_a2a_data(recovery, public_path_roots=roots))
         except Exception as exc:

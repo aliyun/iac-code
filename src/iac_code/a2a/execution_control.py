@@ -921,6 +921,14 @@ class ExecutionController:
             "inputHandoffReady": self.input_handoff_ready(),
         }
 
+    @staticmethod
+    def protocol_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Return the stable execution-control wire shape without coordination-only fields."""
+
+        public_snapshot = dict(snapshot)
+        public_snapshot.pop("inputHandoffReady", None)
+        return public_snapshot
+
     def has_managed_work(self) -> bool:
         return bool(
             any(not task.done() for task in self._execution_tasks)

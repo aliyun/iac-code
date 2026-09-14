@@ -1448,6 +1448,7 @@ async def test_save_attaches_current_execution_control_metadata() -> None:
             "executionId": "exec-1",
             "phase": "pausing",
             "revision": 2,
+            "inputHandoffReady": True,
         },
         lambda: True,
     )

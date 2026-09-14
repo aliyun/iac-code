@@ -3322,10 +3322,12 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
     with TestClient(app) as client:
         pause = client.post("/iac-code/execution/pause", json=pause_payload)
         assert pause.status_code == 202
+        assert "inputHandoffReady" not in pause.json()
         pause_id = pause.json()["pauseId"]
 
         state = client.get("/iac-code/execution/state?contextId=ctx-1&executionId=exec-1")
         assert state.status_code == 200
+        assert "inputHandoffReady" not in state.json()
         assert state.json()["phase"] in {"pause_committing", "paused"}
         assert state.json()["executionStatus"] == "input-required"
         assert state.json()["streamAvailable"] is False
@@ -3334,6 +3336,7 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
         assert recovery.status_code == 200
         assert recovery.json()["outputText"] == ["finished turn"]
         assert recovery.json()["task"]["id"] == "task-1"
+        assert "inputHandoffReady" not in recovery.json()["executionControl"]
 
         resumed = client.post(
             "/iac-code/execution/resume",
@@ -3346,6 +3349,7 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
             },
         )
         assert resumed.status_code == 202
+        assert "inputHandoffReady" not in resumed.json()
         assert resumed.json()["phase"] == "resuming"
 
         stale = client.post(
@@ -3390,4 +3394,5 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
             },
         )
         assert terminated.status_code == 202
+        assert "inputHandoffReady" not in terminated.json()
         assert terminated.json()["phase"] == "terminating"

@@ -22,7 +22,11 @@ from google.protobuf.json_format import MessageToDict, ParseDict
 
 from iac_code.a2a.backup import await_fenced, run_sync_fenced
 from iac_code.a2a.events import with_iac_code_session_metadata
-from iac_code.a2a.execution_control import current_execution_control, current_execution_termination_reason
+from iac_code.a2a.execution_control import (
+    ExecutionController,
+    current_execution_control,
+    current_execution_termination_reason,
+)
 from iac_code.a2a.metadata_redaction import strip_llm_headers_from_metadata
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
@@ -392,7 +396,7 @@ class A2ATaskStore(TaskStore):
             if control is not None:
                 iac_code = metadata.setdefault("iac_code", {})
                 if isinstance(iac_code, dict):
-                    iac_code["executionControl"] = control
+                    iac_code["executionControl"] = ExecutionController.protocol_snapshot(control)
         ParseDict(metadata, task.metadata)
 
     def _attach_pending_permissions(self, task: Task) -> None:
