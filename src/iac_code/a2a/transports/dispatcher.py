@@ -48,6 +48,7 @@ from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
 from iac_code.a2a.app import normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import make_text_part
+from iac_code.a2a.execution_control import RecoverableInputAdmissionCarrier
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.input_required import parse_permission_response
@@ -104,6 +105,7 @@ from iac_code.utils.public_errors import sanitize_strict_text
 logger = logging.getLogger(__name__)
 _ACTIVE_MESSAGE_STREAM_COMPLETED = object()
 _ASGI_STREAM_END = object()
+_RECOVERABLE_INPUT_ADMISSION_STATE_KEY = "iac_code.recoverable_input_admission"
 
 
 @dataclass
@@ -398,6 +400,8 @@ def create_runtime_components(
         set_execution_control_provider(
             execution_control_service.snapshot_for_context,
             execution_control_service.has_active_work,
+            execution_control_service.reserve_recoverable_input_continuation,
+            execution_control_service.release_recoverable_input_continuation,
         )
     if push_notifications:
         assert persistence is not None
@@ -516,6 +520,29 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         self._validate_extensions(context)
         return await super().on_list_tasks(params, context)
 
+    async def _setup_active_task(self, params: SendMessageRequest, call_context):
+        active_task, request_context = await super()._setup_active_task(params, call_context)
+        admission = call_context.state.pop(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY, None)
+        RecoverableInputAdmissionCarrier.attach(request_context, admission)
+        return active_task, request_context
+
+    @staticmethod
+    def _stage_recoverable_input_admission(call_context, admission: str | None) -> None:
+        state = getattr(call_context, "state", None)
+        if not isinstance(state, dict):
+            if admission is None:
+                return
+            raise RuntimeError("Server call context cannot carry a recovery admission")
+        state.pop(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY, None)
+        if admission is not None:
+            state[_RECOVERABLE_INPUT_ADMISSION_STATE_KEY] = admission
+
+    @staticmethod
+    def _clear_recoverable_input_admission(call_context) -> None:
+        state = getattr(call_context, "state", None)
+        if isinstance(state, dict):
+            state.pop(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY, None)
+
     async def on_message_send(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
@@ -542,8 +569,14 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     refreshed = await self.task_store.get(permission_response.task_id, context)
                     return refreshed or task
         await self._hydrate_recoverable_pipeline_task_id(params)
-        await self._reconcile_recoverable_pipeline_task(params, context)
-        return await super().on_message_send(params, context)
+        admission = await self._reconcile_recoverable_pipeline_task(params, context)
+        self._stage_recoverable_input_admission(context, admission)
+        try:
+            return await super().on_message_send(params, context)
+        finally:
+            self._clear_recoverable_input_admission(context)
+            if isinstance(self.task_store, A2ATaskStore):
+                await self.task_store.release_recoverable_input_admission(admission)
 
     async def on_message_send_stream(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
@@ -560,56 +593,64 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     return
         if permission_response is None:
             await self._hydrate_recoverable_pipeline_task_id(params)
-            await self._reconcile_recoverable_pipeline_task(params, context)
-        task_id = params.message.task_id or None
-        if task_id and isinstance(self.task_store, A2ATaskStore) and await self.task_store.is_task_active(task_id):
-            task = await self.task_store.get(task_id, context)
-            active_task = await self._active_task_registry.get(task_id)
-            if (
-                task is not None
-                and active_task is not None
-                and task.status.state not in TERMINAL_TASK_STATES
-                and (task.status.state not in INTERRUPTED_TASK_STATES or permission_response is not None)
-            ):
-                active_stream = self._on_active_message_send_stream(
-                    params,
-                    context,
-                    task=task,
-                    active_task=active_task,
-                )
-                try:
-                    async for event in active_stream:
-                        yield event
-                finally:
-                    await active_stream.aclose()
-                return
-        if permission_response is not None and isinstance(self.task_store, A2ATaskStore):
-            task = await self.task_store.get(permission_response.task_id, context)
-            if task is not None:
-                direct_stream = self._on_inactive_permission_send_stream(params, context, task=task)
-                try:
-                    async for event in direct_stream:
-                        yield event
-                finally:
-                    await direct_stream.aclose()
-                return
-        base_stream = super().on_message_send_stream(params, context)
-        tracked_stream = (
-            base_stream
-            if resolve_request_run_mode(params.message) is RunMode.PIPELINE
-            else _iterate_with_pipeline_transport_tracking(
-                base_stream,
-                task_id=getattr(params.message, "task_id", None) or None,
-                context_id=getattr(params.message, "context_id", None) or None,
-            )
-        )
+            admission = await self._reconcile_recoverable_pipeline_task(params, context)
+        else:
+            admission = None
+        self._stage_recoverable_input_admission(context, admission)
         try:
-            async for event in tracked_stream:
-                mark_pipeline_transport_delivery_dequeued(event)
-                yield event
-                acknowledge_pipeline_transport_delivery(event)
+            task_id = params.message.task_id or None
+            if task_id and isinstance(self.task_store, A2ATaskStore) and await self.task_store.is_task_active(task_id):
+                task = await self.task_store.get(task_id, context)
+                active_task = await self._active_task_registry.get(task_id)
+                if (
+                    task is not None
+                    and active_task is not None
+                    and task.status.state not in TERMINAL_TASK_STATES
+                    and (task.status.state not in INTERRUPTED_TASK_STATES or permission_response is not None)
+                ):
+                    active_stream = self._on_active_message_send_stream(
+                        params,
+                        context,
+                        task=task,
+                        active_task=active_task,
+                    )
+                    try:
+                        async for event in active_stream:
+                            yield event
+                    finally:
+                        await active_stream.aclose()
+                    return
+            if permission_response is not None and isinstance(self.task_store, A2ATaskStore):
+                task = await self.task_store.get(permission_response.task_id, context)
+                if task is not None:
+                    direct_stream = self._on_inactive_permission_send_stream(params, context, task=task)
+                    try:
+                        async for event in direct_stream:
+                            yield event
+                    finally:
+                        await direct_stream.aclose()
+                    return
+            base_stream = super().on_message_send_stream(params, context)
+            tracked_stream = (
+                base_stream
+                if resolve_request_run_mode(params.message) is RunMode.PIPELINE
+                else _iterate_with_pipeline_transport_tracking(
+                    base_stream,
+                    task_id=getattr(params.message, "task_id", None) or None,
+                    context_id=getattr(params.message, "context_id", None) or None,
+                )
+            )
+            try:
+                async for event in tracked_stream:
+                    mark_pipeline_transport_delivery_dequeued(event)
+                    yield event
+                    acknowledge_pipeline_transport_delivery(event)
+            finally:
+                await tracked_stream.aclose()
         finally:
-            await tracked_stream.aclose()
+            self._clear_recoverable_input_admission(context)
+            if isinstance(self.task_store, A2ATaskStore):
+                await self.task_store.release_recoverable_input_admission(admission)
 
     async def _on_inactive_permission_send_stream(self, params: SendMessageRequest, context, *, task: Task):
         """Resume an existing input boundary without asking the SDK to recreate its task."""
@@ -789,44 +830,49 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         if task_id:
             message.task_id = task_id
 
-    async def _reconcile_recoverable_pipeline_task(self, params: SendMessageRequest, context) -> None:
+    async def _reconcile_recoverable_pipeline_task(self, params: SendMessageRequest, context) -> str | None:
         if resolve_request_run_mode(params.message) is not RunMode.PIPELINE or not isinstance(
             self.task_store, A2ATaskStore
         ):
-            return
+            return None
         message = getattr(params, "message", None)
         if message is None:
-            return
+            return None
         task_id = getattr(message, "task_id", None)
         if not isinstance(task_id, str) or not task_id:
-            return
+            return None
         try:
             task = await self.task_store.get(task_id, context)
         except Exception:
             logger.debug("Failed to load A2A task %s before pipeline reconciliation", task_id, exc_info=True)
-            return
-        if task is None or task.status.state not in TERMINAL_TASK_STATES:
-            return
+            return None
+        if task is None or (
+            task.status.state not in TERMINAL_TASK_STATES
+            and task.status.state != TaskState.TASK_STATE_INPUT_REQUIRED
+        ):
+            return None
 
         context_id = getattr(message, "context_id", None) or getattr(task, "context_id", None)
         if not isinstance(context_id, str) or not context_id:
-            return
+            return None
         try:
             context_record = await self.task_store.get_context_record(context_id)
             recoverable_task_id = recoverable_task_id_from_sidecar(
                 cwd=context_record.cwd,
                 session_id=context_record.session_id,
                 context_id=context_id,
+                include_running=False,
             )
         except Exception:
             logger.debug("Failed to inspect recoverable A2A pipeline task %s", task_id, exc_info=True)
-            return
+            return None
         if recoverable_task_id != task_id:
-            return
+            return None
 
-        task.status.CopyFrom(TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)))
-        task.status.timestamp.GetCurrentTime()
-        await self.task_store.reconcile_recoverable_input_required_task(task, context_record, context)
+        if task.status.state in TERMINAL_TASK_STATES:
+            task.status.CopyFrom(TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)))
+            task.status.timestamp.GetCurrentTime()
+        return await self.task_store.reconcile_recoverable_input_required_task(task, context_record, context)
 
     async def _wait_for_active_message_events(self, active_task) -> None:
         event_queue_agent = getattr(active_task, "_event_queue_agent", None)

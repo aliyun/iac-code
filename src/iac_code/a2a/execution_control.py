@@ -20,10 +20,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, TypeVar, cast
 
-from iac_code.a2a.backup import await_fenced, run_sync_fenced
+from iac_code.a2a.backup import await_fenced, run_sync_fenced, run_sync_fenced_with_cancel_completion
 from iac_code.services.session_backup import BackupReason, BackupResult
 from iac_code.services.session_storage import SessionStorage
-from iac_code.utils.state_io import atomic_write_json
+from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
 
 ExecutionPhase = Literal[
     "running",
@@ -37,6 +37,7 @@ ExecutionPhase = Literal[
 
 _PAUSE_PHASES = frozenset({"pausing", "pause_committing", "paused"})
 _TERMINAL_TASK_STATES = frozenset({"completed", "failed", "canceled", "input-required", "normal-turn-ended"})
+_RECOVERABLE_INPUT_ADMISSION_TTL_SECONDS = 60.0
 _CURRENT_CONTROL: ContextVar[Any] = ContextVar("a2a_execution_control", default=None)
 _CURRENT_ACTIVITY_IDS: ContextVar[tuple[str, ...]] = ContextVar("a2a_execution_activity_ids", default=())
 _CURRENT_PARTICIPANT_IDS: ContextVar[tuple[str, ...]] = ContextVar("a2a_execution_participant_ids", default=())
@@ -81,6 +82,255 @@ class _Activity:
     budget_changed: asyncio.Event = field(default_factory=asyncio.Event)
 
 
+@dataclass(frozen=True)
+class _RecoverableInputAdmission:
+    token: str
+    context_id: str
+    task_id: str
+    owner: str
+    expires_at: float
+
+    def as_document(self) -> dict[str, Any]:
+        return {
+            "token": self.token,
+            "contextId": self.context_id,
+            "taskId": self.task_id,
+            "owner": self.owner,
+            "expiresAt": self.expires_at,
+        }
+
+
+@dataclass(frozen=True)
+class _RecoverableInputActivation:
+    previous_control: dict[str, Any] | None
+    execution_id: str
+
+
+class _RecoverableInputAdmissionStore:
+    """One-request reservation store with a cross-process file fence when persistence is enabled."""
+
+    def __init__(self, persistence_root: Path | None) -> None:
+        self._root = persistence_root / "execution-control" if persistence_root is not None else None
+        self._by_token: dict[str, _RecoverableInputAdmission] = {}
+        self._token_by_context: dict[str, str] = {}
+
+    def reserve(self, admission: _RecoverableInputAdmission) -> bool:
+        if self._root is None:
+            if admission.context_id in self._token_by_context:
+                return False
+            self._remember(admission)
+            return True
+        path = self._admission_path(admission.context_id)
+        with cross_process_file_lock(self._lock_path(admission.context_id)):
+            existing = self._load_document(path)
+            if existing is not None and not self._expired(existing):
+                return False
+            if not self._persisted_control_allows_recovery(admission):
+                return False
+            if existing is not None:
+                path.unlink(missing_ok=True)
+            atomic_write_json(path, admission.as_document())
+        self._remember(admission)
+        return True
+
+    def activate(
+        self,
+        admission: _RecoverableInputAdmission,
+        control_snapshot: dict[str, Any],
+    ) -> _RecoverableInputActivation | None:
+        """Fence one admission while publishing its running control."""
+        if self._root is None:
+            if self._by_token.get(admission.token) != admission or self._expired(admission.as_document()):
+                return None
+            return _RecoverableInputActivation(
+                previous_control=None,
+                execution_id=str(control_snapshot["executionId"]),
+            )
+        admission_path = self._admission_path(admission.context_id)
+        with cross_process_file_lock(self._lock_path(admission.context_id)):
+            document = self._load_document(admission_path)
+            if document is None or self._expired(document) or not self._matches(document, admission):
+                return None
+            # A different worker may have advanced the shared control after this
+            # process inspected its stale local controller. Re-check while holding
+            # the same fence used by every recovery reservation and activation.
+            if not self._persisted_control_allows_recovery(admission):
+                return None
+            revision = int(control_snapshot["revision"])
+            persisted_snapshot = dict(control_snapshot)
+            persisted_snapshot["persistedRevision"] = revision
+            control_path = self._root / f"{admission.context_id}.json"
+            previous_control = self._load_document(control_path)
+            atomic_write_json(control_path, persisted_snapshot)
+        return _RecoverableInputActivation(
+            previous_control=previous_control,
+            execution_id=str(control_snapshot["executionId"]),
+        )
+
+    def finish_activation(self, admission: _RecoverableInputAdmission) -> bool:
+        if self._root is not None:
+            path = self._admission_path(admission.context_id)
+            with cross_process_file_lock(self._lock_path(admission.context_id)):
+                document = self._load_document(path)
+                if document is not None and self._matches(document, admission):
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        return False
+        self._forget(admission)
+        return True
+
+    def rollback_activation(
+        self,
+        admission: _RecoverableInputAdmission,
+        activation: _RecoverableInputActivation,
+    ) -> bool:
+        if self._root is None:
+            return True
+        with cross_process_file_lock(self._lock_path(admission.context_id)):
+            control_path = self._root / f"{admission.context_id}.json"
+            current = self._load_document(control_path)
+            if current is None or current.get("executionId") != activation.execution_id:
+                return False
+            if activation.previous_control is None:
+                control_path.unlink(missing_ok=True)
+            else:
+                atomic_write_json(control_path, activation.previous_control)
+        return True
+
+    def can_begin_without_admission(
+        self,
+        context_id: str,
+        local_execution_id: str | None,
+        local_server_instance_id: str,
+        local_input_handoff_ready: bool,
+    ) -> bool:
+        """Reject a new local controller when another process owns shared execution state."""
+        if local_input_handoff_ready:
+            return False
+        if self._root is None:
+            return True
+        with cross_process_file_lock(self._lock_path(context_id)):
+            ticket = self._load_document(self._admission_path(context_id))
+            if ticket is not None and not self._expired(ticket):
+                return False
+            control = self._load_document(self._root / f"{context_id}.json")
+            if control is None:
+                return not local_input_handoff_ready
+            if control.get("inputHandoffReady") is True:
+                return False
+            if local_execution_id is not None and (
+                control.get("executionId") == local_execution_id
+                or control.get("serverInstanceId") == local_server_instance_id
+            ):
+                return True
+            return bool(control.get("phase") == "terminated" and control.get("releaseReady", False))
+
+    def has_active(self, context_id: str) -> bool:
+        if self._root is None:
+            return context_id in self._token_by_context
+        path = self._admission_path(context_id)
+        with cross_process_file_lock(self._lock_path(context_id)):
+            document = self._load_document(path)
+            if document is None:
+                return False
+            if self._expired(document):
+                path.unlink(missing_ok=True)
+                return False
+            return True
+
+    def release(self, token: str) -> None:
+        admission = self._by_token.get(token)
+        if admission is None:
+            return
+        if self._root is not None:
+            path = self._admission_path(admission.context_id)
+            with cross_process_file_lock(self._lock_path(admission.context_id)):
+                document = self._load_document(path)
+                if document is not None and self._matches(document, admission):
+                    path.unlink(missing_ok=True)
+        self._forget(admission)
+
+    def get(self, token: str | None) -> _RecoverableInputAdmission | None:
+        return self._by_token.get(token or "")
+
+    def close(self) -> None:
+        for token in tuple(self._by_token):
+            self.release(token)
+
+    def _persisted_control_allows_recovery(self, admission: _RecoverableInputAdmission) -> bool:
+        assert self._root is not None
+        path = self._root / f"{admission.context_id}.json"
+        if not path.exists():
+            return True
+        document = self._load_document(path)
+        if document is None or document.get("taskId") != admission.task_id:
+            return False
+        if document.get("inputHandoffReady") is True:
+            return True
+        if document.get("phase") != "terminated":
+            return False
+        backup = document.get("backup")
+        backup_status = backup.get("status") if isinstance(backup, dict) else None
+        return bool(document.get("releaseReady", False) or backup_status == "blocked")
+
+    def _remember(self, admission: _RecoverableInputAdmission) -> None:
+        self._by_token[admission.token] = admission
+        self._token_by_context[admission.context_id] = admission.token
+
+    def _forget(self, admission: _RecoverableInputAdmission) -> None:
+        self._by_token.pop(admission.token, None)
+        if self._token_by_context.get(admission.context_id) == admission.token:
+            self._token_by_context.pop(admission.context_id, None)
+
+    def _admission_path(self, context_id: str) -> Path:
+        assert self._root is not None
+        return self._root / f".{context_id}.recoverable-input.json"
+
+    def _lock_path(self, context_id: str) -> Path:
+        assert self._root is not None
+        return self._root / f".{context_id}.recoverable-input.lock"
+
+    @staticmethod
+    def _load_document(path: Path) -> dict[str, Any] | None:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return {"expiresAt": math.inf}
+        return value if isinstance(value, dict) else {"expiresAt": math.inf}
+
+    @staticmethod
+    def _expired(document: dict[str, Any]) -> bool:
+        expires_at = document.get("expiresAt")
+        return isinstance(expires_at, (int, float)) and not isinstance(expires_at, bool) and expires_at <= time.time()
+
+    @staticmethod
+    def _matches(document: dict[str, Any], admission: _RecoverableInputAdmission) -> bool:
+        return bool(
+            document.get("token") == admission.token
+            and document.get("contextId") == admission.context_id
+            and document.get("taskId") == admission.task_id
+            and document.get("owner") == admission.owner
+        )
+
+
+class RecoverableInputAdmissionCarrier:
+    """Attach a server-issued admission to one queued SDK RequestContext."""
+
+    _ATTRIBUTE = "_iac_code_recoverable_input_admission"
+
+    @classmethod
+    def attach(cls, request_context: Any, admission: str | None) -> None:
+        setattr(request_context, cls._ATTRIBUTE, admission)
+
+    @classmethod
+    def read(cls, request_context: Any) -> str | None:
+        admission = getattr(request_context, cls._ATTRIBUTE, None)
+        return admission if isinstance(admission, str) and admission else None
+
+
 @dataclass
 class _Participant:
     participant_id: str
@@ -123,6 +373,7 @@ class ExecutionController:
         backup_service: Any | None,
         termination_cleanup: Callable[[str, str, str], Awaitable[str | None]] | None = None,
         on_resume: Callable[[str], None] | None = None,
+        input_handoff_commit: Callable[[ExecutionController, dict[str, Any]], Awaitable[None]] | None = None,
         execution_id: str | None = None,
     ) -> None:
         self.context_id = context_id
@@ -169,11 +420,29 @@ class ExecutionController:
         self._backup_service = backup_service
         self._termination_cleanup = termination_cleanup
         self._on_resume = on_resume
+        self._input_handoff_commit = input_handoff_commit
+        self._durable_input_handoff_enabled = False
         self._termination_cleanup_complete = termination_cleanup is None
         self._termination_cleanup_inflight = False
 
     def bind_session(self, session_id: str) -> None:
         self.session_id = session_id
+
+    def enable_durable_input_handoff(self) -> None:
+        self._durable_input_handoff_enabled = True
+
+    def disable_durable_input_handoff(self) -> None:
+        self._durable_input_handoff_enabled = False
+
+    def input_handoff_ready(self) -> bool:
+        return bool(
+            self._durable_input_handoff_enabled
+            and self.phase == "running"
+            and self.execution_status == "input-required"
+            and not self.stream_available
+            and not self.has_managed_work()
+            and not any(not task.done() for task in self._background_tasks)
+        )
 
     def permission_suspension_allowed(self) -> bool:
         return self.phase == "running" and not self._connection_hold and self._resume_barrier_revision is None
@@ -270,6 +539,8 @@ class ExecutionController:
         await self._persist_snapshot(snapshot)
 
     async def detach_task(self, task: asyncio.Task[Any], *, execution_status: str) -> None:
+        handoff_snapshot: dict[str, Any] | None = None
+        handoff_commit = self._input_handoff_commit
         async with self._condition:
             self._execution_tasks.discard(task)
             self._remove_participant_locked(task)
@@ -280,6 +551,11 @@ class ExecutionController:
             self._condition.notify_all()
             self._schedule_pause_commit_locked()
             self._maybe_mark_release_ready_locked()
+            if self.input_handoff_ready() and handoff_commit is not None:
+                self.revision += 1
+                handoff_snapshot = self.snapshot()
+        if handoff_snapshot is not None and handoff_commit is not None:
+            await handoff_commit(self, handoff_snapshot)
 
     async def pause(
         self,
@@ -642,6 +918,7 @@ class ExecutionController:
             "backup": dict(self.backup),
             "externalOperations": [dict(operation) for operation in self.external_operations],
             "releaseReady": self.release_ready,
+            "inputHandoffReady": self.input_handoff_ready(),
         }
 
     def has_managed_work(self) -> bool:
@@ -649,6 +926,31 @@ class ExecutionController:
             any(not task.done() for task in self._execution_tasks)
             or self._activities
             or any(not participant.task.done() for participant in self._participants.values())
+        )
+
+    def can_admit_recoverable_input_continuation(self, task_id: str) -> bool:
+        """Return whether a sidecar-proven continuation can safely claim this control."""
+        return bool(
+            self.task_id == task_id
+            and not self.has_managed_work()
+            and not any(not task.done() for task in self._background_tasks)
+            and (
+                (
+                    self.phase == "terminated"
+                    and (self.release_ready or self.backup.get("status") == "blocked")
+                )
+                or self.input_handoff_ready()
+            )
+        )
+
+    def can_replace_with_recoverable_input_continuation(self, task_id: str) -> bool:
+        """Allow an admitted continuation to supersede a blocked terminal backup."""
+        return bool(
+            self.can_admit_recoverable_input_continuation(task_id)
+            and (
+                self.input_handoff_ready()
+                or (not self.release_ready and self.backup.get("status") == "blocked")
+            )
         )
 
     async def close(self) -> None:
@@ -1239,6 +1541,7 @@ class ExecutionControlService:
         self._backup_service = backup_service
         self._controls: dict[str, ExecutionController] = {}
         self._context_start_locks: dict[str, asyncio.Lock] = {}
+        self._recoverable_input_admissions = _RecoverableInputAdmissionStore(persistence_root)
         self._termination_cleanup: Callable[[str, str, str], Awaitable[str | None]] | None = None
         self._on_resume: Callable[[str], None] | None = None
 
@@ -1255,6 +1558,21 @@ class ExecutionControlService:
         for control in self._controls.values():
             control._termination_cleanup = cleanup
 
+    async def _commit_input_handoff(
+        self,
+        control: ExecutionController,
+        snapshot: dict[str, Any],
+    ) -> None:
+        """Publish a drained recovered input wait before another request can start locally."""
+        async with self._context_start_locks.setdefault(control.context_id, asyncio.Lock()):
+            if (
+                self._controls.get(control.context_id) is not control
+                or control.revision != snapshot.get("revision")
+                or not control.input_handoff_ready()
+            ):
+                return
+            await control._persist_snapshot(snapshot)
+
     async def begin_execution(
         self,
         *,
@@ -1263,6 +1581,7 @@ class ExecutionControlService:
         owner: str,
         cwd: str,
         continue_input_required: bool = False,
+        recoverable_input_admission: str | None = None,
     ) -> ExecutionController:
         task = asyncio.current_task()
         if task is None:
@@ -1272,18 +1591,37 @@ class ExecutionControlService:
             control = self._controls.get(context_id)
             if control is not None and control.owner != owner:
                 raise ExecutionControlNotFoundError("Execution was not found")
+            admission = self._recoverable_input_admissions.get(recoverable_input_admission)
+            admitted_recovery = bool(
+                admission is not None
+                and admission.context_id == context_id
+                and admission.task_id == task_id
+                and admission.owner == owner
+            )
+            if recoverable_input_admission is not None and not admitted_recovery:
+                raise ExecutionControlConflictError("Recoverable input continuation admission is stale")
+            replace_blocked_input_wait = bool(
+                control is not None
+                and admitted_recovery
+                and control.can_replace_with_recoverable_input_continuation(task_id)
+            )
             if control is not None and (
                 (
                     control.task_id != task_id
                     and control.phase in {"pausing", "pause_committing", "paused", "resuming", "terminating"}
                 )
-                or (control.phase in {"terminating", "terminated"} and not control.release_ready)
+                or (
+                    control.phase in {"terminating", "terminated"}
+                    and not control.release_ready
+                    and not replace_blocked_input_wait
+                )
             ):
                 raise ExecutionControlConflictError("Current execution must finish recovery before a new task starts")
             reuse = bool(
                 control is not None
                 and control.task_id == task_id
                 and control.phase not in {"terminating", "terminated"}
+                and not control.input_handoff_ready()
                 and (
                     control.stream_available
                     or (continue_input_required and control.execution_status == "input-required")
@@ -1299,6 +1637,16 @@ class ExecutionControlService:
             ):
                 await control.rollover_normal_execution(task_id=task_id, cwd=cwd)
                 reuse = True
+            if not reuse and admission is None:
+                shared_start_allowed = await run_sync_fenced(
+                    self._recoverable_input_admissions.can_begin_without_admission,
+                    context_id,
+                    control.execution_id if control is not None else None,
+                    self.server_instance_id,
+                    control.input_handoff_ready() if control is not None else False,
+                )
+                if not shared_start_allowed:
+                    raise ExecutionControlConflictError("Current execution is active in another process")
             if not reuse:
                 retired_control = control
                 path = None
@@ -1314,13 +1662,118 @@ class ExecutionControlService:
                     backup_service=self._backup_service,
                     termination_cleanup=self._termination_cleanup,
                     on_resume=self._on_resume,
+                    input_handoff_commit=self._commit_input_handoff,
                 )
-                self._controls[context_id] = control
             assert control is not None
+            if admission is not None and not reuse:
+                control.enable_durable_input_handoff()
+                control.revision += 1
+                activation: _RecoverableInputActivation | None = None
+
+                async def cleanup_cancelled_activation(
+                    result: _RecoverableInputActivation | None,
+                    error: BaseException | None,
+                ) -> None:
+                    if result is not None and error is None:
+                        await run_sync_fenced(
+                            self._recoverable_input_admissions.rollback_activation,
+                            admission,
+                            result,
+                        )
+                    control.disable_durable_input_handoff()
+                    await control.detach_task(task, execution_status="input-required")
+                    await control.close()
+
+                await control.attach_task(task, mark_working=False)
+                try:
+                    activation = await run_sync_fenced_with_cancel_completion(
+                        self._recoverable_input_admissions.activate,
+                        cleanup_cancelled_activation,
+                        admission,
+                        control.snapshot(),
+                    )
+                    if activation is None:
+                        raise ExecutionControlConflictError("Recoverable input continuation admission is stale")
+                    control.persisted_revision = control.revision
+                    self._controls[context_id] = control
+                    await run_sync_fenced(self._recoverable_input_admissions.finish_activation, admission)
+                except asyncio.CancelledError:
+                    if activation is not None:
+                        await run_sync_fenced(
+                            self._recoverable_input_admissions.rollback_activation,
+                            admission,
+                            activation,
+                        )
+                        if retired_control is None:
+                            self._controls.pop(context_id, None)
+                        else:
+                            self._controls[context_id] = retired_control
+                        control.disable_durable_input_handoff()
+                        await control.detach_task(task, execution_status="input-required")
+                        await control.close()
+                    raise
+                except BaseException:
+                    if activation is not None:
+                        await run_sync_fenced(
+                            self._recoverable_input_admissions.rollback_activation,
+                            admission,
+                            activation,
+                        )
+                        if retired_control is None:
+                            self._controls.pop(context_id, None)
+                        else:
+                            self._controls[context_id] = retired_control
+                    control.disable_durable_input_handoff()
+                    await control.detach_task(task, execution_status="input-required")
+                    await control.close()
+                    raise
+            self._controls[context_id] = control
             if retired_control is not None:
                 await retired_control.close()
-            await control.attach_task(task, mark_working=False)
+            if admission is None or reuse:
+                await control.attach_task(task, mark_working=False)
         return control
+
+    async def reserve_recoverable_input_continuation(
+        self,
+        *,
+        context_id: str,
+        task_id: str,
+        owner: str,
+    ) -> str | None:
+        """Reserve one request-scoped continuation after the caller proves the sidecar wait."""
+        async with self._context_start_locks.setdefault(context_id, asyncio.Lock()):
+            control = self._controls.get(context_id)
+            if control is not None and (
+                control.owner != owner or not control.can_admit_recoverable_input_continuation(task_id)
+            ):
+                return None
+            if control is not None and control.input_handoff_ready():
+                # A previous detach may have completed locally while its durable
+                # handoff write failed. Re-publish the same revision before a
+                # request can reserve and replace this controller.
+                await control._persist_snapshot(control.snapshot())
+            token = "recovery-" + uuid.uuid4().hex
+            admission = _RecoverableInputAdmission(
+                token=token,
+                context_id=context_id,
+                task_id=task_id,
+                owner=owner,
+                expires_at=time.time() + _RECOVERABLE_INPUT_ADMISSION_TTL_SECONDS,
+            )
+            reserved = await run_sync_fenced(
+                self._recoverable_input_admissions.reserve,
+                admission,
+            )
+            return token if reserved else None
+
+    async def release_recoverable_input_continuation(self, token: str) -> None:
+        """Release an unused recovery reservation; consumed reservations are a no-op."""
+        admission = self._recoverable_input_admissions.get(token)
+        if admission is None:
+            return
+        async with self._context_start_locks.setdefault(admission.context_id, asyncio.Lock()):
+            await run_sync_fenced(self._recoverable_input_admissions.release, token)
 
     def get_for_context(self, context_id: str) -> ExecutionController | None:
         return self._controls.get(context_id)
@@ -1346,6 +1799,7 @@ class ExecutionControlService:
 
     async def close(self) -> None:
         await asyncio.gather(*(control.close() for control in tuple(self._controls.values())), return_exceptions=True)
+        await run_sync_fenced(self._recoverable_input_admissions.close)
 
 
 def bind_execution_control(control: ExecutionController | None) -> Token[ExecutionController | None]:

@@ -31,6 +31,7 @@ from iac_code.a2a.events import (
 )
 from iac_code.a2a.execution_control import (
     ExecutionControlService,
+    RecoverableInputAdmissionCarrier,
     bind_execution_control,
     clear_execution_participants,
     current_execution_control,
@@ -1625,6 +1626,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     owner=owner,
                     cwd=cwd,
                     continue_input_required=pipeline_mode and not route_pipeline_handoff_to_normal,
+                    recoverable_input_admission=RecoverableInputAdmissionCarrier.read(context),
                 )
                 bind_execution_control(control)
                 await control.checkpoint()

@@ -8,11 +8,14 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
+from a2a.server.agent_execution import RequestContext
+from a2a.server.agent_execution.active_task_registry import ActiveTaskRegistry
 from a2a.server.context import ServerCallContext
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.types import Message, Part, Role, SubscribeToTaskRequest, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 from google.protobuf.struct_pb2 import Value
 
+from iac_code.a2a.execution_control import ExecutionControlService, RecoverableInputAdmissionCarrier
 from iac_code.a2a.input_required import PERMISSION_QUERY_PREFIX
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -42,6 +45,86 @@ from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
 from .fakes import FakeAgentLoop, FakeRuntime, pending_future
 
 _STREAM_TEST_TIMEOUT = 5
+
+
+@pytest.mark.asyncio
+async def test_setup_active_task_attaches_admission_to_the_queued_request_context(monkeypatch) -> None:
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    call_context = ServerCallContext()
+    request_context = SimpleNamespace()
+    handler._stage_recoverable_input_admission(call_context, "recovery-1")
+
+    async def sdk_setup(_handler, _params, observed_call_context):
+        assert observed_call_context is call_context
+        return object(), request_context
+
+    monkeypatch.setattr(DefaultRequestHandler, "_setup_active_task", sdk_setup)
+    _, result_context = await handler._setup_active_task(object(), call_context)
+
+    assert result_context is request_context
+    assert RecoverableInputAdmissionCarrier.read(request_context) == "recovery-1"
+    assert call_context.state == {}
+
+
+@pytest.mark.asyncio
+async def test_reused_sdk_producer_reads_admission_from_each_request_context() -> None:
+    observed: list[str | None] = []
+
+    class RecordingExecutor:
+        async def execute(self, request_context, event_queue) -> None:
+            observed.append(RecoverableInputAdmissionCarrier.read(request_context))
+            if request_context.current_task is None:
+                await event_queue.enqueue_event(
+                    Task(
+                        id="task-1",
+                        context_id="ctx-1",
+                        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+                    )
+                )
+            else:
+                await event_queue.enqueue_event(
+                    TaskStatusUpdateEvent(
+                        task_id="task-1",
+                        context_id="ctx-1",
+                        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+                    )
+                )
+
+        async def cancel(self, _request_context, event_queue) -> None:
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-1",
+                    context_id="ctx-1",
+                    status=TaskStatus(state=TaskState.TASK_STATE_CANCELED),
+                )
+            )
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    registry = ActiveTaskRegistry(agent_executor=RecordingExecutor(), task_store=store)
+    active_task = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+
+    for admission in ("recovery-first", "recovery-second"):
+        request_context = RequestContext(
+            call_context=call_context,
+            task_id="task-1",
+            context_id="ctx-1",
+        )
+        RecoverableInputAdmissionCarrier.attach(request_context, admission)
+        events = [event async for event in active_task.subscribe(request=request_context)]
+        assert any(
+            isinstance(event, (Task, TaskStatusUpdateEvent))
+            and event.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+            for event in events
+        )
+
+    assert observed == ["recovery-first", "recovery-second"]
+    await active_task.cancel(call_context)
 
 
 @pytest.mark.asyncio
@@ -160,16 +243,93 @@ async def test_dispatcher_stream_yields_events(monkeypatch, tmp_path) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("release_ready", "expected_task_state", "expected_persisted_state", "expected_active_task_id"),
+    (
+        "phase",
+        "release_ready",
+        "control_task_id",
+        "admission_allowed",
+        "sidecar_task_id",
+        "expected_task_state",
+        "expected_persisted_state",
+        "expected_active_task_id",
+    ),
     [
-        pytest.param(True, TaskState.TASK_STATE_INPUT_REQUIRED, "input-required", None, id="release-ready"),
-        pytest.param(False, TaskState.TASK_STATE_FAILED, "failed", "task-1", id="release-pending"),
+        pytest.param(
+            "terminated",
+            True,
+            "task-1",
+            True,
+            "task-1",
+            TaskState.TASK_STATE_INPUT_REQUIRED,
+            "input-required",
+            None,
+            id="release-ready",
+        ),
+        pytest.param(
+            "terminated",
+            False,
+            "task-1",
+            True,
+            "task-1",
+            TaskState.TASK_STATE_INPUT_REQUIRED,
+            "input-required",
+            None,
+            id="terminated-backup-blocked",
+        ),
+        pytest.param(
+            "terminating",
+            False,
+            "task-1",
+            False,
+            "task-1",
+            TaskState.TASK_STATE_FAILED,
+            "failed",
+            "task-1",
+            id="termination-in-flight",
+        ),
+        pytest.param(
+            "terminated",
+            False,
+            "task-other",
+            False,
+            "task-1",
+            TaskState.TASK_STATE_FAILED,
+            "failed",
+            "task-1",
+            id="blocked-control-task-mismatch",
+        ),
+        pytest.param(
+            "terminated",
+            False,
+            "task-1",
+            False,
+            "task-1",
+            TaskState.TASK_STATE_FAILED,
+            "failed",
+            "task-1",
+            id="blocked-control-live-background-work",
+        ),
+        pytest.param(
+            "terminated",
+            False,
+            "task-1",
+            True,
+            "task-other",
+            TaskState.TASK_STATE_FAILED,
+            "failed",
+            "task-1",
+            id="sidecar-task-mismatch",
+        ),
     ],
 )
 async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting_input(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    phase: str,
     release_ready: bool,
+    control_task_id: str,
+    admission_allowed: bool,
+    sidecar_task_id: str,
     expected_task_state: int,
     expected_persisted_state: str,
     expected_active_task_id: str | None,
@@ -197,9 +357,31 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
         ),
         call_context,
     )
+    issued_admissions: list[str] = []
+    released_admissions: list[str] = []
+
+    async def reserve_admission(*, context_id: str, task_id: str, owner: str) -> str | None:
+        assert context_id == "ctx-1"
+        assert task_id == "task-1"
+        if not admission_allowed:
+            return None
+        admission = f"recovery-{owner}-{task_id}"
+        issued_admissions.append(admission)
+        return admission
+
+    async def release_admission(admission: str) -> None:
+        released_admissions.append(admission)
+
     store.set_execution_control_provider(
-        lambda _context_id: {"phase": "terminated", "releaseReady": release_ready},
-        lambda: not release_ready,
+        lambda _context_id: {
+            "taskId": control_task_id,
+            "phase": phase,
+            "releaseReady": release_ready,
+            "backup": {"status": "shared_committed" if release_ready else "blocked"},
+        },
+        lambda: phase == "terminating" or not release_ready,
+        reserve_admission,
+        release_admission,
     )
 
     pending_input = {
@@ -217,7 +399,7 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
         "eventType": "input_required",
         "scope": "step",
         "pipelineRunId": context_id,
-        "taskId": task_id,
+        "taskId": sidecar_task_id,
         "contextId": context_id,
         "pipelineName": "selling",
         "status": "input_required",
@@ -243,7 +425,7 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
     handler._validate_pipeline_message_request = lambda _params: None
     params = SimpleNamespace(message=SimpleNamespace(task_id=task_id, context_id=context_id))
 
-    if release_ready:
+    if expected_task_state == TaskState.TASK_STATE_INPUT_REQUIRED:
         original_save_task = persistence.save_task
 
         def fail_recovery_task_save(snapshot):
@@ -278,8 +460,14 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
     session_dir = SessionStorage().session_dir(str(cwd), ctx.session_id)
     context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
     assert context_snapshot["active_task_id"] == expected_active_task_id
+    if expected_task_state == TaskState.TASK_STATE_INPUT_REQUIRED:
+        assert len(issued_admissions) == 2
+        assert released_admissions == issued_admissions
+    else:
+        assert issued_admissions == []
+        assert released_admissions == []
 
-    if release_ready:
+    if expected_task_state == TaskState.TASK_STATE_INPUT_REQUIRED:
         for seconds, late_state in enumerate(
             (
                 TaskState.TASK_STATE_FAILED,
@@ -305,6 +493,168 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
             persisted_context = persistence.load_context(context_id)
             assert persisted_context is not None
             assert persisted_context.active_task_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "late_state",
+    [
+        TaskState.TASK_STATE_FAILED,
+        TaskState.TASK_STATE_CANCELED,
+        TaskState.TASK_STATE_COMPLETED,
+    ],
+)
+async def test_recovered_running_execution_rejects_older_terminal_projection(tmp_path, late_state: int) -> None:
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    context_id = "ctx-1"
+    task_id = "task-1"
+    call_context = ServerCallContext()
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(persistence=persistence)
+    service = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=None)
+    store.set_execution_control_provider(
+        service.snapshot_for_context,
+        service.has_active_work,
+        service.reserve_recoverable_input_continuation,
+        service.release_recoverable_input_continuation,
+    )
+    context_record = await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    context_record.active_task_id = task_id
+    store.mirror_context(context_record)
+    failed = Task(
+        id=task_id,
+        context_id=context_id,
+        status=TaskStatus(state=TaskState.TASK_STATE_FAILED),
+    )
+    failed.status.timestamp.FromSeconds(100)
+    await store.save(failed, call_context)
+    owner = store.owner_for_context(call_context)
+
+    original = await service.begin_execution(
+        context_id=context_id,
+        task_id=task_id,
+        owner=owner,
+        cwd=str(cwd),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await original.detach_task(current, execution_status="input-required")
+    original.phase = "terminated"
+    original.execution_status = "canceled"
+    original.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    original.release_ready = False
+    original.revision += 1
+    await original._persist_snapshot(original.snapshot())
+
+    recovered_task = Task(
+        id=task_id,
+        context_id=context_id,
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+    )
+    recovered_task.status.timestamp.FromSeconds(200)
+    admission = await store.reconcile_recoverable_input_required_task(
+        recovered_task,
+        context_record,
+        call_context,
+    )
+    assert admission is not None
+    recovered = await service.begin_execution(
+        context_id=context_id,
+        task_id=task_id,
+        owner=owner,
+        cwd=str(cwd),
+        continue_input_required=True,
+        recoverable_input_admission=admission,
+    )
+    assert recovered.phase == "running"
+
+    late_terminal = Task(
+        id=task_id,
+        context_id=context_id,
+        status=TaskStatus(state=late_state),
+    )
+    late_terminal.status.timestamp.FromSeconds(150)
+    await store.save(late_terminal, call_context)
+
+    visible = await store.get(task_id, call_context)
+    assert visible is not None
+    assert visible.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert persistence.load_task(task_id).state == "input-required"
+    assert persistence.load_context(context_id).active_task_id is None
+
+    await recovered.detach_task(current, execution_status="input-required")
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_handler_does_not_reconcile_a_running_sidecar_owner(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    context_id = "ctx-1"
+    task_id = "task-1"
+    call_context = ServerCallContext()
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(persistence=persistence)
+    context_record = await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    context_record.active_task_id = task_id
+    store.mirror_context(context_record)
+    await store.save(
+        Task(
+            id=task_id,
+            context_id=context_id,
+            status=TaskStatus(state=TaskState.TASK_STATE_FAILED),
+        ),
+        call_context,
+    )
+    admission_calls: list[str] = []
+
+    async def reserve_admission(**_kwargs) -> str:
+        admission_calls.append("called")
+        return "unexpected"
+
+    store.set_execution_control_provider(None, None, reserve_admission, None)
+    include_running_values: list[bool] = []
+
+    def running_sidecar_only(*, include_running: bool, **_kwargs) -> str | None:
+        include_running_values.append(include_running)
+        return task_id if include_running else None
+
+    monkeypatch.setattr(
+        "iac_code.a2a.transports.dispatcher.recoverable_task_id_from_sidecar",
+        running_sidecar_only,
+    )
+
+    async def sdk_send(_handler, _params, sdk_context):
+        return await store.get(task_id, sdk_context)
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send", sdk_send)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    params = SimpleNamespace(message=SimpleNamespace(task_id=task_id, context_id=context_id))
+
+    result = await handler.on_message_send(params, call_context)
+
+    assert isinstance(result, Task)
+    assert result.status.state == TaskState.TASK_STATE_FAILED
+    assert include_running_values == [False]
+    assert admission_calls == []
+    assert persistence.load_task(task_id).state == "failed"
+    assert persistence.load_context(context_id).active_task_id == task_id
 
 
 @pytest.mark.asyncio
