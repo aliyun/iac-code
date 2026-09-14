@@ -4,18 +4,34 @@ import contextlib
 import json
 import shutil
 import threading
+import uuid
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from a2a.server.agent_execution import RequestContext
+from a2a.server.agent_execution.active_task import _RequestCompleted, _RequestStarted
 from a2a.server.agent_execution.active_task_registry import ActiveTaskRegistry
 from a2a.server.context import ServerCallContext
+from a2a.server.events.event_queue_v2 import EventQueueSource, QueueShutDown
 from a2a.server.request_handlers import DefaultRequestHandler
-from a2a.types import Message, Part, Role, SubscribeToTaskRequest, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
+from a2a.types import (
+    Message,
+    Part,
+    Role,
+    SubscribeToTaskRequest,
+    Task,
+    TaskState,
+    TaskStatus,
+    TaskStatusUpdateEvent,
+)
 from google.protobuf.struct_pb2 import Value
 
-from iac_code.a2a.execution_control import ExecutionControlService, RecoverableInputAdmissionCarrier
+from iac_code.a2a.execution_control import (
+    ExecutionControlService,
+    RecoverableInputAdmissionCarrier,
+    RecoverableInputAdmissionLease,
+)
 from iac_code.a2a.input_required import PERMISSION_QUERY_PREFIX
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -29,6 +45,7 @@ from iac_code.a2a.pipeline_transport_delivery import (
     pipeline_transport_delivery_tracking_enabled,
     register_pipeline_transport_delivery,
 )
+from iac_code.a2a.request_scoped_active_task import RequestScopedActiveTask, RequestScopedActiveTaskRegistry
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import (
     A2AJsonRpcDispatcher,
@@ -50,6 +67,7 @@ _STREAM_TEST_TIMEOUT = 5
 @pytest.mark.asyncio
 async def test_setup_active_task_attaches_admission_to_the_queued_request_context(monkeypatch) -> None:
     handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = A2ATaskStore()
     call_context = ServerCallContext()
     request_context = SimpleNamespace()
     handler._stage_recoverable_input_admission(call_context, "recovery-1")
@@ -63,7 +81,244 @@ async def test_setup_active_task_attaches_admission_to_the_queued_request_contex
 
     assert result_context is request_context
     assert RecoverableInputAdmissionCarrier.read(request_context) == "recovery-1"
+    assert call_context.state == {"iac_code.recoverable_input_admission": "recovery-1"}
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_active_task_ignores_old_terminal_before_its_request_start(monkeypatch) -> None:
+    request_id = uuid.uuid4()
+    request_enqueued = asyncio.Event()
+    call_context = ServerCallContext()
+    request_context = RequestContext(call_context=call_context, task_id="task-1", context_id="ctx-1")
+    active_task = RequestScopedActiveTask(
+        agent_executor=SimpleNamespace(),
+        task_id="task-1",
+        task_manager=SimpleNamespace(),
+    )
+
+    async def enqueue_request(_request_context) -> uuid.UUID:
+        request_enqueued.set()
+        return request_id
+
+    monkeypatch.setattr(active_task, "enqueue_request", enqueue_request)
+    stream = active_task.subscribe(request=request_context)
+    first_event = asyncio.create_task(anext(stream))
+    await asyncio.wait_for(request_enqueued.wait(), timeout=_STREAM_TEST_TIMEOUT)
+
+    old_terminal = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+    )
+    current_update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    canonical_working = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    queued_events = (
+        (old_terminal, None),
+        (_RequestStarted(request_id, request_context), None),
+        (old_terminal, canonical_working),
+        (current_update, canonical_working),
+    )
+    for queued_event in queued_events:
+        await active_task._event_queue_subscribers.enqueue_event(queued_event)
+
+    assert await asyncio.wait_for(first_event, timeout=_STREAM_TEST_TIMEOUT) is current_update
+    next_event = asyncio.create_task(anext(stream))
+    await active_task._event_queue_subscribers.enqueue_event((_RequestCompleted(request_id), None))
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(next_event, timeout=_STREAM_TEST_TIMEOUT)
+
+    await active_task._event_queue_agent.close(immediate=True)
+    await active_task._event_queue_subscribers.close(immediate=True)
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_active_task_isolates_two_concurrent_subscribers(monkeypatch) -> None:
+    request_ids = [uuid.uuid4(), uuid.uuid4()]
+    contexts = [
+        RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1")
+        for _ in request_ids
+    ]
+    both_enqueued = asyncio.Event()
+    active_task = RequestScopedActiveTask(
+        agent_executor=SimpleNamespace(),
+        task_id="task-1",
+        task_manager=SimpleNamespace(),
+    )
+    enqueued = 0
+
+    async def enqueue_request(request_context) -> uuid.UUID:
+        nonlocal enqueued
+        index = contexts.index(request_context)
+        enqueued += 1
+        if enqueued == 2:
+            both_enqueued.set()
+        return request_ids[index]
+
+    monkeypatch.setattr(active_task, "enqueue_request", enqueue_request)
+    streams = [active_task.subscribe(request=context) for context in contexts]
+    first_events = [asyncio.create_task(anext(stream)) for stream in streams]
+    await asyncio.wait_for(both_enqueued.wait(), timeout=_STREAM_TEST_TIMEOUT)
+
+    old_terminal = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+    )
+    updates = [
+        TaskStatusUpdateEvent(
+            task_id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=state),
+        )
+        for state in (TaskState.TASK_STATE_WORKING, TaskState.TASK_STATE_INPUT_REQUIRED)
+    ]
+    events = (
+        old_terminal,
+        _RequestStarted(request_ids[0], contexts[0]),
+        updates[0],
+        _RequestCompleted(request_ids[0]),
+        _RequestStarted(request_ids[1], contexts[1]),
+        updates[1],
+        _RequestCompleted(request_ids[1]),
+    )
+    for event in events:
+        await active_task._event_queue_subscribers.enqueue_event((event, None))
+
+    assert await asyncio.wait_for(first_events[0], timeout=_STREAM_TEST_TIMEOUT) is updates[0]
+    assert await asyncio.wait_for(first_events[1], timeout=_STREAM_TEST_TIMEOUT) is updates[1]
+    for stream in streams:
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(anext(stream), timeout=_STREAM_TEST_TIMEOUT)
+
+    await active_task._event_queue_agent.close(immediate=True)
+    await active_task._event_queue_subscribers.close(immediate=True)
+
+
+@pytest.mark.asyncio
+async def test_request_enqueue_failure_keeps_admission_owned_by_transport() -> None:
+    released: list[str] = []
+    call_context = ServerCallContext()
+    call_context.state["iac_code.recoverable_input_admission"] = "recovery-1"
+    request_context = RequestContext(call_context=call_context, task_id="task-1", context_id="ctx-1")
+
+    async def release(admission: str) -> None:
+        released.append(admission)
+
+    lease = RecoverableInputAdmissionLease(
+        "recovery-1",
+        acknowledge_enqueue=lambda token: call_context.state.pop(
+            "iac_code.recoverable_input_admission", None
+        )
+        == token,
+        release=release,
+    )
+    RecoverableInputAdmissionCarrier.attach(request_context, lease)
+    active_task = RequestScopedActiveTask(
+        agent_executor=SimpleNamespace(),
+        task_id="task-1",
+        task_manager=SimpleNamespace(),
+    )
+    active_task._request_queue.shutdown(immediate=True)
+
+    stream = active_task.subscribe(request=request_context)
+    with pytest.raises(QueueShutDown):
+        await anext(stream)
+
+    assert call_context.state == {"iac_code.recoverable_input_admission": "recovery-1"}
+    assert released == []
+    assert active_task._reference_count == 0
+    assert active_task._event_queue_subscribers._sinks == set()
+    await active_task._event_queue_agent.close(immediate=True)
+    await active_task._event_queue_subscribers.close(immediate=True)
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_active_task_surfaces_producer_error_before_request_start(monkeypatch) -> None:
+    request_id = uuid.uuid4()
+    request_enqueued = asyncio.Event()
+    request_context = RequestContext(
+        call_context=ServerCallContext(),
+        task_id="task-1",
+        context_id="ctx-1",
+    )
+    active_task = RequestScopedActiveTask(
+        agent_executor=SimpleNamespace(),
+        task_id="task-1",
+        task_manager=SimpleNamespace(),
+    )
+
+    async def enqueue_request(_request_context) -> uuid.UUID:
+        request_enqueued.set()
+        return request_id
+
+    monkeypatch.setattr(active_task, "enqueue_request", enqueue_request)
+    stream = active_task.subscribe(request=request_context)
+    result = asyncio.create_task(anext(stream))
+    await asyncio.wait_for(request_enqueued.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    await active_task._event_queue_subscribers.enqueue_event((RuntimeError("producer failed"), None))
+    await active_task._event_queue_subscribers.test_only_join_incoming_queue()
+    await active_task._event_queue_subscribers.close(immediate=True)
+
+    with pytest.raises(RuntimeError, match="producer failed"):
+        await asyncio.wait_for(result, timeout=_STREAM_TEST_TIMEOUT)
+
+    await active_task._event_queue_agent.close(immediate=True)
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_registry_releases_admission_after_executor_failure() -> None:
+    released: list[str] = []
+    admission_released = asyncio.Event()
+    executed = asyncio.Event()
+
+    class FailingExecutor:
+        async def execute(self, _request_context, _event_queue) -> None:
+            executed.set()
+            raise RuntimeError("executor failed")
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    async def release(admission: str) -> None:
+        released.append(admission)
+        admission_released.set()
+
+    call_context = ServerCallContext()
+    call_context.state["iac_code.recoverable_input_admission"] = "recovery-1"
+    request_context = RequestContext(call_context=call_context, task_id="task-1", context_id="ctx-1")
+    lease = RecoverableInputAdmissionLease(
+        "recovery-1",
+        acknowledge_enqueue=lambda token: call_context.state.pop(
+            "iac_code.recoverable_input_admission", None
+        )
+        == token,
+        release=release,
+    )
+    RecoverableInputAdmissionCarrier.attach(request_context, lease)
+    registry = RequestScopedActiveTaskRegistry(agent_executor=FailingExecutor(), task_store=A2ATaskStore())
+    active_task = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+
+    stream = active_task.subscribe(request=request_context)
+    with pytest.raises(RuntimeError, match="executor failed"):
+        await asyncio.wait_for(anext(stream), timeout=_STREAM_TEST_TIMEOUT)
+    await asyncio.wait_for(executed.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    await asyncio.wait_for(admission_released.wait(), timeout=_STREAM_TEST_TIMEOUT)
+
     assert call_context.state == {}
+    assert released == ["recovery-1"]
 
 
 @pytest.mark.asyncio
@@ -1036,6 +1291,216 @@ async def test_message_stream_routes_permission_response_to_active_input_require
 
 
 @pytest.mark.asyncio
+async def test_active_message_route_ignores_old_terminal_events_around_its_request_boundary() -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    await store.save(task, call_context)
+    record = await store.get_or_create_task(task_id=task.id, context_id=task.context_id)
+    record.active_task = asyncio.current_task()
+
+    old_terminal = Task(
+        id=task.id,
+        context_id=task.context_id,
+        status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+    )
+    current_update = TaskStatusUpdateEvent(
+        task_id=task.id,
+        context_id=task.context_id,
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    subscribers = EventQueueSource(create_default_sink=False)
+
+    class ForwardingAgentQueue:
+        def __init__(self) -> None:
+            self.boundary_enqueued = False
+
+        async def enqueue_event(self, event) -> None:
+            if not self.boundary_enqueued:
+                self.boundary_enqueued = True
+                await subscribers.enqueue_event((old_terminal, task))
+                await subscribers.enqueue_event((event, None))
+                await subscribers.enqueue_event((old_terminal, task))
+                return
+            await subscribers.enqueue_event((event, task))
+
+        async def test_only_join_incoming_queue(self) -> None:
+            await subscribers.test_only_join_incoming_queue()
+
+    class ActiveTask:
+        def __init__(self) -> None:
+            self.task_id = task.id
+            self.direct_message_lock = asyncio.Lock()
+            self._lock = asyncio.Lock()
+            self._is_finished = asyncio.Event()
+            self._reference_count = 0
+            self._event_queue_agent = ForwardingAgentQueue()
+            self._event_queue_subscribers = subscribers
+
+        async def _maybe_cleanup(self) -> None:
+            return None
+
+    active_task = ActiveTask()
+
+    class ActiveTaskRegistry:
+        async def get(self, _task_id):
+            return active_task
+
+    class RequestContextBuilder:
+        async def build(self, **_kwargs):
+            return SimpleNamespace()
+
+    class AgentExecutor:
+        async def execute(self, _request_context, event_queue) -> None:
+            await event_queue.enqueue_event(current_update)
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = AgentExecutor()
+    handler._request_context_builder = RequestContextBuilder()
+    handler._active_task_registry = ActiveTaskRegistry()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    message = Message(
+        message_id="message-1",
+        task_id=task.id,
+        context_id=task.context_id,
+        role=Role.ROLE_USER,
+        parts=[Part(text="continue")],
+    )
+    params = SimpleNamespace(message=message, configuration=None)
+
+    try:
+        events = await asyncio.wait_for(
+            _collect_async(handler.on_message_send_stream(params, call_context)),
+            timeout=_STREAM_TEST_TIMEOUT,
+        )
+    finally:
+        await subscribers.close(immediate=True)
+
+    assert events == [current_update]
+    assert active_task._reference_count == 0
+    assert not active_task.direct_message_lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_active_message_stream_serializes_direct_requests() -> None:
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    updates = [
+        TaskStatusUpdateEvent(
+            task_id=task.id,
+            context_id=task.context_id,
+            status=TaskStatus(state=state),
+        )
+        for state in (TaskState.TASK_STATE_WORKING, TaskState.TASK_STATE_INPUT_REQUIRED)
+    ]
+    started = [asyncio.Event(), asyncio.Event()]
+    releases = [asyncio.Event(), asyncio.Event()]
+    subscribers = EventQueueSource(create_default_sink=False)
+
+    class ForwardingAgentQueue:
+        async def enqueue_event(self, event) -> None:
+            await subscribers.enqueue_event((event, task))
+
+        async def test_only_join_incoming_queue(self) -> None:
+            await subscribers.test_only_join_incoming_queue()
+
+    class ActiveTask:
+        def __init__(self) -> None:
+            self.task_id = task.id
+            self.direct_message_lock = asyncio.Lock()
+            self._lock = asyncio.Lock()
+            self._is_finished = asyncio.Event()
+            self._reference_count = 0
+            self._event_queue_agent = ForwardingAgentQueue()
+            self._event_queue_subscribers = subscribers
+
+        async def _maybe_cleanup(self) -> None:
+            return None
+
+    class RequestContextBuilder:
+        async def build(self, *, params, **_kwargs):
+            return SimpleNamespace(index=int(params.message.message_id[-1]))
+
+    class AgentExecutor:
+        def __init__(self) -> None:
+            self.running = 0
+            self.max_running = 0
+
+        async def execute(self, request_context, event_queue) -> None:
+            index = request_context.index
+            self.running += 1
+            self.max_running = max(self.max_running, self.running)
+            started[index].set()
+            try:
+                await releases[index].wait()
+                await event_queue.enqueue_event(updates[index])
+            finally:
+                self.running -= 1
+
+    executor = AgentExecutor()
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.agent_executor = executor
+    handler._request_context_builder = RequestContextBuilder()
+    active_task = ActiveTask()
+    params = [
+        SimpleNamespace(
+            message=SimpleNamespace(message_id=f"message-{index}", context_id=task.context_id),
+            configuration=None,
+        )
+        for index in range(2)
+    ]
+    first_consumer = asyncio.create_task(
+        _collect_async(handler._on_active_message_send_stream(params[0], object(), task=task, active_task=active_task))
+    )
+    consumers = [first_consumer]
+
+    try:
+        await asyncio.wait_for(started[0].wait(), timeout=_STREAM_TEST_TIMEOUT)
+        second_consumer = asyncio.create_task(
+            _collect_async(
+                handler._on_active_message_send_stream(params[1], object(), task=task, active_task=active_task)
+            )
+        )
+        consumers.append(second_consumer)
+        await asyncio.sleep(0)
+        assert not started[1].is_set()
+        releases[0].set()
+        await asyncio.wait_for(started[1].wait(), timeout=_STREAM_TEST_TIMEOUT)
+        releases[1].set()
+        events = await asyncio.wait_for(asyncio.gather(*consumers), timeout=_STREAM_TEST_TIMEOUT)
+    finally:
+        for release in releases:
+            release.set()
+        for consumer in consumers:
+            if not consumer.done():
+                consumer.cancel()
+        await asyncio.gather(*consumers, return_exceptions=True)
+        await subscribers.close(immediate=True)
+
+    assert events == [[updates[0]], [updates[1]]]
+    assert executor.max_running == 1
+    assert active_task._reference_count == 0
+    assert not active_task.direct_message_lock.locked()
+
+
+@pytest.mark.asyncio
 async def test_text_gateway_sideband_permission_response_hydrates_task_and_returns_short_ack(monkeypatch) -> None:
     call_context = ServerCallContext()
     response = {
@@ -1653,7 +2118,7 @@ async def test_subscribe_to_task_stops_after_input_required_status(monkeypatch) 
 
     events = await asyncio.wait_for(
         _collect_async(handler.on_subscribe_to_task(SubscribeToTaskRequest(id="task-1"), call_context)),
-        timeout=0.5,
+        timeout=_STREAM_TEST_TIMEOUT,
     )
 
     assert [event.status.state for event in events] == [
@@ -1874,11 +2339,16 @@ async def test_active_message_stream_cancellation_detaches_producer() -> None:
     class FakeActiveTask:
         def __init__(self) -> None:
             self.task_id = "task-1"
+            self.direct_message_lock = asyncio.Lock()
             self._lock = asyncio.Lock()
             self._is_finished = asyncio.Event()
             self._reference_count = 0
-            self._event_queue_agent = SimpleNamespace()
+            self._event_queue_agent = SimpleNamespace(enqueue_event=self._enqueue_event)
             self._event_queue_subscribers = FakeSubscribers(FakeTappedQueue())
+
+        @staticmethod
+        async def _enqueue_event(_event) -> None:
+            return None
 
         async def _maybe_cleanup(self) -> None:
             return None
@@ -1909,6 +2379,7 @@ async def test_active_message_stream_cancellation_detaches_producer() -> None:
     await asyncio.wait_for(producer_cancelled.wait(), timeout=_STREAM_TEST_TIMEOUT)
     await asyncio.gather(*cleanup_tasks, return_exceptions=True)
     assert active_task._reference_count == 0
+    assert not active_task.direct_message_lock.locked()
 
 
 @pytest.mark.asyncio

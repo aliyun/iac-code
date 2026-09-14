@@ -54,18 +54,18 @@ dependencies = [
 
 [project.optional-dependencies]
 http = [
-    "a2a-sdk[http-server,signing]>=1.0.2,<2",
+    "a2a-sdk[http-server,signing]==1.1.0",
     "starlette>=0.39.0",
     "uvicorn[standard]>=0.30.0",
 ]
 a2a = [
-    "a2a-sdk[http-server,signing]>=1.0.2,<2",
+    "a2a-sdk[http-server,signing]==1.1.0",
     "cryptography>=42.0",
     "starlette>=0.39.0",
     "uvicorn[standard]>=0.30.0",
 ]
 a2a-signing = [
-    "a2a-sdk[signing]>=1.0.2,<2",
+    "a2a-sdk[signing]==1.1.0",
 ]
 a2a-grpc = [
     "grpcio>=1.60.0",
@@ -76,7 +76,7 @@ a2a-redis = [
 ]
 agui = [
     "ag-ui-protocol==0.1.20",
-    "a2a-sdk[http-server,signing]>=1.0.2,<2",
+    "a2a-sdk[http-server,signing]==1.1.0",
     "starlette>=0.39.0",
     "uvicorn[standard]>=0.30.0",
 ]
@@ -99,7 +99,7 @@ dev = [
     "pexpect>=4.9.0",
 ]
 desktop = [
-    "a2a-sdk[http-server,signing]>=1.0.2,<2",
+    "a2a-sdk[http-server,signing]==1.1.0",
     "pyinstaller==6.21.0",
     "termaid>=0.1; python_version >= '3.11'",
     "uvicorn[standard]>=0.30.0",

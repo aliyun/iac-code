@@ -1371,6 +1371,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     await control.detach_task(current_task, execution_status=execution_status)
             reset_execution_control(execution_scope)
             reset_execution_participants(participant_scope)
+            await RecoverableInputAdmissionCarrier.release(context)
 
     async def _execute(
         self,
@@ -1620,13 +1621,14 @@ class IacCodeA2AExecutor(AgentExecutor):
                 restore_interrupted=not pipeline_mode,
             )
             if self._execution_control_service is not None:
+                recoverable_input_admission = RecoverableInputAdmissionCarrier.read(context)
                 control = await self._execution_control_service.begin_execution(
                     context_id=context_id,
                     task_id=task.task_id,
                     owner=owner,
                     cwd=cwd,
                     continue_input_required=pipeline_mode and not route_pipeline_handoff_to_normal,
-                    recoverable_input_admission=RecoverableInputAdmissionCarrier.read(context),
+                    recoverable_input_admission=recoverable_input_admission,
                 )
                 bind_execution_control(control)
                 await control.checkpoint()

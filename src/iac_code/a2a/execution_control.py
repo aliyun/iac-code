@@ -316,19 +316,85 @@ class _RecoverableInputAdmissionStore:
         )
 
 
+class RecoverableInputAdmissionLease:
+    """Transfer one recovery admission from the transport to the SDK producer."""
+
+    def __init__(
+        self,
+        token: str,
+        *,
+        acknowledge_enqueue: Callable[[str], bool],
+        release: Callable[[str], Awaitable[None]],
+    ) -> None:
+        self.token = token
+        self._acknowledge_enqueue = acknowledge_enqueue
+        self._release = release
+        self._enqueued = False
+        self._released = False
+        self._release_lock = asyncio.Lock()
+        self._producer_task: asyncio.Task[Any] | None = None
+        self._producer_done_callback: Callable[[asyncio.Task[Any]], None] | None = None
+        self._producer_cleanup: asyncio.Task[None] | None = None
+
+    def acknowledge_enqueued(self, producer_task: asyncio.Task[Any] | None) -> None:
+        """Commit ownership only after the request queue accepted the context."""
+
+        if self._enqueued or not self._acknowledge_enqueue(self.token):
+            return
+        self._enqueued = True
+        if producer_task is None or producer_task.done():
+            self._schedule_release()
+            return
+        self._producer_task = producer_task
+        self._producer_done_callback = lambda _task: self._schedule_release()
+        producer_task.add_done_callback(self._producer_done_callback)
+
+    async def release(self) -> None:
+        """Release once after execution or an early producer failure."""
+
+        async with self._release_lock:
+            if self._released:
+                return
+            await self._release(self.token)
+            self._released = True
+            if self._producer_task is not None and self._producer_done_callback is not None:
+                self._producer_task.remove_done_callback(self._producer_done_callback)
+            self._producer_task = None
+            self._producer_done_callback = None
+
+    def _schedule_release(self) -> None:
+        if self._released or (self._producer_cleanup is not None and not self._producer_cleanup.done()):
+            return
+        self._producer_cleanup = asyncio.create_task(self.release())
+
+
 class RecoverableInputAdmissionCarrier:
-    """Attach a server-issued admission to one queued SDK RequestContext."""
+    """Attach a server-issued admission lease to one queued SDK RequestContext."""
 
     _ATTRIBUTE = "_iac_code_recoverable_input_admission"
 
     @classmethod
-    def attach(cls, request_context: Any, admission: str | None) -> None:
+    def attach(cls, request_context: Any, admission: str | RecoverableInputAdmissionLease | None) -> None:
         setattr(request_context, cls._ATTRIBUTE, admission)
 
     @classmethod
     def read(cls, request_context: Any) -> str | None:
         admission = getattr(request_context, cls._ATTRIBUTE, None)
+        if isinstance(admission, RecoverableInputAdmissionLease):
+            return admission.token
         return admission if isinstance(admission, str) and admission else None
+
+    @classmethod
+    def acknowledge_enqueued(cls, request_context: Any, producer_task: asyncio.Task[Any] | None) -> None:
+        admission = getattr(request_context, cls._ATTRIBUTE, None)
+        if isinstance(admission, RecoverableInputAdmissionLease):
+            admission.acknowledge_enqueued(producer_task)
+
+    @classmethod
+    async def release(cls, request_context: Any) -> None:
+        admission = getattr(request_context, cls._ATTRIBUTE, None)
+        if isinstance(admission, RecoverableInputAdmissionLease):
+            await admission.release()
 
 
 @dataclass

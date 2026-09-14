@@ -48,7 +48,7 @@ from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
 from iac_code.a2a.app import normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import make_text_part
-from iac_code.a2a.execution_control import RecoverableInputAdmissionCarrier
+from iac_code.a2a.execution_control import RecoverableInputAdmissionCarrier, RecoverableInputAdmissionLease
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.input_required import parse_permission_response
@@ -89,6 +89,11 @@ from iac_code.a2a.push_queue import LocalFileA2APushQueue, RedisStreamsA2APushQu
 from iac_code.a2a.push_secrets import A2APushSecretKeyring
 from iac_code.a2a.push_worker import A2APushDeliveryWorker
 from iac_code.a2a.request_mode import resolve_request_run_mode
+from iac_code.a2a.request_scoped_active_task import (
+    DirectMessageRequestStarted,
+    RequestScopedActiveTask,
+    RequestScopedActiveTaskRegistry,
+)
 from iac_code.a2a.runtime_registry import A2ARuntimeOwner, A2ARuntimeRegistration, register_runtime_owner
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.i18n import _
@@ -508,6 +513,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         **kwargs: Any,
     ) -> None:
         super().__init__(*args, **kwargs)
+        self._active_task_registry = RequestScopedActiveTaskRegistry(
+            agent_executor=self.agent_executor,
+            task_store=self.task_store,
+            push_sender=self._push_sender,
+        )
         self._backup_service = backup_service or SessionBackupService()
         self._metrics = metrics or NoOpA2AMetrics()
         self._detached_message_producers: set[asyncio.Task[Any]] = set()
@@ -522,9 +532,30 @@ class IacCodeRequestHandler(DefaultRequestHandler):
 
     async def _setup_active_task(self, params: SendMessageRequest, call_context):
         active_task, request_context = await super()._setup_active_task(params, call_context)
-        admission = call_context.state.pop(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY, None)
-        RecoverableInputAdmissionCarrier.attach(request_context, admission)
+        admission = self._peek_recoverable_input_admission(call_context)
+        lease = None
+        if admission is not None and isinstance(self.task_store, A2ATaskStore):
+            lease = RecoverableInputAdmissionLease(
+                admission,
+                acknowledge_enqueue=lambda token: self._acknowledge_recoverable_input_enqueue(call_context, token),
+                release=self.task_store.release_recoverable_input_admission,
+            )
+        RecoverableInputAdmissionCarrier.attach(request_context, lease)
         return active_task, request_context
+
+    @staticmethod
+    def _peek_recoverable_input_admission(call_context) -> str | None:
+        state = getattr(call_context, "state", None)
+        admission = state.get(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY) if isinstance(state, dict) else None
+        return admission if isinstance(admission, str) and admission else None
+
+    @staticmethod
+    def _acknowledge_recoverable_input_enqueue(call_context, admission: str) -> bool:
+        state = getattr(call_context, "state", None)
+        if not isinstance(state, dict) or state.get(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY) != admission:
+            return False
+        state.pop(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY, None)
+        return True
 
     @staticmethod
     def _stage_recoverable_input_admission(call_context, admission: str | None) -> None:
@@ -538,10 +569,12 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             state[_RECOVERABLE_INPUT_ADMISSION_STATE_KEY] = admission
 
     @staticmethod
-    def _clear_recoverable_input_admission(call_context) -> None:
+    def _take_recoverable_input_admission(call_context) -> str | None:
         state = getattr(call_context, "state", None)
         if isinstance(state, dict):
-            state.pop(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY, None)
+            admission = state.pop(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY, None)
+            return admission if isinstance(admission, str) and admission else None
+        return None
 
     async def on_message_send(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
@@ -574,9 +607,9 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         try:
             return await super().on_message_send(params, context)
         finally:
-            self._clear_recoverable_input_admission(context)
+            untransferred_admission = self._take_recoverable_input_admission(context)
             if isinstance(self.task_store, A2ATaskStore):
-                await self.task_store.release_recoverable_input_admission(admission)
+                await self.task_store.release_recoverable_input_admission(untransferred_admission)
 
     async def on_message_send_stream(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
@@ -648,9 +681,9 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             finally:
                 await tracked_stream.aclose()
         finally:
-            self._clear_recoverable_input_admission(context)
+            untransferred_admission = self._take_recoverable_input_admission(context)
             if isinstance(self.task_store, A2ATaskStore):
-                await self.task_store.release_recoverable_input_admission(admission)
+                await self.task_store.release_recoverable_input_admission(untransferred_admission)
 
     async def _on_inactive_permission_send_stream(self, params: SendMessageRequest, context, *, task: Task):
         """Resume an existing input boundary without asking the SDK to recreate its task."""
@@ -733,42 +766,67 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             task=task,
             context=context,
         )
-        async with active_task._lock:
-            if active_task._is_finished.is_set():
-                raise InvalidParamsError(_("Task {task_id} is already completed.").format(task_id=active_task.task_id))
-            active_task._reference_count += 1
-        tapped_queue = await active_task._event_queue_subscribers.tap()
+        direct_message_lock = active_task.direct_message_lock
+        await direct_message_lock.acquire()
+        reference_registered = False
+        tapped_queue = None
+        producer_task = None
+        producer_owns_lock = False
+        delivery_tracker = None
 
-        async def run_active_message() -> None:
-            try:
-                await self.agent_executor.execute(request_context, active_task._event_queue_agent)
-            finally:
-                await self._wait_for_active_message_events(active_task)
-                with suppress(QueueShutDown):
-                    await tapped_queue._put_internal((_ACTIVE_MESSAGE_STREAM_COMPLETED, None))
+        try:
+            async with active_task._lock:
+                if active_task._is_finished.is_set():
+                    raise InvalidParamsError(
+                        _("Task {task_id} is already completed.").format(task_id=active_task.task_id)
+                    )
+                active_task._reference_count += 1
+                reference_registered = True
+            tapped_queue = await active_task._event_queue_subscribers.tap()
+            request_started = DirectMessageRequestStarted()
+            await active_task._event_queue_agent.enqueue_event(request_started)
 
-        delivery_tracker = create_pipeline_transport_delivery_tracker()
-        with bind_pipeline_transport_delivery_route(
-            delivery_tracker,
-            task_id=task.id,
-            context_id=getattr(task, "context_id", None) or params.message.context_id,
-        ):
-            with bind_pipeline_transport_delivery_tracker(delivery_tracker):
-                producer_task = asyncio.create_task(run_active_message())
+            async def run_active_message() -> None:
+                try:
+                    await self.agent_executor.execute(request_context, active_task._event_queue_agent)
+                finally:
+                    try:
+                        await self._wait_for_active_message_events(active_task)
+                        with suppress(QueueShutDown):
+                            await tapped_queue._put_internal((_ACTIVE_MESSAGE_STREAM_COMPLETED, None))
+                    finally:
+                        direct_message_lock.release()
 
-            try:
+            delivery_tracker = create_pipeline_transport_delivery_tracker()
+            with bind_pipeline_transport_delivery_route(
+                delivery_tracker,
+                task_id=task.id,
+                context_id=getattr(task, "context_id", None) or params.message.context_id,
+            ):
+                with bind_pipeline_transport_delivery_tracker(delivery_tracker):
+                    producer_task = asyncio.create_task(run_active_message())
+                    producer_owns_lock = True
+
+                boundary_reached = False
                 while True:
                     try:
                         dequeued = await tapped_queue.dequeue_event()
                     except QueueShutDown:
                         break
-                    event, _updated_task = cast(Any, dequeued)
-                    if event is _ACTIVE_MESSAGE_STREAM_COMPLETED:
-                        tapped_queue.task_done()
-                        break
-                    if isinstance(event, BaseException):
-                        raise event
+                    event, updated_task = cast(Any, dequeued)
                     try:
+                        if event is _ACTIVE_MESSAGE_STREAM_COMPLETED:
+                            break
+                        if isinstance(event, DirectMessageRequestStarted):
+                            if event is request_started:
+                                boundary_reached = True
+                            continue
+                        if not boundary_reached:
+                            continue
+                        if isinstance(event, BaseException):
+                            raise event
+                        if RequestScopedActiveTask.is_stale_terminal_projection(event, updated_task):
+                            continue
                         mark_pipeline_transport_delivery_dequeued(event)
                         if isinstance(event, Task):
                             self._validate_task_id_match(task.id, event.id)
@@ -778,14 +836,20 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     finally:
                         tapped_queue.task_done()
                     acknowledge_pipeline_transport_delivery(event)
-            except (asyncio.CancelledError, GeneratorExit):
-                raise
-            finally:
+        except (asyncio.CancelledError, GeneratorExit):
+            raise
+        finally:
+            if delivery_tracker is not None:
                 close_pipeline_transport_delivery_tracker(delivery_tracker)
+            if tapped_queue is not None:
                 await tapped_queue.close(immediate=True)
+            if reference_registered:
                 async with active_task._lock:
                     active_task._reference_count -= 1
                 await active_task._maybe_cleanup()
+            if not producer_owns_lock:
+                direct_message_lock.release()
+            if producer_task is not None:
                 if producer_task.done():
                     await self._cleanup_active_message_producer(producer_task, task.id)
                 else:
