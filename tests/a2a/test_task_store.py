@@ -183,6 +183,21 @@ async def test_context_telemetry_channel_binding_persists_and_can_be_updated(mon
 
 
 @pytest.mark.asyncio
+async def test_context_llm_header_binding_can_be_reused_updated_and_cleared() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+
+    assert await store.resolve_context_llm_headers("ctx-1", {"X-Session": "one"}) == {"X-Session": "one"}
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {"X-Session": "one"}
+    assert await store.resolve_context_llm_headers("ctx-2", None) == {}
+
+    assert await store.resolve_context_llm_headers("ctx-1", {"X-Session": "two"}) == {"X-Session": "two"}
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {"X-Session": "two"}
+
+    assert await store.resolve_context_llm_headers("ctx-1", {}) == {}
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {}
+
+
+@pytest.mark.asyncio
 async def test_new_a2a_session_initializes_backup_generation_zero(monkeypatch, tmp_path) -> None:
     config_dir = tmp_path / "config"
     backup_root = tmp_path / "backup"

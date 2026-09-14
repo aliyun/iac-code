@@ -20,6 +20,7 @@ from iac_code.providers.base import (
     Provider,
     ToolDefinition,
 )
+from iac_code.providers.request_headers import get_provider_request_headers, merge_provider_request_headers
 from iac_code.providers.request_logging import log_provider_request_policy
 from iac_code.providers.request_policy import bool_or_none, positive_int_or_none
 from iac_code.providers.streaming import OpenAIStreamResponseAdapter
@@ -368,7 +369,10 @@ class OpenAIProvider(Provider):
                 streaming=context.streaming,
                 cache_policy=context.cache_policy,
             )
-        headers = self._request_headers(cache_policy=context.cache_policy)
+        headers = merge_provider_request_headers(
+            self._request_headers(cache_policy=context.cache_policy),
+            get_provider_request_headers(),
+        )
         if headers:
             kwargs["extra_headers"] = headers
         kwargs.update(self._thinking_kwargs_for_context(context))

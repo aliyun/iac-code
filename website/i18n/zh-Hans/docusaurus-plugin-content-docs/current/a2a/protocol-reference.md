@@ -135,7 +135,8 @@ Callback URLs 会在存储前以及分发前再次校验。默认 validator 会�
           "cwd": "/absolute/path/to/project",
           "user_id": "client-user-123",
           "iac_code_model": "qwen-plus",
-          "iac_code_api_key": "provider-api-key"
+          "iac_code_api_key": "provider-api-key",
+          "llm_headers": {"X-Caller-Session": "session-123"}
         }
       }
     },
@@ -158,6 +159,7 @@ Callback URLs 会在存储前以及分发前再次校验。默认 validator 会�
 | `metadata.iac_code.channel` | string | 可选 | 当前 `contextId` 绑定的 telemetry channel；优先级高于 `IAC_CODE_CHANNEL` |
 | `metadata.iac_code.iac_code_model` | string | 可选 | 当前调用的 LLM model 覆盖；这是 `IAC_CODE_MODEL` 的小写形式，空字符串或非字符串会被忽略 |
 | `metadata.iac_code.iac_code_api_key` | string | 可选 | 当前调用的 LLM provider API key 覆盖；这是 `IAC_CODE_API_KEY` 的小写形式，空字符串或非字符串会被忽略 |
+| `metadata.iac_code.llm_headers` | object | 可选 | 绑定到当前 `contextId` 的 LLM provider 调用上的额外 HTTP headers |
 | `metadata.iac_code.alibaba_cloud_access_key_id` | string | 可选 | 当前任务使用的 Alibaba Cloud AccessKey ID |
 | `metadata.iac_code.alibaba_cloud_access_key_secret` | string | 可选 | 当前任务使用的 Alibaba Cloud AccessKey Secret |
 | `metadata.iac_code.alibaba_cloud_region_id` | string | 可选 | 当前任务使用的 Alibaba Cloud region；和任务凭据一起省略时默认为 `cn-hangzhou` |
@@ -178,6 +180,8 @@ Callback URLs 会在存储前以及分发前再次校验。默认 validator 会�
 `metadata.iac_code.iac_code_model` 只影响当前 A2A message turn。它优先于 `IAC_CODE_MODEL`、`settings.yml` 和 server 启动默认 model；复用同一个 `contextId` 的后续轮次如果不再传该字段，会回落到 server 默认 model。
 
 `metadata.iac_code.iac_code_api_key` 只影响当前 A2A message turn。它优先于 `IAC_CODE_API_KEY` 和 `.credentials.yml` 中当前有效 model 对应 provider 的 key；复用同一个 `contextId` 的后续轮次如果不再传该字段，会重新加载正常凭据，因此单次调用 key 不会串到后续请求。这个字段用于 LLM provider key，和 A2A transport 认证里的 `api-key` / `IACCODE_A2A_API_KEY` 是两件事。
+
+`metadata.iac_code.llm_headers` 是绑定到 A2A `contextId` 的字符串到字符串映射。首次传入后，复用同一 `contextId` 的 normal chat、Pipeline 执行和后续消息即使省略该字段，也会继续沿用这些 headers。后续传入新的映射会整组替换当前绑定；传入 `{}` 会清空绑定。其他并发 context 与之隔离。它会与 provider 自身管理的请求 headers 按名称大小写不敏感地合并，调用方传入的值优先。无效 header 名、非字符串值、包含换行符的值，以及超出数量或大小限制的条目会被忽略。由于 header 值可能包含凭据，绑定只保存在 server 内存中，不会写入 session snapshot；server 重启后调用方需要重新传入。敏感值应按凭据保护，并通过安全的 A2A 链路传输。
 
 `metadata.iac_code.run_mode` 可以为单条消息选择 `normal` 或 `pipeline`。有效模式为 Pipeline 时，`metadata.iac_code.pipeline_name` 可以选择 `selling` 或 `selling_solution_first`；不受支持的非空值会被拒绝。继续或恢复任务时，已有 task/context 中保存的 Pipeline 标识优先，避免调用方用另一条流水线错误恢复持久状态。
 

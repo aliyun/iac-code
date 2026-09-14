@@ -15,6 +15,7 @@ from iac_code.providers.base import (
     Provider,
     ToolDefinition,
 )
+from iac_code.providers.request_headers import get_provider_request_headers, merge_provider_request_headers
 from iac_code.providers.request_logging import log_provider_request_policy
 from iac_code.providers.request_policy import bool_or_none, positive_int_or_none
 from iac_code.providers.thinking import (
@@ -375,8 +376,10 @@ class AnthropicProvider(Provider):
         if tools:
             kwargs["tools"] = self._convert_tools(tools)
         kwargs.update(thinking_kwargs)
-        if extra_betas:
-            kwargs["extra_headers"] = {"anthropic-beta": ",".join(extra_betas)}
+        provider_headers = {"anthropic-beta": ",".join(extra_betas)} if extra_betas else {}
+        headers = merge_provider_request_headers(provider_headers, get_provider_request_headers())
+        if headers:
+            kwargs["extra_headers"] = headers
         return kwargs
 
     def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:

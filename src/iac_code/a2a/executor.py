@@ -81,6 +81,7 @@ from iac_code.a2a.runtime_overrides import (
     configure_runtime_model,
     credentials_with_metadata_api_key,
     refresh_runtime_cloud_tools,
+    resolve_a2a_llm_headers,
     resolve_a2a_preferred_language,
 )
 from iac_code.a2a.task_store import A2ATaskStore, _close_runtime
@@ -1287,6 +1288,10 @@ class IacCodeA2AExecutor(AgentExecutor):
             context_id,
             self._resolve_telemetry_channel(metadata),
         )
+        llm_headers = await self._task_store.resolve_context_llm_headers(
+            context_id,
+            resolve_a2a_llm_headers(metadata),
+        )
         try:
             if permission_response is not None and self._execution_control_service is not None:
                 existing = self._execution_control_service.get_for_context(context_id)
@@ -1295,7 +1300,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                 if existing is not None and existing.owner == owner and current_task is not None:
                     await existing.attach_task(current_task, mark_working=False)
                     bind_execution_control(existing)
-            with a2a_request_context(telemetry_channel=telemetry_channel):
+            with a2a_request_context(
+                telemetry_channel=telemetry_channel,
+                llm_headers=llm_headers,
+            ):
                 await self._execute(context, event_queue, context_id=context_id)
         finally:
             control = current_execution_control()

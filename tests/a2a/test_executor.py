@@ -2556,6 +2556,7 @@ async def test_executor_rejects_empty_prompt_before_creating_runtime(
 async def test_executor_delegates_pipeline_mode_after_validation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    from iac_code.providers.request_headers import get_provider_request_headers
     from iac_code.services.telemetry.attributes import AttributeBuilder
     from iac_code.services.telemetry.identity import Identity
 
@@ -2564,6 +2565,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
     monkeypatch.setenv("IAC_CODE_CHANNEL", "environment")
     calls = []
     captured_channels: list[str] = []
+    captured_headers: list[dict[str, str]] = []
     attributes = AttributeBuilder(Identity(tmp_path / "settings.yml"), "iac-code", "0.1.0")
 
     class SpyPipelineExecutor:
@@ -2583,6 +2585,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
             active_followup_only=False,
         ):
             captured_channels.append(attributes.build_signal_attributes()["iac_code.channel"])
+            captured_headers.append(get_provider_request_headers())
             calls.append(
                 (
                     "execute",
@@ -2610,6 +2613,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
                     "user_id": "client-user",
                     "iac_code_model": "metadata-model",
                     "iac_code_api_key": "metadata-api-key",
+                    "llm_headers": {"X-A2A-Session": "session-1"},
                     "thinking": {"enabled": True, "effort": "high", "budget": 2048},
                     "alibaba_cloud_access_key_id": "client-id",
                     "alibaba_cloud_access_key_secret": "client-secret",
@@ -2634,6 +2638,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
     assert init_kwargs["aliyun_credential"].region_id == "cn-beijing"
     assert init_kwargs["aliyun_credential"].sts_token == "client-sts"
     assert captured_channels == ["a2a-pipeline"]
+    assert captured_headers == [{"X-A2A-Session": "session-1"}]
     assert calls[-1] == (
         "execute",
         {
@@ -4354,6 +4359,95 @@ async def test_executor_applies_user_id_to_telemetry(monkeypatch: pytest.MonkeyP
     await executor.execute(context, queue)
 
     assert captured_user_ids == ["client-user-xyz"]
+
+
+@pytest.mark.asyncio
+async def test_executor_binds_llm_headers_to_a2a_context(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from iac_code.providers.request_headers import get_provider_request_headers
+
+    captured_headers: list[dict[str, str]] = []
+    original_run_streaming = FakeAgentLoop.run_streaming
+
+    async def capturing_run_streaming(self, prompt):
+        captured_headers.append(get_provider_request_headers())
+        async for event in original_run_streaming(self, prompt):
+            yield event
+
+    monkeypatch.setattr(FakeAgentLoop, "run_streaming", capturing_run_streaming)
+    runtime = FakeRuntime(agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]), session_id="sess-headers")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-1",
+            context_id="ctx-headers",
+            metadata={
+                "iac_code": {
+                    "cwd": str(tmp_path),
+                    "llm_headers": {"X-A2A-Session": "session-1"},
+                }
+            },
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-2",
+            context_id="ctx-headers",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-other-context",
+            context_id="ctx-headers-other",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-3",
+            context_id="ctx-headers",
+            metadata={
+                "iac_code": {
+                    "cwd": str(tmp_path),
+                    "llm_headers": {"X-A2A-Session": "session-2"},
+                }
+            },
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-4",
+            context_id="ctx-headers",
+            metadata={"iac_code": {"cwd": str(tmp_path), "llm_headers": {}}},
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-5",
+            context_id="ctx-headers",
+            metadata={"iac_code": {"cwd": str(tmp_path)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert captured_headers == [
+        {"X-A2A-Session": "session-1"},
+        {"X-A2A-Session": "session-1"},
+        {},
+        {"X-A2A-Session": "session-2"},
+        {},
+        {},
+    ]
+    assert get_provider_request_headers() == {}
 
 
 @pytest.mark.asyncio

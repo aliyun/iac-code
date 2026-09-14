@@ -135,7 +135,8 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
           "cwd": "/absolute/path/to/project",
           "user_id": "client-user-123",
           "iac_code_model": "qwen-plus",
-          "iac_code_api_key": "provider-api-key"
+          "iac_code_api_key": "provider-api-key",
+          "llm_headers": {"X-Caller-Session": "session-123"}
         }
       }
     },
@@ -158,6 +159,7 @@ Runs a non-streaming A2A message turn. The response contains a task or message a
 | `metadata.iac_code.channel` | string | Optional | Telemetry channel binding for this `contextId`; takes priority over `IAC_CODE_CHANNEL` |
 | `metadata.iac_code.iac_code_model` | string | Optional | Per-call LLM model override; this is the lowercase form of `IAC_CODE_MODEL` and is ignored when blank or non-string |
 | `metadata.iac_code.iac_code_api_key` | string | Optional | Per-call LLM provider API key override; this is the lowercase form of `IAC_CODE_API_KEY` and is ignored when blank or non-string |
+| `metadata.iac_code.llm_headers` | object | Optional | Additional HTTP headers bound to LLM provider calls for this `contextId` |
 | `metadata.iac_code.alibaba_cloud_access_key_id` | string | Optional | Alibaba Cloud AccessKey ID for this task |
 | `metadata.iac_code.alibaba_cloud_access_key_secret` | string | Optional | Alibaba Cloud AccessKey Secret for this task |
 | `metadata.iac_code.alibaba_cloud_region_id` | string | Optional | Alibaba Cloud region for this task; defaults to `cn-hangzhou` when omitted with task credentials |
@@ -178,6 +180,8 @@ When `metadata.iac_code` includes both `alibaba_cloud_access_key_id` and `alibab
 `metadata.iac_code.iac_code_model` only affects the current A2A message turn. It takes priority over `IAC_CODE_MODEL`, `settings.yml`, and the server startup default model. Follow-up turns without this metadata field fall back to the server default model even when they reuse the same `contextId`.
 
 `metadata.iac_code.iac_code_api_key` only affects the current A2A message turn. It takes priority over `IAC_CODE_API_KEY` and `.credentials.yml` for the provider selected by the effective model. Follow-up turns without this metadata field reload normal credentials, so a per-call key does not leak across reused `contextId`s. This field is for the LLM provider key and is separate from A2A transport authentication such as `api-key` / `IACCODE_A2A_API_KEY`.
+
+`metadata.iac_code.llm_headers` is a string-to-string map bound to the A2A `contextId`. Once supplied, normal chat, Pipeline execution, and later message turns that reuse the same `contextId` inherit the headers even when the field is omitted. Supplying another map replaces the complete binding; supplying `{}` clears it. Other concurrent contexts remain isolated. The headers are merged case-insensitively with provider-managed request headers and caller values take precedence. Invalid header names, non-string values, line breaks, and entries beyond the bounded header count and size limits are ignored. Because header values may contain credentials, bindings are held only in server memory and are not written to session snapshots; callers must supply them again after a server restart. Treat sensitive values like credentials and protect the A2A request accordingly.
 
 `metadata.iac_code.run_mode` can select `normal` or `pipeline` for one message. When the effective mode is `pipeline`, `metadata.iac_code.pipeline_name` can select `selling` or `selling_solution_first`; an unsupported non-empty value is rejected. On continuation and recovery, the pipeline identity stored for the existing task/context takes precedence so a caller cannot accidentally resume durable state with another pipeline.
 

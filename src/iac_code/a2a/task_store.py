@@ -6,7 +6,7 @@ import json
 import logging
 import time
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,6 +65,9 @@ class A2ATaskStore(TaskStore):
         self._task_persistence_dirty: set[str] = set()
         self._contexts: dict[str, A2AContextRecord] = {}
         self._pending_context_telemetry_channels: dict[str, str] = {}
+        # Request headers may contain credentials, so context bindings stay in memory
+        # instead of being mirrored into plaintext A2A/session snapshots.
+        self._context_llm_headers: dict[str, dict[str, str]] = {}
         self._expired_task_tombstones: dict[str, float] = {}
         self._metrics = metrics or NoOpA2AMetrics()
         self._persistence = persistence
@@ -572,6 +575,24 @@ class A2ATaskStore(TaskStore):
                 )
                 self._persist_context_snapshot(snapshot)
             return effective_channel
+
+    async def resolve_context_llm_headers(
+        self,
+        context_id: str,
+        requested_headers: Mapping[str, str] | None,
+    ) -> dict[str, str]:
+        """Resolve and, when explicitly supplied, bind LLM headers to an A2A context."""
+
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            if requested_headers is not None:
+                headers = dict(requested_headers)
+                if headers:
+                    self._context_llm_headers[context_id] = headers
+                else:
+                    self._context_llm_headers.pop(context_id, None)
+                return dict(headers)
+            return dict(self._context_llm_headers.get(context_id, {}))
 
     async def get_context_record(self, context_id: str) -> A2AContextRecord:
         context_id = validate_protocol_id(context_id)
@@ -1260,6 +1281,7 @@ class A2ATaskStore(TaskStore):
             ]
             self._contexts.clear()
             self._pending_context_telemetry_channels.clear()
+            self._context_llm_headers.clear()
             self._context_runtime_tasks.clear()
             self._context_runtime_waiters.clear()
             for task, waiters in runtime_tasks:
