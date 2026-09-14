@@ -19,12 +19,15 @@ from a2a.types import (
     Message,
     Part,
     Role,
+    SendMessageRequest,
     SubscribeToTaskRequest,
     Task,
     TaskState,
     TaskStatus,
     TaskStatusUpdateEvent,
 )
+from a2a.utils.errors import InvalidParamsError
+from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Value
 
 from iac_code.a2a.execution_control import (
@@ -45,7 +48,11 @@ from iac_code.a2a.pipeline_transport_delivery import (
     pipeline_transport_delivery_tracking_enabled,
     register_pipeline_transport_delivery,
 )
-from iac_code.a2a.request_scoped_active_task import RequestScopedActiveTask, RequestScopedActiveTaskRegistry
+from iac_code.a2a.request_scoped_active_task import (
+    DirectPipelineRouteGateCarrier,
+    RequestScopedActiveTask,
+    RequestScopedActiveTaskRegistry,
+)
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import (
     A2AJsonRpcDispatcher,
@@ -362,6 +369,569 @@ async def test_request_scoped_registry_replaces_finished_task_after_durable_reop
     await asyncio.gather(replacement._producer_task, replacement._consumer_task, return_exceptions=True)
     await replacement._event_queue_agent.close(immediate=True)
     await replacement._event_queue_subscribers.close(immediate=True)
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_registry_retires_unfinished_sdk_lifecycle_for_durable_recovery() -> None:
+    class IdleExecutor:
+        async def execute(self, _request_context, _event_queue) -> None:
+            return None
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=IdleExecutor(), task_store=store)
+    stale = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    assert stale._is_finished.is_set() is False
+    assert stale._producer_task is not None and not stale._producer_task.done()
+    assert stale._consumer_task is not None and not stale._consumer_task.done()
+    stale._task_manager._current_task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_CANCELED),
+    )
+    canonical = await store.get("task-1", call_context)
+    assert canonical is not None
+    assert canonical.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+
+    await registry.retire_for_recovery("task-1")
+
+    assert await registry.get("task-1") is None
+    assert stale._is_finished.is_set() is True
+    assert stale._producer_task.done()
+    assert stale._consumer_task.done()
+
+    replacement = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    assert replacement is not stale
+    recovered = await replacement.get_task()
+    assert recovered.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+
+    await registry.retire_for_recovery("task-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_replacement_rejects_a_contender_before_the_admitted_request() -> None:
+    observed: list[str | None] = []
+
+    class RecordingExecutor:
+        async def execute(self, request_context, event_queue) -> None:
+            observed.append(RecoverableInputAdmissionCarrier.read(request_context))
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-1",
+                    context_id="ctx-1",
+                    status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+                )
+            )
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=RecordingExecutor(), task_store=store)
+    assert await registry.reconcile_and_replace_for_recovery(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        acquire_admission=lambda: asyncio.sleep(0, result="recovery-1"),
+    ) == "recovery-1"
+    replacement = await registry.get("task-1")
+    assert replacement is not None
+    contender = RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1")
+    with pytest.raises(InvalidParamsError, match="recovery continuation is reserved"):
+        await anext(replacement.subscribe(request=contender))
+
+    admitted = RequestContext(call_context=call_context, task_id="task-1", context_id="ctx-1")
+    RecoverableInputAdmissionCarrier.attach(admitted, "recovery-1")
+    events = [event async for event in replacement.subscribe(request=admitted)]
+
+    assert [event.status.state for event in events] == [TaskState.TASK_STATE_WORKING]
+    assert observed == ["recovery-1"]
+    assert replacement._recovery_admission is None
+    await registry.retire_for_recovery("task-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_claim_blocks_an_old_lifecycle_contender_before_admission() -> None:
+    class IdleExecutor:
+        async def execute(self, _request_context, _event_queue) -> None:
+            return None
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=IdleExecutor(), task_store=store)
+    old = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    contender_context = RequestContext(
+        call_context=ServerCallContext(),
+        task_id="task-1",
+        context_id="ctx-1",
+    )
+
+    await old._lock.acquire()
+    contender = asyncio.create_task(old.enqueue_request(contender_context))
+    await asyncio.sleep(0)
+    replacement_task = asyncio.create_task(
+        registry.reconcile_and_replace_for_recovery(
+            "task-1",
+            call_context=call_context,
+            context_id="ctx-1",
+            acquire_admission=lambda: asyncio.sleep(0, result="recovery-1"),
+        )
+    )
+    await asyncio.sleep(0)
+    old._lock.release()
+
+    with pytest.raises(InvalidParamsError, match="recovery replacement is pending"):
+        await contender
+    assert await replacement_task == "recovery-1"
+    replacement = await registry.get("task-1")
+    assert replacement is not None and replacement is not old
+    await registry.cancel_recovery_reservation("task-1", "recovery-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_replacement_waits_for_an_already_enqueued_old_lifecycle_request() -> None:
+    executed = asyncio.Event()
+    working_save_started = asyncio.Event()
+    release_working_save = asyncio.Event()
+
+    class GatedTaskStore(A2ATaskStore):
+        async def save(self, task, context=None) -> None:
+            if task.status.state == TaskState.TASK_STATE_WORKING:
+                working_save_started.set()
+                await release_working_save.wait()
+            await super().save(task, context)
+
+    class RecordingExecutor:
+        async def execute(self, _request_context, event_queue) -> None:
+            executed.set()
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-1",
+                    context_id="ctx-1",
+                    status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+                )
+            )
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = GatedTaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=RecordingExecutor(), task_store=store)
+    old = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    contender_context = RequestContext(
+        call_context=ServerCallContext(),
+        task_id="task-1",
+        context_id="ctx-1",
+    )
+
+    await old._request_lock.acquire()
+    await old.enqueue_request(contender_context)
+    while old._request_queue.qsize() > 0:
+        await asyncio.sleep(0)
+
+    async def acquire_admission() -> str | None:
+        task = await store.get("task-1", call_context)
+        assert task is not None
+        return None if task.status.state == TaskState.TASK_STATE_WORKING else "recovery-1"
+
+    released: list[str] = []
+
+    replacement_task = asyncio.create_task(
+        registry.reconcile_and_replace_for_recovery(
+            "task-1",
+            call_context=call_context,
+            context_id="ctx-1",
+            acquire_admission=acquire_admission,
+            release_admission=lambda token: asyncio.sleep(0, result=released.append(token)),
+        )
+    )
+    await asyncio.sleep(0)
+    old._request_lock.release()
+
+    try:
+        await asyncio.wait_for(executed.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.wait_for(working_save_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.sleep(0)
+        assert replacement_task.done() is False
+        release_working_save.set()
+        assert await asyncio.wait_for(replacement_task, timeout=_STREAM_TEST_TIMEOUT) is None
+        assert await registry.get("task-1") is old
+        assert old._is_finished.is_set() is False
+        assert released == []
+    finally:
+        release_working_save.set()
+        if not replacement_task.done():
+            replacement_task.cancel()
+            await asyncio.gather(replacement_task, return_exceptions=True)
+        await registry.retire_for_recovery("task-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_drain_fails_closed_when_the_old_consumer_exits_before_projection() -> None:
+    save_started = asyncio.Event()
+    release_save = asyncio.Event()
+
+    class FailingTaskStore(A2ATaskStore):
+        async def save(self, task, context=None) -> None:
+            if task.status.state == TaskState.TASK_STATE_WORKING:
+                save_started.set()
+                await release_save.wait()
+                raise RuntimeError("projection failed")
+            await super().save(task, context)
+
+    class WorkingExecutor:
+        async def execute(self, _request_context, event_queue) -> None:
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-1",
+                    context_id="ctx-1",
+                    status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+                )
+            )
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = FailingTaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=WorkingExecutor(), task_store=store)
+    old = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    await old.enqueue_request(
+        RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1")
+    )
+    await asyncio.wait_for(save_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    while old.has_unfinished_requests():
+        await asyncio.sleep(0)
+    assert old._request_lock.locked()
+
+    replacement_task = asyncio.create_task(
+        registry.reconcile_and_replace_for_recovery(
+            "task-1",
+            call_context=call_context,
+            context_id="ctx-1",
+            acquire_admission=lambda: asyncio.sleep(0, result="recovery-1"),
+        )
+    )
+    release_save.set()
+
+    try:
+        with pytest.raises(InvalidParamsError, match="ended before the accepted request settled"):
+            await asyncio.wait_for(replacement_task, timeout=_STREAM_TEST_TIMEOUT)
+        assert old._consumer_task is not None and old._consumer_task.done()
+    finally:
+        release_save.set()
+        if not replacement_task.done():
+            replacement_task.cancel()
+            await asyncio.gather(replacement_task, return_exceptions=True)
+        await registry.retire_for_recovery("task-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_drain_for_one_task_does_not_block_registry_operations_for_another() -> None:
+    task_a_started = asyncio.Event()
+    release_task_a = asyncio.Event()
+
+    class BlockingExecutor:
+        async def execute(self, request_context, event_queue) -> None:
+            if request_context.task_id != "task-a":
+                return
+            task_a_started.set()
+            await release_task_a.wait()
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-a",
+                    context_id="ctx-a",
+                    status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+                )
+            )
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    for task_id, context_id in (("task-a", "ctx-a"), ("task-b", "ctx-b")):
+        await store.save(
+            Task(
+                id=task_id,
+                context_id=context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+            ),
+            call_context,
+        )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=BlockingExecutor(), task_store=store)
+    old_a = await registry.get_or_create(
+        "task-a",
+        call_context=call_context,
+        context_id="ctx-a",
+        create_task_if_missing=True,
+    )
+    await old_a.enqueue_request(
+        RequestContext(call_context=ServerCallContext(), task_id="task-a", context_id="ctx-a")
+    )
+    await asyncio.wait_for(task_a_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+
+    async def acquire_a() -> str | None:
+        task = await store.get("task-a", call_context)
+        assert task is not None
+        return None if task.status.state == TaskState.TASK_STATE_WORKING else "recovery-1"
+
+    recovery_a = asyncio.create_task(
+        registry.reconcile_and_replace_for_recovery(
+            "task-a",
+            call_context=call_context,
+            context_id="ctx-a",
+            acquire_admission=acquire_a,
+        )
+    )
+    await asyncio.sleep(0)
+
+    try:
+        task_b = await asyncio.wait_for(
+            registry.get_or_create(
+                "task-b",
+                call_context=call_context,
+                context_id="ctx-b",
+                create_task_if_missing=True,
+            ),
+            timeout=0.5,
+        )
+        assert task_b.task_id == "task-b"
+    finally:
+        release_task_a.set()
+        await asyncio.wait_for(recovery_a, timeout=_STREAM_TEST_TIMEOUT)
+        await registry.retire_for_recovery("task-a")
+        await registry.retire_for_recovery("task-b")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_recovery_replacement_finishes_retiring_old_lifecycle() -> None:
+    class IdleExecutor:
+        async def execute(self, _request_context, _event_queue) -> None:
+            return None
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=IdleExecutor(), task_store=store)
+    old = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    close_started = asyncio.Event()
+    release_close = asyncio.Event()
+    close_finished = asyncio.Event()
+
+    async def gated_close(*, immediate: bool) -> None:
+        assert immediate is True
+        close_started.set()
+        await release_close.wait()
+        close_finished.set()
+
+    old._event_queue_agent.close = gated_close
+    released: list[str] = []
+    replacement = asyncio.create_task(
+        registry.reconcile_and_replace_for_recovery(
+            "task-1",
+            call_context=call_context,
+            context_id="ctx-1",
+            acquire_admission=lambda: asyncio.sleep(0, result="recovery-1"),
+            release_admission=lambda token: asyncio.sleep(0, result=released.append(token)),
+        )
+    )
+    await close_started.wait()
+
+    replacement.cancel()
+    await asyncio.sleep(0)
+    assert replacement.done() is False
+
+    release_close.set()
+    with pytest.raises(asyncio.CancelledError):
+        await replacement
+    assert close_finished.is_set()
+    assert old._producer_task.done()
+    assert old._consumer_task.done()
+    assert await registry.get("task-1") is None
+    assert released == ["recovery-1"]
+
+
+@pytest.mark.asyncio
+async def test_stale_sdk_status_event_restores_task_manager_to_canonical_projection() -> None:
+    class IdleExecutor:
+        async def execute(self, _request_context, _event_queue) -> None:
+            return None
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    def status(state: TaskState.ValueType, seconds: int) -> TaskStatus:
+        value = TaskStatus(state=state)
+        value.timestamp.seconds = seconds
+        return value
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_INPUT_REQUIRED, 100)),
+        call_context,
+    )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=IdleExecutor(), task_store=store)
+    active_task = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = asyncio.current_task()
+    record.updated_at = 200
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_WORKING, 250)),
+        call_context,
+    )
+
+    await active_task._event_queue_agent.enqueue_event(
+        TaskStatusUpdateEvent(
+            task_id="task-1",
+            context_id="ctx-1",
+            status=status(TaskState.TASK_STATE_CANCELED, 150),
+        )
+    )
+    await active_task._event_queue_agent.test_only_join_incoming_queue()
+    canonical = await store.get("task-1", call_context)
+
+    assert canonical is not None
+    assert canonical.status.state == TaskState.TASK_STATE_WORKING
+    assert active_task._task_manager._current_task.status.state == TaskState.TASK_STATE_WORKING
+    assert active_task._is_finished.is_set() is False
+
+    await active_task._event_queue_agent.enqueue_event(
+        TaskStatusUpdateEvent(
+            task_id="task-1",
+            context_id="ctx-1",
+            status=status(TaskState.TASK_STATE_CANCELED, 300),
+        )
+    )
+    await active_task._event_queue_agent.test_only_join_incoming_queue()
+    canonical = await store.get("task-1", call_context)
+    assert canonical is not None
+    assert canonical.status.state == TaskState.TASK_STATE_CANCELED
+    assert active_task._task_manager._current_task.status.state == TaskState.TASK_STATE_CANCELED
+    assert active_task._is_finished.is_set() is True
+    await registry.retire_for_recovery("task-1")
+
+
+@pytest.mark.asyncio
+async def test_stale_sdk_status_rebuilds_projection_when_owner_cache_is_older() -> None:
+    def status(state: TaskState.ValueType, seconds: int) -> TaskStatus:
+        value = TaskStatus(state=state)
+        value.timestamp.seconds = seconds
+        return value
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_CANCELED, 100)),
+        call_context,
+    )
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.state = "working"
+    record.updated_at = 200
+    incoming = Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_FAILED, 150))
+
+    await store.save(incoming, call_context)
+    visible = await store.get("task-1", call_context)
+
+    assert incoming.status.state == TaskState.TASK_STATE_WORKING
+    assert incoming.status.timestamp.seconds == 200
+    assert visible is not None
+    assert visible.status.state == TaskState.TASK_STATE_WORKING
+    assert visible.status.timestamp.seconds == 200
 
 
 @pytest.mark.asyncio
@@ -748,8 +1318,23 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
         return task
 
     monkeypatch.setattr(DefaultRequestHandler, "on_message_send", sdk_send)
+    retired_sdk_tasks: list[str] = []
+
+    class RecoveryAwareRegistry:
+        async def reconcile_and_replace_for_recovery(
+            self, recovered_task_id: str, *, acquire_admission, **_kwargs
+        ) -> str | None:
+            admission = await acquire_admission()
+            if admission is not None:
+                retired_sdk_tasks.append(recovered_task_id)
+            return admission
+
+        async def cancel_recovery_reservation(self, _task_id: str, _admission: str) -> None:
+            return None
+
     handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
     handler.task_store = store
+    handler._active_task_registry = RecoveryAwareRegistry()
     handler._validate_extensions = lambda _context: None
     handler._validate_pipeline_message_request = lambda _params: None
     params = SimpleNamespace(message=SimpleNamespace(task_id=task_id, context_id=context_id))
@@ -774,6 +1359,17 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
         assert (await store.get_context_record(context_id)).active_task_id == task_id
         monkeypatch.setattr(persistence, "save_task", original_save_task)
 
+    if not admission_allowed and sidecar_task_id == task_id:
+        with pytest.raises(InvalidParamsError, match="already being recovered"):
+            await handler.on_message_send(params, call_context)
+        assert observed == {}
+        assert issued_admissions == []
+        assert released_admissions == []
+        assert retired_sdk_tasks == []
+        assert persistence.load_task(task_id).state == expected_persisted_state
+        assert persistence.load_context(context_id).active_task_id == expected_active_task_id
+        return
+
     result = await handler.on_message_send(params, call_context)
 
     assert isinstance(result, Task)
@@ -795,6 +1391,7 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
     else:
         assert issued_admissions == []
         assert released_admissions == []
+    assert retired_sdk_tasks == ([task_id] if expected_task_state == TaskState.TASK_STATE_INPUT_REQUIRED else [])
 
     if expected_task_state == TaskState.TASK_STATE_INPUT_REQUIRED:
         for seconds, late_state in enumerate(
@@ -984,6 +1581,104 @@ async def test_handler_does_not_reconcile_a_running_sidecar_owner(
     assert admission_calls == []
     assert persistence.load_task(task_id).state == "failed"
     assert persistence.load_context(context_id).active_task_id == task_id
+
+
+@pytest.mark.asyncio
+async def test_handler_rejects_recovery_owned_by_another_process_before_sdk(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    persistence_root = tmp_path / "a2a"
+    persistence = A2APersistenceStore(persistence_root)
+    context_id = "ctx-1"
+    task_id = "task-1"
+    call_context = ServerCallContext()
+    first_service = ExecutionControlService(persistence_root=persistence_root, backup_service=None)
+    second_service = ExecutionControlService(persistence_root=persistence_root, backup_service=None)
+    first_store = A2ATaskStore(persistence=persistence)
+    first_store.set_execution_control_provider(
+        first_service.snapshot_for_context,
+        first_service.has_active_work,
+        first_service.reserve_recoverable_input_continuation,
+        first_service.release_recoverable_input_continuation,
+    )
+    context_record = await first_store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    context_record.active_task_id = None
+    first_store.mirror_context(context_record)
+    await first_store.save(
+        Task(
+            id=task_id,
+            context_id=context_id,
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    admission = await first_service.reserve_recoverable_input_continuation(
+        context_id=context_id,
+        task_id=task_id,
+        owner=first_store.owner_for_context(call_context),
+    )
+    assert admission is not None
+
+    second_store = A2ATaskStore(persistence=A2APersistenceStore(persistence_root))
+    second_store.set_execution_control_provider(
+        second_service.snapshot_for_context,
+        second_service.has_active_work,
+        second_service.reserve_recoverable_input_continuation,
+        second_service.release_recoverable_input_continuation,
+    )
+    monkeypatch.setattr(
+        "iac_code.a2a.transports.dispatcher.recoverable_task_id_from_sidecar",
+        lambda **_kwargs: task_id,
+    )
+    sdk_called = False
+
+    async def sdk_send(_handler, _params, _context):
+        nonlocal sdk_called
+        sdk_called = True
+        return None
+
+    async def hydrate(_params) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send", sdk_send)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = second_store
+    handler._active_task_registry = None
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    params = SimpleNamespace(message=SimpleNamespace(task_id=task_id, context_id=context_id))
+
+    try:
+        with pytest.raises(InvalidParamsError, match="already being recovered"):
+            await handler.on_message_send(params, call_context)
+        assert sdk_called is False
+        assert persistence.load_task(task_id).state == "input-required"
+        assert persistence.load_context(context_id).active_task_id is None
+        recovered = await first_service.begin_execution(
+            context_id=context_id,
+            task_id=task_id,
+            owner=first_store.owner_for_context(call_context),
+            cwd=str(cwd),
+            continue_input_required=True,
+            recoverable_input_admission=admission,
+        )
+        assert recovered.phase == "running"
+        current = asyncio.current_task()
+        assert current is not None
+        await recovered.detach_task(current, execution_status="input-required")
+    finally:
+        await first_service.release_recoverable_input_continuation(admission)
+        await first_service.close()
+        await second_service.close()
 
 
 @pytest.mark.asyncio
@@ -1236,6 +1931,65 @@ async def test_pipeline_message_stream_does_not_bind_subscriber_delivery_to_prod
 
 
 @pytest.mark.asyncio
+async def test_message_stream_retires_stale_sdk_lifecycle_after_durable_recovery(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    retired: list[str] = []
+
+    async def sdk_stream(_handler, _params, _context):
+        yield update
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> str:
+        return "recovery-1"
+
+    class RecoveryAwareRegistry:
+        async def reconcile_and_replace_for_recovery(
+            self, task_id: str, *, acquire_admission, **_kwargs
+        ) -> str | None:
+            admission = await acquire_admission()
+            if admission is not None:
+                retired.append(task_id)
+            return admission
+
+        async def cancel_recovery_reservation(self, _task_id: str, _admission: str) -> None:
+            return None
+
+        async def get(self, _task_id: str):
+            return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._active_task_registry = RecoveryAwareRegistry()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    params = SimpleNamespace(message=SimpleNamespace(task_id="task-1", context_id="ctx-1"))
+
+    events = await _collect_async(handler.on_message_send_stream(params, call_context))
+
+    assert events == [update]
+    assert retired == ["task-1"]
+
+
+@pytest.mark.asyncio
 async def test_message_stream_queues_input_required_followup_instead_of_routing_as_interrupt(monkeypatch) -> None:
     call_context = ServerCallContext()
     store = A2ATaskStore()
@@ -1467,6 +2221,314 @@ async def test_active_message_route_ignores_old_terminal_events_around_its_reque
     assert events == [current_update]
     assert active_task._reference_count == 0
     assert not active_task.direct_message_lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_terminal_winning_direct_route_recovers_same_request_without_old_terminal() -> None:
+    def status(state: TaskState.ValueType, seconds: int) -> TaskStatus:
+        value = TaskStatus(state=state)
+        value.timestamp.seconds = seconds
+        return value
+
+    class RoutingExecutor:
+        def __init__(self, owner_release: asyncio.Event) -> None:
+            self.calls = 0
+            self.waited = False
+            self._owner_release = owner_release
+
+        async def execute(self, request_context, event_queue) -> None:
+            self.calls += 1
+            gate = DirectPipelineRouteGateCarrier.read(request_context)
+            if gate is not None:
+                gate.require_recovery()
+                await event_queue.enqueue_event(
+                    TaskStatusUpdateEvent(
+                        task_id="task-1",
+                        context_id="ctx-1",
+                        status=status(TaskState.TASK_STATE_CANCELED, 150),
+                    )
+                )
+                return
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-1",
+                    context_id="ctx-1",
+                    status=status(TaskState.TASK_STATE_WORKING, 300),
+                )
+            )
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+        async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
+            assert (context_id, task_id) == ("ctx-1", "task-1")
+            self.waited = True
+            self._owner_release.set()
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_INPUT_REQUIRED, 200)),
+        call_context,
+    )
+    owner_release = asyncio.Event()
+    owner = asyncio.create_task(owner_release.wait())
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = owner
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_WORKING, 250)),
+        call_context,
+    )
+    executor = RoutingExecutor(owner_release)
+    handler = IacCodeRequestHandler(
+        agent_executor=executor,
+        task_store=store,
+        agent_card=SimpleNamespace(capabilities=SimpleNamespace(streaming=True)),
+    )
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+
+    async def hydrate(_params) -> None:
+        return None
+
+    reconcile_calls = 0
+
+    async def reconcile(_params, _context) -> str | None:
+        nonlocal reconcile_calls
+        reconcile_calls += 1
+        if reconcile_calls == 1:
+            return None
+        owner_release.set()
+        await owner
+        record.active_task = None
+        await store.save(
+            Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_INPUT_REQUIRED, 260)),
+            call_context,
+        )
+        return "recovery-1"
+
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    old_lifecycle = await handler._active_task_registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text="select candidate 0")],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline"}}, message.metadata)
+
+    try:
+        events = await asyncio.wait_for(
+            _collect_async(
+                handler.on_message_send_stream(
+                    SendMessageRequest(message=message),
+                    call_context,
+                )
+            ),
+            timeout=_STREAM_TEST_TIMEOUT,
+        )
+        replacement = await handler._active_task_registry.get("task-1")
+    finally:
+        owner_release.set()
+        await asyncio.gather(owner, return_exceptions=True)
+        await handler._active_task_registry.retire_for_recovery("task-1")
+
+    assert [event.status.state for event in events] == [TaskState.TASK_STATE_WORKING]
+    assert executor.calls == 2
+    assert executor.waited is True
+    assert replacement is not None and replacement is not old_lifecycle
+    assert old_lifecycle._is_finished.is_set()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_direct_stream_finishes_recovery_for_the_same_pipeline_request() -> None:
+    def status(state: TaskState.ValueType, seconds: int) -> TaskStatus:
+        value = TaskStatus(state=state)
+        value.timestamp.seconds = seconds
+        return value
+
+    direct_started = asyncio.Event()
+    release_direct = asyncio.Event()
+    recovered = asyncio.Event()
+    owner_release = asyncio.Event()
+    outer_cleanup_started = asyncio.Event()
+    outer_cleanup_finished = asyncio.Event()
+    detached_admission_staged = asyncio.Event()
+    admission_released = asyncio.Event()
+
+    class RoutingExecutor:
+        async def execute(self, request_context, event_queue) -> None:
+            gate = DirectPipelineRouteGateCarrier.read(request_context)
+            if gate is not None:
+                direct_started.set()
+                await release_direct.wait()
+                gate.require_recovery()
+                return
+            recovered.set()
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-1",
+                    context_id="ctx-1",
+                    status=status(TaskState.TASK_STATE_WORKING, 300),
+                )
+            )
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+        async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
+            assert (context_id, task_id) == ("ctx-1", "task-1")
+            owner_release.set()
+
+    call_context = ServerCallContext(
+        state={"ordinary": {"value": 1}},
+        tenant="tenant-1",
+        requested_extensions={"urn:test:extension"},
+    )
+    store = A2ATaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_INPUT_REQUIRED, 200)),
+        call_context,
+    )
+    owner = asyncio.create_task(owner_release.wait())
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = owner
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_WORKING, 250)),
+        call_context,
+    )
+    handler = IacCodeRequestHandler(
+        agent_executor=RoutingExecutor(),
+        task_store=store,
+        agent_card=SimpleNamespace(capabilities=SimpleNamespace(streaming=True)),
+    )
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+
+    async def hydrate(_params) -> None:
+        return None
+
+    reconcile_calls = 0
+
+    async def reconcile(_params, _context) -> str | None:
+        nonlocal reconcile_calls
+        reconcile_calls += 1
+        if reconcile_calls == 1:
+            return None
+        owner_release.set()
+        await owner
+        record.active_task = None
+        await store.save(
+            Task(id="task-1", context_id="ctx-1", status=status(TaskState.TASK_STATE_INPUT_REQUIRED, 260)),
+            call_context,
+        )
+        return "recovery-1"
+
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    release_contexts: list[object] = []
+    release_recovery = handler._release_untransferred_recovery
+    staged_contexts: list[ServerCallContext] = []
+    stage_recovery = handler._stage_recoverable_input_admission
+    acknowledged: list[tuple[object, str, bool]] = []
+    acknowledge_enqueue = handler._acknowledge_recoverable_input_enqueue
+    setup_active_task = handler._setup_active_task
+    released_admissions: list[str] = []
+
+    def track_stage(stage_context, admission) -> None:
+        stage_recovery(stage_context, admission)
+        if admission == "recovery-1":
+            staged_contexts.append(stage_context)
+            detached_admission_staged.set()
+
+    def track_acknowledge(ack_context, admission) -> bool:
+        result = acknowledge_enqueue(ack_context, admission)
+        acknowledged.append((ack_context, admission, result))
+        return result
+
+    async def synchronize_setup(setup_params, setup_context):
+        await outer_cleanup_finished.wait()
+        return await setup_active_task(setup_params, setup_context)
+
+    async def track_admission_release(admission: str | None) -> None:
+        if admission is not None:
+            released_admissions.append(admission)
+            admission_released.set()
+
+    async def track_release(release_params, release_context) -> None:
+        release_contexts.append(release_context)
+        if release_context is call_context:
+            outer_cleanup_started.set()
+            await detached_admission_staged.wait()
+            await release_recovery(release_params, release_context)
+            outer_cleanup_finished.set()
+            return
+        await release_recovery(release_params, release_context)
+
+    handler._stage_recoverable_input_admission = track_stage
+    handler._acknowledge_recoverable_input_enqueue = track_acknowledge
+    handler._setup_active_task = synchronize_setup
+    handler._release_untransferred_recovery = track_release
+    store.release_recoverable_input_admission = track_admission_release
+    old_lifecycle = await handler._active_task_registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text="select candidate 0")],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline"}}, message.metadata)
+    stream_task = asyncio.create_task(
+        _collect_async(handler.on_message_send_stream(SendMessageRequest(message=message), call_context))
+    )
+
+    try:
+        await asyncio.wait_for(direct_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        stream_task.cancel()
+        await asyncio.wait_for(outer_cleanup_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        release_direct.set()
+        await asyncio.wait_for(detached_admission_staged.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.wait_for(outer_cleanup_finished.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        with pytest.raises(asyncio.CancelledError):
+            await stream_task
+        await asyncio.wait_for(recovered.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        replacement = await handler._active_task_registry.get("task-1")
+        assert replacement is not None and replacement is not old_lifecycle
+    finally:
+        release_direct.set()
+        owner_release.set()
+        await asyncio.gather(owner, return_exceptions=True)
+        detached = tuple(handler._detached_message_producers)
+        if detached:
+            await asyncio.wait_for(asyncio.gather(*detached), timeout=_STREAM_TEST_TIMEOUT)
+        await handler._active_task_registry.retire_for_recovery("task-1")
+        await asyncio.wait_for(admission_released.wait(), timeout=_STREAM_TEST_TIMEOUT)
+
+    assert call_context in release_contexts
+    assert len(staged_contexts) == 1
+    detached_context = staged_contexts[0]
+    assert detached_context is not call_context
+    assert detached_context.state is not call_context.state
+    assert detached_context.state["ordinary"] == {"value": 1}
+    assert detached_context.user is call_context.user
+    assert detached_context.tenant == "tenant-1"
+    assert detached_context.requested_extensions == {"urn:test:extension"}
+    assert detached_context.requested_extensions is not call_context.requested_extensions
+    assert acknowledged == [(detached_context, "recovery-1", True)]
+    assert released_admissions == ["recovery-1"]
 
 
 @pytest.mark.asyncio

@@ -308,6 +308,8 @@ class A2ATaskStore(TaskStore):
         task_id: str,
     ) -> None:
         record = self._tasks.get(task_id)
+        owner_tasks = self._sdk_tasks.setdefault(owner, {})
+        previous = owner_tasks.get(task_id)
         next_state = _task_state_from_sdk_task(task)
         incoming_updated_at = _task_updated_at_from_sdk_task(task)
         preserve_terminal = bool(
@@ -330,10 +332,20 @@ class A2ATaskStore(TaskStore):
             and record.active_task is not None
             and not record.active_task.done()
         )
+        stale_recovered_working_projection = bool(
+            record is not None
+            and record.state == TASK_STATE_WORKING
+            and previous is not None
+            and _task_state_from_sdk_task(previous)
+            in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED}
+        )
         stale_state_projection = bool(
             record is not None
-            and record.state
-            in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+            and (
+                record.state
+                in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+                or stale_recovered_working_projection
+            )
             and next_state != record.state
             and not active_finalization
             and incoming_updated_at < record.updated_at
@@ -343,11 +355,16 @@ class A2ATaskStore(TaskStore):
             # than a detached or recovered final state must not roll either
             # projection back, including a queued terminal event from the old
             # producer that arrives after a recovered execution starts.
+            self._restore_rejected_sdk_projection(
+                task,
+                previous=previous,
+                record=record,
+                owner_tasks=owner_tasks,
+                task_id=task_id,
+            )
             return
         self._attach_context_metadata(task)
         self._attach_pending_permissions(task)
-        owner_tasks = self._sdk_tasks.setdefault(owner, {})
-        previous = owner_tasks.get(task_id)
         if previous is not None:
             self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
         owner_tasks[task_id] = _copy_task(task)
@@ -382,6 +399,43 @@ class A2ATaskStore(TaskStore):
             record.updated_at = incoming_updated_at
             record.touch()
         self._mirror_task(record, persist_shared_snapshot=persist_shared_snapshot)
+
+    def _restore_rejected_sdk_projection(
+        self,
+        task: Task,
+        *,
+        previous: Task | None,
+        record: A2ATaskRecord,
+        owner_tasks: dict[str, Task],
+        task_id: str,
+    ) -> None:
+        """Repair the SDK TaskManager object after rejecting an out-of-date event."""
+
+        previous_state = _task_state_from_sdk_task(previous) if previous is not None else None
+        live_active_projection = bool(
+            record.state in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+            and previous_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
+            and record.active_task is not None
+            and not record.active_task.done()
+        )
+        if previous is not None and previous.context_id == record.context_id and (
+            previous_state == record.state or live_active_projection
+        ):
+            task.CopyFrom(previous)
+            return
+        restored = Task(id=task_id, context_id=record.context_id)
+        if previous is not None and previous.context_id == record.context_id:
+            restored.CopyFrom(previous)
+        restored.status.CopyFrom(
+            TaskStatus(
+                state=TaskState.Value("TASK_STATE_" + record.state.upper().replace("-", "_")),
+                timestamp=_timestamp_from_epoch(record.updated_at),
+            )
+        )
+        self._attach_context_metadata(restored)
+        self._attach_pending_permissions(restored)
+        owner_tasks[task_id] = _copy_task(restored)
+        task.CopyFrom(restored)
 
     def _attach_context_metadata(self, task: Task) -> None:
         context = self._contexts.get(task.context_id)
@@ -1370,6 +1424,29 @@ class A2ATaskStore(TaskStore):
     async def is_task_active(self, task_id: str) -> bool:
         async with self._mutation_lock:
             return self._task_is_active_locked(task_id)
+
+    async def wait_until_task_inactive(self, task_id: str, *, timeout: float) -> None:
+        """Wait for the current in-process domain owner without canceling it."""
+
+        task_id = validate_protocol_id(task_id)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            async with self._mutation_lock:
+                record = self._tasks.get(task_id)
+                active_task = record.active_task if record is not None else None
+                if active_task is None or active_task.done():
+                    return
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("Timed out waiting for A2A task owner to finish")
+            try:
+                await asyncio.wait_for(asyncio.shield(active_task), timeout=remaining)
+            except asyncio.CancelledError:
+                if not active_task.cancelled():
+                    raise
+            except Exception:
+                pass
 
     async def has_active_work(self) -> bool:
         """Return whether shutting down would interrupt in-process A2A work."""

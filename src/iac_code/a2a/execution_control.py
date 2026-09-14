@@ -1027,6 +1027,24 @@ class ExecutionController:
             )
         )
 
+    async def wait_until_recoverable_input_continuation(
+        self,
+        task_id: str,
+        *,
+        timeout: float,
+    ) -> None:
+        """Wait for the current execution's durable handoff or terminal release."""
+
+        async def wait() -> None:
+            async with self._condition:
+                await self._condition.wait_for(
+                    lambda: self.task_id != task_id or self.can_admit_recoverable_input_continuation(task_id)
+                )
+                if self.task_id != task_id:
+                    raise ExecutionControlConflictError("Execution task changed before recovery")
+
+        await asyncio.wait_for(wait(), timeout=timeout)
+
     async def close(self) -> None:
         current = asyncio.current_task()
         managed_tasks = tuple(
@@ -1603,9 +1621,17 @@ class ExecutionController:
             if not done.cancelled():
                 with suppress(BaseException):
                     done.exception()
+            try:
+                done.get_loop().create_task(self._notify_recovery_waiters())
+            except RuntimeError:
+                pass
 
         task.add_done_callback(completed)
         return task
+
+    async def _notify_recovery_waiters(self) -> None:
+        async with self._condition:
+            self._condition.notify_all()
 
 
 class ExecutionControlService:
@@ -1840,6 +1866,20 @@ class ExecutionControlService:
                 admission,
             )
             return token if reserved else None
+
+    async def wait_until_recoverable_input_continuation(
+        self,
+        *,
+        context_id: str,
+        task_id: str,
+        timeout: float,
+    ) -> None:
+        """Wait until the local controller can safely yield to one recovery request."""
+
+        control = self._controls.get(context_id)
+        if control is None:
+            return
+        await control.wait_until_recoverable_input_continuation(task_id, timeout=timeout)
 
     async def release_recoverable_input_continuation(self, token: str) -> None:
         """Release an unused recovery reservation; consumed reservations are a no-op."""

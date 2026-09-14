@@ -2365,6 +2365,38 @@ async def test_non_retryable_exception_terminal_waits_for_active_interrupt(monke
 
 
 @pytest.mark.asyncio
+async def test_direct_route_gate_fence_is_published_only_after_interrupt_registration() -> None:
+    from iac_code.a2a import pipeline_executor as module
+    from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGate, DirectPipelineRouteOutcome
+
+    accepted_runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime())
+    accepted_queue = FakeEventQueue()
+    accepted_gate = DirectPipelineRouteGate()
+
+    assert await module._register_active_interrupt(
+        accepted_runtime,
+        event_queue=accepted_queue,
+        direct_route_gate=accepted_gate,
+    )
+    assert accepted_gate.outcome is DirectPipelineRouteOutcome.ACTIVE
+    assert accepted_queue.events == [accepted_gate.marker]
+    await module._settle_active_interrupt_safely(accepted_runtime)
+
+    terminal_runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime())
+    terminal_runtime.terminal_publication_started = True
+    terminal_queue = FakeEventQueue()
+    terminal_gate = DirectPipelineRouteGate()
+
+    assert not await module._register_active_interrupt(
+        terminal_runtime,
+        event_queue=terminal_queue,
+        direct_route_gate=terminal_gate,
+    )
+    assert terminal_gate.outcome is DirectPipelineRouteOutcome.RECOVERY_REQUIRED
+    assert terminal_queue.events == []
+
+
+@pytest.mark.asyncio
 async def test_cancel_before_outbound_registration_aborts_and_joins_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

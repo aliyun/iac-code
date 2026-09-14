@@ -11,6 +11,7 @@ from typing import Any, AsyncGenerator, AsyncIterator, cast
 
 import httpx
 from a2a.server.agent_execution.active_task import INTERRUPTED_TASK_STATES, TERMINAL_TASK_STATES
+from a2a.server.context import ServerCallContext
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.events.event_queue_v2 import QueueShutDown
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -91,6 +92,10 @@ from iac_code.a2a.push_worker import A2APushDeliveryWorker
 from iac_code.a2a.request_mode import resolve_request_run_mode
 from iac_code.a2a.request_scoped_active_task import (
     DirectMessageRequestStarted,
+    DirectPipelineRecoveryRequiredError,
+    DirectPipelineRouteGate,
+    DirectPipelineRouteGateCarrier,
+    DirectPipelineRouteOutcome,
     RequestScopedActiveTask,
     RequestScopedActiveTaskRegistry,
 )
@@ -576,6 +581,50 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             return admission if isinstance(admission, str) and admission else None
         return None
 
+    async def _reconcile_and_replace_recovered_sdk_task(
+        self,
+        params: SendMessageRequest,
+        context: Any,
+    ) -> str | None:
+        task_id = params.message.task_id
+        if not task_id:
+            return None
+        context_id = params.message.context_id
+        if not context_id:
+            return None
+        registry = cast("RequestScopedActiveTaskRegistry | None", getattr(self, "_active_task_registry", None))
+        if registry is None:
+            return await self._reconcile_recoverable_pipeline_task(params, context)
+        reconcile_and_replace = getattr(registry, "reconcile_and_replace_for_recovery", None)
+        if not callable(reconcile_and_replace):
+            return await self._reconcile_recoverable_pipeline_task(params, context)
+        return await reconcile_and_replace(
+            task_id,
+            call_context=context,
+            context_id=context_id,
+            acquire_admission=lambda: self._reconcile_recoverable_pipeline_task(params, context),
+            release_admission=(
+                self.task_store.release_recoverable_input_admission
+                if isinstance(self.task_store, A2ATaskStore)
+                else None
+            ),
+        )
+
+    async def _release_untransferred_recovery(
+        self,
+        params: SendMessageRequest,
+        context: Any,
+    ) -> None:
+        admission = self._take_recoverable_input_admission(context)
+        if admission is None:
+            return
+        task_id = params.message.task_id
+        if task_id:
+            registry = cast("RequestScopedActiveTaskRegistry", self._active_task_registry)
+            await registry.cancel_recovery_reservation(task_id, admission)
+        if isinstance(self.task_store, A2ATaskStore):
+            await self.task_store.release_recoverable_input_admission(admission)
+
     async def on_message_send(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
@@ -602,14 +651,12 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     refreshed = await self.task_store.get(permission_response.task_id, context)
                     return refreshed or task
         await self._hydrate_recoverable_pipeline_task_id(params)
-        admission = await self._reconcile_recoverable_pipeline_task(params, context)
+        admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
         self._stage_recoverable_input_admission(context, admission)
         try:
             return await super().on_message_send(params, context)
         finally:
-            untransferred_admission = self._take_recoverable_input_admission(context)
-            if isinstance(self.task_store, A2ATaskStore):
-                await self.task_store.release_recoverable_input_admission(untransferred_admission)
+            await self._release_untransferred_recovery(params, context)
 
     async def on_message_send_stream(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
@@ -626,7 +673,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     return
         if permission_response is None:
             await self._hydrate_recoverable_pipeline_task_id(params)
-            admission = await self._reconcile_recoverable_pipeline_task(params, context)
+            admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
         else:
             admission = None
         self._stage_recoverable_input_admission(context, admission)
@@ -641,18 +688,31 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     and task.status.state not in TERMINAL_TASK_STATES
                     and (task.status.state not in INTERRUPTED_TASK_STATES or permission_response is not None)
                 ):
+                    route_gate = (
+                        DirectPipelineRouteGate()
+                        if permission_response is None and resolve_request_run_mode(params.message) is RunMode.PIPELINE
+                        else None
+                    )
                     active_stream = self._on_active_message_send_stream(
                         params,
                         context,
                         task=task,
                         active_task=active_task,
+                        route_gate=route_gate,
                     )
+                    recovery_required = False
                     try:
-                        async for event in active_stream:
-                            yield event
+                        try:
+                            async for event in active_stream:
+                                yield event
+                        except DirectPipelineRecoveryRequiredError:
+                            recovery_required = True
                     finally:
                         await active_stream.aclose()
-                    return
+                    if not recovery_required:
+                        return
+                    admission = await self._wait_for_direct_pipeline_recovery(params, context)
+                    self._stage_recoverable_input_admission(context, admission)
             if permission_response is not None and isinstance(self.task_store, A2ATaskStore):
                 task = await self.task_store.get(permission_response.task_id, context)
                 if task is not None:
@@ -681,9 +741,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             finally:
                 await tracked_stream.aclose()
         finally:
-            untransferred_admission = self._take_recoverable_input_admission(context)
-            if isinstance(self.task_store, A2ATaskStore):
-                await self.task_store.release_recoverable_input_admission(untransferred_admission)
+            await self._release_untransferred_recovery(params, context)
 
     async def _on_inactive_permission_send_stream(self, params: SendMessageRequest, context, *, task: Task):
         """Resume an existing input boundary without asking the SDK to recreate its task."""
@@ -758,7 +816,15 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         except BaseException:
             logger.debug("Detached permission response continuation failed", exc_info=True)
 
-    async def _on_active_message_send_stream(self, params: SendMessageRequest, context, *, task: Task, active_task):
+    async def _on_active_message_send_stream(
+        self,
+        params: SendMessageRequest,
+        context,
+        *,
+        task: Task,
+        active_task,
+        route_gate: DirectPipelineRouteGate | None = None,
+    ):
         request_context = await self._request_context_builder.build(
             params=params,
             task_id=task.id,
@@ -766,6 +832,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             task=task,
             context=context,
         )
+        if route_gate is not None:
+            DirectPipelineRouteGateCarrier.attach(request_context, route_gate)
         direct_message_lock = active_task.direct_message_lock
         await direct_message_lock.acquire()
         reference_registered = False
@@ -783,8 +851,9 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 active_task._reference_count += 1
                 reference_registered = True
             tapped_queue = await active_task._event_queue_subscribers.tap()
-            request_started = DirectMessageRequestStarted()
-            await active_task._event_queue_agent.enqueue_event(request_started)
+            request_started = route_gate.marker if route_gate is not None else DirectMessageRequestStarted()
+            if route_gate is None:
+                await active_task._event_queue_agent.enqueue_event(request_started)
 
             async def run_active_message() -> None:
                 try:
@@ -836,6 +905,14 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     finally:
                         tapped_queue.task_done()
                     acknowledge_pipeline_transport_delivery(event)
+            if route_gate is not None:
+                assert producer_task is not None
+                await producer_task
+                producer_task = None
+                if route_gate.outcome is DirectPipelineRouteOutcome.RECOVERY_REQUIRED:
+                    raise DirectPipelineRecoveryRequiredError
+                if route_gate.outcome is DirectPipelineRouteOutcome.PENDING:
+                    raise RuntimeError("Active Pipeline follow-up did not resolve its route gate")
         except (asyncio.CancelledError, GeneratorExit):
             raise
         finally:
@@ -850,19 +927,105 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             if not producer_owns_lock:
                 direct_message_lock.release()
             if producer_task is not None:
-                if producer_task.done():
+                if route_gate is not None:
+                    cleanup_task = asyncio.create_task(
+                        self._finish_detached_active_pipeline_request(
+                            producer_task,
+                            params=params,
+                            context=context,
+                            route_gate=route_gate,
+                        ),
+                        name=f"a2a-detached-pipeline-recovery-{task.id}",
+                    )
+                    self._track_detached_message_producer(cleanup_task)
+                elif producer_task.done():
                     await self._cleanup_active_message_producer(producer_task, task.id)
                 else:
                     cleanup_task = asyncio.create_task(
                         self._cleanup_active_message_producer(producer_task, task.id),
                         name=f"a2a-detached-message-producer-{task.id}",
                     )
-                    detached_producers = getattr(self, "_detached_message_producers", None)
-                    if detached_producers is None:
-                        detached_producers = set()
-                        self._detached_message_producers = detached_producers
-                    detached_producers.add(cleanup_task)
-                    cleanup_task.add_done_callback(detached_producers.discard)
+                    self._track_detached_message_producer(cleanup_task)
+
+    def _track_detached_message_producer(self, task: asyncio.Task[Any]) -> None:
+        detached_producers = getattr(self, "_detached_message_producers", None)
+        if detached_producers is None:
+            detached_producers = set()
+            self._detached_message_producers = detached_producers
+        detached_producers.add(task)
+        task.add_done_callback(detached_producers.discard)
+
+    async def _finish_detached_active_pipeline_request(
+        self,
+        producer_task: asyncio.Task[Any],
+        *,
+        params: SendMessageRequest,
+        context: Any,
+        route_gate: DirectPipelineRouteGate,
+    ) -> None:
+        task_id = params.message.task_id or "unknown"
+        detached_context = self._copy_detached_recovery_context(context)
+        base_stream = None
+        try:
+            await producer_task
+            if route_gate.outcome is DirectPipelineRouteOutcome.ACTIVE:
+                return
+            if route_gate.outcome is DirectPipelineRouteOutcome.PENDING:
+                raise RuntimeError("Active Pipeline follow-up did not resolve its route gate")
+
+            admission = await self._wait_for_direct_pipeline_recovery(params, detached_context)
+            self._stage_recoverable_input_admission(detached_context, admission)
+            base_stream = DefaultRequestHandler.on_message_send_stream(self, params, detached_context)
+            async for _event in base_stream:
+                pass
+        except asyncio.CancelledError:
+            if not producer_task.done():
+                producer_task.cancel()
+                await asyncio.gather(producer_task, return_exceptions=True)
+            raise
+        except Exception as exc:
+            logger.error(
+                "Detached active Pipeline recovery task_id=%s failed: %s",
+                sanitize_strict_text(task_id),
+                sanitize_strict_text(str(exc)),
+            )
+        finally:
+            if base_stream is not None:
+                await base_stream.aclose()
+            await self._release_untransferred_recovery(params, detached_context)
+
+    @staticmethod
+    def _copy_detached_recovery_context(context: ServerCallContext) -> ServerCallContext:
+        state = dict(context.state)
+        state.pop(_RECOVERABLE_INPUT_ADMISSION_STATE_KEY, None)
+        return ServerCallContext(
+            state=state,
+            user=context.user,
+            tenant=context.tenant,
+            requested_extensions=set(context.requested_extensions),
+        )
+
+    async def _wait_for_direct_pipeline_recovery(
+        self,
+        params: SendMessageRequest,
+        context: Any,
+    ) -> str:
+        task_id = params.message.task_id
+        context_id = params.message.context_id
+        if not task_id or not context_id:
+            raise InvalidParamsError("Pipeline recovery requires task and context ids")
+        wait = getattr(self.agent_executor, "wait_until_recoverable_pipeline_input", None)
+        if callable(wait):
+            await wait(context_id=context_id, task_id=task_id)
+        if isinstance(self.task_store, A2ATaskStore):
+            try:
+                await self.task_store.wait_until_task_inactive(task_id, timeout=30)
+            except TimeoutError as exc:
+                raise InvalidParamsError("Pipeline continuation is still finalizing; retry the same request.") from exc
+        admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
+        if admission is None:
+            raise InvalidParamsError("Pipeline continuation is not ready; retry the same request.")
+        return admission
 
     async def _hydrate_recoverable_pipeline_task_id(self, params: SendMessageRequest) -> None:
         if resolve_request_run_mode(params.message) is not RunMode.PIPELINE or not isinstance(
@@ -936,7 +1099,10 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         if task.status.state in TERMINAL_TASK_STATES:
             task.status.CopyFrom(TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)))
             task.status.timestamp.GetCurrentTime()
-        return await self.task_store.reconcile_recoverable_input_required_task(task, context_record, context)
+        admission = await self.task_store.reconcile_recoverable_input_required_task(task, context_record, context)
+        if admission is None:
+            raise InvalidParamsError("Pipeline continuation is already being recovered; retry the same request.")
+        return admission
 
     async def _wait_for_active_message_events(self, active_task) -> None:
         event_queue_agent = getattr(active_task, "_event_queue_agent", None)

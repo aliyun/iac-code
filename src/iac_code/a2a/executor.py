@@ -77,6 +77,7 @@ from iac_code.a2a.pipeline_snapshot import (
 from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2AEventPublisher
 from iac_code.a2a.projection import a2a_safe_mode_enabled
 from iac_code.a2a.request_mode import resolve_request_run_mode
+from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGateCarrier
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -1270,6 +1271,18 @@ class IacCodeA2AExecutor(AgentExecutor):
             execution_control_service.set_termination_cleanup(self._terminate_detached_execution)
             execution_control_service.set_resume_callback(self._task_store.touch_context)
 
+    async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
+        if self._execution_control_service is None:
+            return
+        try:
+            await self._execution_control_service.wait_until_recoverable_input_continuation(
+                context_id=context_id,
+                task_id=task_id,
+                timeout=30,
+            )
+        except TimeoutError as exc:
+            raise InvalidParamsError("Pipeline continuation is still finalizing; retry the same request.") from exc
+
     async def resolve_sideband_permission(
         self, response: PermissionResponse, *, metadata: Any = None
     ) -> Message | None:
@@ -1715,16 +1728,30 @@ class IacCodeA2AExecutor(AgentExecutor):
                 context_ready_callback=activate_llm_headers,
             )
             try:
-                pipeline_result = await pipeline_executor.execute(
-                    context=context,
-                    event_queue=event_queue,
-                    task=task,
-                    task_id=task_id,
-                    context_id=context_id,
-                    cwd=cwd,
-                    pipeline_input=pipeline_input,
-                    active_followup_only=active_pipeline_owner is not None,
-                )
+                direct_route_gate = DirectPipelineRouteGateCarrier.read(context)
+                if direct_route_gate is None:
+                    pipeline_result = await pipeline_executor.execute(
+                        context=context,
+                        event_queue=event_queue,
+                        task=task,
+                        task_id=task_id,
+                        context_id=context_id,
+                        cwd=cwd,
+                        pipeline_input=pipeline_input,
+                        active_followup_only=active_pipeline_owner is not None,
+                    )
+                else:
+                    pipeline_result = await pipeline_executor.execute(
+                        context=context,
+                        event_queue=event_queue,
+                        task=task,
+                        task_id=task_id,
+                        context_id=context_id,
+                        cwd=cwd,
+                        pipeline_input=pipeline_input,
+                        active_followup_only=active_pipeline_owner is not None,
+                        direct_route_gate=direct_route_gate,
+                    )
                 if active_pipeline_owner is not None and pipeline_result is False:
                     owner_finished = active_pipeline_owner.done()
                     if owner_finished:

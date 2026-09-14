@@ -47,6 +47,7 @@ from iac_code.a2a.pipeline_stream import (
     pending_backup_publication_envelope,
 )
 from iac_code.a2a.pipeline_transport_delivery import PipelineTransportDeliveryClosedError
+from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGate
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -583,6 +584,7 @@ class IacCodeA2APipelineExecutor:
         pipeline_input: PipelineUserInput | str | None = None,
         prompt: str | None = None,
         active_followup_only: bool = False,
+        direct_route_gate: DirectPipelineRouteGate | None = None,
         permission_checkpoint: dict[str, Any] | None = None,
     ) -> bool | None:
         if pipeline_input is None:
@@ -690,6 +692,7 @@ class IacCodeA2APipelineExecutor:
                             cwd=cwd,
                             pipeline_input=pipeline_input,
                             preserve_task_record=preserve_active_task,
+                            direct_route_gate=direct_route_gate,
                         )
                     if routed:
                         return True
@@ -1257,11 +1260,16 @@ class IacCodeA2APipelineExecutor:
         cwd: str,
         pipeline_input: PipelineUserInput,
         preserve_task_record: bool,
+        direct_route_gate: DirectPipelineRouteGate | None = None,
     ) -> bool:
         runtime = ctx.runtime
         if getattr(runtime, "pipeline", None) is None:
             return False
-        if not await _register_active_interrupt(runtime):
+        if not await _register_active_interrupt(
+            runtime,
+            event_queue=event_queue,
+            direct_route_gate=direct_route_gate,
+        ):
             logger.info("Ignoring A2A pipeline interrupt after terminal publication started")
             return True
 
@@ -5182,12 +5190,29 @@ async def _settle_active_interrupt_safely(runtime: Any) -> None:
         raise cancellation
 
 
-async def _register_active_interrupt(runtime: Any) -> bool:
+async def _register_active_interrupt(
+    runtime: Any,
+    *,
+    event_queue: Any | None = None,
+    direct_route_gate: DirectPipelineRouteGate | None = None,
+) -> bool:
     async with _outbound_lock(runtime):
         if bool(getattr(runtime, "terminal_publication_started", False)):
+            if direct_route_gate is not None:
+                direct_route_gate.require_recovery()
             return False
         runtime.active_interrupt_count = _active_interrupt_count(runtime) + 1
         _interrupt_settled_event(runtime).clear()
+        try:
+            if direct_route_gate is not None:
+                if event_queue is None:
+                    raise RuntimeError("Direct Pipeline route gate requires an event queue")
+                await direct_route_gate.activate(event_queue)
+        except BaseException:
+            runtime.active_interrupt_count = max(0, _active_interrupt_count(runtime) - 1)
+            if runtime.active_interrupt_count == 0:
+                _interrupt_settled_event(runtime).set()
+            raise
         return True
 
 

@@ -1175,6 +1175,41 @@ async def test_recoverable_input_admission_rejects_mismatched_task_and_live_back
 
 
 @pytest.mark.asyncio
+async def test_recoverable_input_wait_wakes_after_last_background_task_finishes(tmp_path: Path) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    control = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await control.detach_task(current, execution_status="input-required")
+    control.phase = "terminated"
+    control.execution_status = "canceled"
+    control.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    control.release_ready = False
+    background_release = asyncio.Event()
+    background = control._spawn(background_release.wait(), "test-recovery-wait")
+
+    waiter = asyncio.create_task(
+        service.wait_until_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            timeout=1,
+        )
+    )
+    await asyncio.sleep(0)
+    assert not waiter.done()
+
+    background_release.set()
+    await background
+    await asyncio.wait_for(waiter, timeout=1)
+    await service.close()
+
+
+@pytest.mark.asyncio
 async def test_recoverable_input_admission_is_single_owner_across_service_instances(tmp_path: Path) -> None:
     first_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
     second_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
