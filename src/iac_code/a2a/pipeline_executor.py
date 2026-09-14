@@ -207,6 +207,12 @@ class A2APipelineRuntime:
     restart_requested: asyncio.Event = field(default_factory=asyncio.Event)
     interrupt_settled: asyncio.Event = field(default_factory=_new_set_asyncio_event)
 
+    def bind_publisher_event_queue(self, event_queue: Any) -> None:
+        """Route resumed Pipeline publications through the current SDK lifecycle."""
+
+        if self.publisher is not None:
+            self.publisher.event_queue = event_queue
+
 
 @dataclass(frozen=True)
 class _StreamConsumeResult:
@@ -5208,6 +5214,7 @@ async def _register_active_interrupt(
                 if event_queue is None:
                     raise RuntimeError("Direct Pipeline route gate requires an event queue")
                 await direct_route_gate.activate(event_queue)
+                runtime.bind_publisher_event_queue(event_queue)
         except BaseException:
             runtime.active_interrupt_count = max(0, _active_interrupt_count(runtime) - 1)
             if runtime.active_interrupt_count == 0:

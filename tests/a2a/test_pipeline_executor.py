@@ -2397,6 +2397,32 @@ async def test_direct_route_gate_fence_is_published_only_after_interrupt_registr
 
 
 @pytest.mark.asyncio
+async def test_direct_route_gate_rebinds_recovered_publisher_to_current_lifecycle_queue() -> None:
+    from iac_code.a2a import pipeline_executor as module
+    from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGate
+
+    stale_queue = FakeEventQueue()
+    current_queue = FakeEventQueue()
+    publisher = SimpleNamespace(event_queue=stale_queue)
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        publisher=publisher,
+    )
+    gate = DirectPipelineRouteGate()
+
+    assert await module._register_active_interrupt(
+        runtime,
+        event_queue=current_queue,
+        direct_route_gate=gate,
+    )
+
+    assert publisher.event_queue is current_queue
+    assert current_queue.events == [gate.marker]
+    assert stale_queue.events == []
+    await module._settle_active_interrupt_safely(runtime)
+
+
+@pytest.mark.asyncio
 async def test_cancel_before_outbound_registration_aborts_and_joins_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

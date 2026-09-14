@@ -66,7 +66,7 @@ from iac_code.services.session_backup import BackupReason, SessionBackupService
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
 
-from .fakes import FakeAgentLoop, FakeRuntime, pending_future
+from .fakes import FakeAgentLoop, FakeEventQueue, FakeRuntime, pending_future
 
 _STREAM_TEST_TIMEOUT = 5
 
@@ -2219,6 +2219,120 @@ async def test_active_message_route_ignores_old_terminal_events_around_its_reque
         await subscribers.close(immediate=True)
 
     assert events == [current_update]
+    assert active_task._reference_count == 0
+    assert not active_task.direct_message_lock.locked()
+
+
+@pytest.mark.asyncio
+async def test_active_pipeline_reentry_delivers_events_after_sdk_lifecycle_replacement() -> None:
+    from iac_code.a2a import pipeline_executor as pipeline_executor_module
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    await store.save(task, call_context)
+    record = await store.get_or_create_task(task_id=task.id, context_id=task.context_id)
+    record.active_task = asyncio.current_task()
+    update = TaskStatusUpdateEvent(
+        task_id=task.id,
+        context_id=task.context_id,
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    subscribers = EventQueueSource(create_default_sink=False)
+    stale_queue = FakeEventQueue()
+
+    class ForwardingAgentQueue:
+        async def enqueue_event(self, event) -> None:
+            await subscribers.enqueue_event((event, task))
+
+        async def test_only_join_incoming_queue(self) -> None:
+            await subscribers.test_only_join_incoming_queue()
+
+    class ActiveTask:
+        def __init__(self) -> None:
+            self.task_id = task.id
+            self.direct_message_lock = asyncio.Lock()
+            self._lock = asyncio.Lock()
+            self._is_finished = asyncio.Event()
+            self._reference_count = 0
+            self._event_queue_agent = ForwardingAgentQueue()
+            self._event_queue_subscribers = subscribers
+
+        async def _maybe_cleanup(self) -> None:
+            return None
+
+    active_task = ActiveTask()
+
+    class ActiveTaskRegistry:
+        async def get(self, _task_id):
+            return active_task
+
+    class RequestContextBuilder:
+        async def build(self, **_kwargs):
+            return SimpleNamespace()
+
+    runtime = pipeline_executor_module.A2APipelineRuntime(
+        agent_runtime=SimpleNamespace(),
+        publisher=SimpleNamespace(event_queue=stale_queue),
+    )
+
+    class AgentExecutor:
+        async def execute(self, request_context, event_queue) -> None:
+            gate = DirectPipelineRouteGateCarrier.read(request_context)
+            assert gate is not None
+            assert await pipeline_executor_module._register_active_interrupt(
+                runtime,
+                event_queue=event_queue,
+                direct_route_gate=gate,
+            )
+            try:
+                await runtime.publisher.event_queue.enqueue_event(update)
+            finally:
+                await pipeline_executor_module._settle_active_interrupt_safely(runtime)
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = AgentExecutor()
+    handler._request_context_builder = RequestContextBuilder()
+    handler._active_task_registry = ActiveTaskRegistry()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    message = Message(
+        message_id="message-1",
+        task_id=task.id,
+        context_id=task.context_id,
+        role=Role.ROLE_USER,
+        parts=[Part(text='{"selected_candidate_index": 0}')],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline"}}, message.metadata)
+
+    try:
+        events = await asyncio.wait_for(
+            _collect_async(
+                handler.on_message_send_stream(
+                    SimpleNamespace(message=message, configuration=None),
+                    call_context,
+                )
+            ),
+            timeout=_STREAM_TEST_TIMEOUT,
+        )
+    finally:
+        await subscribers.close(immediate=True)
+
+    assert events == [update]
+    assert stale_queue.events == []
     assert active_task._reference_count == 0
     assert not active_task.direct_message_lock.locked()
 
