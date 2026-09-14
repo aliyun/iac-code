@@ -411,7 +411,7 @@ _PROVIDER_MODEL_FALLBACK_MAP = {
         "qwen3.8-max-0902": "qwen3.8-max",
         "qwen3.8-flash": "qwen3.7-flash",
         "deepseek-v4.1-flash": "qwen3.8-flash",
-        "ZHIPU/GLM-5.3-Flash": "ZHIPU/GLM-5.3",
+        "ZHIPU/GLM-5.3-Flash": "qwen3.8-flash",
         "qwen3.6-plus": "qwen3.6-flash",
     },
     "dashscope_token_plan": {

@@ -525,7 +525,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 params.message.task_id = permission_response.task_id
             resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
             if callable(resolve):
-                ack = await resolve(permission_response)
+                ack = await resolve(permission_response, metadata=params.message)
                 if ack is not None:
                     return ack
             if isinstance(self.task_store, A2ATaskStore) and not await self.task_store.is_task_active(
@@ -554,7 +554,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 params.message.task_id = permission_response.task_id
             resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
             if callable(resolve):
-                ack = await resolve(permission_response)
+                ack = await resolve(permission_response, metadata=params.message)
                 if ack is not None:
                     yield ack
                     return

@@ -459,9 +459,9 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "o4-mini": _OPENAI_O_SERIES_SPEC,
     },
     "deepseek": {
-        "deepseek-flash": _DEEPSEEK_SPEC,
         "deepseek-v4-pro": _DEEPSEEK_SPEC,
         "deepseek-v4-flash": _DEEPSEEK_SPEC,
+        "deepseek-v4-flash-vision-exp": _DEEPSEEK_SPEC,
     },
     "dashscope": {
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,

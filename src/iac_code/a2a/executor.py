@@ -117,6 +117,7 @@ from iac_code.pipeline.engine.cleanup import (
     mark_cleanup_prompt_message_completed,
 )
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
+from iac_code.providers.request_headers import use_provider_request_headers
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
@@ -1268,10 +1269,23 @@ class IacCodeA2AExecutor(AgentExecutor):
             execution_control_service.set_termination_cleanup(self._terminate_detached_execution)
             execution_control_service.set_resume_callback(self._task_store.touch_context)
 
-    async def resolve_sideband_permission(self, response: PermissionResponse) -> Message | None:
+    async def resolve_sideband_permission(
+        self, response: PermissionResponse, *, metadata: Any = None
+    ) -> Message | None:
         if not await self._permission_input_registry.is_sideband_response(response):
             return None
-        approved = await self._permission_input_registry.answer(response)
+        requested_llm_headers = resolve_a2a_llm_headers(metadata)
+
+        async def commit_llm_headers() -> None:
+            await self._task_store.bind_context_llm_headers(
+                response.context_id,
+                requested_llm_headers,
+            )
+
+        approved = await self._permission_input_registry.answer(
+            response,
+            before_delivery=commit_llm_headers,
+        )
         return permission_ack_message(response, approved=approved)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
@@ -1288,10 +1302,6 @@ class IacCodeA2AExecutor(AgentExecutor):
             context_id,
             self._resolve_telemetry_channel(metadata),
         )
-        llm_headers = await self._task_store.resolve_context_llm_headers(
-            context_id,
-            resolve_a2a_llm_headers(metadata),
-        )
         try:
             if permission_response is not None and self._execution_control_service is not None:
                 existing = self._execution_control_service.get_for_context(context_id)
@@ -1300,11 +1310,52 @@ class IacCodeA2AExecutor(AgentExecutor):
                 if existing is not None and existing.owner == owner and current_task is not None:
                     await existing.attach_task(current_task, mark_working=False)
                     bind_execution_control(existing)
-            with a2a_request_context(
-                telemetry_channel=telemetry_channel,
-                llm_headers=llm_headers,
-            ):
-                await self._execute(context, event_queue, context_id=context_id)
+            requested_llm_headers = resolve_a2a_llm_headers(metadata)
+            with contextlib.ExitStack() as request_scope:
+                request_scope.enter_context(a2a_request_context(telemetry_channel=telemetry_channel))
+                llm_headers: Mapping[str, str] | None = None
+                llm_headers_committed = False
+                llm_headers_active = False
+
+                async def commit_llm_headers() -> None:
+                    """Update the shared session binding after task/context validation."""
+
+                    nonlocal llm_headers, llm_headers_committed
+                    if llm_headers_committed:
+                        return
+                    llm_headers = await self._task_store.bind_context_llm_headers(
+                        context_id,
+                        requested_llm_headers,
+                    )
+                    llm_headers_committed = True
+
+                async def activate_llm_headers() -> None:
+                    """Activate committed headers in the current request's async context."""
+
+                    await commit_llm_headers()
+                    await activate_bound_llm_headers()
+
+                async def activate_bound_llm_headers() -> None:
+                    """Activate the session binding without replacing it from this request."""
+
+                    nonlocal llm_headers
+                    nonlocal llm_headers_active
+                    if llm_headers_active:
+                        return
+                    if llm_headers is None:
+                        llm_headers = await self._task_store.bind_context_llm_headers(context_id, None)
+                    assert llm_headers is not None
+                    request_scope.enter_context(use_provider_request_headers(llm_headers, live=True))
+                    llm_headers_active = True
+
+                await self._execute(
+                    context,
+                    event_queue,
+                    context_id=context_id,
+                    commit_llm_headers=commit_llm_headers,
+                    activate_bound_llm_headers=activate_bound_llm_headers,
+                    activate_llm_headers=activate_llm_headers,
+                )
         finally:
             control = current_execution_control()
             if control is not None:
@@ -1320,7 +1371,31 @@ class IacCodeA2AExecutor(AgentExecutor):
             reset_execution_control(execution_scope)
             reset_execution_participants(participant_scope)
 
-    async def _execute(self, context: RequestContext, event_queue: EventQueue, *, context_id: str) -> None:
+    async def _execute(
+        self,
+        context: RequestContext,
+        event_queue: EventQueue,
+        *,
+        context_id: str,
+        commit_llm_headers: Callable[[], Awaitable[None]] | None = None,
+        activate_bound_llm_headers: Callable[[], Awaitable[None]] | None = None,
+        activate_llm_headers: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        if commit_llm_headers is None:
+
+            async def commit_llm_headers() -> None:
+                return None
+
+        if activate_bound_llm_headers is None:
+
+            async def activate_bound_llm_headers() -> None:
+                return None
+
+        if activate_llm_headers is None:
+
+            async def activate_llm_headers() -> None:
+                return None
+
         requested_task_id = context.task_id or None
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         permission_response = parse_permission_response(getattr(context, "message", None))
@@ -1332,8 +1407,19 @@ class IacCodeA2AExecutor(AgentExecutor):
             pending = None
             try:
                 pending = await self._permission_input_registry.pending_for_response(permission_response)
+                owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
+                if owner:
+                    permission_task = await self._task_store.get_task_record(permission_response.task_id)
+                    if permission_task.context_id != permission_response.context_id:
+                        raise PermissionIdentityValidationError("permission_task_context_changed", retryable=False)
+                    if permission_task.owner and permission_task.owner != owner:
+                        raise PermissionIdentityValidationError("permission_task_owner_changed", retryable=False)
                 with a2a_request_context(aliyun_credential=response_credential):
-                    approved = await self._permission_input_registry.answer(permission_response)
+                    approved = await self._permission_input_registry.answer(
+                        permission_response,
+                        before_delivery=commit_llm_headers,
+                    )
+                await activate_bound_llm_headers()
             except PermissionIdentityValidationError as exc:
                 await self._publish_permission_identity_error(
                     event_queue,
@@ -1350,6 +1436,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     context,
                     event_queue,
                     response=permission_response,
+                    activate_llm_headers=activate_llm_headers,
                 ):
                     return
                 raise
@@ -1391,6 +1478,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     context,
                     event_queue,
                     response=permission_response,
+                    activate_llm_headers=activate_llm_headers,
                 ):
                     return
                 raise InvalidParamsError("permission_resume_invalid: suspended permission is unavailable.")
@@ -1620,6 +1708,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 request_policy_override=request_policy_override,
                 backup_service=self._backup_service,
                 pipeline_name=requested_pipeline_name,
+                context_ready_callback=activate_llm_headers,
             )
             try:
                 pipeline_result = await pipeline_executor.execute(
@@ -1711,6 +1800,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     cwd=cwd,
                     runtime_factory=runtime_factory,
                 )
+                await activate_llm_headers()
                 control = current_execution_control()
                 if control is not None:
                     control.bind_session(ctx.session_id)
@@ -2418,6 +2508,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         event_queue: EventQueue,
         *,
         response: PermissionResponse,
+        activate_llm_headers: Callable[[], Awaitable[None]] | None = None,
     ) -> bool:
         """Claim and resume a permission whose process-local registry was lost."""
 
@@ -2433,6 +2524,9 @@ class IacCodeA2AExecutor(AgentExecutor):
             return False
         if task_record.context_id != response.context_id:
             raise InvalidParamsError("input_response_mismatch: permission task context changed.")
+        owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
+        if owner and task_record.owner and task_record.owner != owner:
+            raise InvalidParamsError("Task belongs to a different owner")
         minimum_generation = getattr(task_record, "expected_permission_backup_generation", None)
         try:
             reconcile_result = await self._reconcile_session_before_route(
@@ -2476,6 +2570,8 @@ class IacCodeA2AExecutor(AgentExecutor):
             decision = record.get("decision")
             if not isinstance(decision, dict) or decision.get("value") != expected_value:
                 raise InvalidParamsError("permission_resume_invalid: permission decision conflicts with receipt.")
+            if activate_llm_headers is not None:
+                await activate_llm_headers()
             await self._publish_permission_recovery_ack(
                 event_queue,
                 response=response,
@@ -2490,6 +2586,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                 raise InvalidParamsError(
                     "permission_resume_invalid: permission decision conflicts with active recovery."
                 )
+            if activate_llm_headers is not None:
+                await activate_llm_headers()
             await self._publish_permission_recovery_ack(
                 event_queue,
                 response=response,
@@ -2526,6 +2624,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 metadata_api_key=metadata_api_key,
                 request_policy_override=request_policy_override,
                 backup_service=self._backup_service,
+                context_ready_callback=activate_llm_headers,
             )
 
         persisted_decision = record.get("decision")
@@ -2677,6 +2776,8 @@ class IacCodeA2AExecutor(AgentExecutor):
         task_record = await self._task_store.get_or_create_task(
             task_id=response.task_id, context_id=response.context_id, restore_interrupted=False
         )
+        if activate_llm_headers is not None:
+            await activate_llm_headers()
         if not await self._permission_wait_coordinator.acquire_restore(boundary_id):
             await self._publish_permission_recovery_ack(
                 event_queue,

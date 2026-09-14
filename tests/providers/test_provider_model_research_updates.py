@@ -102,7 +102,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
     assert not _model_entry("dashscope", "xiaomi/mimo-v2.5-pro").support_multimodal
     assert not _model_entry("dashscope", "deepseek-v4-pro-0813").support_multimodal
     assert not _model_entry("dashscope", "ZHIPU/GLM-5.3").support_multimodal
-    assert not _model_entry("dashscope", "ZHIPU/GLM-5.3-Flash").support_multimodal
+    assert _model_entry("dashscope", "ZHIPU/GLM-5.3-Flash").support_multimodal
     # The public adapter can only send local attachments as data URLs, but
     # Moonshot-hosted K3 on DashScope accepts public image URLs only.
     assert not _model_entry("dashscope", "kimi/kimi-k3").support_multimodal
@@ -256,11 +256,17 @@ def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
         assert get_thinking_spec(provider_key, "glm-5.1").family is ThinkingFamily.ZHIPU
 
 
-def test_direct_deepseek_uses_v41_flash_api_model_id() -> None:
-    assert PROVIDER_REGISTRY["deepseek"].default_model == "deepseek-flash"
-    assert _model_ids("deepseek") == ["deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"]
-    assert _model_entry("deepseek", "deepseek-flash").support_multimodal
-    assert get_thinking_spec("deepseek", "deepseek-flash").family is ThinkingFamily.OPENAI
+def test_direct_deepseek_uses_documented_v4_model_ids() -> None:
+    assert PROVIDER_REGISTRY["deepseek"].default_model == "deepseek-v4-flash"
+    assert _model_ids("deepseek") == [
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash-vision-exp",
+    ]
+    assert not _model_entry("deepseek", "deepseek-v4-flash").support_multimodal
+    assert _model_entry("deepseek", "deepseek-v4-flash-vision-exp").support_multimodal
+    assert get_thinking_spec("deepseek", "deepseek-v4-flash").family is ThinkingFamily.OPENAI
+    assert get_thinking_spec("deepseek", "deepseek-v4-flash-vision-exp").family is ThinkingFamily.OPENAI
     assert "deepseek-v4.1-flash" not in _model_ids("deepseek")
 
 

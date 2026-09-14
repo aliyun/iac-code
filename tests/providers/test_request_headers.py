@@ -3,6 +3,7 @@ from iac_code.providers.base import Message
 from iac_code.providers.openai_provider import OpenAIProvider
 from iac_code.providers.qwen_provider import QwenProvider
 from iac_code.providers.request_headers import (
+    get_provider_request_headers,
     merge_provider_request_headers,
     use_provider_request_headers,
 )
@@ -13,6 +14,20 @@ def test_merge_provider_request_headers_overrides_case_insensitively() -> None:
         {"X-Provider": "default", "X-Keep": "yes"},
         {"x-provider": "a2a"},
     ) == {"X-Keep": "yes", "x-provider": "a2a"}
+
+
+def test_live_provider_request_headers_reflect_session_binding_updates() -> None:
+    binding = {"Authorization": "Bearer first"}
+
+    with use_provider_request_headers(binding, live=True):
+        assert get_provider_request_headers() == {"Authorization": "Bearer first"}
+        binding.clear()
+        binding["Authorization"] = "Bearer second"
+        assert get_provider_request_headers() == {"Authorization": "Bearer second"}
+        binding.clear()
+        assert get_provider_request_headers() == {}
+
+    assert get_provider_request_headers() == {}
 
 
 def test_openai_provider_adds_request_local_headers() -> None:

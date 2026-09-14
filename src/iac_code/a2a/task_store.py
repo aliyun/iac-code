@@ -23,6 +23,7 @@ from google.protobuf.json_format import MessageToDict, ParseDict
 from iac_code.a2a.backup import await_fenced, run_sync_fenced
 from iac_code.a2a.events import with_iac_code_session_metadata
 from iac_code.a2a.execution_control import current_execution_control, current_execution_termination_reason
+from iac_code.a2a.metadata_redaction import strip_llm_headers_from_metadata
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.types import (
@@ -142,6 +143,7 @@ class A2ATaskStore(TaskStore):
     async def save(self, task: Task, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)
         task_id = validate_protocol_id(task.id)
+        _strip_task_llm_headers(task)
         async with self._mutation_lock:
             record = self._tasks.get(task_id)
             next_state = _task_state_from_sdk_task(task)
@@ -469,6 +471,7 @@ class A2ATaskStore(TaskStore):
                     record = self._contexts.get(context_id)
                     if record is not None and record.runtime is None and current_execution_termination_reason() is None:
                         self._contexts.pop(context_id, None)
+                        self._discard_context_llm_headers_locked(context_id)
                     if self._context_runtime_tasks.get(context_id) is create_task:
                         discard_task = self._context_runtime_tasks.pop(context_id, None)
                     if discard_task is not None:
@@ -499,6 +502,7 @@ class A2ATaskStore(TaskStore):
                 record = self._contexts.get(context_id)
                 if record is not None and record.runtime is None:
                     self._contexts.pop(context_id, None)
+                    self._discard_context_llm_headers_locked(context_id)
                 if self._context_runtime_tasks.get(context_id) is create_task:
                     self._context_runtime_tasks.pop(context_id, None)
             raise
@@ -585,14 +589,36 @@ class A2ATaskStore(TaskStore):
 
         context_id = validate_protocol_id(context_id)
         async with self._mutation_lock:
+            binding = self._context_llm_headers.get(context_id)
             if requested_headers is not None:
-                headers = dict(requested_headers)
-                if headers:
-                    self._context_llm_headers[context_id] = headers
-                else:
-                    self._context_llm_headers.pop(context_id, None)
-                return dict(headers)
-            return dict(self._context_llm_headers.get(context_id, {}))
+                replacement = dict(requested_headers)
+                if binding is None:
+                    binding = {}
+                    self._context_llm_headers[context_id] = binding
+                binding.clear()
+                binding.update(replacement)
+            return dict(binding or {})
+
+    async def bind_context_llm_headers(
+        self,
+        context_id: str,
+        requested_headers: Mapping[str, str] | None,
+    ) -> Mapping[str, str]:
+        """Return the stable live header binding for one validated A2A context."""
+
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            binding = self._context_llm_headers.setdefault(context_id, {})
+            if requested_headers is not None:
+                replacement = dict(requested_headers)
+                binding.clear()
+                binding.update(replacement)
+            return binding
+
+    def _discard_context_llm_headers_locked(self, context_id: str) -> None:
+        binding = self._context_llm_headers.pop(context_id, None)
+        if binding is not None:
+            binding.clear()
 
     async def get_context_record(self, context_id: str) -> A2AContextRecord:
         context_id = validate_protocol_id(context_id)
@@ -1242,6 +1268,7 @@ class A2ATaskStore(TaskStore):
                 record = self._contexts.pop(context_id, None)
                 if record is not None:
                     await _close_runtime(record.runtime)
+                self._discard_context_llm_headers_locked(context_id)
                 for task_id, task in list(self._tasks.items()):
                     if task.context_id == context_id:
                         task.expired = True
@@ -1281,6 +1308,8 @@ class A2ATaskStore(TaskStore):
             ]
             self._contexts.clear()
             self._pending_context_telemetry_channels.clear()
+            for binding in self._context_llm_headers.values():
+                binding.clear()
             self._context_llm_headers.clear()
             self._context_runtime_tasks.clear()
             self._context_runtime_waiters.clear()
@@ -1628,7 +1657,18 @@ def _close_runtime_task_when_done(
 def _copy_task(task: Task) -> Task:
     copied = Task()
     copied.CopyFrom(task)
+    _strip_task_llm_headers(copied)
     return copied
+
+
+def _strip_task_llm_headers(task: Task) -> None:
+    """Keep sensitive provider headers out of every public Task projection."""
+
+    strip_llm_headers_from_metadata(task.metadata)
+    if task.HasField("status") and task.status.HasField("message"):
+        strip_llm_headers_from_metadata(task.status.message.metadata)
+    for message in task.history:
+        strip_llm_headers_from_metadata(message.metadata)
 
 
 def _project_task(task: Task, *, include_artifacts: bool) -> Task:

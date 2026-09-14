@@ -1907,11 +1907,17 @@ async def test_executor_keeps_initial_task_echo_canonical_without_changing_runti
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
 
     prompt = f"paths: {cwd}/src/app.py {config_dir}/tool-results/session-1/result.txt /opt/iac-code-outside/config.yaml"
-    context = FakeRequestContext(text=prompt, metadata={"iac_code": {"cwd": str(cwd)}})
+    metadata = {
+        "iac_code": {
+            "cwd": str(cwd),
+            "llm_headers": {"Authorization": "Bearer top-secret"},
+        }
+    }
+    context = FakeRequestContext(text=prompt, metadata=metadata)
     context.message = Message(
         role=Role.ROLE_USER,
         parts=[Part(text=prompt)],
-        metadata={"iac_code": {"cwd": str(cwd)}},
+        metadata=metadata,
         message_id="msg-paths",
     )
 
@@ -1925,6 +1931,8 @@ async def test_executor_keeps_initial_task_echo_canonical_without_changing_runti
     history = rendered["history"][0]
     assert history["parts"][0]["text"] == prompt
     assert history["metadata"]["iac_code"]["cwd"] == str(cwd)
+    assert "llm_headers" not in history["metadata"]["iac_code"]
+    assert "top-secret" not in str(rendered)
     assert str(cwd) in history["parts"][0]["text"]
     assert str(config_dir) in history["parts"][0]["text"]
     assert "/opt/iac-code-outside/config.yaml" in history["parts"][0]["text"]
@@ -2570,6 +2578,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
 
     class SpyPipelineExecutor:
         def __init__(self, **kwargs):
+            self.context_ready_callback = kwargs["context_ready_callback"]
             calls.append(("init", kwargs))
 
         async def execute(
@@ -2584,6 +2593,7 @@ async def test_executor_delegates_pipeline_mode_after_validation(
             pipeline_input,
             active_followup_only=False,
         ):
+            await self.context_ready_callback()
             captured_channels.append(attributes.build_signal_attributes()["iac_code.channel"])
             captured_headers.append(get_provider_request_headers())
             calls.append(
@@ -4451,6 +4461,73 @@ async def test_executor_binds_llm_headers_to_a2a_context(monkeypatch: pytest.Mon
 
 
 @pytest.mark.asyncio
+async def test_executor_rejected_workspace_request_cannot_replace_context_llm_headers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from iac_code.providers.request_headers import get_provider_request_headers
+
+    captured_headers: list[dict[str, str]] = []
+    original_run_streaming = FakeAgentLoop.run_streaming
+
+    async def capturing_run_streaming(self, prompt):
+        captured_headers.append(get_provider_request_headers())
+        async for event in original_run_streaming(self, prompt):
+            yield event
+
+    monkeypatch.setattr(FakeAgentLoop, "run_streaming", capturing_run_streaming)
+    runtime = FakeRuntime(agent_loop=FakeAgentLoop([TextDeltaEvent(text="ok")]), session_id="sess-headers")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    valid_cwd = tmp_path / "valid"
+    invalid_cwd = tmp_path / "invalid"
+    valid_cwd.mkdir()
+    invalid_cwd.mkdir()
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-valid-1",
+            context_id="ctx-headers-protected",
+            metadata={
+                "iac_code": {
+                    "cwd": str(valid_cwd),
+                    "llm_headers": {"Authorization": "Bearer victim"},
+                }
+            },
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-invalid",
+            context_id="ctx-headers-protected",
+            metadata={
+                "iac_code": {
+                    "cwd": str(invalid_cwd),
+                    "llm_headers": {"Authorization": "Bearer attacker"},
+                }
+            },
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-headers-valid-2",
+            context_id="ctx-headers-protected",
+            metadata={"iac_code": {"cwd": str(valid_cwd)}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert captured_headers == [
+        {"Authorization": "Bearer victim"},
+        {"Authorization": "Bearer victim"},
+    ]
+    assert await store.resolve_context_llm_headers("ctx-headers-protected", None) == {"Authorization": "Bearer victim"}
+
+
+@pytest.mark.asyncio
 async def test_executor_applies_metadata_channel_over_environment(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -4915,7 +4992,9 @@ async def test_suspending_permission_answer_waits_for_owner_then_resumes_once(
     async def pending_for_response(_response):
         return pending
 
-    async def answer(_response):
+    async def answer(_response, *, before_delivery=None):
+        if before_delivery is not None:
+            await before_delivery()
         return True
 
     async def wait_for_suspended_owner(_boundary_id):
@@ -4924,7 +5003,8 @@ async def test_suspending_permission_answer_waits_for_owner_then_resumes_once(
     async def complete(value):
         completed.append(value)
 
-    async def resume(_context, _queue, *, response):
+    async def resume(_context, _queue, *, response, activate_llm_headers=None):
+        del activate_llm_headers
         resumed.append(response)
         return True
 
@@ -4977,7 +5057,8 @@ async def test_failed_live_permission_answer_releases_stale_pending_before_recov
         calls.append("lookup")
         return pending
 
-    async def answer(_response):
+    async def answer(_response, *, before_delivery=None):
+        del before_delivery
         calls.append("answer")
         raise InvalidParamsError("permission boundary has no live owner")
 
@@ -4985,7 +5066,8 @@ async def test_failed_live_permission_answer_releases_stale_pending_before_recov
         assert value is pending
         calls.append("complete")
 
-    async def resume(_context, _queue, *, response):
+    async def resume(_context, _queue, *, response, activate_llm_headers=None):
+        del activate_llm_headers
         calls.append("recover")
         return True
 
@@ -5004,10 +5086,12 @@ async def test_failed_live_permission_answer_releases_stale_pending_before_recov
     assert calls == ["lookup", "answer", "complete", "recover"]
 
 
+@pytest.mark.parametrize("checkpoint_phase", ["RESOLVED", "RESTORING"])
 @pytest.mark.asyncio
 async def test_persisted_permission_restores_backup_before_checkpoint_lookup(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    checkpoint_phase: str,
 ) -> None:
     backup_root = tmp_path / "backup"
     origin_config = tmp_path / "origin-config"
@@ -5042,7 +5126,7 @@ async def test_persisted_permission_restores_backup_before_checkpoint_lookup(
         "contextId": context_id,
         "inputId": input_id,
         "toolUseId": tool_use_id,
-        "phase": "RESOLVED",
+        "phase": checkpoint_phase,
         "decision": {"value": "deny"},
     }
     (permission_waits_dir / f"{boundary_id}.json").write_text(json.dumps(checkpoint), encoding="utf-8")
@@ -5070,11 +5154,18 @@ async def test_persisted_permission_restores_backup_before_checkpoint_lookup(
     )
 
     assert not restored_storage.exists(cwd, session_id)
+    activations: list[str] = []
+
+    async def activate_llm_headers() -> None:
+        activations.append("activated")
+
     assert await executor._resume_persisted_permission(
         FakeRequestContext(task_id=task_id, context_id=context_id),
         FakeEventQueue(),
         response=response,
+        activate_llm_headers=activate_llm_headers,
     )
+    assert activations == ["activated"]
     assert restored_storage.exists(cwd, session_id)
     assert (
         restored_storage.session_dir(cwd, session_id) / "permission-waits" / f"{boundary_id}.json"
@@ -5245,7 +5336,8 @@ async def test_identity_lookup_failure_keeps_live_permission_pending(monkeypatch
     async def pending_for_response(_response):
         return pending
 
-    async def answer(_response):
+    async def answer(_response, *, before_delivery=None):
+        del before_delivery
         raise PermissionIdentityValidationError("InternalError", retryable=True)
 
     async def publish(_queue, **kwargs):
@@ -5275,6 +5367,143 @@ async def test_identity_lookup_failure_keeps_live_permission_pending(monkeypatch
         "retryable": True,
         "inputId": "input-1",
         "toolUseId": "tool-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_rejected_live_permission_does_not_replace_context_llm_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.resolve_context_llm_headers("ctx-1", {"Authorization": "Bearer accepted"})
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+
+    async def pending_for_response(_response):
+        return SimpleNamespace()
+
+    async def answer(_response, *, before_delivery=None):
+        assert before_delivery is not None
+        raise PermissionIdentityValidationError("cloud_execution_identity_changed", retryable=False)
+
+    monkeypatch.setattr("iac_code.a2a.executor.parse_permission_response", lambda _message: response)
+    monkeypatch.setattr(executor._permission_input_registry, "pending_for_response", pending_for_response)
+    monkeypatch.setattr(executor._permission_input_registry, "answer", answer)
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer rejected"}}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {
+        "Authorization": "Bearer accepted"
+    }
+
+
+@pytest.mark.asyncio
+async def test_duplicate_live_permission_keeps_first_committed_llm_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    pending = SimpleNamespace(state="pending")
+    answer_count = 0
+
+    async def pending_for_response(_response):
+        return pending
+
+    async def answer(_response, *, before_delivery=None):
+        nonlocal answer_count
+        answer_count += 1
+        if answer_count == 1:
+            assert before_delivery is not None
+            await before_delivery()
+        return True
+
+    async def claim_continuation(_pending):
+        return None
+
+    monkeypatch.setattr("iac_code.a2a.executor.parse_permission_response", lambda _message: response)
+    monkeypatch.setattr(executor._permission_input_registry, "pending_for_response", pending_for_response)
+    monkeypatch.setattr(executor._permission_input_registry, "answer", answer)
+    monkeypatch.setattr(executor._permission_input_registry, "claim_continuation", claim_continuation)
+
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer first"}}},
+        ),
+        FakeEventQueue(),
+    )
+    await executor.execute(
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer duplicate"}}},
+        ),
+        FakeEventQueue(),
+    )
+
+    assert answer_count == 2
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {
+        "Authorization": "Bearer first"
+    }
+
+
+@pytest.mark.asyncio
+async def test_rejected_sideband_permission_does_not_replace_context_llm_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.resolve_context_llm_headers("ctx-1", {"Authorization": "Bearer accepted"})
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id="input-1",
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+
+    async def is_sideband_response(_response):
+        return True
+
+    async def answer(_response, *, before_delivery=None):
+        assert before_delivery is not None
+        raise InvalidParamsError("permission_resume_invalid: pending permission is not active")
+
+    monkeypatch.setattr(executor._permission_input_registry, "is_sideband_response", is_sideband_response)
+    monkeypatch.setattr(executor._permission_input_registry, "answer", answer)
+
+    with pytest.raises(InvalidParamsError, match="pending permission is not active"):
+        await executor.resolve_sideband_permission(
+            response,
+            metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer rejected"}}},
+        )
+
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {
+        "Authorization": "Bearer accepted"
     }
 
 

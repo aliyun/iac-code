@@ -69,7 +69,7 @@ class TestGetThinkingSpec:
         assert EffortLevel.NONE not in o3.allowed_efforts
 
     def test_deepseek_official_uses_openai_family_with_low_high_max(self):
-        for model in ("deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash"):
+        for model in ("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"):
             spec = get_thinking_spec("deepseek", model)
             assert spec.family is ThinkingFamily.OPENAI
             assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)

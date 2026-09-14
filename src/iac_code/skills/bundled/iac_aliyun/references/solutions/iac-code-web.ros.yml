@@ -338,7 +338,7 @@ Resources:
                     'providers': {
                         'dashscope': {
                             'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-                            'model': 'qwen3.8-max',
+                            'model': 'qwen3.8-max-0902',
                             'name': 'DashScope',
                         }
                     },

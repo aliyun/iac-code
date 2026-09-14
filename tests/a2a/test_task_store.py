@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 from a2a.auth.user import User
 from a2a.server.context import ServerCallContext
-from a2a.types import Artifact, ListTasksRequest, Part, Task, TaskState, TaskStatus
+from a2a.types import Artifact, ListTasksRequest, Message, Part, Role, Task, TaskState, TaskStatus
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict, ParseDict
 from google.protobuf.timestamp_pb2 import Timestamp
@@ -195,6 +195,121 @@ async def test_context_llm_header_binding_can_be_reused_updated_and_cleared() ->
 
     assert await store.resolve_context_llm_headers("ctx-1", {}) == {}
     assert await store.resolve_context_llm_headers("ctx-1", None) == {}
+
+
+@pytest.mark.asyncio
+async def test_context_cleanup_removes_llm_header_binding(tmp_path) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), idle_timeout_seconds=0, cleanup_interval_seconds=300)
+    await store.get_or_create_context(
+        context_id="ctx-headers",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: object(),
+    )
+    await store.resolve_context_llm_headers("ctx-headers", {"Authorization": "Bearer secret"})
+
+    await store.cleanup_once(now_offset_seconds=1)
+
+    assert await store.resolve_context_llm_headers("ctx-headers", None) == {}
+
+
+@pytest.mark.asyncio
+async def test_task_store_strips_llm_headers_from_followup_history() -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    first = Message(
+        message_id="message-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text="first")],
+        metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer first"}, "keep": "yes"}},
+    )
+    task = Task(
+        id="task-headers",
+        context_id="ctx-headers",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+        history=[first],
+    )
+    await store.save(task)
+
+    followup = Message(
+        message_id="message-2",
+        role=Role.ROLE_USER,
+        parts=[Part(text="second")],
+        metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer second"}, "keep": "yes"}},
+    )
+    task.history.append(followup)
+    await store.save(task)
+
+    stored = await store.get("task-headers")
+    assert stored is not None
+    rendered = MessageToDict(stored, preserving_proto_field_name=False)
+    assert [message["metadata"]["iac_code"] for message in rendered["history"]] == [
+        {"keep": "yes"},
+        {"keep": "yes"},
+    ]
+    assert "llm_headers" not in str(rendered)
+    assert "Bearer first" not in str(rendered)
+    assert "Bearer second" not in str(rendered)
+
+
+@pytest.mark.asyncio
+async def test_failed_context_runtime_rebuild_clears_live_llm_header_binding(tmp_path) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context = await store.get_or_create_context(
+        context_id="ctx-rebuild-failure",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: object(),
+    )
+    binding = await store.bind_context_llm_headers(
+        context.context_id,
+        {"Authorization": "Bearer stale"},
+    )
+    context.runtime = None
+
+    def fail_runtime(_session_id: str):
+        raise RuntimeError("bootstrap failed")
+
+    with pytest.raises(RuntimeError, match="bootstrap failed"):
+        await store.get_or_create_context(
+            context_id=context.context_id,
+            cwd=str(tmp_path),
+            runtime_factory=fail_runtime,
+        )
+
+    assert context.context_id not in store._contexts
+    assert context.context_id not in store._context_llm_headers
+    assert dict(binding) == {}
+
+
+@pytest.mark.asyncio
+async def test_cancelled_context_runtime_rebuild_clears_live_llm_header_binding(tmp_path) -> None:
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context = await store.get_or_create_context(
+        context_id="ctx-rebuild-cancel",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: object(),
+    )
+    binding = await store.bind_context_llm_headers(
+        context.context_id,
+        {"Authorization": "Bearer stale"},
+    )
+    context.runtime = None
+    release = threading.Event()
+
+    rebuild = asyncio.create_task(
+        store.get_or_create_context(
+            context_id=context.context_id,
+            cwd=str(tmp_path),
+            runtime_factory=lambda _session_id: release.wait(timeout=2) or object(),
+        )
+    )
+    await asyncio.sleep(0.01)
+    rebuild.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await rebuild
+    release.set()
+
+    assert context.context_id not in store._contexts
+    assert context.context_id not in store._context_llm_headers
+    assert dict(binding) == {}
 
 
 @pytest.mark.asyncio

@@ -2787,7 +2787,7 @@ class TestModelPrefixAutoMapping:
             ("qwen3.6-plus", "dashscope"),
             ("qwen3.8-max", "dashscope"),
             ("qwen-max", "dashscope"),
-            ("deepseek-flash", "deepseek"),
+            ("deepseek-v4-flash-vision-exp", "deepseek"),
             ("deepseek-v4-pro", "deepseek"),
             ("deepseek-chat", "deepseek"),
         ],

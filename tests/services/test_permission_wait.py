@@ -800,13 +800,18 @@ async def test_live_reply_commits_required_backup_before_future_delivery(tmp_pat
         decision = store.load(boundary_id)["decision"]
         observed.append((decision["status"], decision["backupStatus"], future.done()))
 
+    async def before_release() -> None:
+        decision = store.load(boundary_id)["decision"]
+        observed.append((decision["status"], decision["backupStatus"], future.done()))
+
     await coordinator.claim_live(
         boundary_id=boundary_id,
         value="allow_once",
         before_delivery=backup,
+        before_release=before_release,
     )
 
-    assert observed == [("claimed", "pending", False)]
+    assert observed == [("claimed", "pending", False), ("claimed", "committed", False)]
     assert await future is True
     decision = store.load(boundary_id)["decision"]
     assert decision["backupStatus"] == "committed"

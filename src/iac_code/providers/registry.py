@@ -83,7 +83,7 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
             ModelEntry("glm-5.2"),
             ModelEntry("glm-5.1"),
             ModelEntry("ZHIPU/GLM-5.3"),
-            ModelEntry("ZHIPU/GLM-5.3-Flash"),
+            ModelEntry("ZHIPU/GLM-5.3-Flash", support_multimodal=True),
             ModelEntry("MiniMax/MiniMax-M3", support_multimodal=True),
             ModelEntry("MiniMax/MiniMax-M2.7"),
             ModelEntry("MiniMax/MiniMax-M2.5"),
@@ -167,10 +167,9 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         provider_class="iac_code.providers.deepseek_provider.DeepSeekProvider",
         base_url="https://api.deepseek.com/v1",
         models=[
-            ModelEntry("deepseek-flash", is_default=True, support_multimodal=True),
+            ModelEntry("deepseek-v4-flash", is_default=True),
             ModelEntry("deepseek-v4-pro"),
-            # Temporarily routed to V4.1 Flash by DeepSeek for compatibility.
-            ModelEntry("deepseek-v4-flash"),
+            ModelEntry("deepseek-v4-flash-vision-exp", support_multimodal=True),
         ],
         qwenpaw_provider_ids=["deepseek"],
     ),

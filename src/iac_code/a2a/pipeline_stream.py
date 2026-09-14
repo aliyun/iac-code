@@ -1473,7 +1473,13 @@ class _PipelinePermissionResolutionOwner:
     def __init__(self, publisher: PipelineA2AEventPublisher) -> None:
         self.publisher = publisher
 
-    async def resolve_permission(self, pending: PendingPermission, response: PermissionResponse) -> bool:
+    async def resolve_permission(
+        self,
+        pending: PendingPermission,
+        response: PermissionResponse,
+        *,
+        before_delivery: Callable[[], Awaitable[None]] | None = None,
+    ) -> bool:
         registry = self.publisher.permission_input_registry
         if registry is None:
             raise PipelineA2APersistenceError("Sub Pipeline permission registry is unavailable")
@@ -1503,6 +1509,8 @@ class _PipelinePermissionResolutionOwner:
         if future is None or future.done():
             await registry.complete(pending)
             raise PipelineA2APersistenceError("Sub Pipeline permission wait point is unavailable")
+        if before_delivery is not None:
+            await before_delivery()
         future.set_result(approved)
         await registry.complete(pending)
         return approved

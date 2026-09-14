@@ -6,7 +6,7 @@ import contextlib
 import contextvars
 from collections.abc import Iterator, Mapping
 
-_request_headers: contextvars.ContextVar[tuple[tuple[str, str], ...]] = contextvars.ContextVar(
+_request_headers: contextvars.ContextVar[Mapping[str, str] | tuple[tuple[str, str], ...]] = contextvars.ContextVar(
     "iac_code_provider_request_headers",
     default=(),
 )
@@ -18,9 +18,14 @@ def get_provider_request_headers() -> dict[str, str]:
 
 
 @contextlib.contextmanager
-def use_provider_request_headers(headers: Mapping[str, str]) -> Iterator[None]:
+def use_provider_request_headers(headers: Mapping[str, str], *, live: bool = False) -> Iterator[None]:
     """Apply HTTP headers to provider calls made in the current async context."""
-    token = _request_headers.set(tuple(headers.items()))
+    # A live binding is intentionally shared by A2A continuation tasks so a
+    # sideband permission response can rotate or clear session headers before
+    # the suspended Pipeline makes its next provider call. Other callers keep
+    # the immutable snapshot behavior.
+    value: Mapping[str, str] | tuple[tuple[str, str], ...] = headers if live else tuple(headers.items())
+    token = _request_headers.set(value)
     try:
         yield
     finally:

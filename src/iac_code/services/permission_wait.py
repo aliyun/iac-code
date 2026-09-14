@@ -1166,6 +1166,7 @@ class PermissionWaitCoordinator:
         source: str = "user",
         on_new_claim: Callable[[str], bool] | None = None,
         before_delivery: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
+        before_release: Callable[[], Awaitable[None]] | None = None,
     ) -> tuple[dict[str, Any], bool]:
         # Keep delivery independent of the transport request that carried the
         # answer. Once the decision is durable, canceling that request must not
@@ -1177,6 +1178,7 @@ class PermissionWaitCoordinator:
                 source=source,
                 on_new_claim=on_new_claim,
                 before_delivery=before_delivery,
+                before_release=before_release,
             )
         )
         delivery.add_done_callback(_consume_background_exception)
@@ -1190,6 +1192,7 @@ class PermissionWaitCoordinator:
         source: str,
         on_new_claim: Callable[[str], bool] | None,
         before_delivery: Callable[[dict[str, Any]], Awaitable[None] | None] | None,
+        before_release: Callable[[], Awaitable[None]] | None,
     ) -> tuple[dict[str, Any], bool]:
         owner = self._owners.get(boundary_id)
         if owner is None:
@@ -1229,6 +1232,8 @@ class PermissionWaitCoordinator:
                         await result
                 record = owner.store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
                 owner.generation = int(record["generation"])
+            if created and before_release is not None:
+                await before_release()
             phase = record.get("phase")
             if phase in {"SUSPENDING", "SUSPENDED", "RESTORING"}:
                 return record, created
