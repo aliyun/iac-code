@@ -826,11 +826,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
 
         task.status.CopyFrom(TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)))
         task.status.timestamp.GetCurrentTime()
-        await self.task_store.save(task, context)
-        if context_record.active_task_id == task_id:
-            context_record.active_task_id = None
-            context_record.touch()
-            self.task_store.mirror_context(context_record)
+        await self.task_store.reconcile_recoverable_input_required_task(task, context_record, context)
 
     async def _wait_for_active_message_events(self, active_task) -> None:
         event_queue_agent = getattr(active_task, "_event_queue_agent", None)

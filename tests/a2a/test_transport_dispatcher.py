@@ -14,6 +14,7 @@ from a2a.types import Message, Part, Role, SubscribeToTaskRequest, Task, TaskSta
 from google.protobuf.struct_pb2 import Value
 
 from iac_code.a2a.input_required import PERMISSION_QUERY_PREFIX
+from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
@@ -158,9 +159,20 @@ async def test_dispatcher_stream_yields_events(monkeypatch, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("release_ready", "expected_task_state", "expected_persisted_state", "expected_active_task_id"),
+    [
+        pytest.param(True, TaskState.TASK_STATE_INPUT_REQUIRED, "input-required", None, id="release-ready"),
+        pytest.param(False, TaskState.TASK_STATE_FAILED, "failed", "task-1", id="release-pending"),
+    ],
+)
 async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting_input(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
+    release_ready: bool,
+    expected_task_state: int,
+    expected_persisted_state: str,
+    expected_active_task_id: str | None,
 ) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     cwd = tmp_path / "workspace"
@@ -168,7 +180,8 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
     context_id = "ctx-1"
     task_id = "task-1"
     call_context = ServerCallContext()
-    store = A2ATaskStore()
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(persistence=persistence)
     ctx = await store.get_or_create_context(
         context_id=context_id,
         cwd=str(cwd),
@@ -183,6 +196,10 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
             status=TaskStatus(state=TaskState.TASK_STATE_FAILED),
         ),
         call_context,
+    )
+    store.set_execution_control_provider(
+        lambda _context_id: {"phase": "terminated", "releaseReady": release_ready},
+        lambda: not release_ready,
     )
 
     pending_input = {
@@ -226,14 +243,68 @@ async def test_handler_reconciles_terminal_task_when_pipeline_sidecar_is_waiting
     handler._validate_pipeline_message_request = lambda _params: None
     params = SimpleNamespace(message=SimpleNamespace(task_id=task_id, context_id=context_id))
 
+    if release_ready:
+        original_save_task = persistence.save_task
+
+        def fail_recovery_task_save(snapshot):
+            if snapshot.state == "input-required":
+                raise OSError("temporary recovery write failure")
+            original_save_task(snapshot)
+
+        monkeypatch.setattr(persistence, "save_task", fail_recovery_task_save)
+        with pytest.raises(OSError, match="temporary recovery write failure"):
+            await handler.on_message_send(params, call_context)
+        assert observed == {}
+        failed_recovery_task = await store.get(task_id, call_context)
+        assert failed_recovery_task is not None
+        assert failed_recovery_task.status.state == TaskState.TASK_STATE_FAILED
+        assert persistence.load_task(task_id).state == "failed"
+        assert persistence.load_context(context_id).active_task_id == task_id
+        assert (await store.get_context_record(context_id)).active_task_id == task_id
+        monkeypatch.setattr(persistence, "save_task", original_save_task)
+
     result = await handler.on_message_send(params, call_context)
 
     assert isinstance(result, Task)
-    assert observed["state"] == TaskState.TASK_STATE_INPUT_REQUIRED
-    assert result.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert observed["state"] == expected_task_state
+    assert result.status.state == expected_task_state
+    persisted_task = persistence.load_task(task_id)
+    assert persisted_task is not None
+    assert persisted_task.state == expected_persisted_state
+    persisted_context = persistence.load_context(context_id)
+    assert persisted_context is not None
+    assert persisted_context.active_task_id == expected_active_task_id
+    assert (await store.get_context_record(context_id)).active_task_id == expected_active_task_id
     session_dir = SessionStorage().session_dir(str(cwd), ctx.session_id)
     context_snapshot = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
-    assert context_snapshot["active_task_id"] is None
+    assert context_snapshot["active_task_id"] == expected_active_task_id
+
+    if release_ready:
+        for seconds, late_state in enumerate(
+            (
+                TaskState.TASK_STATE_FAILED,
+                TaskState.TASK_STATE_CANCELED,
+                TaskState.TASK_STATE_COMPLETED,
+            ),
+            start=1,
+        ):
+            late_terminal = Task(
+                id=task_id,
+                context_id=context_id,
+                status=TaskStatus(state=late_state),
+            )
+            late_terminal.status.timestamp.FromSeconds(seconds)
+            await store.save(late_terminal, call_context)
+
+            visible_task = await store.get(task_id, call_context)
+            assert visible_task is not None
+            assert visible_task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+            persisted_task = persistence.load_task(task_id)
+            assert persisted_task is not None
+            assert persisted_task.state == "input-required"
+            persisted_context = persistence.load_context(context_id)
+            assert persisted_context is not None
+            assert persisted_context.active_task_id is None
 
 
 @pytest.mark.asyncio
