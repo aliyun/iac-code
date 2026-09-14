@@ -8607,6 +8607,48 @@ async def test_active_task_route_answers_pending_question_without_marking_input_
 
 
 @pytest.mark.asyncio
+async def test_base_lifecycle_active_interrupt_publishes_binding_frame_before_routing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    stale_queue = FakeEventQueue()
+    current_queue = FakeEventQueue()
+    publisher = SimpleNamespace(event_queue=stale_queue)
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        pipeline=object(),
+        publisher=publisher,
+    )
+    ctx = SimpleNamespace(runtime=runtime)
+    task = SimpleNamespace(task_id="task-1", context_id="ctx-1", state="input-required")
+    executor = _pipeline_executor()
+    route_registered = AsyncMock(return_value=True)
+    monkeypatch.setattr(executor, "_route_registered_active_pipeline_interrupt", route_registered)
+
+    routed = await executor._route_active_pipeline_interrupt(
+        current_queue,
+        task=task,
+        ctx=ctx,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        pipeline_input='{"selected_candidate_index": 0}',
+        preserve_task_record=True,
+        bind_publisher_event_queue=True,
+    )
+
+    assert routed is True
+    assert publisher.event_queue is current_queue
+    assert _status_events(current_queue)[0]["status"]["state"] == "TASK_STATE_WORKING"
+    assert _status_events(current_queue)[0]["taskId"] == "task-1"
+    assert _status_events(current_queue)[0]["contextId"] == "ctx-1"
+    assert stale_queue.events == []
+    route_registered.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_executor_routes_running_sidecar_pending_ask_to_ask_resume(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

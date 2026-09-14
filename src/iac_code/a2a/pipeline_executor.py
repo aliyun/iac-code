@@ -1304,6 +1304,19 @@ class IacCodeA2APipelineExecutor:
                 )
             return True
 
+        # The SDK lifecycle that recovered an input-required task may not
+        # replay its existing Task projection.  Publish a request-scoped
+        # non-terminal frame before routing so the upstream caller can bind
+        # execution control even when the accepted interrupt itself completes
+        # without producing another public event.
+        if direct_route_gate is None and bind_publisher_event_queue:
+            await self._publish_status(
+                event_queue,
+                task_id=task_id,
+                context_id=context_id,
+                state=TaskState.TASK_STATE_WORKING,
+            )
+
         interrupt_registered = True
 
         async def settle_interrupt() -> None:
