@@ -141,8 +141,10 @@ class RequestScopedActiveTaskRegistry(ActiveTaskRegistry):
     ) -> RequestScopedActiveTask:
         async with self._lock:
             existing = self._active_tasks.get(task_id)
-            if existing is not None:
+            if existing is not None and not existing._is_finished.is_set():
                 return cast("RequestScopedActiveTask", existing)
+            if existing is not None:
+                self._active_tasks.pop(task_id, None)
 
             task_manager = TaskManager(
                 task_id=task_id,
@@ -165,3 +167,16 @@ class RequestScopedActiveTaskRegistry(ActiveTaskRegistry):
             create_task_if_missing=create_task_if_missing,
         )
         return active_task
+
+    def _on_active_task_cleanup(self, active_task: ActiveTask) -> None:
+        cleanup = asyncio.create_task(
+            self._remove_task_if_same(active_task),
+            name=f"remove-finished-active-task:{active_task.task_id}",
+        )
+        self._cleanup_tasks.add(cleanup)
+        cleanup.add_done_callback(self._cleanup_tasks.discard)
+
+    async def _remove_task_if_same(self, active_task: ActiveTask) -> None:
+        async with self._lock:
+            if self._active_tasks.get(active_task.task_id) is active_task:
+                self._active_tasks.pop(active_task.task_id, None)

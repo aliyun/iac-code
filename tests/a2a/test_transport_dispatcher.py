@@ -322,6 +322,80 @@ async def test_request_scoped_registry_releases_admission_after_executor_failure
 
 
 @pytest.mark.asyncio
+async def test_request_scoped_registry_replaces_finished_task_after_durable_reopen() -> None:
+    class IdleExecutor:
+        async def execute(self, _request_context, _event_queue) -> None:
+            return None
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    reopened = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+    )
+    await store.save(reopened, call_context)
+    registry = RequestScopedActiveTaskRegistry(agent_executor=IdleExecutor(), task_store=store)
+    finished = RequestScopedActiveTask(
+        agent_executor=IdleExecutor(),
+        task_id="task-1",
+        task_manager=SimpleNamespace(),
+    )
+    finished._is_finished.set()
+    registry._active_tasks["task-1"] = finished
+
+    replacement = await registry.get_or_create(
+        "task-1",
+        call_context=call_context,
+        context_id="ctx-1",
+        create_task_if_missing=True,
+    )
+
+    assert replacement is not finished
+    assert await registry.get("task-1") is replacement
+
+    replacement._producer_task.cancel()
+    replacement._consumer_task.cancel()
+    await asyncio.gather(replacement._producer_task, replacement._consumer_task, return_exceptions=True)
+    await replacement._event_queue_agent.close(immediate=True)
+    await replacement._event_queue_subscribers.close(immediate=True)
+
+
+@pytest.mark.asyncio
+async def test_request_scoped_registry_old_cleanup_cannot_remove_replacement() -> None:
+    registry = RequestScopedActiveTaskRegistry(agent_executor=SimpleNamespace(), task_store=A2ATaskStore())
+    finished = RequestScopedActiveTask(
+        agent_executor=SimpleNamespace(),
+        task_id="task-1",
+        task_manager=SimpleNamespace(),
+    )
+    replacement = RequestScopedActiveTask(
+        agent_executor=SimpleNamespace(),
+        task_id="task-1",
+        task_manager=SimpleNamespace(),
+    )
+    registry._active_tasks["task-1"] = finished
+
+    await registry._lock.acquire()
+    try:
+        registry._on_active_task_cleanup(finished)
+        registry._active_tasks["task-1"] = replacement
+    finally:
+        registry._lock.release()
+    await asyncio.gather(*tuple(registry._cleanup_tasks))
+
+    assert await registry.get("task-1") is replacement
+
+    await finished._event_queue_agent.close(immediate=True)
+    await finished._event_queue_subscribers.close(immediate=True)
+    await replacement._event_queue_agent.close(immediate=True)
+    await replacement._event_queue_subscribers.close(immediate=True)
+
+
+@pytest.mark.asyncio
 async def test_reused_sdk_producer_reads_admission_from_each_request_context() -> None:
     observed: list[str | None] = []
 
