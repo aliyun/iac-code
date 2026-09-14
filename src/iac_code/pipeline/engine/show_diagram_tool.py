@@ -277,16 +277,17 @@ def _diagram_event_from_render_result(
     render_result: ArchitectureMultiViewRenderResult,
     diagram_stage: str,
 ) -> DiagramEvent:
-    views = [
+    views: list[dict[str, Any]] = [
         {
             "id": view.id,
             "title": view.title,
             "purpose": view.purpose,
             "mermaid_source": view.mermaid_source,
+            "graph": view.graph,
         }
         for view in render_result.views
     ]
-    mermaid_source = views[0]["mermaid_source"] if views else "graph TD"
+    mermaid_source = str(views[0]["mermaid_source"]) if views else "graph TD"
     return DiagramEvent(
         candidate_name=candidate_name,
         template_content=template_content,

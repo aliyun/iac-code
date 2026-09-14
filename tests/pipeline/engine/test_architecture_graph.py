@@ -3858,3 +3858,59 @@ Resources:
             ],
         }
     ]
+
+
+def test_each_rendered_view_carries_renderer_neutral_graph_with_matching_membership():
+    template = """\
+ROSTemplateFormatVersion: '2015-09-01'
+Resources:
+  VPC:
+    Type: ALIYUN::ECS::VPC
+  VSwitch:
+    Type: ALIYUN::ECS::VSwitch
+    Properties:
+      VpcId:
+        Ref: VPC
+  ECS:
+    Type: ALIYUN::ECS::Instance
+    Properties:
+      VSwitchId:
+        Ref: VSwitch
+  Database:
+    Type: ALIYUN::RDS::DBInstance
+    Properties:
+      VSwitchId:
+        Ref: VSwitch
+"""
+
+    result = render_ros_template_architecture_views(
+        template,
+        semantic_plan={
+            "edges": [
+                {
+                    "from": "ECS",
+                    "to": "Database",
+                    "kind": "traffic",
+                    "label": "SQL",
+                    "confidence": "high",
+                }
+            ]
+        },
+    )
+
+    graph = result.views[0].graph
+    assert "graph" not in result.views[0].architecture_context
+    assert "graph" not in result.architecture_context["views"][0]
+    assert graph["version"] == 1
+    assert graph["layout"] == {"direction": "LR"}
+    assert [(container["id"], container["parentId"]) for container in graph["containers"]] == [
+        ("VPC", None),
+        ("VSwitch", "VPC"),
+    ]
+    assert {(node["id"], node["parentId"]) for node in graph["nodes"]} == {
+        ("ECS", "VSwitch"),
+        ("Database", "VSwitch"),
+    }
+    assert graph["edges"] == [
+        {"id": "edge_1_ECS_Database", "from": "ECS", "to": "Database", "label": "SQL", "style": "solid_arrow"}
+    ]

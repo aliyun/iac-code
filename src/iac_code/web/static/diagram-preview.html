@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title data-i18n="Architecture diagram preview">Architecture diagram preview</title>
+    <link rel="stylesheet" href="/static/styles.css?v=web-repl-ui-318" />
+    <link rel="stylesheet" href="/static/diagram-preview.css?v=diagram-preview-v2" />
+  </head>
+  <body>
+    <main class="diagram-preview-page">
+      <header class="diagram-preview-header">
+        <div>
+          <p class="diagram-preview-eyebrow">iac-code</p>
+          <h1 data-i18n="Architecture diagram preview">Architecture diagram preview</h1>
+          <p class="diagram-preview-intro" data-i18n="Choose or drop a ROS template to render its architecture diagram locally.">
+            Choose or drop a ROS template to render its architecture diagram locally.
+          </p>
+        </div>
+        <a class="diagram-preview-back" href="/" data-i18n="Back to conversations">Back to conversations</a>
+      </header>
+
+      <section class="diagram-preview-library" aria-labelledby="diagram-preview-library-title">
+        <div class="diagram-preview-library-copy">
+          <h2 id="diagram-preview-library-title" data-i18n="Template library">Template library</h2>
+          <p data-i18n="Select the local ros-templates folder once, then switch between the fixed corpus or random templates.">
+            Select the local ros-templates folder once, then switch between the fixed corpus or random templates.
+          </p>
+        </div>
+        <div class="diagram-preview-library-actions">
+          <label class="diagram-preview-button diagram-preview-repository-button">
+            <input
+              data-diagram-preview="repository-input"
+              type="file"
+              accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml"
+              webkitdirectory
+              directory
+              multiple
+              hidden
+            />
+            <span data-i18n="Select ros-templates folder">Select ros-templates folder</span>
+          </label>
+          <label class="diagram-preview-field">
+            <span data-i18n="Fixed 30-template corpus">Fixed 30-template corpus</span>
+            <select data-diagram-preview="corpus-select" disabled>
+              <option value="" selected data-i18n="Select a template">Select a template</option>
+            </select>
+          </label>
+          <button class="diagram-preview-button diagram-preview-random" data-diagram-preview="random" type="button" disabled>
+            <span aria-hidden="true">↝</span>
+            <span data-i18n="Random other template">Random other template</span>
+          </button>
+        </div>
+        <output
+          class="diagram-preview-library-status"
+          data-diagram-preview="repository-status"
+          role="status"
+          aria-live="polite"
+        ></output>
+      </section>
+
+      <section class="diagram-preview-picker" aria-labelledby="diagram-preview-picker-title">
+        <div class="diagram-preview-picker-copy">
+          <h2 id="diagram-preview-picker-title" data-i18n="Single template">Single template</h2>
+          <p data-i18n="Supports ROS YAML, YML, and JSON templates up to 2 MB.">
+            Supports ROS YAML, YML, and JSON templates up to 2 MB.
+          </p>
+        </div>
+        <label
+          class="diagram-preview-dropzone"
+          data-diagram-preview="dropzone"
+          tabindex="0"
+          role="button"
+          aria-label="Choose or drop a ROS template"
+          data-i18n-attr="aria-label:Choose or drop a ROS template"
+        >
+          <input
+            data-diagram-preview="input"
+            type="file"
+            accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml"
+            hidden
+          />
+          <span class="diagram-preview-drop-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14" />
+            </svg>
+          </span>
+          <strong data-i18n="Drop a template here, or click to choose">Drop a template here, or click to choose</strong>
+          <span data-i18n="The file is read for this preview and is not saved.">
+            The file is read for this preview and is not saved.
+          </span>
+        </label>
+        <output class="diagram-preview-status" data-diagram-preview="status" role="status" aria-live="polite"></output>
+      </section>
+
+      <section class="diagram-preview-result" data-diagram-preview="result" hidden aria-labelledby="diagram-preview-result-title">
+        <header class="diagram-preview-result-header">
+          <div>
+            <h2 id="diagram-preview-result-title" data-diagram-preview="filename"></h2>
+            <p data-diagram-preview="summary"></p>
+          </div>
+          <span class="diagram-preview-renderer" data-diagram-preview="renderer"></span>
+        </header>
+        <div class="diagram-preview-canvas" data-diagram-preview="canvas">
+          <div class="diagram-preview-render" data-diagram-preview="render"></div>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/static/js/diagram_preview.js?v=diagram-preview-v7"></script>
+  </body>
+</html>

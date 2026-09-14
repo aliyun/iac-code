@@ -19,6 +19,23 @@ def test_write_then_read_views_roundtrip(tmp_path, monkeypatch):
     assert read_cached("ctx1", 0, "TPL") == views
 
 
+def test_write_then_read_preserves_graph_and_cache_version(tmp_path, monkeypatch):
+    monkeypatch.setattr("iac_code.web.diagram_cache.get_config_dir", lambda: tmp_path)
+    graph = {
+        "version": 1,
+        "nodes": [{"id": "a", "label": "A", "resourceType": "ALIYUN::ECS::Instance", "parentId": None}],
+        "containers": [],
+        "edges": [],
+        "layout": {"direction": "LR"},
+    }
+    views = [{"id": "overview", "title": "Overview", "purpose": "All", "mermaidSource": "graph TD\n A", "graph": graph}]
+    write_cached("ctx1", 0, "TPL", views, "model-x")
+
+    assert read_cached("ctx1", 0, "TPL") == views
+    payload = json.loads(cache_path("ctx1", 0, template_hash("TPL")).read_text(encoding="utf-8"))
+    assert payload["version"] == 2
+
+
 def test_read_legacy_single_source_wrapped_as_one_view(tmp_path, monkeypatch):
     monkeypatch.setattr("iac_code.web.diagram_cache.get_config_dir", lambda: tmp_path)
     thash = template_hash("TPL")

@@ -22,6 +22,7 @@
 | `provider-update-guide.zh-CN.md` | Provider 模型调研、代码更新、测试与提交的中文维护指南。 |
 | `rendering/test_diagram_render.py` | 手工图表渲染检查。 |
 | `repl/e2e/` | 基于真实 PTY 驱动的 REPL pipeline 端到端场景 runner。因为使用 `pexpect`，仅支持 POSIX 环境。 |
+| `web/` | Web 静态资源维护和视觉评估工具，详见 `web/README.zh-CN.md`。 |
 
 ## 常用命令
 

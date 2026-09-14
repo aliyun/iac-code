@@ -46,7 +46,7 @@ class DisplayCandidate:
     candidate_index: int | None = None
     mermaid_source: str = ""
     diagram_stage: str = "optimized"
-    diagram_views: list[dict[str, str]] = field(default_factory=list)
+    diagram_views: list[dict[str, Any]] = field(default_factory=list)
     summary: str = ""
     cost_items: list[dict[str, Any]] = field(default_factory=list)
     total_monthly_cost: str = ""
@@ -603,8 +603,8 @@ class PipelineDisplayReducer:
         return "draft" if value == "draft" else "optimized"
 
     @staticmethod
-    def _diagram_views(value: Any, fallback_mermaid_source: str) -> list[dict[str, str]]:
-        views: list[dict[str, str]] = []
+    def _diagram_views(value: Any, fallback_mermaid_source: str) -> list[dict[str, Any]]:
+        views: list[dict[str, Any]] = []
         if isinstance(value, list):
             for index, raw in enumerate(value, start=1):
                 if not isinstance(raw, dict):
@@ -616,14 +616,16 @@ class PipelineDisplayReducer:
                 view_id = raw_view.get("id")
                 title = raw_view.get("title")
                 purpose = raw_view.get("purpose")
-                views.append(
-                    {
-                        "id": str(view_id or f"view_{index}"),
-                        "title": str(title or view_id or f"Diagram {index}"),
-                        "purpose": str(purpose or ""),
-                        "mermaid_source": mermaid_source,
-                    }
-                )
+                view: dict[str, Any] = {
+                    "id": str(view_id or f"view_{index}"),
+                    "title": str(title or view_id or f"Diagram {index}"),
+                    "purpose": str(purpose or ""),
+                    "mermaid_source": mermaid_source,
+                }
+                graph = raw_view.get("graph")
+                if isinstance(graph, dict) and graph.get("version") == 1:
+                    view["graph"] = graph
+                views.append(view)
         if not views and fallback_mermaid_source:
             views.append(
                 {

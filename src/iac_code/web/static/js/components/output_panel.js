@@ -1,8 +1,20 @@
 import { t } from "../i18n.js?v=web-repl-ui-277";
 // 输出面板:悬浮抽屉汇总资源栈与模板文件;自持 DOM,不进 render 扇出。
-import { renderMermaid, renderMermaidViews, renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v5";
+import {
+  disposeArchitectureDiagram,
+  renderArchitectureDiagram,
+} from "../architecture_diagram.js?v=eraser-browser-v14";
+import { renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v5";
 
 const STATUS_LABELS = { true: t("Success"), false: t("In progress / failed") };
+const DIAGRAM_PREVIEW_MIN_WIDTH = 560;
+const DIAGRAM_PREVIEW_CHROME_WIDTH = 34;
+
+export function diagramPreviewWidth(diagramWidth) {
+  const width = Number(diagramWidth);
+  if (!Number.isFinite(width) || width <= 0) return DIAGRAM_PREVIEW_MIN_WIDTH;
+  return Math.max(DIAGRAM_PREVIEW_MIN_WIDTH, Math.ceil(width) + DIAGRAM_PREVIEW_CHROME_WIDTH);
+}
 
 // 行首类型图标(静态 SVG 常量,随 currentColor 着色):资源栈=堆叠层、模板=文档、架构图=流程节点。
 const ROW_ICONS = {
@@ -46,6 +58,10 @@ function outputLeafName(path) {
 
 function diagramDisplayName(item) {
   return item.candidateName || outputLeafName(item.sourceRelPath) || t("Architecture diagram");
+}
+
+function architectureRendererLabel() {
+  return document.body?.dataset.architectureDiagramRenderer === "mermaid" ? "MERMAID" : "ERASER";
 }
 
 // 轻量正则高亮(无第三方依赖):先整体转义,再按 token 包裹。
@@ -198,8 +214,21 @@ export function createOutputController({
   let isOpen = false;
   let autoOpenedOnce = false;
   let activePreviewPath = null;
+  let activeDiagramCanvas = null;
+
+  function clearDiagramPreview() {
+    if (activeDiagramCanvas) disposeArchitectureDiagram(activeDiagramCanvas);
+    activeDiagramCanvas = null;
+  }
+
+  function resetPreviewLayout() {
+    preview?.classList?.remove?.("is-architecture");
+    preview?.style?.removeProperty?.("--architecture-preview-width");
+  }
 
   function closePreview() {
+    clearDiagramPreview();
+    resetPreviewLayout();
     activePreviewPath = null;
     if (preview) preview.hidden = true;
   }
@@ -207,6 +236,8 @@ export function createOutputController({
   async function openPreview(path) {
     const id = getSessionId?.();
     if (!id || !preview) return;
+    clearDiagramPreview();
+    resetPreviewLayout();
     activePreviewPath = path;
     preview.hidden = false;
     preview.replaceChildren(previewHead(path), loadingBody());
@@ -237,20 +268,28 @@ export function createOutputController({
     // 用唯一 diagramId 做陈旧性键(重名候选的 title 可能相同,无法区分)。
     const key = item.diagramId || title;
     activePreviewPath = key;
+    resetPreviewLayout();
+    preview.classList.add("is-architecture");
     preview.hidden = false;
     preview.replaceChildren(previewHead(title, st), loadingBody());
-    // 先在游离容器里渲染(renderMermaid 会往其中注入 .mermaid-diagram),
-    // 渲染完成后再校验会话/选中态未被切走,才写入面板 —— 与 openPreview 同款防护。
     const container = document.createElement("div");
     container.className = "output-preview-body";
-    if (Array.isArray(item.views) && item.views.length > 1) {
-      await renderMermaidViews(container, item.views);
-    } else {
-      await renderMermaid(container, item.mermaidSource);
-    }
-    container.append(renderDiagramPrice(item));
-    if (activePreviewPath !== key || getSessionId?.() !== id) return; // 期间被切走
+    const canvas = document.createElement("div");
+    canvas.className = "architecture-diagram-canvas";
+    container.append(canvas, renderDiagramPrice(item));
+    clearDiagramPreview();
+    activeDiagramCanvas = canvas;
     preview.replaceChildren(previewHead(title, st), container);
+    await renderArchitectureDiagram(canvas, item, {
+      onSize: ({ width }) => {
+        if (activePreviewPath !== key || activeDiagramCanvas !== canvas) return;
+        preview.style.setProperty("--architecture-preview-width", `${diagramPreviewWidth(width)}px`);
+      },
+    });
+    if (activePreviewPath !== key || getSessionId?.() !== id) {
+      disposeArchitectureDiagram(canvas);
+      if (activeDiagramCanvas === canvas) activeDiagramCanvas = null;
+    }
   }
 
   // 切换架构图预览:同一图已在预览中(面板可见且键相同)则关闭,否则打开/切换到该图。
@@ -317,6 +356,7 @@ export function createOutputController({
   function setOpen(open) {
     isOpen = open;
     if (panel) panel.hidden = !open;
+    if (!open) closePreview();
   }
 
   function updateToggle() {
@@ -410,8 +450,8 @@ export function createOutputController({
     name.className = "output-row-name";
     name.textContent = diagramDisplayName(item);
     const badge = document.createElement("span");
-    badge.className = "output-badge output-format-" + item.format;
-    badge.textContent = String(item.format).toUpperCase();
+    badge.className = "output-badge output-format-diagram";
+    badge.textContent = architectureRendererLabel();
     row.append(rowIcon("diagram"), name, badge);
     // 候选方案架构图的优化三态徽标(待优化/优化中/无);非候选图或已优化则无徽标。
     const stateBadge = diagramStateBadge(getDiagramState(item));
@@ -461,7 +501,15 @@ export function createOutputController({
 
   if (toggle) toggle.addEventListener("click", () => setOpen(!isOpen));
   if (closeBtn) closeBtn.addEventListener("click", () => setOpen(false));
+  const onArchitectureRendererChanged = () => renderPanel();
+  const eventTarget = typeof window === "undefined" ? null : window;
+  eventTarget?.addEventListener("iac-code:architecture-renderer-changed", onArchitectureRendererChanged);
+
+  function destroy() {
+    eventTarget?.removeEventListener("iac-code:architecture-renderer-changed", onArchitectureRendererChanged);
+    closePreview();
+  }
 
   updateToggle();
-  return { refresh, reset, openDiagramPreview, toggleDiagramPreview, destroy() {} };
+  return { refresh, reset, openDiagramPreview, toggleDiagramPreview, destroy };
 }

@@ -88,6 +88,7 @@ PACKAGE_DATA = {
         "**/*.js",
         "**/*.svg",
         "**/*.LICENSE",
+        "**/*.NOTICE",
         "**/*.mo",
         "**/*.po",
     ],

@@ -18,6 +18,66 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Architecture diagram preview"
+msgstr "アーキテクチャ図のプレビュー"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Choose or drop a ROS template to render its architecture diagram locally."
+msgstr "ROS テンプレートを選択またはドロップして、アーキテクチャ図をローカルで描画します。"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Back to conversations"
+msgstr "会話に戻る"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Template library"
+msgstr "テンプレートライブラリ"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid ""
+"Select the local ros-templates folder once, then switch between the fixed"
+" corpus or random templates."
+msgstr "ローカルの ros-templates フォルダーを一度選択すると、固定コーパスまたはランダムなテンプレートを切り替えて表示できます。"
+
+#: src/iac_code/web/static/diagram-preview.html
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "Select ros-templates folder"
+msgstr "ros-templates フォルダーを選択"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Fixed 30-template corpus"
+msgstr "固定 30 テンプレート"
+
+#: src/iac_code/web/static/diagram-preview.html
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "Select a template"
+msgstr "テンプレートを選択"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Random other template"
+msgstr "他のテンプレートをランダム表示"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Single template"
+msgstr "単一テンプレート"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Supports ROS YAML, YML, and JSON templates up to 2 MB."
+msgstr "最大 2 MB の ROS YAML、YML、JSON テンプレートに対応しています。"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Choose or drop a ROS template"
+msgstr "ROS テンプレートを選択またはドロップ"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Drop a template here, or click to choose"
+msgstr "ここにテンプレートをドロップするか、クリックして選択"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "The file is read for this preview and is not saved."
+msgstr "ファイルはこのプレビュー用に読み取られ、保存されません。"
+
 #: src/iac_code/web/static/index.html
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session"
@@ -960,6 +1020,81 @@ msgstr "更新を開始できませんでした。詳細は診断を開いて確
 msgid "Failed to start update: {error}"
 msgstr "更新の開始に失敗しました: {error}"
 
+#: src/iac_code/web/static/js/architecture_diagram.js
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "アーキテクチャ図"
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+msgid "This historical diagram is shown with Mermaid."
+msgstr "この過去の図は Mermaid で表示されています。"
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+msgid "This diagram is temporarily shown with Mermaid."
+msgstr "この図は一時的に Mermaid で表示されています。"
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+#: src/iac_code/web/static/js/mermaid_render.js
+#, python-brace-format
+msgid "View {n}"
+msgstr "ビュー {n}"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Renderer: {renderer}"
+msgstr "レンダラー: {renderer}"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The fixed template corpus could not be loaded."
+msgstr "固定テンプレートコーパスを読み込めませんでした。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "No supported ROS templates were found in that folder."
+msgstr "選択したフォルダーに対応する ROS テンプレートがありません。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} template loaded; {available} of 30 corpus templates available."
+msgstr "{count} 件のテンプレートを読み込みました。固定 30 件のうち {available} 件を利用できます。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} templates loaded; {available} of 30 corpus templates available."
+msgstr "{count} 件のテンプレートを読み込みました。固定 30 件のうち {available} 件を利用できます。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The template could not be rendered."
+msgstr "テンプレートを描画できませんでした。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The template must be 2 MB or smaller."
+msgstr "テンプレートは 2 MB 以下にしてください。"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Rendering {filename}…"
+msgstr "{filename} を描画しています…"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} architecture view"
+msgstr "アーキテクチャビュー {count} 件"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} architecture views"
+msgstr "アーキテクチャビュー {count} 件"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Rendered {filename}"
+msgstr "{filename} を描画しました"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "No templates remain outside the fixed corpus."
+msgstr "固定コーパス以外のテンプレートはありません。"
+
 #: src/iac_code/web/static/js/events.js
 msgid "Local shell"
 msgstr "ローカルシェル"
@@ -968,11 +1103,6 @@ msgstr "ローカルシェル"
 #: src/iac_code/web/static/js/events.js
 msgid "Unknown error"
 msgstr "不明なエラー"
-
-#: src/iac_code/web/static/js/mermaid_render.js
-#, python-brace-format
-msgid "View {n}"
-msgstr "ビュー {n}"
 
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "No pricing information"
@@ -1352,11 +1482,6 @@ msgstr "成功"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "In progress / failed"
 msgstr "進行中／失敗"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "アーキテクチャ図"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
@@ -3856,6 +3981,20 @@ msgstr "言語"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Choose the interface language; the page reloads after saving."
 msgstr "インターフェース言語を選択します。保存後にページが再読み込みされます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Architecture diagram renderer"
+msgstr "アーキテクチャ図レンダラー"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Choose how architecture diagrams are displayed; the change takes effect "
+"after saving."
+msgstr "アーキテクチャ図の表示方法を選択します。保存後すぐに反映されます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Open template preview"
+msgstr "テンプレートプレビューを開く"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Downloading…"

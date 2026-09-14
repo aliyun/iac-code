@@ -366,7 +366,18 @@ def test_reducer_tracks_candidate_selection_phases(tmp_path):
             "mermaid_source": "graph TD; A-->B",
             "diagram_stage": "optimized",
             "views": [
-                {"id": "overview", "title": "架构概览", "mermaid_source": "graph TD; A-->B"},
+                {
+                    "id": "overview",
+                    "title": "架构概览",
+                    "mermaid_source": "graph TD; A-->B",
+                    "graph": {
+                        "version": 1,
+                        "nodes": [{"id": "A", "label": "A", "parentId": None}],
+                        "containers": [],
+                        "edges": [],
+                        "layout": {"direction": "LR"},
+                    },
+                },
                 {"id": "detail_app", "title": "应用详情", "mermaid_source": "graph TD; C-->D"},
             ],
         },
@@ -387,6 +398,7 @@ def test_reducer_tracks_candidate_selection_phases(tmp_path):
     assert preparing.state == "preparing"
     assert preparing.candidates[0].diagram_stage == "optimized"
     assert [view["id"] for view in preparing.candidates[0].diagram_views] == ["overview", "detail_app"]
+    assert preparing.candidates[0].diagram_views[0]["graph"]["nodes"][0]["id"] == "A"
     assert preparing.candidates[0].summary == "单 ECS Nginx"
 
     options = [{"name": "低成本方案", "summary": "单 ECS Nginx", "candidate_index": 0}]

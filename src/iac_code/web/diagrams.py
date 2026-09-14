@@ -6,38 +6,71 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from iac_code.pipeline.engine.architecture_graph import render_ros_template_architecture_views
 from iac_code.pipeline.engine.architecture_semantic_planning import browser_mermaid_source
-from iac_code.pipeline.engine.show_diagram_tool import ros_template_to_mermaid
 from iac_code.web.diagram_cache import read_cached
 from iac_code.web.outputs import TEMPLATE_SUFFIXES, is_template_content, pipeline_candidate_costs
 
 _MATERIALIZED_STEP_ID = "materialize_selected_candidate"
 _MATERIALIZED_OPTIMIZATION_KEY = "materialized"
 _ARCHITECTURE_PLAN_SOURCE = "architecture_plan"
+PREVIEW_TEMPLATE_SUFFIXES = {".json", ".yaml", ".yml"}
+
+
+class TemplateDiagramPreviewError(ValueError):
+    """Raised when an uploaded template cannot produce an architecture preview."""
+
+
+def render_template_diagram_views(content: str, suffix: str) -> list[dict[str, Any]]:
+    """Render a standalone preview from an in-memory ROS template.
+
+    JSON is accepted because ROS JSON is also valid input for ``ros_yaml_load``.  Terraform
+    is intentionally excluded until there is a deterministic Terraform graph parser.
+    """
+    normalized_suffix = suffix.lower()
+    if normalized_suffix not in PREVIEW_TEMPLATE_SUFFIXES:
+        raise TemplateDiagramPreviewError("unsupported_template_format")
+    if not content.strip() or not is_template_content(content, normalized_suffix):
+        raise TemplateDiagramPreviewError("not_ros_template")
+    try:
+        result = render_ros_template_architecture_views(content)
+    except Exception as exc:
+        raise TemplateDiagramPreviewError("template_render_failed") from exc
+    error_reason = result.architecture_context.get("error")
+    if error_reason == "yaml_parse_error":
+        raise TemplateDiagramPreviewError("template_parse_failed")
+    if error_reason:
+        raise TemplateDiagramPreviewError(str(error_reason))
+    views: list[dict[str, Any]] = [
+        {
+            "id": view.id,
+            "title": view.title,
+            "purpose": view.purpose,
+            "mermaidSource": browser_mermaid_source(view.mermaid_source),
+            "graph": view.graph,
+        }
+        for view in result.views
+        if view.mermaid_source
+    ]
+    if not views or not str(views[0]["mermaidSource"]).strip():
+        raise TemplateDiagramPreviewError("template_has_no_supported_resources")
+    return views
+
+
+def _rendered_views_or_none(content: str, suffix: str) -> list[dict[str, Any]] | None:
+    """Derive Mermaid and DiagramGraph views from one exact template projection."""
+    if suffix not in {".yaml", ".yml"}:
+        return None
+    try:
+        return render_template_diagram_views(content, suffix)
+    except TemplateDiagramPreviewError:
+        return None
 
 
 def _mermaid_or_none(content: str, suffix: str) -> str | None:
-    """仅对 ROS YAML 模板产出 mermaid;非 YAML/非模板/解析失败一律 None。"""
-    if suffix not in {".yaml", ".yml"}:
-        return None
-    if not is_template_content(content, suffix):
-        return None
-    try:
-        source = ros_template_to_mermaid(content)
-    except Exception:
-        return None
-    if not source:
-        return None
-    # ros_template_to_mermaid 不抛异常:YAML 解析失败时返回哨兵图(节点 id 恒为 Error,
-    # 仅括号内文案随 i18n 变化),据此判定为不可解析并跳过。
-    if source.startswith("graph TD\n  Error["):
-        return None
-    # 非 dict / 无 Resources 时 ros_template_to_mermaid 只返回裸表头(无节点),视为空图跳过。
-    if source.strip() == "graph TD":
-        return None
-    # ros_template_to_mermaid 产出的 subgraph 标题未加引号且可能含括号(如 "VPC (10.0.0.0/16)"),
-    # 浏览器端 mermaid.js 会解析失败(炸弹图)。复用与 HTML 预览(write_html)同一转换,给标题加引号。
-    return browser_mermaid_source(source)
+    """Compatibility helper returning the first renderer-neutral view's Mermaid source."""
+    views = _rendered_views_or_none(content, suffix)
+    return views[0]["mermaidSource"] if views else None
 
 
 def _read_content(cwd: Path, raw_path: Any, captured: str | None) -> tuple[str, str] | None:
@@ -187,14 +220,20 @@ def diagram_items(
                         view_source = raw_view.get("mermaidSource") or raw_view.get("mermaid_source")
                         if not isinstance(view_source, str) or not view_source.strip():
                             continue
-                        views.append(
-                            {
-                                "id": str(raw_view.get("id") or "overview"),
-                                "title": str(raw_view.get("title") or ""),
-                                "purpose": str(raw_view.get("purpose") or ""),
-                                "mermaidSource": view_source,
-                            }
-                        )
+                        view: dict[str, Any] = {
+                            "id": str(raw_view.get("id") or "overview"),
+                            "title": str(raw_view.get("title") or ""),
+                            "purpose": str(raw_view.get("purpose") or ""),
+                            "mermaidSource": view_source,
+                        }
+                        graph = raw_view.get("graph")
+                        if isinstance(graph, dict) and graph.get("version") == 1:
+                            view["graph"] = graph
+                        views.append(view)
+                if views and "graph" not in views[0]:
+                    graph = architecture_context.get("graph")
+                    if isinstance(graph, dict) and graph.get("version") == 1:
+                        views[0]["graph"] = graph
                 stage = str(data.get("diagramStage") or "optimized")
                 entry: dict[str, Any] = {
                     "diagramId": str(data.get("diagramId") or envelope.get("eventId") or f"plan:{index}"),
@@ -225,9 +264,10 @@ def diagram_items(
         if read is None:
             continue
         content, suffix = read
-        source = _mermaid_or_none(content, suffix)
-        if source is None:
+        draft_views = _rendered_views_or_none(content, suffix)
+        if not draft_views:
             continue
+        source = draft_views[0]["mermaidSource"]
         candidate = envelope.get("candidate")
         candidate = candidate if isinstance(candidate, dict) else {}
         index = candidate.get("index")
@@ -267,6 +307,8 @@ def diagram_items(
             }
             if cached:
                 entry["views"] = cached
+            else:
+                entry["views"] = draft_views
             exact_cost = materialized_costs.get(canonical_key)
             if exact_cost is not None:
                 entry.update(exact_cost)
@@ -290,6 +332,8 @@ def diagram_items(
         }
         if cached:
             entry["views"] = cached
+        else:
+            entry["views"] = draft_views
         cost = costs.get(index)
         if cost is not None:
             entry["costItems"] = cost["costItems"]

@@ -561,12 +561,16 @@ class WebEventTranslator:
                 },
             )
         if isinstance(event, DiagramEvent):
-            data = {
+            data: dict[str, Any] = {
                 "candidateName": event.candidate_name,
                 "templateContent": event.template_content,
                 "mermaidSource": event.mermaid_source,
                 "candidateIndex": event.candidate_index,
+                "diagramStage": event.diagram_stage,
+                "views": event.views,
             }
+            if event.architecture_context is not None:
+                data["architectureContext"] = event.architecture_context
             if event.candidate_set_id:
                 data["candidateSetId"] = event.candidate_set_id
             if event.detail_stage:

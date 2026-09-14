@@ -122,13 +122,17 @@ msgid "Cleanup-only continuation requires a completed Pipeline handoff."
 msgstr "クリーンアップ専用の継続には、完了した Pipeline 引き継ぎが必要です。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-#: src/iac_code/a2a/transports/dispatcher.py
+#: src/iac_code/a2a/task_store.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "タスクがキャンセルされました。"
 
 #: src/iac_code/a2a/executor.py
 msgid "Normal permission decision is unavailable before backup."
 msgstr "バックアップ前に通常チャットの権限判断を取得できません。"
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
+msgid "Task canceled while waiting for input."
+msgstr "入力待ち中にタスクがキャンセルされました。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/agui/errors.py
 msgid "Session backup is still synchronizing. Retry after 3 seconds."
@@ -463,10 +467,6 @@ msgstr ""
 #, python-brace-format
 msgid "Task {task_id} is already completed."
 msgstr "タスク {task_id} はすでに完了しています。"
-
-#: src/iac_code/a2a/transports/dispatcher.py
-msgid "Task canceled while waiting for input."
-msgstr "入力待ち中にタスクがキャンセルされました。"
 
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task completed."
@@ -12523,6 +12523,40 @@ msgid "The update command exited with code {}."
 msgstr "更新コマンドは終了コード {} で終了しました。"
 
 #: src/iac_code/web/app.py
+msgid "The template must be 2 MB or smaller."
+msgstr "テンプレートは 2 MB 以下にしてください。"
+
+#: src/iac_code/web/app.py
+msgid "Choose a ROS template in YAML, YML, or JSON format."
+msgstr "YAML、YML、または JSON 形式の ROS テンプレートを選択してください。"
+
+#: src/iac_code/web/app.py
+msgid "The file does not look like a ROS template."
+msgstr "このファイルは ROS テンプレートではないようです。"
+
+#: src/iac_code/web/app.py
+msgid "The ROS template could not be parsed."
+msgstr "ROS テンプレートを解析できませんでした。"
+
+#: src/iac_code/web/app.py
+msgid "The ROS template must contain a mapping at its root."
+msgstr "ROS テンプレートのルートはマッピングである必要があります。"
+
+#: src/iac_code/web/app.py
+msgid "The ROS template does not contain any resources."
+msgstr "ROS テンプレートにリソースが含まれていません。"
+
+#: src/iac_code/web/app.py
+msgid ""
+"The ROS template does not contain resources supported by the architecture"
+" renderer."
+msgstr "ROS テンプレートにアーキテクチャレンダラーが対応するリソースが含まれていません。"
+
+#: src/iac_code/web/app.py
+msgid "The ROS template could not be rendered."
+msgstr "ROS テンプレートを描画できませんでした。"
+
+#: src/iac_code/web/app.py
 msgid "A project directory is required."
 msgstr "プロジェクトディレクトリが必要です。"
 
@@ -12951,6 +12985,10 @@ msgstr "セッション · {}"
 #: src/iac_code/web/settings.py
 msgid "unknown theme"
 msgstr "不明なテーマ"
+
+#: src/iac_code/web/settings.py
+msgid "unknown architecture diagram renderer"
+msgstr "不明なアーキテクチャ図レンダラー"
 
 #: src/iac_code/web/settings.py
 msgid "unknown language"

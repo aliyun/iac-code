@@ -20,6 +20,7 @@ from iac_code.pipeline.engine.architecture_rules import (
     ConceptEdgeRule,
     RuleLabel,
 )
+from iac_code.pipeline.engine.diagram_graph import build_diagram_graph
 
 COMPACT_MIN_VISIBLE_NODES = 25
 COMPACT_MIN_VISIBLE_ELEMENTS = 25
@@ -194,6 +195,7 @@ class ArchitectureViewResult:
     purpose: str
     mermaid_source: str
     architecture_context: dict[str, Any]
+    graph: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -1205,6 +1207,7 @@ def _render_views_from_context(
 ) -> tuple[ArchitectureViewResult, ...]:
     raw_views = semantic_plan.get("views") if isinstance(semantic_plan, dict) else None
     if not isinstance(raw_views, list) or not raw_views:
+        graph = _diagram_graph_from_context(architecture_context)
         return (
             ArchitectureViewResult(
                 id="overview",
@@ -1217,6 +1220,7 @@ def _render_views_from_context(
                     "purpose": _("Show the complete architecture diagram."),
                     "rendered_as": "full_architecture",
                 },
+                graph=graph,
             ),
         )
 
@@ -1371,7 +1375,7 @@ def _render_single_view_from_context(
         view_node_parent,
         rules,
     )
-    view_context = {
+    view_context: dict[str, Any] = {
         "id": view_id,
         "title": title,
         "purpose": purpose,
@@ -1384,12 +1388,89 @@ def _render_single_view_from_context(
         "layout": layout,
         "rendered_as": "filtered_architecture_view",
     }
+    graph = _diagram_graph(
+        nodes=view_nodes,
+        containers=view_containers,
+        edges=view_edges,
+        layer_parent=view_layer_parent,
+        node_parent=view_node_parent,
+    )
     return ArchitectureViewResult(
         id=view_id,
         title=title,
         purpose=purpose,
         mermaid_source=mermaid_source,
         architecture_context=view_context,
+        graph=graph,
+    )
+
+
+def _diagram_graph_from_context(architecture_context: dict[str, Any]) -> dict[str, Any]:
+    """Build the renderer-neutral graph from the exact full-view projection."""
+    nodes = _context_nodes_by_id(architecture_context)
+    containers = _context_containers_by_id(architecture_context)
+    edges = [
+        GraphEdge(
+            from_id=str(item.get("from") or ""),
+            to_id=str(item.get("to") or ""),
+            style=str(item.get("style") or "solid_arrow"),
+            label=str(item["label"]) if item.get("label") is not None else None,
+        )
+        for item in architecture_context.get("visible_edges", [])
+        if isinstance(item, dict) and item.get("from") and item.get("to")
+    ]
+    return _diagram_graph(
+        nodes=nodes,
+        containers=containers,
+        edges=edges,
+        layer_parent=_context_layer_parent(containers),
+        node_parent=_context_node_parent(architecture_context),
+    )
+
+
+def _diagram_graph(
+    *,
+    nodes: dict[str, dict[str, Any]],
+    containers: dict[str, dict[str, Any]],
+    edges: list[GraphEdge],
+    layer_parent: dict[str, str],
+    node_parent: dict[str, str],
+) -> dict[str, Any]:
+    """Return DiagramGraph v1 from the same projection used to emit Mermaid."""
+    visible_ids = set(nodes) | set(containers)
+    graph_edges: list[dict[str, Any]] = []
+    for index, edge in enumerate(_dedupe_edges(edges), start=1):
+        if edge.from_id not in visible_ids or edge.to_id not in visible_ids:
+            continue
+        graph_edges.append(
+            {
+                "id": f"edge_{index}_{edge.from_id}_{edge.to_id}",
+                "from": edge.from_id,
+                "to": edge.to_id,
+                "label": edge.label or "",
+                "style": edge.style,
+            }
+        )
+    return build_diagram_graph(
+        nodes=[
+            {
+                "id": node_id,
+                "label": str(node.get("label") or node_id).replace("\\n", "\n"),
+                "resourceType": str(node.get("type") or ""),
+                "parentId": node_parent.get(node_id),
+            }
+            for node_id, node in nodes.items()
+        ],
+        containers=[
+            {
+                "id": container_id,
+                "label": str(container.get("label") or container_id).replace("\\n", "\n"),
+                "resourceType": str(container.get("type") or ""),
+                "parentId": layer_parent.get(container_id),
+            }
+            for container_id, container in containers.items()
+        ],
+        edges=graph_edges,
     )
 
 

@@ -22,6 +22,7 @@ repository root with `uv run python ...` unless a script-specific README says ot
 | `rendering/test_diagram_render.py` | Manual diagram rendering check. |
 | `rendering/preview_template_architecture_llm.py` | Manual ROS template architecture preview with a real LLM semantic pass. |
 | `repl/e2e/` | Real PTY-driven REPL pipeline end-to-end scenario runner. POSIX-only because it uses `pexpect`. |
+| `web/` | Web asset maintenance and visual evaluation tools. See `web/README.md`. |
 
 ## Common Commands
 

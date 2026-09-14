@@ -163,6 +163,8 @@ def save_telemetry_settings(share_content: bool) -> dict[str, bool]:
 _APPEARANCE_SETTINGS_KEY = "appearance"
 VALID_THEMES = ("graphite", "midnight", "evergreen", "sepia", "ivory")
 DEFAULT_THEME = "graphite"
+VALID_ARCHITECTURE_DIAGRAM_RENDERERS = ("eraser", "mermaid")
+DEFAULT_ARCHITECTURE_DIAGRAM_RENDERER = "eraser"
 
 
 def get_appearance_theme() -> str:
@@ -188,6 +190,33 @@ def save_appearance_theme(theme: str) -> dict[str, str]:
     settings[_APPEARANCE_SETTINGS_KEY] = section
     _save_yaml(settings_path, settings)
     return {"theme": theme}
+
+
+def get_architecture_diagram_renderer() -> str:
+    """Return the persisted Web architecture renderer, defaulting to Eraser."""
+    settings = _load_yaml(get_settings_path())
+    section = settings.get(_APPEARANCE_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        return DEFAULT_ARCHITECTURE_DIAGRAM_RENDERER
+    renderer = section.get("architectureDiagramRenderer")
+    if not isinstance(renderer, str) or renderer not in VALID_ARCHITECTURE_DIAGRAM_RENDERERS:
+        return DEFAULT_ARCHITECTURE_DIAGRAM_RENDERER
+    return renderer
+
+
+def save_architecture_diagram_renderer(renderer: str) -> dict[str, str]:
+    """Persist the Web architecture renderer while preserving appearance keys."""
+    if renderer not in VALID_ARCHITECTURE_DIAGRAM_RENDERERS:
+        raise ValueError(_("unknown architecture diagram renderer"))
+    settings_path = get_settings_path()
+    settings = _load_yaml(settings_path)
+    section = settings.get(_APPEARANCE_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    section["architectureDiagramRenderer"] = renderer
+    settings[_APPEARANCE_SETTINGS_KEY] = section
+    _save_yaml(settings_path, settings)
+    return {"renderer": renderer}
 
 
 _UI_SETTINGS_KEY = "ui"

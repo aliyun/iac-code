@@ -21,6 +21,17 @@ TOOL_CARDS_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/componen
 OUTPUT_PANEL_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components/output_panel.js"
 MERMAID_RENDER_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/mermaid_render.js"
 MERMAID_VENDOR_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/vendor/mermaid.min.js"
+ARCHITECTURE_DIAGRAM_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/architecture_diagram.js"
+DIAGRAM_PREVIEW_HTML = Path(__file__).parents[2] / "src/iac_code/web/static/diagram-preview.html"
+DIAGRAM_PREVIEW_CSS = Path(__file__).parents[2] / "src/iac_code/web/static/diagram-preview.css"
+DIAGRAM_PREVIEW_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/diagram_preview.js"
+DIAGRAM_PREVIEW_LIBRARY_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/diagram_preview_library.js"
+ERASER_FRAME_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/eraser_frame.js"
+ERASER_WORKER_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/eraser_layout_worker.js"
+ERASER_FRAME_HTML = Path(__file__).parents[2] / "src/iac_code/web/static/eraser-frame.html"
+ERASER_VENDOR_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/vendor/eraser-diagrams.min.js"
+ERASER_LICENSE = Path(__file__).parents[2] / "src/iac_code/web/static/js/vendor/eraser-diagrams.LICENSE"
+ERASER_NOTICE = Path(__file__).parents[2] / "src/iac_code/web/static/js/vendor/eraser-diagrams.NOTICE"
 INDEX_HTML = Path(__file__).parents[2] / "src/iac_code/web/static/index.html"
 STYLES_CSS = Path(__file__).parents[2] / "src/iac_code/web/static/styles.css"
 VISUAL_AUDIT_SCRIPT = Path(__file__).parents[2] / "scripts/web/e2e/web_repl_visual_audit.mjs"
@@ -186,6 +197,22 @@ def _run_output_panel_script(tmp_path: Path, source: str) -> dict[str, object]:
 
     script = tmp_path / "output-panel-test.mjs"
     script_source = source.strip().replace("__OUTPUT_PANEL_MODULE__", json.dumps(OUTPUT_PANEL_JS.as_uri()))
+    script.write_text(script_source, encoding="utf-8")
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
+
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def _run_diagram_preview_library_script(tmp_path: Path, source: str) -> dict[str, object]:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    script = tmp_path / "diagram-preview-library-test.mjs"
+    script_source = source.strip().replace(
+        "__DIAGRAM_PREVIEW_LIBRARY_MODULE__", json.dumps(DIAGRAM_PREVIEW_LIBRARY_JS.as_uri())
+    )
     script.write_text(script_source, encoding="utf-8")
     result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
@@ -1258,14 +1285,14 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-316" in html
-    assert "/static/js/app.js?v=web-repl-ui-347" in html
+    assert "/static/styles.css?v=web-repl-ui-318" in html
+    assert "/static/js/app.js?v=web-repl-ui-362" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-312" in app_source
+    assert "./api.js?v=web-repl-ui-313" in app_source
     assert "./components/composer.js?v=session-model-v20" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
@@ -1293,11 +1320,11 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-347" in index_html
+    assert "web-repl-ui-362" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-323" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v58" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v60" in app_source
     # ECS RAM Role 面板改动后旧 token 不得残留,否则回访浏览器仍加载旧缓存 workspace.js。
     assert "./components/workspace.js?v=cloud-creds-v57" not in app_source
     assert "workspace-cloud-vendors" in workspace_source
@@ -2559,7 +2586,7 @@ def test_completed_turn_collapses_process_into_summary() -> None:
     # 「已处理」组的展开态必须跨重建保留:openKey 让 toggle 记录器登记用户操作、
     # applyDetailsOpenOverrides 在重建后恢复;键取 turnId,缺 turnId 时回退首条消息 id。
     assert 'const turnKey = turnId || text(agentMessages[0]?.messageId || agentMessages[0]?.id || "");' in app_source
-    assert 'details.dataset.openKey = `turnproc:${turnKey}`;' in app_source
+    assert "details.dataset.openKey = `turnproc:${turnKey}`;" in app_source
 
     # 只有最后一次工具调用之后的文本才是「最终回答」;此前每个步骤的文本旁白
     # (夹在工具调用之间的 text delta)连同思考、工具一起折进「已处理」,不平铺成答案。
@@ -7777,6 +7804,8 @@ def test_general_panel_section_order() -> None:
         "    themeGroupHead,\n"
         "    themeGrid,\n"
         "    languageField,\n"
+        "    architectureRendererField,\n"
+        "    architecturePreviewRow,\n"
         "    reviewStepGroupHead,\n"
         "    reviewStepCard,\n"
         "    groupHead,\n"
@@ -8342,7 +8371,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v58";'
+    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v60";'
     assert workspace_import in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
@@ -10870,7 +10899,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-347" in html
+    assert "web-repl-ui-362" in html
     assert "web-repl-ui-343" not in html
 
 
@@ -11105,7 +11134,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-312" in source
+    assert "./api.js?v=web-repl-ui-313" in source
     assert "./api.js?v=web-repl-ui-311" not in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
@@ -11125,7 +11154,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v24" in app_source
+    assert "output_panel.js?v=output-panel-v38" in app_source
 
 
 def test_desktop_resource_stack_links_use_native_external_opener() -> None:
@@ -11209,7 +11238,7 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v24" in app_source
+    assert "output_panel.js?v=output-panel-v38" in app_source
     assert "output_panel.js?v=output-panel-v23" not in app_source
 
 
@@ -11241,12 +11270,36 @@ def test_output_panel_uses_codex_dark_theme() -> None:
 def test_output_panel_renders_architecture_diagram_section() -> None:
     js = _source(OUTPUT_PANEL_JS)
     assert 'from "../mermaid_render.js?v=arch-diagram-v5"' in js
+    assert 'from "../architecture_diagram.js?v=eraser-browser-v14"' in js
     assert "renderDiagramRow" in js
     assert '"Architecture diagram"' in js
     # 计数把 diagrams 计入(驱动徽标/自动显隐/自动弹出)
     assert "diagrams" in js
-    # 预览用 mermaid 渲染而非纯文本
-    assert "renderMermaid" in js
+    assert "renderArchitectureDiagram" in js
+    assert "disposeArchitectureDiagram" in js
+
+
+def test_architecture_preview_grows_to_diagram_width_with_conversation_cap(tmp_path: Path) -> None:
+    source = """
+    const { diagramPreviewWidth } = await import(__OUTPUT_PANEL_MODULE__);
+    console.log(JSON.stringify({
+      small: diagramPreviewWidth(320),
+      large: diagramPreviewWidth(900),
+      invalid: diagramPreviewWidth("bad"),
+    }));
+    """
+    result = _run_output_panel_script(tmp_path, source)
+    assert result == {"small": 560, "large": 934, "invalid": 560}
+
+    output_source = _source(OUTPUT_PANEL_JS)
+    assert 'preview.classList.add("is-architecture")' in output_source
+    assert 'preview.style.setProperty("--architecture-preview-width"' in output_source
+    assert "onSize: ({ width }) =>" in output_source
+
+    css = _source(STYLES_CSS)
+    preview = _css_block(css, ".output-file-preview.is-architecture")
+    assert "width: min(80%," in preview
+    assert "max-width: 80%" in preview
 
 
 def test_output_highlight_escapes_hostile_input(tmp_path: Path) -> None:
@@ -11306,12 +11359,133 @@ def test_mermaid_vendor_bundle_present() -> None:
     assert MERMAID_VENDOR_JS.exists() and MERMAID_VENDOR_JS.stat().st_size > 0
 
 
+def test_eraser_renderer_is_local_sandboxed_and_has_license_notices() -> None:
+    architecture = _source(ARCHITECTURE_DIAGRAM_JS)
+    frame = _source(ERASER_FRAME_JS)
+    frame_html = _source(ERASER_FRAME_HTML)
+    notice = _source(ERASER_NOTICE)
+
+    assert ERASER_VENDOR_JS.exists() and ERASER_VENDOR_JS.stat().st_size > 500_000
+    assert "MIT License" in _source(ERASER_LICENSE)
+    assert "eraserlabs/eraser-diagrams commit 6d377f296b94abf63481a07128884066e4930321" in notice
+    assert "fast-uri@" in notice and "source-map-js@" in notice
+    assert 'frame.setAttribute("sandbox", "allow-scripts")' in architecture
+    assert "new MessageChannel()" in architecture
+    assert "crypto.getRandomValues(random)" in architecture
+    assert "event.source.postMessage(" in architecture
+    assert "connect-src 'none'" in frame_html
+    assert "script-src 'nonce-iac-eraser-v1' 'unsafe-eval'" in frame_html
+    assert "img-src data:" in frame_html
+    assert '(0, eval)(String(event.data.rendererSource || ""))' in frame_html
+    assert '(0, eval)(String(event.data.frameSource || ""))' in frame_html
+    assert "window.startIacEraserFrame" in frame
+    assert "window.createIacEraserRenderer" in frame
+    assert 'getElementById("iac-eraser-theme")' in frame
+    assert "#eraser-scene .er-rel__label" in frame
+    assert 'dark ? "#e4eaf2" : "#34445b"' in frame
+    assert 'port.postMessage({ type: "rendered", requestId, width, height' in frame
+    assert "eraser_layout_worker.js?v=iac-layered-v7" in architecture
+    assert "eraser_frame.js?v=eraser-browser-v7" in architecture
+    assert "edge.labelPlacement.x - originX" in frame
+
+
+def test_architecture_renderer_supports_switching_fallback_and_lifecycle_cleanup() -> None:
+    source = _source(ARCHITECTURE_DIAGRAM_JS)
+
+    assert 'document.body?.dataset.architectureDiagramRenderer === "mermaid"' in source
+    assert 't("This historical diagram is shown with Mermaid.")' in source
+    assert 't("This diagram is temporarily shown with Mermaid.")' in source
+    assert "generation !== record.generation" in source
+    assert "new MutationObserver" in source
+    assert "MAX_LAYOUT_CACHE = 24" in source
+    assert "workerSourcePromise = null;" in source
+    listener_index = source.index('window.addEventListener("message", onReady);')
+    attachment_index = source.index("record.target.replaceChildren(frame);")
+    assert listener_index < attachment_index
+    assert "record.activeIndex = index" in source
+    assert "disposeArchitectureDiagram" in source
+    assert "notifyIntrinsicSize(record, portEvent.data.width, height)" in source
+    assert "notifyIntrinsicSize(record, mermaidIntrinsicWidth(body))" in source
+
+
+def test_standalone_diagram_preview_supports_template_library_picker_drop_and_shared_renderer() -> None:
+    html = _source(DIAGRAM_PREVIEW_HTML)
+    css = _source(DIAGRAM_PREVIEW_CSS)
+    source = _source(DIAGRAM_PREVIEW_JS)
+    workspace = _source(WORKSPACE_JS)
+
+    assert 'accept=".yaml,.yml,.json,application/json,application/yaml,text/yaml"' in html
+    assert 'data-diagram-preview="dropzone"' in html
+    assert 'data-diagram-preview="repository-input"' in html
+    assert "webkitdirectory" in html and "multiple" in html
+    assert 'data-diagram-preview="corpus-select"' in html
+    assert 'data-diagram-preview="random"' in html
+    assert "/static/diagram-preview.css?v=diagram-preview-v2" in html
+    assert "/static/js/diagram_preview.js?v=diagram-preview-v7" in html
+    assert 'from "./architecture_diagram.js?v=eraser-browser-v14"' in source
+    assert 'from "./diagram_preview_library.js?v=template-library-v1"' in source
+    assert '"/static/diagram-preview-corpus.json?v=visual-corpus-v1"' in source
+    assert 'tokenFetch("/api/diagram-preview"' in source
+    assert "repositoryInput.files" in source
+    assert "corpusSelect.disabled = !corpusPaths.length" in source
+    assert "pendingCorpusPath = path" in source
+    assert "repositoryInput.click()" in source
+    assert 'corpusSelect.addEventListener("change"' in source
+    assert 'randomButton.addEventListener("click"' in source
+    assert 'dropzone.addEventListener("drop"' in source
+    assert "file.text()" in source
+    assert "renderArchitectureDiagram(renderTarget, payload" in source
+    assert "new ResizeObserver(syncRenderWidth)" in source
+    assert ".diagram-preview-canvas" in css and "overflow: auto" in css
+    assert 't("{count} template loaded; {available} of 30 corpus templates available."' in source
+    assert 't("{count} templates loaded; {available} of 30 corpus templates available."' in source
+    assert 't("{count} architecture view"' in source
+    assert 't("{count} architecture views"' in source
+    assert "architecture view(s)" not in source
+    assert 'makeButton(t("Open template preview"), "workspace-open-diagram-preview")' in workspace
+    assert 'window.open("/diagram-preview", "_blank", "noopener,noreferrer")' in workspace
+
+
+def test_diagram_preview_library_indexes_repository_and_randomizes_only_other_templates(tmp_path: Path) -> None:
+    output = _run_diagram_preview_library_script(
+        tmp_path,
+        """
+        const {
+          indexTemplateFiles,
+          repositoryRelativePath,
+          shuffledOtherTemplatePaths,
+        } = await import(__DIAGRAM_PREVIEW_LIBRARY_MODULE__);
+        const files = [
+          { name: "one.yml", webkitRelativePath: "ros-templates/examples/one.yml" },
+          { name: "two.JSON", webkitRelativePath: "ros-templates/resources/two.JSON" },
+          { name: "readme.md", webkitRelativePath: "ros-templates/README.md" },
+          { name: "hidden.yml", webkitRelativePath: "ros-templates/.git/hidden.yml" },
+        ];
+        const index = indexTemplateFiles(files);
+        const random = shuffledOtherTemplatePaths(index, ["examples/one.yml"], () => 0);
+        process.stdout.write(JSON.stringify({
+          path: repositoryRelativePath(files[0]),
+          indexed: Array.from(index.keys()),
+          random,
+        }));
+        """,
+    )
+
+    assert output == {
+        "path": "examples/one.yml",
+        "indexed": ["examples/one.yml", "resources/two.JSON"],
+        "random": ["resources/two.JSON"],
+    }
+
+
 def test_pipeline_candidate_inline_diagram_uses_web_diagrams() -> None:
     js = _source(PIPELINE_JS)
     assert 'from "../mermaid_render.js?v=arch-diagram-v5"' in js
+    assert 'from "../architecture_diagram.js?v=eraser-browser-v14"' in js
     assert "webDiagrams" in js  # combinedDiagrams 合并 state.webDiagrams
     assert "pipeline-candidate-diagram" in js  # 每卡可折叠架构图
-    assert "renderMermaid" in js
+    assert "renderArchitectureDiagram" in js
+    assert "disposeArchitectureDiagram" in js
     # 候选↔图匹配须 index 优先(重名候选靠 candidate_index 区分),name 仅兜底。
     assert "duplicate-name discriminator" in js
 
@@ -11320,7 +11494,7 @@ def test_pipeline_js_import_is_versioned() -> None:
     # pipeline.js 之前是 app.js 里唯一无版本位的 import;内容改动(含本轮 index 优先
     # 匹配修复)在回访浏览器的 warm cache 下不会重新拉取。加版本位以确保修复落地。
     app_source = _source(APP_JS)
-    assert "./components/pipeline.js?v=pipeline-solution-confirm-v3" in app_source
+    assert "./components/pipeline.js?v=pipeline-solution-confirm-v16" in app_source
 
 
 def test_solution_first_deployment_confirmation_uses_compact_actual_options() -> None:
@@ -11907,8 +12081,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_for_desktop_external_links() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v24" in js
-    assert "output-panel-v23" not in js
+    assert "output-panel-v38" in js
+    assert "output-panel-v24" not in js
 
 
 def test_appearance_theme_css_blocks_present() -> None:
@@ -11965,6 +12139,18 @@ def test_appearance_frontend_wiring() -> None:
     assert "dataset.theme" in workspace_source
     assert "getAppearance" in workspace_source
     assert "saveAppearance" in workspace_source
+
+
+def test_architecture_renderer_setting_frontend_wiring() -> None:
+    api_source = _source(API_JS)
+    workspace_source = _source(WORKSPACE_JS)
+
+    assert "export function getArchitectureDiagramRenderer()" in api_source
+    assert "export function saveArchitectureDiagramRenderer(" in api_source
+    assert "/api/settings/architecture-diagram" in api_source
+    assert "workspace-architecture-renderer-select" in workspace_source
+    assert '[["eraser", "Eraser"], ["mermaid", "Mermaid"]]' in workspace_source
+    assert 'new CustomEvent("iac-code:architecture-renderer-changed")' in workspace_source
 
 
 def test_ivory_syntax_highlight_variant_present() -> None:
@@ -12107,7 +12293,7 @@ def test_diagram_price_wired_into_both_render_sites():
     op = _source(OUTPUT_PANEL_JS)
     pl = _source(PIPELINE_JS)
     assert "renderDiagramPrice" in op
-    assert "container.append(renderDiagramPrice(item))" in op
+    assert "container.append(canvas, renderDiagramPrice(item))" in op
     assert "renderDiagramPrice" in pl
     assert "body.append(renderDiagramPrice(match))" in pl
 

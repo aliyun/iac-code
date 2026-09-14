@@ -18,6 +18,70 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Architecture diagram preview"
+msgstr "Pré-visualização do diagrama de arquitetura"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Choose or drop a ROS template to render its architecture diagram locally."
+msgstr ""
+"Selecione ou solte um modelo ROS para renderizar localmente o diagrama de"
+" arquitetura."
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Back to conversations"
+msgstr "Voltar às conversas"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Template library"
+msgstr "Biblioteca de modelos"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid ""
+"Select the local ros-templates folder once, then switch between the fixed"
+" corpus or random templates."
+msgstr ""
+"Selecione uma vez a pasta local ros-templates e alterne entre o conjunto "
+"fixo e modelos aleatórios."
+
+#: src/iac_code/web/static/diagram-preview.html
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "Select ros-templates folder"
+msgstr "Selecionar pasta ros-templates"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Fixed 30-template corpus"
+msgstr "Conjunto fixo de 30 modelos"
+
+#: src/iac_code/web/static/diagram-preview.html
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "Select a template"
+msgstr "Selecionar um modelo"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Random other template"
+msgstr "Outro modelo aleatório"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Single template"
+msgstr "Modelo individual"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Supports ROS YAML, YML, and JSON templates up to 2 MB."
+msgstr "Compatível com modelos ROS YAML, YML e JSON de até 2 MB."
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Choose or drop a ROS template"
+msgstr "Selecionar ou soltar um modelo ROS"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "Drop a template here, or click to choose"
+msgstr "Solte um modelo aqui ou clique para selecionar"
+
+#: src/iac_code/web/static/diagram-preview.html
+msgid "The file is read for this preview and is not saved."
+msgstr "O arquivo é lido para esta pré-visualização e não é salvo."
+
 #: src/iac_code/web/static/index.html
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session"
@@ -972,6 +1036,81 @@ msgstr ""
 msgid "Failed to start update: {error}"
 msgstr "Falha ao iniciar a atualização: {error}"
 
+#: src/iac_code/web/static/js/architecture_diagram.js
+#: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Architecture diagram"
+msgstr "Diagrama de arquitetura"
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+msgid "This historical diagram is shown with Mermaid."
+msgstr "Este diagrama histórico é exibido com Mermaid."
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+msgid "This diagram is temporarily shown with Mermaid."
+msgstr "Este diagrama é exibido temporariamente com Mermaid."
+
+#: src/iac_code/web/static/js/architecture_diagram.js
+#: src/iac_code/web/static/js/mermaid_render.js
+#, python-brace-format
+msgid "View {n}"
+msgstr "Visualização {n}"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Renderer: {renderer}"
+msgstr "Renderizador: {renderer}"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The fixed template corpus could not be loaded."
+msgstr "Não foi possível carregar o conjunto fixo de modelos."
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "No supported ROS templates were found in that folder."
+msgstr "Nenhum modelo ROS compatível foi encontrado nessa pasta."
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} template loaded; {available} of 30 corpus templates available."
+msgstr "Modelos carregados: {count}; disponíveis no conjunto: {available}/30."
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} templates loaded; {available} of 30 corpus templates available."
+msgstr "Modelos carregados: {count}; disponíveis no conjunto: {available}/30."
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The template could not be rendered."
+msgstr "Não foi possível renderizar o modelo."
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "The template must be 2 MB or smaller."
+msgstr "O modelo deve ter no máximo 2 MB."
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Rendering {filename}…"
+msgstr "Renderizando {filename}…"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} architecture view"
+msgstr "{count} visualização de arquitetura"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "{count} architecture views"
+msgstr "{count} visualizações de arquitetura"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+#, python-brace-format
+msgid "Rendered {filename}"
+msgstr "{filename} renderizado"
+
+#: src/iac_code/web/static/js/diagram_preview.js
+msgid "No templates remain outside the fixed corpus."
+msgstr "Não há modelos fora do conjunto fixo."
+
 #: src/iac_code/web/static/js/events.js
 msgid "Local shell"
 msgstr "Shell local"
@@ -980,11 +1119,6 @@ msgstr "Shell local"
 #: src/iac_code/web/static/js/events.js
 msgid "Unknown error"
 msgstr "Erro desconhecido"
-
-#: src/iac_code/web/static/js/mermaid_render.js
-#, python-brace-format
-msgid "View {n}"
-msgstr "Visualização {n}"
 
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "No pricing information"
@@ -1376,11 +1510,6 @@ msgstr "Sucesso"
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "In progress / failed"
 msgstr "Em andamento / falhou"
-
-#: src/iac_code/web/static/js/components/output_panel.js
-#: src/iac_code/web/static/js/components/pipeline.js
-msgid "Architecture diagram"
-msgstr "Diagrama de arquitetura"
 
 #: src/iac_code/web/static/js/components/output_panel.js
 msgid "File no longer exists"
@@ -3956,6 +4085,22 @@ msgstr "Idioma"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Choose the interface language; the page reloads after saving."
 msgstr "Escolha o idioma da interface; a página é recarregada após salvar."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Architecture diagram renderer"
+msgstr "Renderizador de diagramas de arquitetura"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Choose how architecture diagrams are displayed; the change takes effect "
+"after saving."
+msgstr ""
+"Escolha como os diagramas de arquitetura são exibidos; a alteração entra "
+"em vigor após salvar."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Open template preview"
+msgstr "Abrir pré-visualização do modelo"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Downloading…"

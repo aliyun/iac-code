@@ -149,7 +149,7 @@ msgstr ""
 "completada."
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-#: src/iac_code/a2a/transports/dispatcher.py
+#: src/iac_code/a2a/task_store.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "Tarea cancelada."
 
@@ -158,6 +158,10 @@ msgid "Normal permission decision is unavailable before backup."
 msgstr ""
 "La decisión de permiso del chat normal no está disponible antes de la "
 "copia de seguridad."
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
+msgid "Task canceled while waiting for input."
+msgstr "Tarea cancelada mientras esperaba entrada."
 
 #: src/iac_code/a2a/executor.py src/iac_code/agui/errors.py
 msgid "Session backup is still synchronizing. Retry after 3 seconds."
@@ -514,10 +518,6 @@ msgstr ""
 #, python-brace-format
 msgid "Task {task_id} is already completed."
 msgstr "La tarea {task_id} ya está completada."
-
-#: src/iac_code/a2a/transports/dispatcher.py
-msgid "Task canceled while waiting for input."
-msgstr "Tarea cancelada mientras esperaba entrada."
 
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task completed."
@@ -13473,6 +13473,42 @@ msgid "The update command exited with code {}."
 msgstr "El comando de actualización finalizó con el código {}."
 
 #: src/iac_code/web/app.py
+msgid "The template must be 2 MB or smaller."
+msgstr "La plantilla debe tener un tamaño máximo de 2 MB."
+
+#: src/iac_code/web/app.py
+msgid "Choose a ROS template in YAML, YML, or JSON format."
+msgstr "Selecciona una plantilla ROS en formato YAML, YML o JSON."
+
+#: src/iac_code/web/app.py
+msgid "The file does not look like a ROS template."
+msgstr "El archivo no parece ser una plantilla ROS."
+
+#: src/iac_code/web/app.py
+msgid "The ROS template could not be parsed."
+msgstr "No se pudo analizar la plantilla ROS."
+
+#: src/iac_code/web/app.py
+msgid "The ROS template must contain a mapping at its root."
+msgstr "La raíz de la plantilla ROS debe ser un mapa."
+
+#: src/iac_code/web/app.py
+msgid "The ROS template does not contain any resources."
+msgstr "La plantilla ROS no contiene recursos."
+
+#: src/iac_code/web/app.py
+msgid ""
+"The ROS template does not contain resources supported by the architecture"
+" renderer."
+msgstr ""
+"La plantilla ROS no contiene recursos compatibles con el renderizador de "
+"arquitectura."
+
+#: src/iac_code/web/app.py
+msgid "The ROS template could not be rendered."
+msgstr "No se pudo renderizar la plantilla ROS."
+
+#: src/iac_code/web/app.py
 msgid "A project directory is required."
 msgstr "Se requiere un directorio de proyecto."
 
@@ -13905,6 +13941,10 @@ msgstr "Sesión · {}"
 #: src/iac_code/web/settings.py
 msgid "unknown theme"
 msgstr "tema desconocido"
+
+#: src/iac_code/web/settings.py
+msgid "unknown architecture diagram renderer"
+msgstr "Renderizador de diagramas de arquitectura desconocido"
 
 #: src/iac_code/web/settings.py
 msgid "unknown language"

@@ -122,13 +122,17 @@ msgid "Cleanup-only continuation requires a completed Pipeline handoff."
 msgstr "仅清理模式的继续操作需要先完成 Pipeline 交接。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/a2a/pipeline_executor.py
-#: src/iac_code/a2a/transports/dispatcher.py
+#: src/iac_code/a2a/task_store.py src/iac_code/a2a/transports/dispatcher.py
 msgid "Task canceled."
 msgstr "任务已取消。"
 
 #: src/iac_code/a2a/executor.py
 msgid "Normal permission decision is unavailable before backup."
 msgstr "备份前无法获取普通对话权限决定。"
+
+#: src/iac_code/a2a/executor.py src/iac_code/a2a/transports/dispatcher.py
+msgid "Task canceled while waiting for input."
+msgstr "等待输入时任务已取消。"
 
 #: src/iac_code/a2a/executor.py src/iac_code/agui/errors.py
 msgid "Session backup is still synchronizing. Retry after 3 seconds."
@@ -461,10 +465,6 @@ msgstr "Windows 不支持 Unix 域套接字传输。请使用 --transport http �
 #, python-brace-format
 msgid "Task {task_id} is already completed."
 msgstr "任务 {task_id} 已完成。"
-
-#: src/iac_code/a2a/transports/dispatcher.py
-msgid "Task canceled while waiting for input."
-msgstr "等待输入时任务已取消。"
 
 #: src/iac_code/a2a/transports/dispatcher.py
 msgid "Task completed."
@@ -12307,6 +12307,40 @@ msgid "The update command exited with code {}."
 msgstr "更新命令以退出码 {} 结束。"
 
 #: src/iac_code/web/app.py
+msgid "The template must be 2 MB or smaller."
+msgstr "模板大小不能超过 2 MB。"
+
+#: src/iac_code/web/app.py
+msgid "Choose a ROS template in YAML, YML, or JSON format."
+msgstr "请选择 YAML、YML 或 JSON 格式的 ROS 模板。"
+
+#: src/iac_code/web/app.py
+msgid "The file does not look like a ROS template."
+msgstr "该文件看起来不是 ROS 模板。"
+
+#: src/iac_code/web/app.py
+msgid "The ROS template could not be parsed."
+msgstr "ROS 模板无法解析。"
+
+#: src/iac_code/web/app.py
+msgid "The ROS template must contain a mapping at its root."
+msgstr "ROS 模板的根节点必须是映射。"
+
+#: src/iac_code/web/app.py
+msgid "The ROS template does not contain any resources."
+msgstr "ROS 模板中不包含任何资源。"
+
+#: src/iac_code/web/app.py
+msgid ""
+"The ROS template does not contain resources supported by the architecture"
+" renderer."
+msgstr "ROS 模板中没有架构图渲染器支持的资源。"
+
+#: src/iac_code/web/app.py
+msgid "The ROS template could not be rendered."
+msgstr "无法渲染 ROS 模板。"
+
+#: src/iac_code/web/app.py
 msgid "A project directory is required."
 msgstr "需要项目目录。"
 
@@ -12735,6 +12769,10 @@ msgstr "会话 · {}"
 #: src/iac_code/web/settings.py
 msgid "unknown theme"
 msgstr "未知的主题"
+
+#: src/iac_code/web/settings.py
+msgid "unknown architecture diagram renderer"
+msgstr "未知的架构图渲染器"
 
 #: src/iac_code/web/settings.py
 msgid "unknown language"

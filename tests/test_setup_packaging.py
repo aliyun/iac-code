@@ -15,6 +15,18 @@ import iac_code
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOLUTION_FIRST_SKILLS = PROJECT_ROOT / "src/iac_code/pipeline/selling_solution_first/skills"
+ERASER_VENDOR_ASSETS = (
+    PROJECT_ROOT / "src/iac_code/web/static/js/vendor/eraser-diagrams.min.js",
+    PROJECT_ROOT / "src/iac_code/web/static/js/vendor/eraser-diagrams.LICENSE",
+    PROJECT_ROOT / "src/iac_code/web/static/js/vendor/eraser-diagrams.NOTICE",
+)
+
+
+def _assert_eraser_vendor_assets_are_packaged(patterns: list[str]) -> None:
+    for asset in ERASER_VENDOR_ASSETS:
+        assert asset.is_file()
+        relative = asset.relative_to(PROJECT_ROOT / "src/iac_code")
+        assert any(relative.match(pattern) for pattern in patterns), relative
 
 
 def _load_setup_module(monkeypatch):
@@ -207,6 +219,8 @@ def test_web_static_assets_are_included_in_package_data():
     assert "**/*.json" in package_data
     assert "**/*.svg" in package_data
     assert "**/*.LICENSE" in package_data
+    assert "**/*.NOTICE" in package_data
+    _assert_eraser_vendor_assets_are_packaged(package_data)
 
 
 def test_web_static_assets_are_included_in_legacy_setup_package_data(monkeypatch):
@@ -220,6 +234,8 @@ def test_web_static_assets_are_included_in_legacy_setup_package_data(monkeypatch
         assert "**/*.json" in package_data
         assert "**/*.svg" in package_data
         assert "**/*.LICENSE" in package_data
+        assert "**/*.NOTICE" in package_data
+        _assert_eraser_vendor_assets_are_packaged(package_data)
 
 
 def test_http_extra_includes_pipeline_runtime_dependencies(monkeypatch):

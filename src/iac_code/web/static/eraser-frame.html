@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'nonce-iac-eraser-v1' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data:; font-src data:; worker-src blob:; connect-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root { color-scheme: dark; }
+      :root[data-color-scheme="light"] { color-scheme: light; }
+      html, body { margin: 0; min-height: 100%; background: transparent; overflow: auto; }
+      body { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
+      #eraser-scene { margin: 8px; transform-origin: top left; }
+    </style>
+  </head>
+  <body>
+    <script nonce="iac-eraser-v1">
+      (() => {
+        "use strict";
+        const requestId = decodeURIComponent(location.hash.slice(1));
+        let initialized = false;
+        window.addEventListener("message", (event) => {
+          if (
+            initialized ||
+            event.source !== parent ||
+            event.data?.type !== "iac-eraser-init" ||
+            event.data?.requestId !== requestId
+          ) return;
+          const port = event.ports?.[0];
+          if (!port) return;
+          initialized = true;
+          try {
+            (0, eval)(String(event.data.rendererSource || ""));
+            (0, eval)(String(event.data.frameSource || ""));
+            if (typeof window.startIacEraserFrame !== "function") throw new Error("Eraser frame failed to start");
+            window.startIacEraserFrame(event.data, port, requestId);
+          } catch (error) {
+            port.postMessage({
+              type: "failed",
+              requestId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        });
+        parent.postMessage({ type: "iac-eraser-ready", requestId }, "*");
+      })();
+    </script>
+  </body>
+</html>

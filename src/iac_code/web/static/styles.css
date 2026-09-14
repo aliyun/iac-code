@@ -11817,6 +11817,11 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
   overflow: hidden;
 }
 .output-file-preview[hidden] { display: none; }
+.output-file-preview.is-architecture {
+  width: min(80%, max(560px, var(--architecture-preview-width, 560px)));
+  max-width: 80%;
+  transition: width 0.16s ease-out;
+}
 .output-preview-head {
   display: flex;
   align-items: center;
@@ -12118,6 +12123,31 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
 
 .diagram-view-body {
   min-height: 0;
+}
+
+.architecture-diagram-shell,
+.architecture-diagram-view,
+.architecture-diagram-canvas {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.architecture-diagram-view {
+  overflow-x: auto;
+}
+
+.architecture-eraser-frame {
+  display: block;
+  width: 100%;
+  min-height: 240px;
+  border: 0;
+  background: transparent;
+}
+
+.architecture-diagram-fallback {
+  margin: 0 0 0.55rem;
+  color: var(--codex-muted, var(--muted));
+  font-size: 0.78rem;
 }
 
 .update-banner {
