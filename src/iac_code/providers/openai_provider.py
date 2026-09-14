@@ -20,6 +20,7 @@ from iac_code.providers.base import (
     Provider,
     ToolDefinition,
 )
+from iac_code.providers.request_headers import get_provider_request_headers, merge_provider_request_headers
 from iac_code.providers.request_logging import log_provider_request_policy
 from iac_code.providers.request_policy import bool_or_none, positive_int_or_none
 from iac_code.providers.streaming import OpenAIStreamResponseAdapter
@@ -142,11 +143,11 @@ class OpenAIProvider(Provider):
         kwargs: dict[str, Any] = {"extra_body": extra_body}
         if spec.uses_reasoning_effort_param:
             effort = normalize_effort(self._effort)
-            allowed = {e.value for e in spec.allowed_efforts}
+            allowed = set(spec.effort_values)
             if effort in allowed:
                 kwargs["reasoning_effort"] = effort
-            elif effort not in {None, "auto"} and spec.default_effort is not None:
-                kwargs["reasoning_effort"] = spec.default_effort.value
+            elif effort not in {None, "auto"} and spec.default_effort_value is not None:
+                kwargs["reasoning_effort"] = spec.default_effort_value
         return kwargs
 
     def _effective_thinking_budget(self) -> int | None:
@@ -197,9 +198,7 @@ class OpenAIProvider(Provider):
         reasoning = getattr(message_or_delta, "reasoning_content", None)
         return reasoning if isinstance(reasoning, str) else ""
 
-    def _create_stream_response_adapter(
-        self, tools: list[ToolDefinition] | None
-    ) -> OpenAIStreamResponseAdapter:
+    def _create_stream_response_adapter(self, tools: list[ToolDefinition] | None) -> OpenAIStreamResponseAdapter:
         return OpenAIStreamResponseAdapter(self, tools)
 
     # -- Message conversion ----------------------------------------------------
@@ -368,7 +367,10 @@ class OpenAIProvider(Provider):
                 streaming=context.streaming,
                 cache_policy=context.cache_policy,
             )
-        headers = self._request_headers(cache_policy=context.cache_policy)
+        headers = merge_provider_request_headers(
+            self._request_headers(cache_policy=context.cache_policy),
+            get_provider_request_headers(),
+        )
         if headers:
             kwargs["extra_headers"] = headers
         kwargs.update(self._thinking_kwargs_for_context(context))

@@ -34,6 +34,13 @@ class TestDeepSeekProvider:
             "extra_body": {"thinking": {"type": "enabled"}},
         }
 
+    def test_v4_flash_vision_api_model_uses_current_thinking_protocol(self):
+        p = DeepSeekProvider(model="deepseek-v4-flash-vision-exp", api_key="test", effort="high")
+        assert p._effort_request_kwargs() == {
+            "reasoning_effort": "high",
+            "extra_body": {"thinking": {"type": "enabled"}},
+        }
+
     def test_effort_request_kwargs_max(self):
         p = DeepSeekProvider(model="deepseek-v4-pro", api_key="test", effort="max")
         assert p._effort_request_kwargs() == {
@@ -195,12 +202,17 @@ class TestProviderDefinitions:
         deepseek = next(p for p in PROVIDERS if p["name"] == "DeepSeek")
         assert deepseek["key_name"] == "deepseek"
         assert deepseek["api_base"] == DEEPSEEK_BASE_URL
-        assert set(deepseek["models"]) == {"deepseek-v4-pro", "deepseek-v4-flash"}
+        assert deepseek["default_model"] == "deepseek-v4-flash"
+        assert set(deepseek["models"]) == {
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash-vision-exp",
+        }
 
     def test_deepseek_model_capabilities(self):
         from iac_code.providers.thinking import EffortLevel, get_thinking_spec
 
-        for model in ("deepseek-v4-pro", "deepseek-v4-flash"):
+        for model in ("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"):
             spec = get_thinking_spec("deepseek", model)
             assert spec.supports_effort is True
             assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)

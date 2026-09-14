@@ -2,18 +2,24 @@ from __future__ import annotations
 
 import contextlib
 import contextvars
+import re
 from collections.abc import Iterator, Mapping
 from typing import Any
 
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.i18n import SUPPORTED_LANGUAGES, use_request_language
+from iac_code.providers.request_headers import use_provider_request_headers
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.permission_wait import permission_execution_identity_cache_scope
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
 from iac_code.services.telemetry import use_session_id, use_telemetry_channel, use_user_id
 
 _RUNTIME_OVERRIDE_UNSET = object()
+_HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_MAX_LLM_HEADERS = 64
+_MAX_LLM_HEADER_NAME_BYTES = 256
+_MAX_LLM_HEADER_VALUE_BYTES = 8192
 _preferred_language: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "iac_code_a2a_preferred_language",
     default=None,
@@ -43,6 +49,51 @@ def resolve_a2a_preferred_language(value: Any | None) -> str | None:
     return language if language in SUPPORTED_LANGUAGES else None
 
 
+def resolve_a2a_llm_headers(value: Any | None) -> dict[str, str] | None:
+    """Resolve an explicit ``metadata.iac_code.llm_headers`` session update."""
+
+    metadata = getattr(value, "metadata", value)
+    if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
+        metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+    if not isinstance(metadata, Mapping):
+        return None
+    raw_iac_meta = metadata.get("iac_code")
+    if not isinstance(raw_iac_meta, Mapping):
+        return None
+    if "llm_headers" not in raw_iac_meta:
+        return None
+    raw_headers = raw_iac_meta.get("llm_headers")
+    if not isinstance(raw_headers, Mapping):
+        return None
+
+    headers: dict[str, str] = {}
+    names_by_lowercase: dict[str, str] = {}
+    for raw_name, raw_value in raw_headers.items():
+        if len(headers) >= _MAX_LLM_HEADERS:
+            break
+        if not isinstance(raw_name, str) or not isinstance(raw_value, str):
+            continue
+        name = raw_name.strip()
+        if (
+            not name
+            or _HTTP_HEADER_NAME.fullmatch(name) is None
+            or len(name.encode("ascii")) > _MAX_LLM_HEADER_NAME_BYTES
+            or "\r" in raw_value
+            or "\n" in raw_value
+            or not raw_value.isascii()
+            or any((ord(character) < 32 and character != "\t") or ord(character) == 127 for character in raw_value)
+            or len(raw_value) > _MAX_LLM_HEADER_VALUE_BYTES
+        ):
+            continue
+        normalized_name = name.lower()
+        previous_name = names_by_lowercase.get(normalized_name)
+        if previous_name is not None:
+            headers.pop(previous_name, None)
+        headers[name] = raw_value
+        names_by_lowercase[normalized_name] = name
+    return headers
+
+
 @contextlib.contextmanager
 def a2a_request_context(
     *,
@@ -51,9 +102,12 @@ def a2a_request_context(
     aliyun_credential: AliyunCredential | None = None,
     preferred_language: str | None = None,
     telemetry_channel: str | None = None,
+    llm_headers: Mapping[str, str] | None = None,
 ) -> Iterator[None]:
     with contextlib.ExitStack() as stack:
         stack.enter_context(permission_execution_identity_cache_scope())
+        if llm_headers is not None:
+            stack.enter_context(use_provider_request_headers(llm_headers))
         if telemetry_channel:
             stack.enter_context(use_telemetry_channel(telemetry_channel))
         if preferred_language:

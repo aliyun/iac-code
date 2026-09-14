@@ -427,6 +427,8 @@ function effortItems(model) {
   return Array.isArray(model?.efforts) ? model.efforts : [];
 }
 
+const LONG_EFFORT_MENU_THRESHOLD = 12;
+
 function activeProviderSummary(active = {}) {
   return {
     provider: text(active.provider),
@@ -469,6 +471,7 @@ function effortLabel(effort) {
       high: t("High"),
       xhigh: t("Very high"),
       max: t("Max"),
+      ultra: t("Ultra"),
       auto: t("Auto"),
     }[text(effort)] || text(effort)
   );
@@ -1036,7 +1039,8 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     submenu.className = "composer-model-submenu";
     submenu.setAttribute("data-composer-submenu", kind);
     submenu.hidden = activeSubmenu !== kind;
-    submenu.append(makeComposerMenuHeading(kind === "model" ? t("Model") : t("Provider")), ...buttons);
+    const heading = kind === "model" ? t("Model") : kind === "effort" ? t("Reasoning effort") : t("Provider");
+    submenu.append(makeComposerMenuHeading(heading), ...buttons);
     return submenu;
   }
 
@@ -1167,7 +1171,17 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
 
     modelMenu.append(makeComposerMenuHeading(t("Reasoning")));
     if (effortButtons.length > 0) {
-      modelMenu.append(...effortButtons);
+      if (effortButtons.length > LONG_EFFORT_MENU_THRESHOLD) {
+        modelMenu.append(
+          makeComposerSubmenuTrigger({
+            kind: "effort",
+            label: effortLabel(selectedEffort()) || t("Reasoning effort"),
+            active: activeSubmenu === "effort",
+          }),
+        );
+      } else {
+        modelMenu.append(...effortButtons);
+      }
     } else {
       modelMenu.append(makeComposerDisabledMenuItem(t("Not supported")));
     }
@@ -1189,6 +1203,9 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     }
     if (activeSubmenu === "provider") {
       modelMenu.append(makeComposerSubmenu("provider", providerButtons));
+    }
+    if (activeSubmenu === "effort") {
+      modelMenu.append(makeComposerSubmenu("effort", effortButtons));
     }
   }
 

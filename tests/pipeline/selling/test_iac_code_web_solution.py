@@ -215,7 +215,7 @@ def test_golden_template_parameters_outputs_and_bootstrap_follow_contract() -> N
         "'memory': {'autoMemory': True}",
         "'pipeline': {'sellingReviewStep': False}",
         "'apiBase': 'https://dashscope.aliyuncs.com/compatible-mode/v1'",
-        "'model': 'qwen3.8-max'",
+        "'model': 'qwen3.8-max-0902'",
         "'name': 'DashScope'",
         "'mode': 'normal'",
         "'permissionMode': 'bypass_permissions'",

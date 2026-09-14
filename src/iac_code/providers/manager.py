@@ -135,6 +135,7 @@ _TOKEN_METRIC_SCOPE_KEYS = frozenset(
     }
 )
 
+
 class _BestEffortSpan:
     def __init__(self, span: Any | None = None) -> None:
         self._span = span
@@ -400,18 +401,36 @@ MODEL_FALLBACK_MAP = {
 }
 
 _MODEL_REFUSAL_FALLBACK_MAP = {
+    "claude-fable-5-1": "claude-opus-5",
     "claude-fable-5": "claude-opus-4-8",
     "claude-opus-5": "claude-opus-4-8",
 }
 
 _PROVIDER_MODEL_FALLBACK_MAP = {
     "dashscope": {
+        "qwen3.8-max-0902": "qwen3.8-max",
         "qwen3.8-flash": "qwen3.7-flash",
+        "deepseek-v4.1-flash": "qwen3.8-flash",
+        "ZHIPU/GLM-5.3-Flash": "qwen3.8-flash",
         "qwen3.6-plus": "qwen3.6-flash",
     },
     "dashscope_token_plan": {
         "qwen3.8-flash": "qwen3.6-flash",
+        # Keep retry compatibility for sessions saved before qwen3.6-plus
+        # left the current Token Plan selector catalog.
         "qwen3.6-plus": "qwen3.6-flash",
+        "deepseek-v4.1-flash": "qwen3.8-flash",
+        "deepseek-v4-pro": "deepseek-v4-flash-0731",
+        "deepseek-v4-flash-0731": "qwen3.6-flash",
+        "glm-5.2": "qwen3.6-flash",
+    },
+    "anthropic": {"claude-fable-5-1": "claude-fable-5"},
+    "gemini": {"gemini-3.8-flash": "gemini-3.7-flash"},
+    "openai": {"gpt-6-astra": "gpt-5.6-sol"},
+    "kimi_code": {
+        "k3": "kimi-for-coding",
+        "k3-256k": "kimi-for-coding",
+        "kimi-for-coding-highspeed": "kimi-for-coding",
     },
     "aliyun_codingplan": {"qwen3.6-plus": "qwen3.5-plus"},
     "aliyun_codingplan_intl": {"qwen3.6-plus": "qwen3.5-plus"},
@@ -440,7 +459,7 @@ def _normalize_configured_effort(
         from iac_code.providers.thinking import get_thinking_spec
 
         spec = get_thinking_spec(provider_key, model)
-        if any(item.value == normalized_effort for item in spec.allowed_efforts):
+        if normalized_effort in spec.effort_values:
             return normalized_effort, thinking_enabled
     return None, False
 
@@ -814,9 +833,7 @@ def _telemetry_provider_name(provider: Any) -> str:
 
 def _provider_telemetry_attrs(provider: Any) -> dict[str, str | bool]:
     attrs: dict[str, str | bool] = {
-        IacCodeAttr.OFFICIAL_ENDPOINT: official_dashscope_wire_provider_key(
-            _provider_endpoint_url(provider)
-        )
+        IacCodeAttr.OFFICIAL_ENDPOINT: official_dashscope_wire_provider_key(_provider_endpoint_url(provider))
         is not None,
     }
     adapter_name = _string_provider_attr(provider, "_ADAPTER_NAME")
@@ -1790,9 +1807,7 @@ class ProviderManager:
                                 yield terminal_event
                                 return
                             yield replay_event
-                        raise UnsafeStreamProtocolError(
-                            "Qwen replay ended before message completion."
-                        )
+                        raise UnsafeStreamProtocolError("Qwen replay ended before message completion.")
                     except UnsafeStreamProtocolError as exc:
                         last_unsafe_error = exc
                         commit_replay_failure(exc)

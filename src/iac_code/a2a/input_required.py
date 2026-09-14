@@ -149,7 +149,13 @@ class PendingPermission:
 
 
 class PermissionResolutionOwner(Protocol):
-    async def resolve_permission(self, pending: PendingPermission, response: PermissionResponse) -> bool: ...
+    async def resolve_permission(
+        self,
+        pending: PendingPermission,
+        response: PermissionResponse,
+        *,
+        before_delivery: Callable[[], Awaitable[None]] | None = None,
+    ) -> bool: ...
 
     async def fail_permission(self, pending: PendingPermission) -> None: ...
 
@@ -1161,10 +1167,21 @@ class PermissionInputRegistry:
                 request.resolution_owner_managed = True
             return pending
 
-    async def answer(self, response: PermissionResponse) -> bool:
+    async def answer(
+        self,
+        response: PermissionResponse,
+        *,
+        before_delivery: Callable[[], Awaitable[None]] | None = None,
+    ) -> bool:
         pending = await self._lookup(response)
         if pending.resolution_owner is not None:
-            return await pending.resolution_owner.resolve_permission(pending, response)
+            if before_delivery is None:
+                return await pending.resolution_owner.resolve_permission(pending, response)
+            return await pending.resolution_owner.resolve_permission(
+                pending,
+                response,
+                before_delivery=before_delivery,
+            )
 
         coordinator = self._permission_wait_coordinator
         if coordinator is not None and pending.boundary_id is not None:
@@ -1188,6 +1205,7 @@ class PermissionInputRegistry:
                     source="user",
                     on_new_claim=audit_new_claim,
                     before_delivery=lambda record: self._backup_claim_before_delivery(pending, record),
+                    before_release=before_delivery,
                 )
             except (LookupError, ValueError) as exc:
                 raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
@@ -1213,6 +1231,8 @@ class PermissionInputRegistry:
             )
             if approved and not audit_ok:
                 approved = False
+            if before_delivery is not None:
+                await before_delivery()
             future.set_result(approved)
             return approved
 

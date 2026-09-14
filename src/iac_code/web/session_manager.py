@@ -2936,7 +2936,7 @@ class WebSessionManager:
             from iac_code.providers.thinking import get_thinking_spec, normalize_effort
 
             normalized = normalize_effort(normalized_effort)
-            allowed = {item.value for item in get_thinking_spec(provider, model).allowed_efforts}
+            allowed = set(get_thinking_spec(provider, model).effort_values)
             if normalized is None or normalized not in allowed:
                 raise ValueError(_("unknown effort"))
             normalized_effort = normalized

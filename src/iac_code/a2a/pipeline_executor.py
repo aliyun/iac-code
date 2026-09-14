@@ -417,6 +417,7 @@ class IacCodeA2APipelineExecutor:
         backup_service: Any | None = None,
         aliyun_delegated_executor_factory: Any | None = None,
         pipeline_name: str | None = None,
+        context_ready_callback: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -443,6 +444,7 @@ class IacCodeA2APipelineExecutor:
         self._backup_service = backup_service or SessionBackupService()
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._pipeline_name_override = pipeline_name or None
+        self._context_ready_callback = context_ready_callback
 
     def _resolve_pipeline_name(self) -> str:
         """Pipeline this executor must run.
@@ -617,6 +619,8 @@ class IacCodeA2APipelineExecutor:
                     cwd=cwd,
                     runtime_factory=runtime_factory,
                 )
+                if self._context_ready_callback is not None:
+                    await self._context_ready_callback()
                 control = current_execution_control()
                 if control is not None:
                     control.bind_session(ctx.session_id)

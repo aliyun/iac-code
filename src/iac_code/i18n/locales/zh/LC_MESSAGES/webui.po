@@ -1303,6 +1303,10 @@ msgid "Max"
 msgstr "最大"
 
 #: src/iac_code/web/static/js/components/composer.js
+msgid "Ultra"
+msgstr "极致"
+
+#: src/iac_code/web/static/js/components/composer.js
 msgid "Auto"
 msgstr "自动"
 
@@ -1373,6 +1377,11 @@ msgstr "无法保存思考开关"
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Model"
 msgstr "模型"
+
+#: src/iac_code/web/static/js/components/composer.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Reasoning effort"
+msgstr "推理强度"
 
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Provider"
@@ -2849,10 +2858,6 @@ msgstr "选择左侧服务商以查看与编辑其配置。"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The model used for generation under this provider"
 msgstr "该服务商下用于生成的模型"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Reasoning effort"
-msgstr "推理强度"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "How deeply the model thinks; higher is slower but more detailed"

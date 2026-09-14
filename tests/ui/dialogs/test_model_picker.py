@@ -31,6 +31,7 @@ class TestEffortLevel:
         assert EffortLevel.HIGH.value == "high"
         assert EffortLevel.XHIGH.value == "xhigh"
         assert EffortLevel.MAX.value == "max"
+        assert EffortLevel.ULTRA.value == "ultra"
         assert EffortLevel.AUTO.value == "auto"
 
     def test_effort_order(self):
@@ -42,6 +43,7 @@ class TestEffortLevel:
             EffortLevel.HIGH,
             EffortLevel.XHIGH,
             EffortLevel.MAX,
+            EffortLevel.ULTRA,
             EffortLevel.AUTO,
         ]
 
@@ -53,6 +55,7 @@ class TestEffortLevel:
         assert EFFORT_SYMBOLS[EffortLevel.HIGH] == "◆◆◆"
         assert EFFORT_SYMBOLS[EffortLevel.XHIGH] == "◆◆◆◆"
         assert EFFORT_SYMBOLS[EffortLevel.MAX] == "◆◆◆◆◆"
+        assert EFFORT_SYMBOLS[EffortLevel.ULTRA] == "◆◆◆◆◆◆"
         assert EFFORT_SYMBOLS[EffortLevel.AUTO] == "◆"
 
 

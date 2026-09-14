@@ -43,9 +43,9 @@ def _title_effort_override(provider_key: str | None, model: str) -> str:
     if not provider_key:
         return "none"
     spec = get_thinking_spec(provider_key, model)
-    if spec.supports_disable or not spec.allowed_efforts:
+    if spec.supports_disable or not spec.effort_values:
         return "none"
-    return spec.allowed_efforts[0].value
+    return spec.effort_values[0]
 
 
 def _build_messages(text: str | None, image_blocks: list[ContentBlock]) -> list[Message]:

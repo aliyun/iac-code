@@ -27,6 +27,7 @@ from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipe
 from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher, _unified_input_projection
 from iac_code.a2a.runtime_overrides import a2a_request_context
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.providers.request_headers import get_provider_request_headers, use_provider_request_headers
 from iac_code.services.permission_wait import (
     PermissionExecutionIdentity,
     PermissionWaitCheckpointStore,
@@ -447,14 +448,20 @@ async def test_concurrent_duplicate_normal_answers_claim_live_continuation_once(
         decision="allow_once",
     )
 
-    async def answer_and_continue() -> bool:
-        approved = await registry.answer(response)
+    header_commits: list[str] = []
+
+    async def answer_and_continue(label: str) -> bool:
+        async def commit_headers() -> None:
+            header_commits.append(label)
+
+        approved = await registry.answer(response, before_delivery=commit_headers)
         claimed = await registry.claim_continuation(pending)
         if claimed is not None:
             await claimed()
         return approved
 
-    assert await asyncio.gather(answer_and_continue(), answer_and_continue()) == [True, True]
+    assert await asyncio.gather(answer_and_continue("first"), answer_and_continue("second")) == [True, True]
+    assert len(header_commits) == 1
     assert continuation_calls == 1
     assert checkpoint_store.load(record["boundaryId"])["decision"]["status"] == "applied"
     await registry.complete(pending)
@@ -1194,7 +1201,13 @@ async def test_sub_pipeline_permissions_stay_working_and_resolve_independently(m
         decision="allow_once",
     )
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", permission_input_registry=registry)
-    ack = await executor.resolve_sideband_permission(response)
+    binding = await store.bind_context_llm_headers("ctx-1", {"Authorization": "Bearer old"})
+    with use_provider_request_headers(binding, live=True):
+        ack = await executor.resolve_sideband_permission(
+            response,
+            metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer rotated"}}},
+        )
+        assert get_provider_request_headers() == {"Authorization": "Bearer rotated"}
     assert ack is not None
     ack_payload = MessageToDict(ack, preserving_proto_field_name=False)
     assert ack_payload["role"] == "ROLE_AGENT"

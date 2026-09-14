@@ -165,22 +165,27 @@ class DashScopeProvider(OpenAIProvider):
     def _build_thinking_kwargs(self) -> dict[str, Any]:
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is ThinkingFamily.MINIMAX:
+            # MiniMax-M3 exposes an adaptive/disabled switch. Earlier
+            # original-vendor models always think and reject that switch, so
+            # keep their server default by omitting the extension entirely.
+            if not spec.supports_disable:
+                return {}
             thinking_type = "disabled" if self._thinking_disabled() else "adaptive"
             return {"extra_body": {"thinking": {"type": thinking_type}}}
         if spec.family is not ThinkingFamily.DASHSCOPE:
             return {}
         effort = normalize_effort(self._effort)
-        allowed = {e.value for e in spec.allowed_efforts}
+        allowed = set(spec.effort_values)
         if self._model in {"kimi/kimi-k3", "qwen3.8-max-preview"}:
             kwargs: dict[str, Any] = {"extra_body": {"preserve_thinking": True}}
             if self._thinking_disabled():
                 return kwargs
-            if effort in {None, "auto"} and self._thinking_forced() and spec.default_effort is not None:
-                effort = spec.default_effort.value
+            if effort in {None, "auto"} and self._thinking_forced() and spec.default_effort_value is not None:
+                effort = spec.default_effort_value
             if effort in allowed:
                 kwargs["reasoning_effort"] = effort
-            elif effort not in {None, "auto"} and spec.default_effort is not None:
-                kwargs["reasoning_effort"] = spec.default_effort.value
+            elif effort not in {None, "auto"} and spec.default_effort_value is not None:
+                kwargs["reasoning_effort"] = spec.default_effort_value
             return kwargs
         if self._model == "kimi-k3":
             # Bailian-hosted K3 is always-on and defaults to preserved
@@ -206,14 +211,14 @@ class DashScopeProvider(OpenAIProvider):
         kwargs: dict[str, Any] = {"extra_body": extra_body}
         if not spec.uses_reasoning_effort_param:
             return kwargs
-        if effort in {None, "auto"} and self._thinking_forced() and spec.default_effort is not None:
-            effort = spec.default_effort.value
+        if effort in {None, "auto"} and self._thinking_forced() and spec.default_effort_value is not None:
+            effort = spec.default_effort_value
         if effort is None or effort == "auto":
             return kwargs
         if effort in allowed:
             kwargs["reasoning_effort"] = effort
-        elif spec.default_effort is not None:
-            kwargs["reasoning_effort"] = spec.default_effort.value
+        elif spec.default_effort_value is not None:
+            kwargs["reasoning_effort"] = spec.default_effort_value
         return kwargs
 
     def _supports_preserve_thinking(self) -> bool:

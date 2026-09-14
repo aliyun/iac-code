@@ -27,7 +27,7 @@ API Key 参数。
   `--host 0.0.0.0 --port 8766 --no-open` 以 root 用户启动 iac-code Web。
 - `IAC_CODE_CONFIG_DIR` 固定为 `/root/.iac-code`。Bootstrap 将百炼 API Key 写入
   `.credentials.yml`，将阿里云云凭证默认配置为当前 ECS 绑定角色对应的 `EcsRamRole`，并在
-  `settings.yml` 中配置 DashScope（默认模型 `qwen3.8-max`）、自动 Memory、中文 UI、
+  `settings.yml` 中配置 DashScope（默认模型 `qwen3.8-max-0902`）、自动 Memory、中文 UI、
   `selling` Pipeline、普通会话模式和 `bypass_permissions`；`userID` 使用 `ALIYUN::TenantId`。
 - Bootstrap 在 `/root/AGENTS.md` 注入当前 ECS 的实例 ID、规格、地域、可用区、VPC、
   VSwitch、安全组、EIP 和 ECS 控制台详情链接。iac-code 将未明确指定目标的 ECS 查询、

@@ -134,6 +134,17 @@ class TestRegistryDrivenCreateProvider:
         p = create_provider("kimi-k2.6", credentials={"kimi_cn": "test-key"})
         assert p.get_model_name() == "kimi-k2.6"
 
+    def test_creates_kimi_code_provider_with_subscription_endpoint(self, monkeypatch):
+        monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: None)
+        monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})
+        from iac_code.providers.manager import create_provider
+
+        p = create_provider("kimi-for-coding", credentials={"kimi_code": "test-key"})
+
+        assert p.get_model_name() == "kimi-for-coding"
+        assert p._PROVIDER_KEY == "kimi_code"
+        assert p._base_url == "https://api.kimi.com/coding/v1"
+
     def test_creates_gemini_provider(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "gemini")
         monkeypatch.setattr("iac_code.config.get_provider_config", lambda name: {})

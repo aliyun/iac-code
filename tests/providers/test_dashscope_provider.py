@@ -103,15 +103,11 @@ class TestDashScopeBuildThinkingKwargs:
 
     def test_bailian_hosted_kimi_k3_keeps_always_on_thinking(self):
         p = DashScopeProvider(model="kimi-k3", api_key="k", thinking_enabled=False)
-        assert p._build_thinking_kwargs() == {
-            "extra_body": {"enable_thinking": True, "preserve_thinking": True}
-        }
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "preserve_thinking": True}}
 
     def test_qwen38_open_model_supports_thinking_budget(self):
         p = DashScopeProvider(model="qwen3.8-2.4t-a95b", api_key="k", thinking_budget=2048)
-        assert p._build_thinking_kwargs() == {
-            "extra_body": {"enable_thinking": True, "thinking_budget": 2048}
-        }
+        assert p._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True, "thinking_budget": 2048}}
 
     def test_stepfun_uses_its_documented_effort_values(self):
         p = DashScopeProvider(model="stepfun/step-3.7-flash", api_key="k", effort="medium")
@@ -175,6 +171,26 @@ class TestDashScopeBuildThinkingKwargs:
             "reasoning_effort": "xhigh",
         }
 
+    @pytest.mark.parametrize("provider_key", ["dashscope", "dashscope_token_plan"])
+    @pytest.mark.parametrize("effort", ["minimal", "low", "medium", "high", "xhigh", "max", "ultra"])
+    def test_deepseek_v41_flash_forwards_documented_effort(self, provider_key, effort):
+        provider = DashScopeProvider(
+            model="deepseek-v4.1-flash",
+            api_key="k",
+            provider_key=provider_key,
+            effort=effort,
+        )
+
+        assert provider._build_thinking_kwargs() == {
+            "extra_body": {"enable_thinking": True},
+            "reasoning_effort": effort,
+        }
+
+    def test_deepseek_v41_flash_omits_unsupported_effort(self):
+        provider = DashScopeProvider(model="deepseek-v4.1-flash", api_key="k", effort="100")
+
+        assert provider._build_thinking_kwargs() == {"extra_body": {"enable_thinking": True}}
+
     def test_unknown_model_returns_empty(self):
         p = DashScopeProvider(model="not-real", api_key="k")
         assert p._build_thinking_kwargs() == {}
@@ -186,6 +202,24 @@ class TestDashScopeBuildThinkingKwargs:
 
 @pytest.mark.asyncio
 class TestDashScopeThinkingBudgetRequestPolicy:
+    async def test_deepseek_v41_stream_sends_ultra_effort_as_top_level_string(self):
+        chunks = [
+            ns(
+                usage=ns(prompt_tokens=1, completion_tokens=1),
+                choices=[ns(finish_reason="stop", delta=ns(content="ok", tool_calls=None))],
+            ),
+        ]
+        client = FakeOpenAIClient(stream_chunks=chunks)
+        provider = DashScopeProvider(model="deepseek-v4.1-flash", api_key="k", effort="ultra")
+        provider._client = client
+
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
+
+        call_kwargs = client.chat.completions.calls[0]
+        assert call_kwargs["reasoning_effort"] == "ultra"
+        assert isinstance(call_kwargs["reasoning_effort"], str)
+        assert call_kwargs["extra_body"] == {"enable_thinking": True}
+
     async def test_qwen38_stream_uses_token_plan_always_on_payload(self):
         chunks = [
             ns(

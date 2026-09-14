@@ -652,7 +652,8 @@ async def test_text_gateway_sideband_permission_response_hydrates_task_and_retur
     )
 
     class Executor:
-        async def resolve_sideband_permission(self, _response):
+        async def resolve_sideband_permission(self, _response, *, metadata=None):
+            assert metadata is message
             return ack
 
     async def fail_sdk_stream(*_args, **_kwargs):

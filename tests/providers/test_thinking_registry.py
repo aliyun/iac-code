@@ -69,11 +69,12 @@ class TestGetThinkingSpec:
         assert EffortLevel.NONE not in o3.allowed_efforts
 
     def test_deepseek_official_uses_openai_family_with_low_high_max(self):
-        spec = get_thinking_spec("deepseek", "deepseek-v4-pro")
-        assert spec.family is ThinkingFamily.OPENAI
-        assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
-        assert spec.default_effort is EffortLevel.HIGH
-        assert spec.thinking_enabled_by_default is True
+        for model in ("deepseek-v4-flash", "deepseek-v4-pro", "deepseek-v4-flash-vision-exp"):
+            spec = get_thinking_spec("deepseek", model)
+            assert spec.family is ThinkingFamily.OPENAI
+            assert spec.allowed_efforts == (EffortLevel.LOW, EffortLevel.HIGH, EffortLevel.MAX)
+            assert spec.default_effort is EffortLevel.HIGH
+            assert spec.thinking_enabled_by_default is True
 
     def test_dashscope_qwen_supports_thinking_no_effort(self):
         spec = get_thinking_spec("dashscope", "qwen3.6-plus")
@@ -270,6 +271,27 @@ class TestGetThinkingSpec:
             )
             assert spec.default_effort is EffortLevel.HIGH
             assert spec.uses_reasoning_effort_param is True
+
+    @pytest.mark.parametrize("provider_key", ["dashscope", "dashscope_token_plan"])
+    def test_deepseek_v41_flash_exposes_documented_efforts(self, provider_key):
+        spec = get_thinking_spec(provider_key, "deepseek-v4.1-flash")
+
+        assert spec.family is ThinkingFamily.DASHSCOPE
+        assert spec.supports_effort is True
+        assert spec.allowed_efforts == (
+            EffortLevel.MINIMAL,
+            EffortLevel.LOW,
+            EffortLevel.MEDIUM,
+            EffortLevel.HIGH,
+            EffortLevel.XHIGH,
+            EffortLevel.MAX,
+            EffortLevel.ULTRA,
+        )
+        assert spec.effort_values == ("minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+        assert spec.effort_range == (EffortLevel.MINIMAL, EffortLevel.ULTRA)
+        assert spec.default_effort_value is None
+        assert spec.uses_reasoning_effort_param is True
+        assert spec.thinking_enabled_by_default is True
 
     def test_token_plan_deepseek_0731_is_registered(self):
         spec = get_thinking_spec("dashscope_token_plan", "deepseek-v4-flash-0731")

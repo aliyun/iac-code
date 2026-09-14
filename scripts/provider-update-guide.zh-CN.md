@@ -18,17 +18,27 @@
    不能进入 pytest。
 7. Provider 返回的签名、加密思考块等 opaque metadata 不是展示内容，但可能是下一轮请求的必填字段；
    必须原样持久化、按 provider 隔离回传，并从公开输出和日志中排除。
+8. 用户点名的 provider 或模型只是调研线索，不是范围清单。每次更新都要从仓库完整 registry 出发，
+   逐个检查官方目录、区域版和套餐版，不能因需求中没提到某个模型就跳过它。
+9. 能力结论必须绑定 `provider key + 精确 model ID + base URL + API surface`。文档、控制台、
+   `/models` 和真实请求证明的是不同层次的事实，不能把一个端点的结论外推到另一个端点。
+10. Provider 更新是跨终端和 Web 的产品变更。模型列表、默认项、effort 选项、翻译和长列表交互
+    都必须在两个入口分别验收，不能只验证 adapter 单测。
 
 ## 标准流程
 
 ### 1. 确认范围和当前基线
 
-先确认本次要更新哪些 provider，以及是否包含它们的区域版、套餐版和兼容版。例如：
+用户提供的名单只能作为“重点关注项”。先从
+[`src/iac_code/providers/registry.py`](../src/iac_code/providers/registry.py) 导出所有 provider key，
+再确认每个 provider 是否包含区域版、套餐版、工作空间端点和兼容版。例如：
 
 - OpenAI 与 Azure OpenAI 是两个可用性边界，不应默认完全同步。
 - Kimi CN、Kimi Intl 可以共享实现，但 model ID 和上线时间仍需分别确认。
 - DashScope 标准兼容端点、Token Plan、Coding Plan 的模型集合可能不同。
 - 官方 GLM/Kimi/DeepSeek 与百炼托管的同名模型可能使用不同请求参数。
+- Kimi 公共 API 与 Kimi Code 订阅是不同 provider；同一个产品版本也可能暴露不同 API model ID。
+- 百炼公共兼容端点、用户 Workspace 端点和 Token Plan 即使都使用 OpenAI SDK，也不是同一能力边界。
 
 开始前执行：
 
@@ -44,6 +54,18 @@ PROVIDER_UPDATE_COMMIT="$(git log -1 --format=%H -- src/iac_code/providers tests
 git show --stat "$PROVIDER_UPDATE_COMMIT"
 git show "$PROVIDER_UPDATE_COMMIT" -- src/iac_code/providers tests/providers
 ```
+
+随后建立全量盘点表。表中每个 registry provider 必须恰好出现一次；没有更新也要写明“已核验、无变化”
+及证据，不能只列已知有更新的厂商：
+
+```markdown
+| provider_key | registry 当前模型 | 官方当前目录 | 区域/套餐/端点 | 结论 | 证据与日期 |
+| --- | --- | --- | --- | --- | --- |
+| example | old-model | new-model | public / CN | 更新 | official URL, YYYY-MM-DD |
+```
+
+这个门禁用于防止只搜索用户点名的 Qwen、GLM、Gemini、GPT、Claude，而漏掉同周期更新的 DeepSeek、
+Kimi、MiniMax 或其他 registry provider。调研完成前先检查盘点表是否覆盖 registry 全集，再开始改代码。
 
 ### 2. 建立官方信息源
 
@@ -63,13 +85,14 @@ git show "$PROVIDER_UPDATE_COMMIT" -- src/iac_code/providers tests/providers
 | OpenAI | [Models](https://developers.openai.com/api/docs/models) | [Reasoning](https://developers.openai.com/api/docs/guides/reasoning)、[Deprecations](https://developers.openai.com/api/docs/deprecations) |
 | Anthropic | [Models overview](https://platform.claude.com/docs/en/about-claude/models/overview) | [Extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking) |
 | Gemini | [Models](https://ai.google.dev/gemini-api/docs/models) | [Thinking](https://ai.google.dev/gemini-api/docs/thinking)、[OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai) |
-| Qwen / DashScope | [模型列表](https://help.aliyun.com/zh/model-studio/models) | [OpenAI 兼容](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking) |
-| Kimi | [Model List](https://platform.kimi.ai/docs/models) | [Model parameters](https://platform.kimi.ai/docs/api/models-overview)、[Chat Completion](https://platform.kimi.ai/docs/api/chat) |
+| Qwen / DashScope | [模型列表](https://help.aliyun.com/zh/model-studio/models)、[百炼模型市场](https://bailian.console.aliyun.com/cn-beijing/model/market) | [OpenAI 兼容](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)、[Token Plan](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview)；标准百炼、Token Plan 和 Workspace 分栏核对 |
+| Kimi 公共 API | [Model List](https://platform.kimi.ai/docs/models) | [Model parameters](https://platform.kimi.ai/docs/api/models-overview)、[Chat Completion](https://platform.kimi.ai/docs/api/chat) |
+| Kimi Code | [Models](https://www.kimi.com/code/docs/kimi-code/models.html) | 单独核对 `https://api.kimi.com/coding/v1` 的模型别名、effort 和订阅权限，不从公共 API 推导 |
 | GLM / Z.AI | [Chat Completion](https://docs.z.ai/api-reference/llm/chat-completion) | 在同一 API reference 中核对 `thinking`、工具调用和模型枚举 |
 | Azure OpenAI | [Create and deploy](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/create-resource?view=foundry-classic) | 请求中的 `model` 是用户自定义 deployment name，不是公开模型 ID |
 | DeepSeek | [Models and pricing](https://api-docs.deepseek.com/quick_start/pricing) | 核对官方 Chat Completions、思考模式和精确模型 ID |
 | MiniMax 官方 | [Models](https://platform.minimax.io/docs/guides/models-intro)、[API Overview](https://platform.minimax.io/docs/api-reference/api-overview) | 中国/国际直连端点、Anthropic/OpenAI 兼容协议和套餐模型分别核对 |
-| DashScope 托管 MiniMax | [DashScope MiniMax API](https://help.aliyun.com/en/model-studio/minimax-api-by-minimax) | 不要把官方端点的模型命名和 thinking 协议直接套到百炼命名空间 |
+| 百炼 MiniMax 原厂直供 | [百炼 MiniMax API](https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax) | 不要把官方端点的模型命名和 thinking 协议直接套到 `MiniMax/` 命名空间 |
 
 官方页面可能改变路径。链接失效时，从厂商文档首页重新搜索，不要转而引用聚合站、新闻稿或
 模型排行榜。查询时优先使用下面这类窄关键词：
@@ -91,29 +114,61 @@ site:官方域名 deprecation migration model
 | 字段 | 要确认的内容 |
 | --- | --- |
 | Provider key | 仓库中的 key，例如 `openai`、`dashscope_token_plan`、`kimi_cn` |
+| 精确 base URL | 公共、区域、套餐或 Workspace URL；Workspace ID 必须脱敏为 `{WorkspaceId}` |
 | 精确 model ID | 大小写、连字符、日期后缀、命名空间前缀是否完全一致 |
 | 生命周期 | GA、preview、latest alias、dated snapshot、deprecated、下线日期 |
 | 可用范围 | 中国/国际区域、标准计费/Token Plan/Coding Plan、账号白名单 |
-| API 协议 | 原生 OpenAI、原生 Anthropic、OpenAI-compatible 或厂商扩展 |
+| API surface | Chat Completions、Responses、Messages、原生 API 或厂商兼容扩展 |
 | 输入输出模态 | 文本、图片、音频、视频；注意“模型支持”与“当前 endpoint 支持”之别 |
 | Agent 能力 | tool calling、parallel tools、structured output、system message |
 | 容量 | context window、最大输出、思考 token 是否计入输出上限 |
-| 思考控制 | 开关字段、effort 枚举、budget、默认值、是否 always-on |
+| 思考控制 | wire 字段、服务端接受值、UI 标准值、alias、默认值、关闭语义、是否 always-on |
 | Opaque 响应字段 | thinking signature、redacted/encrypted block、tool-call signature 是否必须在下一轮原样回传 |
 | 缓存 | 隐式/显式缓存、cache marker、支持模型列表 |
 | 降级候选 | 同协议、同模态、仍在线、成本和质量可接受的模型 |
-| 证据 | 官方 URL、页面标题、核验日期；有冲突时记录冲突和采用理由 |
+| 默认模型理由 | 可用性、生命周期、当前 adapter 协议、工具/多模态能力、降级链和厂商推荐 |
+| 证据 | 官方 URL、控制台所见、脱敏实测、核验日期；有冲突时记录冲突和采用理由 |
 
 建议在 PR 描述或临时调研笔记中使用以下模板：
 
 ```markdown
-| provider_key | model_id | status | scope | multimodal | context | max output | thinking wire format | fallback | source | checked_at |
+| provider_key | base_url | API surface | model_id | status | UI efforts | wire efforts | default reason | fallback | source/test | checked_at |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| openai | example-model | GA | global | image input | 128K | 16K | reasoning_effort=... | example-small | official URL | YYYY-MM-DD |
+| openai | official | Chat Completions | example-model | GA | low/high | low/high | tool loop supported | example-small | official URL | YYYY-MM-DD |
 ```
 
 不要仅凭 `GET /models` 决定能力。模型列表通常不能完整表达思考档位、多模态限制、弃用日期或
 代理端点的扩展参数；它只能作为官方文档的补充证据。
+
+### 4. 对每个真实 URL 做端点级验证
+
+先从 registry 和用户配置方式建立端点矩阵，至少区分厂商直连、CN/Intl、百炼公共兼容端点、
+Token Plan、Coding Plan 和 Workspace 端点。Workspace URL 在笔记、日志和提交中统一写成：
+
+```text
+https://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+```
+
+文档与实际报错冲突，或端点属于 Workspace/套餐/代理服务时，必须在开发者授权并提供已配置凭据后，
+对**每个 URL**做最小真实 smoke test。一次探测只能证明“这个 URL + 这个 model ID + 这个 API
+surface + 这组参数”；禁止把结论复制到名称相近的 provider。
+
+对 effort 至少记录 UI 标准值、服务端接受 alias、默认值、关闭语义和实际 wire 字段。声称支持数值范围
+（例如 `1`–`100`）时，必须对同一 URL 测试下界、上界、一个中间值及非法负例；不能从控制台滑块、
+SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准枚举，兼容 alias 只在 transport 层接受。
+
+建议把脱敏结果记录为：
+
+```markdown
+| provider_key | base_url | API surface | model_id | field=value | HTTP/SDK result | sanitized conclusion | checked_at |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+```
+
+- `GET /models` 只证明当前凭据可能看见某个 ID，不证明 Chat/Responses、工具调用或 effort 可用。
+- `401`/`403` 只证明请求到达认证边界，不证明模型存在或参数被接受。
+- `400` 的合法值枚举可以作为该 URL 的实测证据，但要记录请求的 model、surface 和日期。
+- 不打印或提交 API key、认证 header、Workspace ID、完整响应正文和用户配置。
+- 文档、控制台和实测不一致时，在证据表分栏保留三者并说明采用哪一项，不能静默择一。
 
 ## 代码更新矩阵
 
@@ -126,6 +181,20 @@ site:官方域名 deprecation migration model
 - 仅在当前接入路径确实支持图片输入时设置 `support_multimodal=True`。
 - 检查 `base_url`、`provider_class`、`qwenpaw_provider_ids` 和 `qwenpaw_chat_model`。
 - 模型顺序通常为推荐默认、当前主力、较旧兼容模型；不要把已弃用模型放到默认位。
+
+默认模型不能按“版本号最大”自动选择。按以下顺序完成门禁，并把理由写入证据表：
+
+1. 精确 endpoint 和账号范围是否可用。
+2. 是否为稳定版本，是否即将弃用或仅限预览/邀请。
+3. 当前 adapter 使用的 API surface 是否支持它；支持 Responses 不等于支持现有 Chat Completions 工具循环。
+4. tool calling、连续工具轮次、structured output 和 system message 是否满足 agent 运行要求。
+5. registry 的多模态标记是否与当前附件传输格式一致。
+6. 是否存在同 endpoint、同协议、能力足够的 fallback。
+7. 在以上条件都满足时，再参考厂商的默认/推荐模型。
+
+模型可以先进入可选目录但暂不成为默认。例如旗舰模型若只有 Responses API 才支持工具调用，而当前
+adapter 仍使用 Chat Completions，就应保留当前可工作的默认模型，并把 Responses adapter 作为独立需求。
+标准百炼和 Token Plan 的目录、生命周期与 endpoint 不同，因此可以有不同默认模型。
 
 新增 provider 或全新模型前缀时，还要检查
 [`src/iac_code/config.py`](../src/iac_code/config.py) 中的 `_MODEL_PREFIX_TO_PROVIDER`。如果模型名带
@@ -152,6 +221,8 @@ site:官方域名 deprecation migration model
 - 确认 `ThinkingFamily`、允许的 effort、默认 effort、budget 和输出 token 策略。
 - 仅在 CN/Intl 或套餐版协议完全一致时使用 `_THINKING_FALLBACK` 复用。
 - 未确认的组合应保持 `ThinkingFamily.NONE`，不要猜测“新版本应该兼容旧参数”。
+- 区分 UI 标准枚举与 wire alias；选择器只展示标准值，adapter 可按明确证据映射兼容 alias。
+- effort 超过可视阈值时，使用可滚动选择器或分组子菜单；终端和 Web 都要验证滚动、键盘选择及当前值回显。
 
 特别注意：能力声明只描述“支持什么”，实际请求格式由 provider adapter 组装。
 
@@ -239,13 +310,17 @@ signature/redacted thinking 和 Gemini function-call thought signature 都属于
 registry 会驱动多个入口，更新后至少检查：
 
 - `/auth` 展示的 provider 默认模型；
-- `/model` 和模型选择器的列表、默认项、多模态标记；
+- 终端 `/model`、`/effort` 和模型选择器的列表、默认项、多模态标记、长列表导航；
+- Web provider 设置接口、会话级 model/effort 选择器和输入区快捷入口；
+- 终端与 Web 是否都从同一 registry/thinking capability 读取数据，但仍分别有回归测试；
 - 已有 `settings.yml` 中旧模型是否仍能读取；
 - custom provider 和自定义 model ID 是否未被限制；
 - Azure 或其他 deployment-based provider 是否错误地把公开 model ID 当作 deployment ID。
 
-仅修改现有 model ID 通常不需要新增用户可见字符串，因此一般不需要运行 `make translate`。
-若修改了 provider 显示名、错误提示或帮助文本，则按仓库规则更新翻译。
+新增 provider 显示名、effort 标签、错误提示或帮助文本时，必须更新 `messages` 与 `webui` 两个翻译域，
+并运行 `make translate`。所有 locale 都要有非空翻译；`ultra` 等新增枚举不能在中文界面回退为英文。
+翻译工具可能把 `Kimi Code` 这类品牌名猜成普通词，提交前要人工检查 fuzzy 条目，品牌名应保持品牌名。
+修改 Web JS 模块时还要更新 `index.html` 中对应的 `?v=` cache-bust token，并同步前端静态测试。
 
 ## 测试策略
 
@@ -255,7 +330,7 @@ registry 会驱动多个入口，更新后至少检查：
 2. thinking registry：family、effort 枚举、默认值、budget 和 fallback。
 3. adapter wire format：开启、关闭、默认、非法 effort，以及代际差异。
 4. manager：降级映射和 provider 选择。
-5. UI/auth：默认模型和可选模型是否来自 registry。
+5. UI/auth：终端和 Web 的默认模型、可选模型、effort 标准值、翻译和长列表交互是否一致。
 6. telemetry：新增模型不会被清洗为 `other`。
 7. opaque metadata：流式、非流式、会话序列化、下一轮回传和公开输出隔离。
 
@@ -269,19 +344,26 @@ tests/providers/test_anthropic_provider.py
 tests/providers/test_dashscope_provider.py
 tests/providers/test_deepseek_provider.py
 tests/providers/test_manager.py
+tests/providers/test_new_providers.py
 tests/agent/test_message.py
 tests/agent/test_agent_loop_new.py
 tests/services/test_token_counter.py
 tests/services/test_context_manager.py
 tests/commands/test_auth_basics.py
+tests/commands/test_effort.py
 tests/cli/test_output_formats.py
 tests/types/test_stream_events.py
 tests/test_config_env_overrides.py
 tests/ui/test_stream_accumulator.py
 tests/ui/test_renderer_events.py
 tests/ui/dialogs/test_model_picker.py
+tests/web/test_settings.py
 tests/test_services/test_telemetry/test_constants.py
 ```
+
+目录类测试应同时包含精确正向列表和已移除 ID 的负向断言，并尽量加入 registry 覆盖不变量：每个静态
+模型都应按适用范围进入 thinking、context、fallback 和 telemetry 配置。这样新增模型不会只在选择器中
+可见，却在运行时落入通用默认值或遥测 `other`。
 
 先运行聚焦测试：
 
@@ -309,8 +391,9 @@ make test
 make lint
 ```
 
-如需真实 API smoke test，使用开发者自己的已配置凭据，只发送最小请求，并分别验证文本、思考、
-工具调用和图片输入。不要打印请求 header、API key 或用户配置，也不要把真实响应录入测试 fixture。
+真实 API smoke test 仍不能进入 pytest；按“对每个真实 URL 做端点级验证”执行并只保留脱敏结论。
+当全量测试出现单个失败时，不得把一次单测重跑通过表述为“全量测试通过”：应保留第一次全量结果，
+重跑精确失败项判断是否偶发，并在提交说明中分别记录两次结果。
 
 ## 提交前检查表
 
@@ -324,10 +407,17 @@ git diff HEAD -- iac-code-rs
 确认以下事项后再提交：
 
 - 每个 model ID 都能追溯到官方来源和核验日期。
+- 全量盘点表覆盖 registry 中每一个 provider，而不是只覆盖用户点名的厂商。
+- 百炼公共端点、Workspace、Token Plan、Coding Plan 和厂商直连没有共用未经验证的结论。
+- 文档、控制台、`/models` 和逐 URL 实测结论已分栏记录；没有把 `401`/`403` 当作能力验证。
 - 默认模型有明确理由，且没有多个默认项。
+- 默认模型已通过当前 API surface 的连续工具调用门禁；“最新模型”没有自动等同于“默认模型”。
 - preview、deprecated、alias 和 dated snapshot 没有混为一谈。
+- 产品版本名、控制台显示名和实际 API model ID 没有混为一谈。
 - 同名模型在不同 provider 下的思考协议没有被错误复用。
+- effort 的 UI 标准值、wire alias、默认值和关闭语义已经分别验证。
 - 新模型已加入遥测白名单和必要的降级链。
+- 终端与 Web 的 model/effort 选择器均已验证，新增标签在所有 locale 中有正确翻译。
 - 聚焦测试、全量测试和 lint 已通过，或在 PR 中明确记录未运行项。
 - `git diff HEAD -- iac-code-rs` 为空。
 - 提交中没有调研缓存、网页快照、API 响应、密钥或用户配置。
@@ -362,7 +452,7 @@ git diff HEAD -- iac-code-rs
 | DashScope / Token Plan | Token Plan 的 `qwen3.8-max-preview` 支持视觉输入、1M context，只能思考，effort 为 `low/medium/xhigh`；它不发送 `enable_thinking`，工具循环通过 `extra_body.preserve_thinking=true` 保留思考状态；该参数仅向端点参数文档明确列出的 Qwen 与 Kimi 模型发送，包含 `qwen3.6-flash`；`thinking_budget` 在 OpenAI-compatible Chat 参数页中限定于 Qwen3.x，GLM-5.2 只发送 `enable_thinking`、`reasoning_effort` 和总输出限制；DashScope 的 `glm-5.1` 以及 Token Plan 的 `glm-5.1/glm-5` 接受 `none/minimal/low/medium/high/xhigh`，不得误用仅 `glm-5.2` 支持的 `max`；`MiniMax/MiniMax-M3` 使用 adaptive/disabled thinking；已核实的百炼容量要按 model ID 精确配置，不能统一落到 `qwen` 的 128K 默认值 | `registry.py`、`thinking.py`、`dashscope_provider.py`、`context_manager.py`、DashScope 调研回归测试 | [OpenAI-compatible Chat](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)、[Token Plan](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview)、[文本生成](https://help.aliyun.com/zh/model-studio/text-generation-model)、[GLM on DashScope](https://help.aliyun.com/zh/model-studio/glm)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)、[Kimi on DashScope](https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai)、[MiniMax on DashScope](https://help.aliyun.com/en/model-studio/minimax-api-by-minimax) |
 | DashScope K3 接入边界与容量 | `kimi/kimi-k3` 上下文为 100 万 token，仅支持公网 URL 图片和隐式缓存；当前附件适配器只生成 Data URL，因此不开放多模态标记；K3 的 `preserve_thinking` 默认关闭，工具循环必须显式开启；最大输出缺少精确证据，运行时保持 8192 的保守值 | `registry.py`、`dashscope_provider.py`、`context_manager.py` 及对应测试 | [K3 上架说明](https://help.aliyun.com/zh/model-studio/newly-released-models)、[Kimi on DashScope](https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai)、[Context Cache](https://help.aliyun.com/zh/model-studio/context-cache) |
 | Kimi 官方 | K3 始终思考并支持 `low/high/max`，context 为 100 万；K2.7 始终思考，关闭参数会报错；K2.6 可启停；K2.5/K2.6/K2.7 的 context 为 256K | `kimi_provider.py`、`context_manager.py`、Kimi 调研回归测试 | [Kimi API Platform](https://platform.kimi.ai/)、[Models overview](https://platform.kimi.ai/docs/api/models-overview) |
-| MiniMax 官方 | 中国/国际直连 provider 使用 MiniMax 官方兼容端点，默认模型 `MiniMax-M3` 的 context 为 100 万；DashScope 托管的 `MiniMax/MiniMax-M3` 仍按该端点文档配置为 196,608，二者必须按完整 model ID 分别验证 | `registry.py`、`thinking.py`、`minimax_provider.py`、`context_manager.py`、direct provider 调研回归测试 | [Models](https://platform.minimax.io/docs/guides/models-intro)、[API Overview](https://platform.minimax.io/docs/api-reference/api-overview) |
+| MiniMax 官方 | 中国/国际直连 provider 使用 MiniMax 官方兼容端点，默认模型 `MiniMax-M3` 的 context 为 100 万；DashScope 托管的 `MiniMax/MiniMax-M3` 也必须按其独立模型信息页配置为 1,048,576，仍需按完整 model ID 分别验证其他能力和参数 | `registry.py`、`thinking.py`、`minimax_provider.py`、`context_manager.py`、direct/DashScope provider 调研回归测试 | [Models](https://platform.minimax.io/docs/guides/models-intro)、[百炼 MiniMax M3](https://help.aliyun.com/zh/model-studio/minimax-m3) |
 | Z.AI / GLM 官方 | 中国、国际和 Coding Plan provider 均登记 `glm-5.2`，使用 Chat Completions 的 `thinking.type=enabled/disabled` 协议；直连 GLM-5.2 支持 `reasoning_effort=high/max`、默认 `max`，context 为 100 万、最大输出为 12.8 万 | `registry.py`、`thinking.py`、`zhipu_provider.py`、`context_manager.py`、direct provider 调研回归测试 | [GLM-5.2](https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2)、[Migration](https://docs.bigmodel.cn/cn/guide/start/migrate-to-glm-new)、[Chat Completion](https://docs.z.ai/api-reference/llm/chat-completion) |
 | DeepSeek | V4 Pro/Flash 通过 Chat Completions 提供思考能力，仓库仅开放官方确认的 `high/max` 档位 | `registry.py`、`thinking.py`、DeepSeek provider 测试 | [Models and pricing](https://api-docs.deepseek.com/quick_start/pricing) |
 | 遥测与公开输出 | 所有静态 registry model ID 都应进入有限白名单；provider signature 只作为内部协议状态，不进入 `stream-json` | `telemetry/constants.py`、`cli/output_formats.py` 及对应测试 | 仓库内隐私边界和本次官方模型证据 |
@@ -404,3 +494,22 @@ git diff HEAD -- iac-code-rs
 | Z.AI / GLM 官方 | `glm-5.3` 已同时开放标准 Model API 与 Coding Plan，不再只限 Coding Plan，因此进入中国站、国际站的标准 provider 并成为默认；2026-08-26 新发布 `glm-5.3-flash`，同时开放 Model API 与 Coding Plan，支持 1M context、原生图片/视频/文件输入、Function Calling 与结构化输出。其文本参数与 GLM-5.3 一致：思考始终开启，`thinking.type` 仅接受 `enabled`，`reasoning_effort` 支持 `low/high/max`（推荐 `max`）；当前附件适配器使用官方明确支持的 Base64 Data URL，因此开放图片输入标记。关闭思考时继续按 GLM-5.3 迁移规则降级为 `enabled + low` | `config.py`、`registry.py`、`thinking.py`、`zhipu_provider.py`、`manager.py`、`context_manager.py`、遥测及对应测试 | [GLM-5.3（CN）](https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3)、[GLM-5.3（Intl）](https://docs.z.ai/guides/llm/glm-5.3)、[GLM-5.3-Flash](https://docs.z.ai/guides/vlm/glm-5.3-flash)、[发布公告](https://z.ai/blog/glm-5.3-flash) |
 | DashScope 智谱直供 | 百炼华北2（北京）新增智谱原厂直供 `ZHIPU/GLM-5.3`，精确 model ID 包含大写命名空间；仅文本输入，context 为 1,048,576、最大输出为 131,072，支持 Function Calling 与隐式缓存。模型信息页把结构化输出标为支持，但端点级调用页标为不支持，本次不依赖该能力并以端点级限制为准。模型始终思考，`enable_thinking` 必须保持 `true`，`reasoning_effort` 接受 `low/high/max`；关闭请求降级为 `enable_thinking=true + low`。该模型未进入 Token Plan 目录，且按百炼兼容端点协议发送参数，不能复用 Z.AI 直连的 `thinking.type` wire format | `config.py`、`registry.py`、`thinking.py`、`dashscope_provider.py`、`manager.py`、`context_manager.py`、遥测及对应测试 | [GLM-智谱直供调用](https://help.aliyun.com/zh/model-studio/glm-zhipu)、[ZHIPU/GLM-5.3 模型信息](https://help.aliyun.com/zh/model-studio/glm-5-3-by-zhipu)、[Token Plan 个人版目录](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview) |
 | 其他厂商直连 provider | 重新检查 OpenAI、Anthropic、Gemini、DeepSeek、Kimi 与 MiniMax 的官方模型目录和更新日志后，没有发现 2026-08-18 基线之后适合当前 Chat Completions/Message 直连接入路径的新 GA 文本模型；上表的 `kimi-k3`、MiMo 和 Stepfun 变化只属于百炼服务。Kimi K2.5 的 2026-08-31 下线日期尚未到达，继续保留以兼容存量用户 | 无代码变更 | [OpenAI Models](https://developers.openai.com/api/docs/models)、[Anthropic Models](https://platform.claude.com/docs/en/about-claude/models/overview)、[Gemini Release Notes](https://ai.google.dev/gemini-api/docs/changelog)、[DeepSeek Models](https://api-docs.deepseek.com/quick_start/pricing)、[Kimi Models](https://platform.kimi.ai/docs/models)、[MiniMax Models](https://platform.minimax.io/docs/guides/models-intro) |
+
+### 2026-09-14 增量证据附录
+
+本节记录 2026-09-14 的完整复核；若与更早的证据附录冲突，以本节为准。这次先按用户点名列表
+调研，曾漏掉 DeepSeek V4.1 Flash，又曾把未经指定 Workspace URL 验证的 `1`–`100` 数值范围写入
+交互设计。两处问题促成了前文的“registry 全量盘点”和“逐 URL 实测”门禁。
+
+| 范围 | 2026-09-14 核验结论 | 代码/测试落点 | 官方证据 |
+| --- | --- | --- | --- |
+| OpenAI | 新增可选模型 `gpt-6-astra`，effort 为 `low/medium/high/xhigh/max`。它虽是当前旗舰，但官方明确其 tool calling 需要 Responses API；本仓库当前 agent adapter 仍使用 Chat Completions，因此默认继续使用能完成现有工具循环的 `gpt-5.6-sol`，Responses 支持另行实现 | `registry.py`、`thinking.py`、`openai_provider.py`、默认模型及 wire-format 测试 | [Models](https://developers.openai.com/api/docs/models)、[Latest model guide](https://developers.openai.com/api/docs/guides/latest-model) |
+| Anthropic | 默认升级为 `claude-fable-5-1`，保留 `claude-fable-5`；新默认采用 adaptive thinking，UI effort 为 `low/medium/high/xhigh/max`、默认 `high`，且不提供关闭选项 | `registry.py`、`thinking.py`、Anthropic provider 与目录测试 | [Models overview](https://platform.claude.com/docs/en/about-claude/models/overview)、[Adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking)、[Effort](https://platform.claude.com/docs/en/build-with-claude/effort) |
+| Gemini | `gemini-3.8-flash` 成为默认，保留 3.7/3.6/3.5 兼容项；3.8 的 effort 为 `low/medium/high`、默认 `medium`，不接受 `minimal`，且当前接入不提供关闭思考 | `registry.py`、`thinking.py`、`context_manager.py`、fallback/telemetry 及 Gemini 目录测试 | [Gemini 3.8 Flash](https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash)、[Models](https://ai.google.dev/gemini-api/docs/models)、[Thinking](https://ai.google.dev/gemini-api/docs/thinking) |
+| 百炼标准端点 / Qwen | 华北2标准兼容端点默认模型更新为精确快照 `qwen3.8-max-0902`，同时保留 `qwen3.8-max`；默认项依据当前标准端点目录，不能复制到 Token Plan。百炼模型市场属于动态控制台证据，应与文档页、精确 API ID 和日期一起记录 | `registry.py`、`config.py`、`thinking.py`、context/fallback/telemetry 及目录测试 | [百炼模型列表](https://help.aliyun.com/zh/model-studio/models)、[百炼模型市场](https://bailian.console.aliyun.com/cn-beijing/model/market)、[OpenAI-compatible Chat](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions) |
+| Token Plan | Token Plan 目录按套餐页重新收敛为其实际支持项，默认仍为 `qwen3.8-max`；标准百炼的 `qwen3.8-max-0902`、第三方模型和旧套餐模型不得自动复制进来。Token Plan 与标准百炼分别维护目录、默认项和负向断言 | `registry.py`、`thinking.py`、`manager.py`、Token Plan 精确列表测试 | [Token Plan 个人版](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview)、[百炼模型列表](https://help.aliyun.com/zh/model-studio/models) |
+| DeepSeek 直连 / 百炼 | DeepSeek 直连默认 API ID 为 `deepseek-v4-flash`，并登记仅该端点提供的多模态模型 `deepseek-v4-flash-vision-exp`；只有 vision 模型声明图片能力。百炼标准端点与 Token Plan 则登记 `deepseek-v4.1-flash`，两者不能复用 ID、模型能力或 endpoint 结论。对指定 Workspace Chat Completions URL 的最小请求实测表明，`reasoning_effort` 接受 `minimal/low/medium/high/xhigh/max/ultra`，数值字符串 `1`、`100` 被拒绝；该结论只绑定当次 URL、model 和 surface，不能据此改写 DeepSeek 官方端点的模型 ID | `registry.py`、`thinking.py`、`dashscope_provider.py`、`deepseek_provider.py`、context/telemetry、终端/Web effort 与 provider 测试 | [DeepSeek models](https://api-docs.deepseek.com/quick_start/pricing)、[DeepSeek thinking mode](https://api-docs.deepseek.com/guides/thinking_mode/)、[百炼模型列表](https://help.aliyun.com/zh/model-studio/models)、指定 Workspace URL 的 2026-09-14 脱敏实测 |
+| Kimi 公共 API / Kimi Code | 公共 API 目录移除已下线的 `kimi-k2.5`。Kimi Code 作为独立订阅 provider 接入 `https://api.kimi.com/coding/v1`，精确 ID 为 `k3`、`k3-256k`、`kimi-for-coding`、`kimi-for-coding-highspeed`；其中 `kimi-for-coding` 是 K2.8 Preview 的 API 别名并作为该 provider 默认。K3 默认 effort 为 `high`，K2.8 默认 `max`，可选值均为 `low/high/max`；highspeed 为固定思考行为 | `registry.py`、`thinking.py`、`kimi_provider.py`、认证/设置/终端/Web 与 Kimi Code 测试 | [Kimi public models](https://platform.kimi.ai/docs/models)、[Kimi Code models](https://www.kimi.com/code/docs/kimi-code/models.html) |
+| MiniMax 直连 / 百炼原厂直供 | MiniMax 中国/国际直连仍以 `MiniMax-M3` 为默认。百炼原厂直供使用带命名空间的 `MiniMax/MiniMax-M3`、`MiniMax/MiniMax-M2.7`、`MiniMax/MiniMax-M2.5`、`MiniMax/MiniMax-M2.1`，不能与直连 `MiniMax-*` 混用；百炼 `MiniMax/MiniMax-M3` 的多模态、adaptive thinking 和 1,048,576 context 必须按其模型信息页单独声明 | `registry.py`、`thinking.py`、`minimax_provider.py`、context/telemetry 与目录测试 | [MiniMax official models](https://platform.minimax.io/docs/guides/models-intro)、[百炼 MiniMax M3](https://help.aliyun.com/zh/model-studio/minimax-m3) |
+| 百炼智谱直供 | `ZHIPU/GLM-5.3-Flash` 原生支持 Image、Video、File 输入；当前附件适配器可发送其支持的 Base64 Data URL，因此必须声明图片能力。其 fallback 也必须保持图片能力，不能降级到纯文本 `ZHIPU/GLM-5.3` | `registry.py`、`manager.py`、multimodal capability 与 fallback 测试 | [ZHIPU/GLM-5.3-Flash](https://help.aliyun.com/zh/model-studio/glm-5-3-flash-by-zhipu) |
+| 终端 / Web effort 交互 | effort 选择器统一消费 provider/model capability 的标准枚举，Web 设置接口和会话选择器同步支持；若未来出现超长范围，则按前文使用可滚动选择器或分组子菜单。新增 `ultra` 后补齐 `messages` 与 `webui` 的全部 locale 翻译，并对 Web 静态模块更新 cache-bust token | `commands/effort.py`、`ui/dialogs/model_picker.py`、`web/settings.py`、`web/static/`、两套翻译域及终端/Web 回归测试 | 仓库 UI/i18n 约束与上述逐端点能力证据 |
