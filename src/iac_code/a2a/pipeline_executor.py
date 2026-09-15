@@ -102,6 +102,9 @@ _TERMINAL_SNAPSHOT_STATUSES = {"completed", "failed", "canceled"}
 _TERMINAL_A2A_STATUSES = {"completed", "failed", "canceled"}
 _WAITING_A2A_STATUSES = {"waiting_input", "input_required"}
 _RUNNING_A2A_STATUSES = {"working"}
+_SANDBOX_RELEASE_RECOVERABLE_INPUT_KINDS = frozenset(
+    {"ask_user_question", "candidate_selection", "deployment_confirmation", "pipeline_pause_confirmation"}
+)
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _WAITING_INPUT_CANCEL_LOCKS = PathLockRegistry()
@@ -4427,6 +4430,28 @@ def waiting_input_task_id_from_sidecar(*, cwd: str, session_id: str, context_id:
     )
 
 
+def sandbox_release_recoverable_task_id_from_sidecar(*, cwd: str, session_id: str, context_id: str) -> str | None:
+    task_id = waiting_input_task_id_from_sidecar(cwd=cwd, session_id=session_id, context_id=context_id)
+    if task_id is None:
+        return None
+    pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    journal = A2APipelineJournal(pipeline_dir)
+    pending_input = _pending_input_from_snapshot(
+        _authoritative_snapshot_for_task(
+            snapshot_store=snapshot_store,
+            journal=journal,
+            task_id=task_id,
+            context_id=context_id,
+        ),
+        task_id=task_id,
+        context_id=context_id,
+    )
+    if pending_input is None or pending_input.get("kind") not in _SANDBOX_RELEASE_RECOVERABLE_INPUT_KINDS:
+        return None
+    return task_id
+
+
 def cancel_waiting_input_task_from_sidecar(
     *,
     cwd: str,
@@ -5199,8 +5224,7 @@ async def _drive_stream_events(
             except asyncio.CancelledError:
                 control = current_execution_control()
                 logger.warning(
-                    "A2A pipeline source canceled execution_id=%s control_phase=%s "
-                    "termination_reason=%s",
+                    "A2A pipeline source canceled execution_id=%s control_phase=%s termination_reason=%s",
                     getattr(control, "execution_id", None),
                     getattr(control, "phase", None),
                     sanitize_strict_text(current_execution_termination_reason() or ""),

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 
 import pytest
 from a2a.types import Message, Part, Role, Task, TaskState, TaskStatus
@@ -162,6 +163,144 @@ async def test_terminate_detached_pipeline_permission_cancels_sidecar_without_ha
     event_types = [event["eventType"] for event in journal.read_all()]
     assert "pipeline_canceled" in event_types
     assert "pipeline_handoff_ready" not in event_types
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "reason",
+        "input_kind",
+        "race_cancel",
+        "expected_state",
+        "expected_snapshot_status",
+        "expected_canceled_events",
+    ),
+    [
+        ("disconnect_timeout", "candidate_selection", False, "input-required", "waiting_input", 0),
+        ("explicit_terminate", "candidate_selection", False, "canceled", "canceled", 1),
+        ("disconnect_timeout", "permission", False, "canceled", "canceled", 1),
+        ("disconnect_timeout", "candidate_selection", True, "canceled", "canceled", 1),
+    ],
+)
+async def test_terminate_detached_waiting_input_distinguishes_sandbox_release_from_cancel(
+    tmp_path,
+    monkeypatch,
+    reason,
+    input_kind,
+    race_cancel,
+    expected_state,
+    expected_snapshot_status,
+    expected_canceled_events,
+) -> None:
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=context.session_id)
+    pending_selection = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-09-15T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {
+            "inputId": "selection-1",
+            "kind": input_kind,
+            "prompt": "请选择方案",
+            "options": [{"name": "方案A", "candidate_index": 0}],
+        },
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pending_selection)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_selection]))
+    backup = DisabledBackup()
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        permission_input_registry=PermissionInputRegistry(),
+        backup_service=backup,
+    )
+
+    if race_cancel:
+        from iac_code.a2a import executor as executor_module
+        from iac_code.a2a.pipeline_executor import WaitingInputCancelResult, cancel_waiting_input_task_from_sidecar
+
+        entered = threading.Event()
+        release = threading.Event()
+        original_check = executor_module.sandbox_release_recoverable_task_id_from_sidecar
+
+        def gated_sidecar_check(**kwargs):
+            result = original_check(**kwargs)
+            entered.set()
+            assert release.wait(3)
+            return result
+
+        monkeypatch.setattr(
+            executor_module,
+            "sandbox_release_recoverable_task_id_from_sidecar",
+            gated_sidecar_check,
+        )
+        termination = asyncio.create_task(executor._terminate_detached_execution("ctx-1", "task-1", reason))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            task_record = await store.get_task_record("task-1")
+            context_record = await store.get_context_record("ctx-1")
+            canceled = await asyncio.to_thread(
+                cancel_waiting_input_task_from_sidecar,
+                cwd=str(cwd),
+                session_id=context.session_id,
+                context_id="ctx-1",
+                task_id="task-1",
+                backup_service=backup,
+                task_store=store,
+                task_record=task_record,
+                context_record=context_record,
+                allow_normal_handoff=False,
+            )
+            assert canceled == WaitingInputCancelResult.CANCELED
+            assert await store.cancel_inactive_input_required_task(task_id="task-1", context_id="ctx-1")
+        finally:
+            release.set()
+        result = await termination
+    else:
+        result = await executor._terminate_detached_execution("ctx-1", "task-1", reason)
+
+    assert result == expected_state
+    assert (await store.get_task_record("task-1")).state == expected_state
+    snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+    assert snapshot is not None and snapshot["status"] == expected_snapshot_status
+    committed_canceled_events = [
+        event
+        for event in journal.read_all()
+        if event["eventType"] == "pipeline_canceled" and event.get("visibility") == "committed"
+    ]
+    assert len(committed_canceled_events) == expected_canceled_events
 
 
 @pytest.fixture(autouse=True)

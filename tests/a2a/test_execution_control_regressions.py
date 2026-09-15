@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -91,6 +92,135 @@ async def test_slow_termination_commit_keeps_event_loop_and_other_contexts_avail
         await commit
     assert store._persistence.load_task("task-1").state == "canceled"
     await store.stop_cleanup_loop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_first_task_commit", [False, True])
+async def test_disconnect_timeout_backup_preserves_candidate_selection_for_sandbox_restore(
+    tmp_path,
+    monkeypatch,
+    fail_first_task_commit,
+):
+    from iac_code.a2a.pipeline_journal import A2APipelineJournal
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    shared = tmp_path / "shared"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(shared))
+    backup = SessionBackupService()
+    service = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=backup)
+    store = A2ATaskStore(persistence=A2APersistenceStore(tmp_path / "a2a"), backup_service=backup)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="test",
+        backup_service=backup,
+        execution_control_service=service,
+    )
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(tmp_path), session_id=context.session_id)
+    pending_selection = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-09-15T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {
+            "inputId": "selection-1",
+            "kind": "candidate_selection",
+            "prompt": "请选择方案",
+            "options": [{"name": "方案A", "candidate_index": 0}],
+        },
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pending_selection)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_selection]))
+    control = controller(tmp_path, backup)
+    control.bind_session(context.session_id)
+    control._termination_cleanup = executor._terminate_detached_execution
+    service._controls["ctx-1"] = control
+    store.set_execution_control_provider(service.snapshot_for_context, service.has_active_work)
+
+    try:
+        await control.pause(
+            task_id="task-1",
+            expected_execution_id=control.execution_id,
+            request_id="pause",
+            connection_epoch=1,
+            reason="transport_disconnected",
+            reconnect_timeout_seconds=60,
+        )
+        await wait_until(lambda: control.phase == "paused")
+        pause_id = control.pause_id
+        assert pause_id is not None
+        original_save_task = store._persistence.save_task
+        if fail_first_task_commit:
+
+            def fail_task_commit(_snapshot):
+                raise OSError("injected task commit failure")
+
+            monkeypatch.setattr(store._persistence, "save_task", fail_task_commit)
+        await control.terminate(
+            execution_id=control.execution_id,
+            request_id="disconnect-timeout",
+            connection_epoch=2,
+            reason="disconnect_timeout",
+            pause_id=pause_id,
+        )
+        if fail_first_task_commit:
+            await wait_until(lambda: control.phase == "terminated" and control.backup["status"] == "blocked")
+            assert not control.release_ready
+            assert A2APipelineSnapshotStore(pipeline_dir).load()["status"] == "waiting_input"
+            monkeypatch.setattr(store._persistence, "save_task", original_save_task)
+            await control.terminate(
+                execution_id=control.execution_id,
+                request_id="disconnect-timeout",
+                connection_epoch=2,
+                reason="disconnect_timeout",
+                pause_id=pause_id,
+            )
+        await wait_until(lambda: control.release_ready)
+
+        assert control.phase == "terminated"
+        assert control.execution_status == "input-required"
+        assert control.backup["status"] == "shared_committed"
+        assert json.loads(next(shared.rglob("a2a/task.json")).read_text(encoding="utf-8"))["state"] == (
+            "input-required"
+        )
+        shared_pipeline_snapshot = json.loads(
+            next(shared.rglob("a2a/pipeline/a2a-snapshot.json")).read_text(encoding="utf-8")
+        )
+        assert shared_pipeline_snapshot["status"] == "waiting_input"
+
+        session_dir = SessionStorage().session_dir(str(tmp_path), context.session_id)
+        shutil.rmtree(session_dir)
+        restored = backup.restore_session(str(tmp_path), context.session_id)
+        assert restored.restored
+        restored_pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(tmp_path), session_id=context.session_id)
+        assert A2APipelineSnapshotStore(restored_pipeline_dir).load()["status"] == "waiting_input"
+        assert all(
+            event["eventType"] != "pipeline_canceled" for event in A2APipelineJournal(restored_pipeline_dir).read_all()
+        )
+    finally:
+        await service.close()
+        await store.stop_cleanup_loop()
 
 
 @pytest.mark.asyncio

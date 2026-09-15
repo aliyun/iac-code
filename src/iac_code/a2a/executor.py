@@ -65,6 +65,7 @@ from iac_code.a2a.pipeline_executor import (
     WaitingInputCancelResult,
     cancel_waiting_input_task_from_sidecar,
     recoverable_task_id_from_sidecar,
+    sandbox_release_recoverable_task_id_from_sidecar,
     terminal_task_state_from_sidecar,
 )
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -2482,6 +2483,33 @@ class IacCodeA2AExecutor(AgentExecutor):
             if not await self._task_store.commit_inactive_execution_task(task_id=task_id, context_id=context_id):
                 raise RuntimeError("Execution task did not reach a terminal state")
             return task_record.state
+        if (
+            reason == "disconnect_timeout"
+            and task_record.state == TASK_STATE_INPUT_REQUIRED
+            and not had_pending_permission
+        ):
+            waiting_task_id = await run_sync_fenced(
+                sandbox_release_recoverable_task_id_from_sidecar,
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                context_id=context_id,
+            )
+            if waiting_task_id == task_id:
+                await self._task_store.discard_context_runtime(context_id, persist_context=False)
+                if not await self._task_store.commit_inactive_execution_task(
+                    task_id=task_id,
+                    context_id=context_id,
+                ):
+                    raise RuntimeError("Pipeline input wait did not reach a recoverable state")
+                committed_task = await self._task_store.get_task_record(task_id)
+                committed_waiting_task_id = await run_sync_fenced(
+                    sandbox_release_recoverable_task_id_from_sidecar,
+                    cwd=context_record.cwd,
+                    session_id=context_record.session_id,
+                    context_id=context_id,
+                )
+                if committed_task.state == TASK_STATE_INPUT_REQUIRED and committed_waiting_task_id == task_id:
+                    return TASK_STATE_INPUT_REQUIRED
         cancel_result = await run_sync_fenced(
             cancel_waiting_input_task_from_sidecar,
             cwd=context_record.cwd,
@@ -3050,9 +3078,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 event_queue,
                 task_id=response.task_id,
                 context_id=response.context_id,
-                state=(
-                    TaskState.TASK_STATE_INPUT_REQUIRED if normal_turn_finished else TaskState.TASK_STATE_CANCELED
-                ),
+                state=(TaskState.TASK_STATE_INPUT_REQUIRED if normal_turn_finished else TaskState.TASK_STATE_CANCELED),
                 session_id=context_record.session_id,
             )
             await self._notify_terminal_task(
@@ -3381,9 +3407,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 return None
             if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region_id) is None:
                 language = self._resolve_preferred_language(metadata) or "en"
-                raise InvalidParamsError(
-                    translate_message("Unsupported Alibaba Cloud region ID.", language=language)
-                )
+                raise InvalidParamsError(translate_message("Unsupported Alibaba Cloud region ID.", language=language))
             configured = AliyunCredentials.load()
             if configured is None:
                 return None
