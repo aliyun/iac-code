@@ -663,14 +663,20 @@ def create_app(
             context_id = request.query_params.get("contextId")
             if not context_id:
                 raise ValueError("contextId is required")
-            control = await execution_control_from_request(request, context_id)
+            service = components.execution_control_service
+            if service is None:
+                raise ExecutionControlNotFoundError("Execution control is unavailable")
+            state = await service.observe(
+                context_id=validate_protocol_id(context_id),
+                owner=execution_owner(request),
+            )
             expected_execution_id = request.query_params.get("executionId")
             pause_id = request.query_params.get("pauseId")
-            if expected_execution_id is not None and expected_execution_id != control.execution_id:
+            if expected_execution_id is not None and expected_execution_id != state.get("executionId"):
                 raise ExecutionControlConflictError("executionId does not identify the current execution")
-            if pause_id is not None and pause_id != control.pause_id:
+            if pause_id is not None and pause_id != state.get("pauseId"):
                 raise ExecutionControlConflictError("pauseId does not identify the current pause")
-            return JSONResponse(control.protocol_snapshot(control.snapshot()))
+            return JSONResponse(state)
         except Exception as exc:
             return await execution_error_response(exc)
 

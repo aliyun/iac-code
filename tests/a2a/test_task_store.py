@@ -992,11 +992,21 @@ async def test_stale_sdk_state_does_not_replace_newer_sdk_visible_state() -> Non
     await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=10))
     await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_INPUT_REQUIRED, updated_at=20))
 
-    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=15))
+    delayed = sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=15)
+    delayed.status.message.CopyFrom(
+        Message(
+            message_id="delayed-output",
+            role=Role.ROLE_AGENT,
+            parts=[Part(text="preserve me for history")],
+        )
+    )
+    await store.save(delayed)
 
     task = await store.get("task-1")
     assert task is not None
     assert task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert delayed.status.state == TaskState.TASK_STATE_WORKING
+    assert delayed.status.message.parts[0].text == "preserve me for history"
 
 
 @pytest.mark.asyncio

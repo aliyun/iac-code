@@ -31,6 +31,7 @@ from iac_code.a2a.events import (
 )
 from iac_code.a2a.execution_control import (
     ExecutionControlService,
+    NaturalCompletionGenerationCarrier,
     RecoverableInputAdmissionCarrier,
     bind_execution_control,
     clear_execution_participants,
@@ -94,6 +95,7 @@ from iac_code.a2a.task_store import A2ATaskStore, _close_runtime
 from iac_code.a2a.thinking_metadata import A2AThinkingMetadata
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
+    TASK_STATE_COMPLETED,
     TASK_STATE_FAILED,
     TASK_STATE_INPUT_REQUIRED,
     TASK_STATE_WORKING,
@@ -1237,6 +1239,10 @@ def _string_value(value: Any) -> str:
 
 
 class IacCodeA2AExecutor(AgentExecutor):
+    _RECOVERABLE_RELEASE_REASONS = frozenset(
+        {"disconnect_timeout", "client_disconnect_control_timeout", "natural_completion"}
+    )
+
     def __init__(
         self,
         *,
@@ -1286,6 +1292,25 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
         except TimeoutError as exc:
             raise InvalidParamsError("Pipeline continuation is still finalizing; retry the same request.") from exc
+
+    async def finalize_natural_execution(
+        self,
+        *,
+        context_id: str,
+        task_id: str,
+        owner: str,
+        completion_generation: int,
+    ) -> None:
+        """Finalize a delivered response without canceling its business task."""
+
+        if self._execution_control_service is None:
+            return
+        await self._execution_control_service.finalize_natural_completion(
+            context_id=context_id,
+            task_id=task_id,
+            owner=owner,
+            completion_generation=completion_generation,
+        )
 
     async def resolve_sideband_permission(
         self, response: PermissionResponse, *, metadata: Any = None
@@ -1378,14 +1403,35 @@ class IacCodeA2AExecutor(AgentExecutor):
             control = current_execution_control()
             if control is not None:
                 execution_status = "unknown"
+                natural_completion = False
                 try:
                     record = await self._task_store.get_task_record(control.task_id)
                     execution_status = record.state
+                    natural_completion = execution_status in {
+                        TASK_STATE_INPUT_REQUIRED,
+                        TASK_STATE_COMPLETED,
+                        TASK_STATE_FAILED,
+                    } and not await self._permission_input_registry.has_pending_task(control.task_id)
                 except ValueError:
                     pass
                 current_task = asyncio.current_task()
                 if current_task is not None:
-                    await control.detach_task(current_task, execution_status=execution_status)
+                    completion_generation = await control.detach_task(
+                        current_task,
+                        execution_status=execution_status,
+                        natural_completion=natural_completion,
+                    )
+                    response_already_delivered = NaturalCompletionGenerationCarrier.attach(
+                        context,
+                        completion_generation,
+                    )
+                    if completion_generation is not None and response_already_delivered:
+                        await self.finalize_natural_execution(
+                            context_id=context_id,
+                            task_id=control.task_id,
+                            owner=self._task_store.owner_for_context(getattr(context, "call_context", None)),
+                            completion_generation=completion_generation,
+                        )
             reset_execution_control(execution_scope)
             reset_execution_participants(participant_scope)
             await RecoverableInputAdmissionCarrier.release(context)
@@ -1644,6 +1690,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     task_id=task.task_id,
                     owner=owner,
                     cwd=cwd,
+                    execution_mode="pipeline" if pipeline_mode and not route_pipeline_handoff_to_normal else "normal",
                     continue_input_required=pipeline_mode and not route_pipeline_handoff_to_normal,
                     recoverable_input_admission=recoverable_input_admission,
                 )
@@ -2454,6 +2501,8 @@ class IacCodeA2AExecutor(AgentExecutor):
     async def _terminate_detached_execution(self, context_id: str, task_id: str, reason: str) -> str | None:
         had_pending_permission = await self._permission_input_registry.has_pending_task(task_id)
         if had_pending_permission:
+            if reason == "natural_completion":
+                raise RuntimeError("Natural completion cannot release an active permission wait")
             await self._permission_input_registry.cancel_task(task_id)
             await self._task_store.set_pending_permissions(task_id, [])
             await self._task_store.discard_context_runtime(context_id, persist_context=False)
@@ -2480,14 +2529,39 @@ class IacCodeA2AExecutor(AgentExecutor):
                 canceled=task_record.state == TASK_STATE_CANCELED,
             )
         if task_record.state not in {TASK_STATE_INPUT_REQUIRED, TASK_STATE_CANCELED}:
-            if not await self._task_store.commit_inactive_execution_task(task_id=task_id, context_id=context_id):
+            if not await self._task_store.commit_inactive_execution_task(
+                task_id=task_id,
+                context_id=context_id,
+                expected_state=task_record.state,
+            ):
                 raise RuntimeError("Execution task did not reach a terminal state")
+            await self._task_store.discard_context_runtime(context_id, persist_context=False)
             return task_record.state
+        if reason == "natural_completion" and task_record.state == TASK_STATE_CANCELED:
+            if not await self._task_store.commit_inactive_execution_task(
+                task_id=task_id,
+                context_id=context_id,
+                expected_state=TASK_STATE_CANCELED,
+            ):
+                raise RuntimeError("Canceled execution changed during natural completion")
+            await self._task_store.discard_context_runtime(context_id, persist_context=False)
+            return TASK_STATE_CANCELED
         if (
-            reason == "disconnect_timeout"
+            reason in self._RECOVERABLE_RELEASE_REASONS
             and task_record.state == TASK_STATE_INPUT_REQUIRED
             and not had_pending_permission
         ):
+            if control is not None and control.execution_mode == "normal":
+                committed = await self._task_store.commit_inactive_execution_task(
+                    task_id=task_id,
+                    context_id=context_id,
+                    expected_state=TASK_STATE_INPUT_REQUIRED,
+                )
+                if committed:
+                    await self._task_store.discard_context_runtime(context_id, persist_context=False)
+                    committed_task = await self._task_store.get_task_record(task_id)
+                    if committed_task.state == TASK_STATE_INPUT_REQUIRED:
+                        return TASK_STATE_INPUT_REQUIRED
             waiting_task_id = await run_sync_fenced(
                 sandbox_release_recoverable_task_id_from_sidecar,
                 cwd=context_record.cwd,
@@ -2511,6 +2585,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                     )
                     if committed_task.state == TASK_STATE_INPUT_REQUIRED and committed_waiting_task_id == task_id:
                         return TASK_STATE_INPUT_REQUIRED
+            if reason == "natural_completion":
+                raise RuntimeError("Natural input completion lacks a recoverable handoff proof")
         cancel_result = await run_sync_fenced(
             cancel_waiting_input_task_from_sidecar,
             cwd=context_record.cwd,

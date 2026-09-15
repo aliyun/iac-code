@@ -49,7 +49,11 @@ from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
 from iac_code.a2a.app import normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.events import make_text_part
-from iac_code.a2a.execution_control import RecoverableInputAdmissionCarrier, RecoverableInputAdmissionLease
+from iac_code.a2a.execution_control import (
+    NaturalCompletionGenerationCarrier,
+    RecoverableInputAdmissionCarrier,
+    RecoverableInputAdmissionLease,
+)
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.input_required import parse_permission_response
@@ -539,6 +543,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
     async def _setup_active_task(self, params: SendMessageRequest, call_context):
         active_task, request_context = await super()._setup_active_task(params, call_context)
         PipelineLifecycleEventQueueCarrier.attach(request_context)
+        NaturalCompletionGenerationCarrier.prepare(request_context)
         admission = self._peek_recoverable_input_admission(call_context)
         lease = None
         if admission is not None and isinstance(self.task_store, A2ATaskStore):
@@ -627,6 +632,66 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         if isinstance(self.task_store, A2ATaskStore):
             await self.task_store.release_recoverable_input_admission(admission)
 
+    async def _finalize_natural_execution(self, params: SendMessageRequest, context: Any) -> None:
+        """Settle the execution only after the request's response stream is exhausted."""
+
+        await self._finalize_natural_execution_boundary(
+            task_id=getattr(params.message, "task_id", None),
+            context_id=getattr(params.message, "context_id", None),
+            context=context,
+        )
+
+    async def _finalize_natural_execution_boundary(self, *, task_id: Any, context_id: Any, context: Any) -> None:
+        """Settle a pending natural completion once its response stream is delivered.
+
+        The generation is carried on the delivering request's ``ServerCallContext``;
+        when it is absent (e.g. a bare observer that did not deliver the executor
+        turn) ``mark_delivered`` returns ``None`` and this is a no-op, so the
+        controller never claims natural completion from a non-delivering path.
+        """
+
+        completion_generation = NaturalCompletionGenerationCarrier.mark_delivered(context)
+        finalize = getattr(getattr(self, "agent_executor", None), "finalize_natural_execution", None)
+        if (
+            not callable(finalize)
+            or not task_id
+            or not context_id
+            or completion_generation is None
+            or not isinstance(self.task_store, A2ATaskStore)
+        ):
+            return
+        await finalize(
+            context_id=context_id,
+            task_id=task_id,
+            owner=self.task_store.owner_for_context(context),
+            completion_generation=completion_generation,
+        )
+
+    async def _settle_nonstream_input_required_result(
+        self,
+        result: Message | Task,
+        params: SendMessageRequest,
+        context: Any,
+    ) -> Message | Task:
+        """Wait for the accepted request before finalizing an input boundary."""
+
+        if (
+            not isinstance(result, Task)
+            or result.status.state != TaskState.TASK_STATE_INPUT_REQUIRED
+            or bool(getattr(getattr(params, "configuration", None), "return_immediately", False))
+        ):
+            return result
+        get_active_task = getattr(self._active_task_registry, "get", None)
+        if not callable(get_active_task):
+            return result
+        active_task = await get_active_task(result.id)
+        if isinstance(active_task, RequestScopedActiveTask):
+            await active_task.wait_for_accepted_requests()
+            refreshed = await self.task_store.get(result.id, context)
+            if refreshed is not None:
+                return apply_history_length(refreshed, params.configuration)
+        return result
+
     async def on_message_send(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
@@ -650,13 +715,21 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                         task=task,
                     ):
                         pass
+                    await self._finalize_natural_execution(params, context)
                     refreshed = await self.task_store.get(permission_response.task_id, context)
                     return refreshed or task
         await self._hydrate_recoverable_pipeline_task_id(params)
         admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
         self._stage_recoverable_input_admission(context, admission)
         try:
-            return await super().on_message_send(params, context)
+            result = await super().on_message_send(params, context)
+            result = await self._settle_nonstream_input_required_result(
+                result,
+                params,
+                context,
+            )
+            await self._finalize_natural_execution(params, context)
+            return result
         finally:
             await self._release_untransferred_recovery(params, context)
 
@@ -712,6 +785,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     finally:
                         await active_stream.aclose()
                     if not recovery_required:
+                        await self._finalize_natural_execution(params, context)
                         return
                     admission = await self._wait_for_direct_pipeline_recovery(params, context)
                     self._stage_recoverable_input_admission(context, admission)
@@ -724,6 +798,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                             yield event
                     finally:
                         await direct_stream.aclose()
+                    await self._finalize_natural_execution(params, context)
                     return
             base_stream = super().on_message_send_stream(params, context)
             tracked_stream = (
@@ -742,6 +817,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     acknowledge_pipeline_transport_delivery(event)
             finally:
                 await tracked_stream.aclose()
+            await self._finalize_natural_execution(params, context)
         finally:
             await self._release_untransferred_recovery(params, context)
 
@@ -1076,8 +1152,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             logger.debug("Failed to load A2A task %s before pipeline reconciliation", task_id, exc_info=True)
             return None
         if task is None or (
-            task.status.state not in TERMINAL_TASK_STATES
-            and task.status.state != TaskState.TASK_STATE_INPUT_REQUIRED
+            task.status.state not in TERMINAL_TASK_STATES and task.status.state != TaskState.TASK_STATE_INPUT_REQUIRED
         ):
             return None
 
@@ -1101,6 +1176,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         if task.status.state in TERMINAL_TASK_STATES:
             task.status.CopyFrom(TaskStatus(state=TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)))
             task.status.timestamp.GetCurrentTime()
+        if self.task_store.can_continue_local_input_required_task(context_id=context_id, task_id=task_id):
+            return None
         admission = await self.task_store.reconcile_recoverable_input_required_task(task, context_record, context)
         if admission is None:
             raise InvalidParamsError("Pipeline continuation is already being recovered; retry the same request.")
@@ -1144,9 +1221,10 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             if durable_cancel == "lost":
                 return await self._reconcile_inactive_pipeline_input_required_task(task, context)
             if durable_cancel == "normal":
-                canceled = await self._reconcile_inactive_terminal_task(task, context, "canceled")
-                await self.task_store.discard_context_runtime(task.context_id)
-                return canceled
+                canceled = await self._cancel_inactive_normal_input_required_task(task, context)
+                if canceled is not None:
+                    return canceled
+                raise TaskNotCancelableError
             canceled_task = await self._cancel_inactive_pipeline_waiting_input_task(task, context)
             if canceled_task is not None:
                 return canceled_task
@@ -1259,7 +1337,17 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             return None
         if waiting_task_id is not None:
             return None
-        canceled = await self._reconcile_inactive_terminal_task(task, context, "canceled")
+        committed = await self.task_store.cancel_inactive_input_required_task(
+            task_id=task.id,
+            context_id=task.context_id,
+        )
+        if not committed:
+            return None
+        canceled = await self._reconcile_inactive_terminal_task(
+            task,
+            context,
+            "canceled",
+        )
         await self.task_store.discard_context_runtime(task.context_id)
         return canceled
 
@@ -1318,23 +1406,39 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         active_task_registry = getattr(self, "_active_task_registry", None)
         active_task = await active_task_registry.get(params.id) if active_task_registry is not None else None
         terminal_state_seen = False
+        interrupted = False
         async for event in super().on_subscribe_to_task(params, context):
             event_state = _task_event_state(event)
             terminal_state_seen = terminal_state_seen or event_state in TERMINAL_TASK_STATES
             yield event
             if event_state in INTERRUPTED_TASK_STATES:
-                return
-        if terminal_state_seen:
-            return
-
-        # a2a-sdk 1.1 can close its subscriber queue after the producer finishes but
-        # before the consumer publishes the last update. Recover the persisted terminal
-        # snapshot so subscribers do not observe a silent, non-terminal stream ending.
+                interrupted = True
+                break
+        if not interrupted and not terminal_state_seen:
+            # a2a-sdk 1.1 can close its subscriber queue after the producer finishes but
+            # before the consumer publishes the last update. Recover the persisted terminal
+            # snapshot so subscribers do not observe a silent, non-terminal stream ending.
+            if active_task is not None:
+                await active_task._is_finished.wait()
+            final_task = await self.task_store.get(params.id, context)
+            if final_task is not None and final_task.status.state in TERMINAL_TASK_STATES:
+                yield final_task
+        # Settle any natural completion the delivered executor turn registered. Draining
+        # the accepted request first ensures the executor turn's finally has registered
+        # its natural-completion generation, so the finalize claims and settles the
+        # release synchronously before this subscriber stream closes instead of leaving
+        # the controller pinned until a later GET retry. No-op unless this delivering
+        # request carried a natural-completion generation.
         if active_task is not None:
-            await active_task._is_finished.wait()
-        final_task = await self.task_store.get(params.id, context)
-        if final_task is not None and final_task.status.state in TERMINAL_TASK_STATES:
-            yield final_task
+            try:
+                await active_task.wait_for_accepted_requests()
+            except InvalidParamsError:
+                pass
+        await self._finalize_natural_execution_boundary(
+            task_id=params.id,
+            context_id=task.context_id,
+            context=context,
+        )
 
     async def on_create_task_push_notification_config(
         self, params: TaskPushNotificationConfig, context

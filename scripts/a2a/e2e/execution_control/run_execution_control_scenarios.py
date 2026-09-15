@@ -543,12 +543,24 @@ class _Scenario:
         other_context = _first(other.snapshot(), "contextId")
         assert other_context and other_context != self.context_id
         assert "ISOLATION_FIXTURE_FINAL" in json.dumps(other.snapshot())
-        status, other_state = _http_json(
-            "GET",
-            self.server.url + "/iac-code/execution/state?" + urlencode({"contextId": other_context}),
-            timeout=1.0,
+        def other_context_released() -> dict[str, Any] | None:
+            status, state = _http_json(
+                "GET",
+                self.server.url + "/iac-code/execution/state?" + urlencode({"contextId": other_context}),
+                timeout=1.0,
+            )
+            assert status == 200
+            if state["phase"] == "running":
+                return state
+            if state.get("terminationReason") == "natural_completion" and state.get("releaseReady") is True:
+                return state
+            return None
+
+        _wait_until(
+            other_context_released,
+            timeout=self.timeout,
+            description="other context natural release",
         )
-        assert status == 200 and other_state["phase"] == "running"
         assert not (self.control_dir / "release-storage").exists()
         lifecycle = _read_jsonl(self.run_dir / "fixture-lifecycle.jsonl")
         assert not any(value["event"].endswith("commit_finished") for value in lifecycle)
@@ -1088,9 +1100,17 @@ class _Scenario:
         assert transcript.count("NATURAL_FIXTURE_FINAL") == 1
         assert recovery["outputText"] == ["NATURAL_FIXTURE_FINAL"]
         self._resume(epoch=2, request_id="resume-natural")
-        final = self._wait_state(lambda value: value["phase"] == "running", "natural completion hold release")
+        final = self._wait_state(
+            lambda value: (
+                value["phase"] == "terminated"
+                and value.get("terminationReason") == "natural_completion"
+                and value.get("releaseReady") is True
+            ),
+            "natural completion hold release",
+        )
         assert final.get("executionStatus") == completed.get("executionStatus")
         assert final.get("streamAvailable") is False
+        self._assert_shared_backup(final, None, require_reason=False)
         assert len(self._provider_calls()) == 1
 
     def _capture_recovery(self, suffix: str) -> dict[str, Any]:
@@ -1117,10 +1137,15 @@ class _Scenario:
                 "completed normal turn",
             )
             task = self._task()
-        state = self._state()
-        assert state["phase"] == "running"
-        assert state.get("terminationReason") is None
-        assert state.get("backup", {}).get("status") == "not_requested"
+        state = self._wait_state(
+            lambda value: (
+                value["phase"] == "terminated"
+                and value.get("terminationReason") == "natural_completion"
+                and value.get("releaseReady") is True
+            ),
+            "natural completion release",
+        )
+        self._assert_shared_backup(state, None, require_reason=False)
         assert state["executionId"] == self.execution_id
         assert state["serverInstanceId"] == self.server_instance_id
         assert len([value for value in self._tool_events() if value.get("event") == "tool.started"]) == 1

@@ -104,6 +104,441 @@ async def test_resume_during_long_tool_does_not_wait_for_tool(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_natural_business_boundary_self_finalizes_without_terminate_request(
+    tmp_path: Path,
+) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    assert completion_generation is not None
+    observed = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+    assert observed["phase"] == "terminated"
+    assert observed["terminationReason"] == "natural_completion"
+    assert observed["releaseReady"] is True
+    snapshot = control.snapshot()
+    assert snapshot["phase"] == "terminated"
+    assert snapshot["executionStatus"] == "input-required"
+    assert snapshot["terminationReason"] == "natural_completion"
+    assert snapshot["backup"] == {"status": "disabled"}
+    assert snapshot["connectionEpoch"] == -1
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_old_response_boundary_cannot_finalize_newer_same_task_turn(tmp_path: Path) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+
+    await control.attach_task(current)
+    first_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    await control.attach_task(current)
+    second_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    stale = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=first_generation,
+    )
+    observed = await control.observe_state()
+
+    assert first_generation != second_generation
+    assert stale["phase"] == "running"
+    assert observed["phase"] == "running"
+
+    settled = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=second_generation,
+    )
+    assert settled["phase"] == "terminated"
+    assert settled["terminationReason"] == "natural_completion"
+    assert settled["releaseReady"] is True
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_preempts_inflight_natural_cleanup(tmp_path: Path) -> None:
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    reasons: list[str] = []
+
+    async def cleanup(_context_id: str, _task_id: str, reason: str) -> str:
+        reasons.append(reason)
+        if reason == "natural_completion":
+            cleanup_started.set()
+            await release_cleanup.wait()
+        return "input-required" if reason == "natural_completion" else "canceled"
+
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=None,
+        termination_cleanup=cleanup,
+        execution_id="exec-1",
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    natural = asyncio.create_task(
+        control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+    )
+    await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+
+    claimed = await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop-during-natural",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+    release_cleanup.set()
+    await natural
+    await _wait_for_condition(lambda: control.release_ready)
+    retried = await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop-during-natural",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+
+    assert claimed["phase"] == "terminating"
+    assert control.termination_reason == "stop_chat"
+    assert control.execution_status == "canceled"
+    assert retried["terminationReason"] == "stop_chat"
+    assert reasons[0] == "natural_completion"
+    assert "stop_chat" in reasons
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_claim_wins_before_natural_finalization(tmp_path: Path) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    claimed = await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+    assert completion_generation is not None
+    observed = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+
+    assert claimed["terminationReason"] == "stop_chat"
+    assert observed["terminationReason"] == "stop_chat"
+    await _wait_for_condition(lambda: control.release_ready)
+    assert control.termination_reason == "stop_chat"
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_after_natural_release_publishes_fresh_backup(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[BackupReason, bool]] = []
+
+    class BackupService:
+        def backup_session(self, _cwd, _session_id, *, reason, critical) -> BackupResult:
+            calls.append((reason, critical))
+            generation = len(calls)
+            return BackupResult(
+                enabled=True,
+                generation=generation,
+                commit_id=f"commit-{generation}",
+                shared_committed=True,
+            )
+
+    control = _controller(tmp_path, backup_service=BackupService())
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+
+    claimed = await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop-after-natural",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+
+    assert claimed["phase"] == "terminating"
+    assert claimed["terminationReason"] == "stop_chat"
+    assert claimed["releaseReady"] is False
+    await _wait_for_condition(lambda: control.release_ready)
+    assert calls == [
+        (BackupReason.TERMINAL, True),
+        (BackupReason.TERMINAL, True),
+    ]
+    assert control.termination_reason == "stop_chat"
+    assert control.backup["generation"] == 2
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_fences_inflight_natural_backup(tmp_path: Path) -> None:
+    first_backup_started = threading.Event()
+    release_first_backup = threading.Event()
+    calls: list[str] = []
+
+    class BackupService:
+        def backup_session(self, _cwd, _session_id, *, reason, critical) -> BackupResult:
+            assert reason is BackupReason.TERMINAL
+            assert critical is True
+            calls.append(control.termination_reason or "none")
+            generation = len(calls)
+            if generation == 1:
+                first_backup_started.set()
+                assert release_first_backup.wait(timeout=2)
+            return BackupResult(
+                enabled=True,
+                generation=generation,
+                commit_id=f"commit-{generation}",
+                shared_committed=True,
+            )
+
+    control = _controller(tmp_path, backup_service=BackupService())
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    natural = asyncio.create_task(
+        control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+    )
+    assert await asyncio.to_thread(first_backup_started.wait, 1)
+
+    await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop-during-backup",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+    await asyncio.sleep(0.01)
+    assert calls == ["natural_completion"]
+
+    release_first_backup.set()
+    await natural
+    await _wait_for_condition(lambda: control.release_ready)
+
+    assert calls == ["natural_completion", "stop_chat"]
+    assert control.termination_reason == "stop_chat"
+    assert control.backup["generation"] == 2
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_initial_input_wait_exposes_only_local_continuation_readiness(tmp_path: Path) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    await control.detach_task(current, execution_status="input-required")
+
+    snapshot = control.snapshot()
+
+    assert snapshot["localInputContinuationReady"] is True
+    assert snapshot["inputHandoffReady"] is False
+    assert "localInputContinuationReady" not in control.protocol_snapshot(snapshot)
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_business_boundary_requires_critical_shared_backup(tmp_path: Path) -> None:
+    calls: list[tuple[BackupReason, bool]] = []
+
+    class BackupService:
+        def backup_session(self, _cwd, _session_id, *, reason, critical) -> BackupResult:
+            calls.append((reason, critical))
+            return BackupResult(
+                enabled=True,
+                generation=7,
+                commit_id="commit-7",
+                shared_committed=True,
+            )
+
+    control = _controller(tmp_path, backup_service=BackupService())
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    assert completion_generation is not None
+    await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+    await _wait_for_condition(lambda: control.release_ready)
+    assert calls == [(BackupReason.TERMINAL, True)]
+    assert control.release_ready is True
+    assert control.backup["status"] == "shared_committed"
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_business_boundary_waits_for_disconnect_pause_resume_without_cancel(
+    tmp_path: Path,
+) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    paused = await control.pause(
+        task_id="task-1",
+        expected_execution_id="exec-1",
+        request_id="request-pause",
+        connection_epoch=1,
+        reason="client_disconnected",
+        reconnect_timeout_seconds=10,
+    )
+    assert paused["phase"] == "pausing"
+
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    assert current.cancelled() is False
+    await _wait_for_condition(lambda: control.phase == "paused")
+    assert control.termination_reason is None
+    assert control.pause_id == paused["pauseId"]
+    assert control.release_ready is False
+    assert completion_generation is not None
+    await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+
+    resumed = await control.resume(
+        execution_id="exec-1",
+        pause_id=paused["pauseId"],
+        request_id="request-resume",
+        connection_epoch=2,
+    )
+
+    assert resumed["phase"] == "resuming"
+    await _wait_for_condition(lambda: control.phase == "running")
+    await control.observe_state()
+    await _wait_for_condition(lambda: control.release_ready)
+    assert control.phase == "terminated"
+    assert control.termination_reason == "natural_completion"
+    assert control.pause_id is None
+    assert control.release_ready is True
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_state_observation_retries_failed_cleanup(
+    tmp_path: Path,
+) -> None:
+    cleanup_attempts = 0
+
+    async def cleanup(_context_id: str, _task_id: str, _reason: str) -> str:
+        nonlocal cleanup_attempts
+        cleanup_attempts += 1
+        if cleanup_attempts == 1:
+            raise OSError("injected cleanup failure")
+        return "input-required"
+
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=None,
+        termination_cleanup=cleanup,
+        execution_id="exec-1",
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+    await _wait_for_condition(lambda: control.phase == "terminated" and control.backup["status"] == "blocked")
+
+    observed = await control.observe_state()
+
+    assert observed["phase"] == "terminated"
+    await _wait_for_condition(lambda: control.release_ready)
+    assert cleanup_attempts == 2
+    assert control.execution_status == "input-required"
+    await control.close()
+
+
+@pytest.mark.asyncio
 async def test_resume_is_ordered_after_inflight_paused_commit(tmp_path: Path, monkeypatch) -> None:
     control = _controller(tmp_path)
     paused_write_started = threading.Event()

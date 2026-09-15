@@ -651,7 +651,7 @@ class IacCodeA2APipelineExecutor:
                 sanitize_strict_text(task_id),
                 sanitize_strict_text(context_id),
                 sanitize_strict_text(current_task.get_name() if current_task is not None else "none"),
-                current_task.cancelling() if current_task is not None else 0,
+                getattr(current_task, "cancelling", lambda: 0)() if current_task is not None else 0,
                 sanitize_strict_text(control.execution_id if control is not None else "none"),
                 sanitize_strict_text(control.phase if control is not None else "none"),
                 sanitize_strict_text(control.termination_reason if control is not None else "none"),

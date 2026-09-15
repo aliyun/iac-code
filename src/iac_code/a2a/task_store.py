@@ -297,6 +297,16 @@ class A2ATaskStore(TaskStore):
                     if not committed:
                         await self.release_recoverable_input_admission(admission)
 
+    def can_continue_local_input_required_task(self, *, context_id: str, task_id: str) -> bool:
+        """Return whether the owning process can reuse its drained execution directly."""
+
+        control = self._execution_snapshot(context_id)
+        return bool(
+            control
+            and control.get("taskId") == task_id
+            and control.get("localInputContinuationReady") is True
+        )
+
     async def release_recoverable_input_admission(self, admission: str | None) -> None:
         if admission is None or self._recoverable_input_admission_releaser is None:
             return
@@ -357,13 +367,23 @@ class A2ATaskStore(TaskStore):
             # than a detached or recovered final state must not roll either
             # projection back, including a queued terminal event from the old
             # producer that arrives after a recovered execution starts.
-            self._restore_rejected_sdk_projection(
-                task,
-                previous=previous,
-                record=record,
-                owner_tasks=owner_tasks,
-                task_id=task_id,
-            )
+            # Preserve a delayed nonterminal event on TaskManager's mutable
+            # object so its status message can be folded into the following
+            # INPUT_REQUIRED history. Only terminal or recovered-lifecycle
+            # projections may close/corrupt the current SDK lifecycle and
+            # therefore need to be repaired in place.
+            if next_state in {
+                TASK_STATE_CANCELED,
+                TASK_STATE_COMPLETED,
+                TASK_STATE_FAILED,
+            } or stale_recovered_working_projection:
+                self._restore_rejected_sdk_projection(
+                    task,
+                    previous=previous,
+                    record=record,
+                    owner_tasks=owner_tasks,
+                    task_id=task_id,
+                )
             return
         self._attach_context_metadata(task)
         self._attach_pending_permissions(task)

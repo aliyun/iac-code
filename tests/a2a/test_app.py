@@ -62,6 +62,7 @@ from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, Bac
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent
+from iac_code.utils.state_io import atomic_write_json
 
 from .fakes import FakeAgentLoop, FakeRuntime
 
@@ -440,9 +441,7 @@ def test_pipeline_state_endpoint_can_return_delta_without_snapshot(tmp_path) -> 
     )
 
     with TestClient(app) as client:
-        response = client.get(
-            "/iac-code/pipeline/state?contextId=ctx-1&afterSequence=1&includeSnapshot=false"
-        )
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1&afterSequence=1&includeSnapshot=false")
 
     assert response.status_code == 200
     data = response.json()
@@ -2897,10 +2896,17 @@ async def test_subscribe_to_active_task_yields_initial_task_then_updates(monkeyp
 
     await asyncio.wait_for(collect_remaining_events(), timeout=1)
 
+    execution_state = await components.execution_control_service.observe(
+        context_id=result.context_id,
+        owner='',
+    )
     assert isinstance(first_event, Task)
     assert first_event.id == result.id
     assert "second" in json.dumps([event.__class__.__name__ + str(event) for event in remaining_events])
     assert prompts == ["hello"]
+    assert execution_state["phase"] == "terminated"
+    assert execution_state["terminationReason"] == "natural_completion"
+    assert execution_state["releaseReady"] is True
     await components.aclose()
 
 
@@ -3382,7 +3388,6 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
             },
         )
         assert late_timeout.status_code == 409
-
         terminated = client.post(
             "/iac-code/execution/terminate",
             json={
@@ -3396,3 +3401,94 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
         assert terminated.status_code == 202
         assert "inputHandoffReady" not in terminated.json()
         assert terminated.json()["phase"] == "terminating"
+
+
+def test_execution_state_reads_persisted_terminal_snapshot_after_cold_restart(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="",
+        cwd=str(tmp_path),
+        server_instance_id="instance-before-restart",
+        persistence_path=persistence_dir / "execution-control" / "ctx-1.json",
+        backup_service=None,
+        execution_id="exec-1",
+    )
+    control.phase = "terminated"
+    control.execution_status = "input-required"
+    control.stream_available = False
+    control.termination_reason = "natural_completion"
+    control.backup = {"status": "shared_committed", "generation": 3, "commitId": "commit-3"}
+    control.release_ready = True
+    persisted = control.snapshot()
+    persisted["owner"] = ""
+    atomic_write_json(persistence_dir / "execution-control" / "ctx-1.json", persisted)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        state = client.get("/iac-code/execution/state?contextId=ctx-1&executionId=exec-1")
+        mutation = client.post(
+            "/iac-code/execution/terminate",
+            json={
+                "contextId": "ctx-1",
+                "expectedExecutionId": "exec-1",
+                "requestId": "cold-mutation",
+                "connectionEpoch": 1,
+                "reason": "stop_chat",
+            },
+        )
+
+    assert state.status_code == 200
+    assert state.json()["phase"] == "terminated"
+    assert state.json()["terminationReason"] == "natural_completion"
+    assert state.json()["releaseReady"] is True
+    assert "owner" not in state.json()
+    assert mutation.status_code == 404
+
+
+def test_execution_state_hides_persisted_terminal_snapshot_from_wrong_owner(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="bearer",
+        cwd=str(tmp_path),
+        server_instance_id="instance-before-restart",
+        persistence_path=persistence_dir / "execution-control" / "ctx-1.json",
+        backup_service=None,
+        execution_id="exec-1",
+    )
+    control.phase = "terminated"
+    control.execution_status = "completed"
+    control.stream_available = False
+    control.termination_reason = "natural_completion"
+    control.release_ready = True
+    persisted = control.snapshot()
+    persisted["owner"] = "bearer"
+    atomic_write_json(persistence_dir / "execution-control" / "ctx-1.json", persisted)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        basic_username="alice",
+        basic_password="pass",
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        state = client.get(
+            "/iac-code/execution/state?contextId=ctx-1&executionId=exec-1",
+            headers={"Authorization": "Basic " + b64encode(b"alice:pass").decode("ascii")},
+        )
+
+    assert state.status_code == 404

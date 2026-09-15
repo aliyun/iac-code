@@ -85,6 +85,162 @@ async def test_cancel_durable_detached_permission_runs_suspend_callback() -> Non
 
 
 @pytest.mark.asyncio
+async def test_natural_completion_preserves_normal_input_wait(tmp_path) -> None:
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    class Control:
+        execution_mode = "normal"
+
+        def has_managed_work(self) -> bool:
+            return False
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        def get_for_context(self, context_id: str):
+            assert context_id == "ctx-1"
+            return Control()
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = None
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        backup_service=DisabledBackup(),
+        execution_control_service=ExecutionControlService(),
+    )
+
+    result = await executor._terminate_detached_execution(
+        "ctx-1",
+        "task-1",
+        "natural_completion",
+    )
+
+    assert result == "input-required"
+    assert (await store.get_task_record("task-1")).state == "input-required"
+    assert (await store.get_context_record("ctx-1")).runtime is None
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_closes_completed_runtime_before_release(tmp_path) -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    runtime = Runtime()
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: runtime,
+    )
+    context.active_task_id = None
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "completed"
+    store.mirror_task(task)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        backup_service=DisabledBackup(),
+    )
+
+    result = await executor._terminate_detached_execution(
+        "ctx-1",
+        "task-1",
+        "natural_completion",
+    )
+
+    assert result == "completed"
+    assert runtime.closed is True
+    assert (await store.get_context_record("ctx-1")).runtime is None
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_fails_closed_for_active_permission(tmp_path) -> None:
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    registry = PermissionInputRegistry()
+    pending = await registry.register(
+        PermissionRequestEvent(
+            tool_name="bash",
+            tool_input={"cmd": "true"},
+            tool_use_id="tool-1",
+            response_future=pending_future(),
+        ),
+        task_id="task-1",
+        context_id="ctx-1",
+        scope="normal",
+    )
+    pending.continuation = object()
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        permission_input_registry=registry,
+        backup_service=DisabledBackup(),
+    )
+
+    with pytest.raises(RuntimeError, match="active permission wait"):
+        await executor._terminate_detached_execution(
+            "ctx-1",
+            "task-1",
+            "natural_completion",
+        )
+
+    assert await registry.has_pending_task("task-1") is True
+    assert (await store.get_task_record("task-1")).state == "input-required"
+    assert context.runtime is not None
+
+
+@pytest.mark.asyncio
 async def test_terminate_detached_pipeline_permission_cancels_sidecar_without_handoff(tmp_path) -> None:
     from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 
@@ -178,6 +334,8 @@ async def test_terminate_detached_pipeline_permission_cancels_sidecar_without_ha
     ),
     [
         ("disconnect_timeout", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
+        ("client_disconnect_control_timeout", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
+        ("natural_completion", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
         ("disconnect_timeout", "deployment_confirmation", {}, False, "input-required", "waiting_input", 0),
         (
             "disconnect_timeout",

@@ -32,6 +32,7 @@ from google.protobuf.struct_pb2 import Value
 
 from iac_code.a2a.execution_control import (
     ExecutionControlService,
+    NaturalCompletionGenerationCarrier,
     RecoverableInputAdmissionCarrier,
     RecoverableInputAdmissionLease,
 )
@@ -152,8 +153,7 @@ async def test_request_scoped_active_task_ignores_old_terminal_before_its_reques
 async def test_request_scoped_active_task_isolates_two_concurrent_subscribers(monkeypatch) -> None:
     request_ids = [uuid.uuid4(), uuid.uuid4()]
     contexts = [
-        RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1")
-        for _ in request_ids
+        RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1") for _ in request_ids
     ]
     both_enqueued = asyncio.Event()
     active_task = RequestScopedActiveTask(
@@ -223,10 +223,7 @@ async def test_request_enqueue_failure_keeps_admission_owned_by_transport() -> N
 
     lease = RecoverableInputAdmissionLease(
         "recovery-1",
-        acknowledge_enqueue=lambda token: call_context.state.pop(
-            "iac_code.recoverable_input_admission", None
-        )
-        == token,
+        acknowledge_enqueue=lambda token: call_context.state.pop("iac_code.recoverable_input_admission", None) == token,
         release=release,
     )
     RecoverableInputAdmissionCarrier.attach(request_context, lease)
@@ -305,10 +302,7 @@ async def test_request_scoped_registry_releases_admission_after_executor_failure
     request_context = RequestContext(call_context=call_context, task_id="task-1", context_id="ctx-1")
     lease = RecoverableInputAdmissionLease(
         "recovery-1",
-        acknowledge_enqueue=lambda token: call_context.state.pop(
-            "iac_code.recoverable_input_admission", None
-        )
-        == token,
+        acknowledge_enqueue=lambda token: call_context.state.pop("iac_code.recoverable_input_admission", None) == token,
         release=release,
     )
     RecoverableInputAdmissionCarrier.attach(request_context, lease)
@@ -460,12 +454,15 @@ async def test_recovery_replacement_rejects_a_contender_before_the_admitted_requ
         call_context,
     )
     registry = RequestScopedActiveTaskRegistry(agent_executor=RecordingExecutor(), task_store=store)
-    assert await registry.reconcile_and_replace_for_recovery(
-        "task-1",
-        call_context=call_context,
-        context_id="ctx-1",
-        acquire_admission=lambda: asyncio.sleep(0, result="recovery-1"),
-    ) == "recovery-1"
+    assert (
+        await registry.reconcile_and_replace_for_recovery(
+            "task-1",
+            call_context=call_context,
+            context_id="ctx-1",
+            acquire_admission=lambda: asyncio.sleep(0, result="recovery-1"),
+        )
+        == "recovery-1"
+    )
     replacement = await registry.get("task-1")
     assert replacement is not None
     contender = RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1")
@@ -671,9 +668,7 @@ async def test_recovery_drain_fails_closed_when_the_old_consumer_exits_before_pr
         context_id="ctx-1",
         create_task_if_missing=True,
     )
-    await old.enqueue_request(
-        RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1")
-    )
+    await old.enqueue_request(RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1"))
     await asyncio.wait_for(save_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
     while old.has_unfinished_requests():
         await asyncio.sleep(0)
@@ -741,9 +736,7 @@ async def test_recovery_drain_for_one_task_does_not_block_registry_operations_fo
         context_id="ctx-a",
         create_task_if_missing=True,
     )
-    await old_a.enqueue_request(
-        RequestContext(call_context=ServerCallContext(), task_id="task-a", context_id="ctx-a")
-    )
+    await old_a.enqueue_request(RequestContext(call_context=ServerCallContext(), task_id="task-a", context_id="ctx-a"))
     await asyncio.wait_for(task_a_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
 
     async def acquire_a() -> str | None:
@@ -1849,7 +1842,7 @@ async def test_message_stream_acknowledges_transport_delivery_only_when_resumed(
     handler._hydrate_recoverable_pipeline_task_id = hydrate
     params = SimpleNamespace(message=SimpleNamespace(task_id=None))
 
-    stream = handler.on_message_send_stream(params, object())
+    stream = handler.on_message_send_stream(params, SimpleNamespace())
     assert await anext(stream) is update
     assert observed["completion"].done() is False
     assert stages == ["registered", "dequeued"]
@@ -1860,6 +1853,103 @@ async def test_message_stream_acknowledges_transport_delivery_only_when_resumed(
     assert observed["completion"].done() is True
     assert stages == ["registered", "dequeued", "acknowledged"]
     assert pipeline_transport_delivery_tracking_enabled() is False
+
+
+@pytest.mark.asyncio
+async def test_message_stream_finalizes_natural_execution_only_after_stream_exhaustion(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+    )
+    order: list[str] = []
+
+    async def sdk_stream(_handler, _params, _context):
+        order.append("yield")
+        yield update
+        NaturalCompletionGenerationCarrier.attach(SimpleNamespace(call_context=_context), 7)
+        order.append("exhausted")
+
+    class Executor:
+        async def finalize_natural_execution(self, **kwargs) -> None:
+            assert kwargs["completion_generation"] == 7
+            order.append("finalized")
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = Executor()
+    handler._active_task_registry = None
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    params = SimpleNamespace(message=SimpleNamespace(task_id="task-1", context_id="ctx-1"))
+
+    stream = handler.on_message_send_stream(params, call_context)
+    assert await anext(stream) is update
+    assert order == ["yield"]
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+
+    assert order == ["yield", "exhausted", "finalized"]
+
+
+@pytest.mark.asyncio
+async def test_message_stream_disconnect_does_not_naturally_finalize_execution(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    first = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    finalized = False
+
+    async def sdk_stream(_handler, _params, _context):
+        yield first
+        NaturalCompletionGenerationCarrier.attach(SimpleNamespace(call_context=_context), 7)
+        yield TaskStatusUpdateEvent(
+            task_id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        )
+
+    class Executor:
+        async def finalize_natural_execution(self, **_kwargs) -> None:
+            nonlocal finalized
+            finalized = True
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = Executor()
+    handler._active_task_registry = None
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    params = SimpleNamespace(message=SimpleNamespace(task_id="task-1", context_id="ctx-1"))
+
+    stream = handler.on_message_send_stream(params, call_context)
+    assert await anext(stream) is first
+    await stream.aclose()
+
+    assert finalized is False
 
 
 @pytest.mark.asyncio
@@ -1961,9 +2051,7 @@ async def test_message_stream_retires_stale_sdk_lifecycle_after_durable_recovery
         return "recovery-1"
 
     class RecoveryAwareRegistry:
-        async def reconcile_and_replace_for_recovery(
-            self, task_id: str, *, acquire_admission, **_kwargs
-        ) -> str | None:
+        async def reconcile_and_replace_for_recovery(self, task_id: str, *, acquire_admission, **_kwargs) -> str | None:
             admission = await acquire_admission()
             if admission is not None:
                 retired.append(task_id)

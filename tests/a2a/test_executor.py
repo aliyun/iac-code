@@ -7,12 +7,17 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from a2a.server.context import ServerCallContext
 from a2a.types import Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.backup import backup_session_async
-from iac_code.a2a.execution_control import RecoverableInputAdmissionCarrier
+from iac_code.a2a.execution_control import (
+    NaturalCompletionGenerationCarrier,
+    RecoverableInputAdmissionCarrier,
+    bind_execution_control,
+)
 from iac_code.a2a.executor import IacCodeA2AExecutor, _normal_handoff_has_backup_ack
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.input_required import PermissionIdentityValidationError, PermissionResponse
@@ -2678,8 +2683,15 @@ async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
         async def mark_execution_started(self) -> None:
             observed["started"] = True
 
-        async def detach_task(self, _task, *, execution_status: str) -> None:
+        async def detach_task(
+            self,
+            _task,
+            *,
+            execution_status: str,
+            natural_completion: bool = False,
+        ) -> None:
             observed["detached_as"] = execution_status
+            observed["natural_completion"] = natural_completion
 
     class ExecutionControlService:
         def set_termination_cleanup(self, _callback) -> None:
@@ -2730,6 +2742,7 @@ async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
     assert observed["checkpointed"] is True
     assert observed["started"] is True
     assert observed["begin"]["recoverable_input_admission"] == "recovery-1"
+    assert observed["natural_completion"] is True
     assert PipelineLifecycleEventQueueCarrier.is_bound(context)
     events_at_delegation = observed["events_at_delegation"]
     assert isinstance(events_at_delegation, list)
@@ -2738,6 +2751,67 @@ async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
     assert dumped["taskId"] == "task-1"
     assert dumped["contextId"] == "ctx-1"
     assert dumped["status"]["state"] == "TASK_STATE_WORKING"
+
+
+@pytest.mark.asyncio
+async def test_executor_marks_failed_response_as_natural_completion(monkeypatch, tmp_path: Path) -> None:
+    observed: dict[str, object] = {}
+
+    class Control:
+        task_id = "task-1"
+
+        async def detach_task(
+            self,
+            _task,
+            *,
+            execution_status: str,
+            natural_completion: bool = False,
+        ) -> int:
+            observed["execution_status"] = execution_status
+            observed["natural_completion"] = natural_completion
+            return 17
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def finalize_natural_completion(self, **kwargs) -> None:
+            observed["finalized_generation"] = kwargs["completion_generation"]
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    control_service = ExecutionControlService()
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        execution_control_service=control_service,
+    )
+
+    async def fail_execution(*_args, **_kwargs) -> None:
+        record.state = "failed"
+        bind_execution_control(Control())
+
+    monkeypatch.setattr(executor, "_execute", fail_execution)
+    context = FakeRequestContext(
+        task_id="task-1",
+        context_id="ctx-1",
+        metadata={"iac_code": {"cwd": str(tmp_path)}},
+    )
+    context.call_context = ServerCallContext()
+    NaturalCompletionGenerationCarrier.prepare(context)
+    assert NaturalCompletionGenerationCarrier.mark_delivered(context.call_context) is None
+
+    await executor.execute(context, FakeEventQueue())
+
+    assert observed == {
+        "execution_status": "failed",
+        "natural_completion": True,
+        "finalized_generation": 17,
+    }
+    assert NaturalCompletionGenerationCarrier.read(context) == 17
 
 
 @pytest.mark.asyncio
@@ -2979,9 +3053,7 @@ async def test_executor_runs_normal_mode_when_iac_code_mode_is_normal(
 
 
 @pytest.mark.asyncio
-async def test_normal_mode_ignores_stale_pipeline_name(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+async def test_normal_mode_ignores_stale_pipeline_name(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     loop = FakeAgentLoop([TextDeltaEvent(text="normal")])
     runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
@@ -4389,9 +4461,7 @@ class TestResolveAliyunCredential:
         )
         executor = self._make_executor()
 
-        result = executor._resolve_aliyun_credential(
-            {"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}}
-        )
+        result = executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}})
 
         assert result is not None
         assert result is not configured
@@ -4407,9 +4477,7 @@ class TestResolveAliyunCredential:
         monkeypatch.setattr("iac_code.a2a.executor.AliyunCredentials.load", lambda: None)
         executor = self._make_executor()
 
-        result = executor._resolve_aliyun_credential(
-            {"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}}
-        )
+        result = executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}})
 
         assert result is None
 
@@ -4417,9 +4485,7 @@ class TestResolveAliyunCredential:
         executor = self._make_executor()
 
         with pytest.raises(InvalidParamsError, match="Unsupported Alibaba Cloud region ID"):
-            executor._resolve_aliyun_credential(
-                {"iac_code": {"alibaba_cloud_region_id": "https://example.com"}}
-            )
+            executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "https://example.com"}})
 
 
 @pytest.mark.asyncio
@@ -5247,9 +5313,7 @@ async def test_persisted_permission_restores_backup_before_checkpoint_lookup(
     )
     assert activations == ["activated"]
     assert restored_storage.exists(cwd, session_id)
-    assert (
-        restored_storage.session_dir(cwd, session_id) / "permission-waits" / f"{boundary_id}.json"
-    ).is_file()
+    assert (restored_storage.session_dir(cwd, session_id) / "permission-waits" / f"{boundary_id}.json").is_file()
 
 
 @pytest.mark.asyncio
@@ -5486,9 +5550,7 @@ async def test_rejected_live_permission_does_not_replace_context_llm_headers(
         FakeEventQueue(),
     )
 
-    assert await store.resolve_context_llm_headers("ctx-1", None) == {
-        "Authorization": "Bearer accepted"
-    }
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {"Authorization": "Bearer accepted"}
 
 
 @pytest.mark.asyncio
@@ -5545,9 +5607,7 @@ async def test_duplicate_live_permission_keeps_first_committed_llm_headers(
     )
 
     assert answer_count == 2
-    assert await store.resolve_context_llm_headers("ctx-1", None) == {
-        "Authorization": "Bearer first"
-    }
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {"Authorization": "Bearer first"}
 
 
 @pytest.mark.asyncio
@@ -5582,9 +5642,7 @@ async def test_rejected_sideband_permission_does_not_replace_context_llm_headers
             metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer rejected"}}},
         )
 
-    assert await store.resolve_context_llm_headers("ctx-1", None) == {
-        "Authorization": "Bearer accepted"
-    }
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {"Authorization": "Bearer accepted"}
 
 
 @pytest.mark.asyncio
@@ -5709,8 +5767,7 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         index
         for index, event in enumerate(queue.events)
         if isinstance(event, TaskStatusUpdateEvent)
-        and dump(event).get("metadata", {}).get("iac_code", {}).get("inputReceived", {}).get("decision")
-        == "allow_once"
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("inputReceived", {}).get("decision") == "allow_once"
     ]
     final_indices = [
         index
