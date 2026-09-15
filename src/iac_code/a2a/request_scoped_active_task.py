@@ -291,6 +291,7 @@ class PipelineLifecycleEventQueueCarrier:
     """Mark a RequestContext whose SDK lifecycle owns its event queue."""
 
     _ATTRIBUTE = "_iac_code_pipeline_lifecycle_event_queue"
+    _BOUND_ATTRIBUTE = "_iac_code_pipeline_lifecycle_event_queue_bound"
 
     @classmethod
     def attach(cls, request_context: Any) -> None:
@@ -299,6 +300,14 @@ class PipelineLifecycleEventQueueCarrier:
     @classmethod
     def read(cls, request_context: Any) -> bool:
         return getattr(request_context, cls._ATTRIBUTE, False) is True
+
+    @classmethod
+    def mark_bound(cls, request_context: Any) -> None:
+        setattr(request_context, cls._BOUND_ATTRIBUTE, True)
+
+    @classmethod
+    def is_bound(cls, request_context: Any) -> bool:
+        return getattr(request_context, cls._BOUND_ATTRIBUTE, False) is True
 
 
 class DirectPipelineRecoveryRequiredError(RuntimeError):

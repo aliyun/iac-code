@@ -77,7 +77,10 @@ from iac_code.a2a.pipeline_snapshot import (
 from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2AEventPublisher
 from iac_code.a2a.projection import a2a_safe_mode_enabled
 from iac_code.a2a.request_mode import resolve_request_run_mode
-from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGateCarrier
+from iac_code.a2a.request_scoped_active_task import (
+    DirectPipelineRouteGateCarrier,
+    PipelineLifecycleEventQueueCarrier,
+)
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -1646,6 +1649,24 @@ class IacCodeA2AExecutor(AgentExecutor):
                 bind_execution_control(control)
                 await control.checkpoint()
                 await control.mark_execution_started()
+                if (
+                    pipeline_mode
+                    and not route_pipeline_handoff_to_normal
+                    and recoverable_input_admission is not None
+                    and PipelineLifecycleEventQueueCarrier.read(context)
+                ):
+                    # A cold recovered request reuses the SDK's existing
+                    # INPUT_REQUIRED Task, so there is no automatic initial
+                    # Task frame.  Bind ROS to the newly started execution
+                    # before Pipeline context/sidecar restoration can finish
+                    # without producing a public event.
+                    await self._publish_status(
+                        event_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        state=TaskState.TASK_STATE_WORKING,
+                    )
+                    PipelineLifecycleEventQueueCarrier.mark_bound(context)
             await publish_initial_task_if_missing()
             await self._task_store.ensure_task_not_expired(task.task_id)
         except InvalidParamsError:

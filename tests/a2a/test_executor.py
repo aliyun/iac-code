@@ -7,11 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from a2a.types import Task, TaskState, TaskStatusUpdateEvent
+from a2a.types import Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.backup import backup_session_async
+from iac_code.a2a.execution_control import RecoverableInputAdmissionCarrier
 from iac_code.a2a.executor import IacCodeA2AExecutor, _normal_handoff_has_backup_ack
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.input_required import PermissionIdentityValidationError, PermissionResponse
@@ -21,6 +22,7 @@ from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
+from iac_code.a2a.request_scoped_active_task import PipelineLifecycleEventQueueCarrier
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import ImageBlock, Message, TextBlock
 from iac_code.commands.registry import CommandRegistry, PromptCommand
@@ -2658,6 +2660,84 @@ async def test_executor_delegates_pipeline_mode_after_validation(
             "pipeline_input": PipelineUserInput(content="hello", display_text="hello", has_images=False),
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    observed: dict[str, object] = {}
+
+    class Control:
+        task_id = "task-1"
+
+        async def checkpoint(self) -> None:
+            observed["checkpointed"] = True
+
+        async def mark_execution_started(self) -> None:
+            observed["started"] = True
+
+        async def detach_task(self, _task, *, execution_status: str) -> None:
+            observed["detached_as"] = execution_status
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def begin_execution(self, **kwargs):
+            observed["begin"] = kwargs
+            return Control()
+
+    class SpyPipelineExecutor:
+        def __init__(self, **_kwargs) -> None:
+            return None
+
+        async def execute(self, *, event_queue, **_kwargs):
+            observed["events_at_delegation"] = list(event_queue.events)
+            return True
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", SpyPipelineExecutor)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.state = "input-required"
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        execution_control_service=ExecutionControlService(),
+    )
+    context = FakeRequestContext(
+        task_id="task-1",
+        context_id="ctx-1",
+        text="确认方案并继续",
+        metadata={"iac_code": {"cwd": str(tmp_path), "run_mode": "pipeline"}},
+    )
+    context.current_task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+    )
+    RecoverableInputAdmissionCarrier.attach(context, "recovery-1")
+    PipelineLifecycleEventQueueCarrier.attach(context)
+    queue = FakeEventQueue()
+
+    await executor.execute(context, queue)
+
+    assert observed["checkpointed"] is True
+    assert observed["started"] is True
+    assert observed["begin"]["recoverable_input_admission"] == "recovery-1"
+    assert PipelineLifecycleEventQueueCarrier.is_bound(context)
+    events_at_delegation = observed["events_at_delegation"]
+    assert isinstance(events_at_delegation, list)
+    assert len(events_at_delegation) == 1
+    dumped = dump(events_at_delegation[0])
+    assert dumped["taskId"] == "task-1"
+    assert dumped["contextId"] == "ctx-1"
+    assert dumped["status"]["state"] == "TASK_STATE_WORKING"
 
 
 @pytest.mark.asyncio

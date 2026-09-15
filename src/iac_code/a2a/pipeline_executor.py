@@ -745,6 +745,7 @@ class IacCodeA2APipelineExecutor:
             elif (
                 task.state == TASK_STATE_INPUT_REQUIRED
                 and PipelineLifecycleEventQueueCarrier.read(context)
+                and not PipelineLifecycleEventQueueCarrier.is_bound(context)
             ):
                 # A recovered SDK lifecycle reuses the existing Task projection,
                 # so the SDK does not emit another initial Task.  Publish a
