@@ -1697,17 +1697,29 @@ class IacCodeA2AExecutor(AgentExecutor):
                 bind_execution_control(control)
                 await control.checkpoint()
                 await control.mark_execution_started()
-                if (
+                current_task = getattr(context, "current_task", None)
+                needs_lifecycle_binding_frame = (
                     pipeline_mode
                     and not route_pipeline_handoff_to_normal
-                    and recoverable_input_admission is not None
                     and PipelineLifecycleEventQueueCarrier.read(context)
-                ):
+                    and (
+                        recoverable_input_admission is not None
+                        or (
+                            isinstance(current_task, Task)
+                            and current_task.status is not None
+                            and current_task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+                        )
+                    )
+                )
+                if needs_lifecycle_binding_frame:
                     # A cold recovered request reuses the SDK's existing
                     # INPUT_REQUIRED Task, so there is no automatic initial
                     # Task frame.  Bind ROS to the newly started execution
                     # before Pipeline context/sidecar restoration can finish
-                    # without producing a public event.
+                    # without producing a public event.  Same-process reuse
+                    # (localInputContinuationReady) legitimately reenters
+                    # without a dispatcher-signed admission but hits the
+                    # same empty-first-frame window, so publish here too.
                     await self._publish_status(
                         event_queue,
                         task_id=task_id,
