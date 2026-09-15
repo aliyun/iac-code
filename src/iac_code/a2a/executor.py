@@ -1351,7 +1351,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                 owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
                 current_task = asyncio.current_task()
                 if existing is not None and existing.owner == owner and current_task is not None:
-                    await existing.attach_task(current_task, mark_working=False)
+                    await existing.attach_task(current_task, mark_working=True)
+                    await existing.mark_execution_started()
                     bind_execution_control(existing)
             requested_llm_headers = resolve_a2a_llm_headers(metadata)
             with contextlib.ExitStack() as request_scope:
@@ -1465,6 +1466,17 @@ class IacCodeA2AExecutor(AgentExecutor):
         task_id = requested_task_id or "task-" + uuid.uuid4().hex[:12]
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
+            if (
+                PipelineLifecycleEventQueueCarrier.read(context)
+                and not PipelineLifecycleEventQueueCarrier.is_bound(context)
+            ):
+                await self._publish_status(
+                    event_queue,
+                    task_id=permission_response.task_id,
+                    context_id=permission_response.context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                )
+                PipelineLifecycleEventQueueCarrier.mark_bound(context)
             response_metadata = getattr(context, "metadata", None) or getattr(
                 getattr(context, "message", None), "metadata", None
             )
