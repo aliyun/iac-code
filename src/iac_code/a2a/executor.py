@@ -2495,21 +2495,22 @@ class IacCodeA2AExecutor(AgentExecutor):
                 context_id=context_id,
             )
             if waiting_task_id == task_id:
-                await self._task_store.discard_context_runtime(context_id, persist_context=False)
-                if not await self._task_store.commit_inactive_execution_task(
+                committed = await self._task_store.commit_inactive_execution_task(
                     task_id=task_id,
                     context_id=context_id,
-                ):
-                    raise RuntimeError("Pipeline input wait did not reach a recoverable state")
-                committed_task = await self._task_store.get_task_record(task_id)
-                committed_waiting_task_id = await run_sync_fenced(
-                    sandbox_release_recoverable_task_id_from_sidecar,
-                    cwd=context_record.cwd,
-                    session_id=context_record.session_id,
-                    context_id=context_id,
+                    expected_state=TASK_STATE_INPUT_REQUIRED,
                 )
-                if committed_task.state == TASK_STATE_INPUT_REQUIRED and committed_waiting_task_id == task_id:
-                    return TASK_STATE_INPUT_REQUIRED
+                if committed:
+                    await self._task_store.discard_context_runtime(context_id, persist_context=False)
+                    committed_task = await self._task_store.get_task_record(task_id)
+                    committed_waiting_task_id = await run_sync_fenced(
+                        sandbox_release_recoverable_task_id_from_sidecar,
+                        cwd=context_record.cwd,
+                        session_id=context_record.session_id,
+                        context_id=context_id,
+                    )
+                    if committed_task.state == TASK_STATE_INPUT_REQUIRED and committed_waiting_task_id == task_id:
+                        return TASK_STATE_INPUT_REQUIRED
         cancel_result = await run_sync_fenced(
             cancel_waiting_input_task_from_sidecar,
             cwd=context_record.cwd,

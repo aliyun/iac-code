@@ -4447,7 +4447,16 @@ def sandbox_release_recoverable_task_id_from_sidecar(*, cwd: str, session_id: st
         task_id=task_id,
         context_id=context_id,
     )
-    if pending_input is None or pending_input.get("kind") not in _SANDBOX_RELEASE_RECOVERABLE_INPUT_KINDS:
+    if pending_input is None:
+        return None
+    kind = pending_input.get("kind")
+    if kind not in _SANDBOX_RELEASE_RECOVERABLE_INPUT_KINDS:
+        return None
+    if kind == "ask_user_question" and not _string_value(
+        pending_input.get("toolUseId") or pending_input.get("tool_use_id")
+    ):
+        return None
+    if kind == "pipeline_pause_confirmation" and pending_input.get("paused") is not True:
         return None
     return task_id
 

@@ -50,6 +50,7 @@ from iac_code.utils.file_security import atomic_write_text
 
 logger = logging.getLogger(__name__)
 A2ATaskSnapshotList: TypeAlias = list[A2ATaskSnapshot]
+_RUNTIME_CLOSE_TIMEOUT_SECONDS = 2.0
 
 
 class A2ATaskStore(TaskStore):
@@ -1250,7 +1251,12 @@ class A2ATaskStore(TaskStore):
         return await self.commit_inactive_execution_task(task_id=task_id, context_id=context_id, cancel_wait=True)
 
     async def commit_inactive_execution_task(
-        self, *, task_id: str, context_id: str, cancel_wait: bool = False
+        self,
+        *,
+        task_id: str,
+        context_id: str,
+        cancel_wait: bool = False,
+        expected_state: str | None = None,
     ) -> bool:
         """Strictly commit an execution's final task/context snapshots off the event loop."""
 
@@ -1267,6 +1273,7 @@ class A2ATaskStore(TaskStore):
                     or record.context_id != context_id
                     or (record.active_task is not None and not record.active_task.done())
                     or record.state not in allowed_states
+                    or (expected_state is not None and record.state != expected_state)
                 ):
                     return False
                 if cancel_wait:
@@ -1803,25 +1810,45 @@ def _write_session_snapshot(session_dir: Path, path: Path, data: dict[str, Any])
 async def _close_runtime(runtime: Any | None) -> None:
     if runtime is None:
         return
+    close_task = asyncio.create_task(_close_runtime_unbounded(runtime))
+    try:
+        done, _pending = await asyncio.wait({close_task}, timeout=_RUNTIME_CLOSE_TIMEOUT_SECONDS)
+    except asyncio.CancelledError:
+        close_task.cancel()
+        close_task.add_done_callback(_consume_runtime_close_result)
+        raise
+    if not done:
+        logger.warning("Timed out closing A2A runtime")
+        close_task.cancel()
+        close_task.add_done_callback(_consume_runtime_close_result)
+        return
+    _consume_runtime_close_result(close_task)
+
+
+def _consume_runtime_close_result(task: asyncio.Task[Any]) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("Failed to close A2A runtime")
+
+
+async def _close_runtime_unbounded(runtime: Any | None) -> None:
+    if runtime is None:
+        return
     close = getattr(runtime, "aclose", None)
     if callable(close):
-        try:
-            result = close()
-            if asyncio.iscoroutine(result):
-                await result
-            return
-        except Exception:
-            logger.exception("Failed to close A2A runtime")
-            return
+        result = close()
+        if asyncio.iscoroutine(result):
+            await result
+        return
     manager = getattr(runtime, "mcp_manager", None)
     if manager is not None:
-        try:
-            await manager.disconnect_all()
-        except Exception:
-            logger.exception("Failed to disconnect A2A MCP manager")
+        await manager.disconnect_all()
     agent_runtime = getattr(runtime, "agent_runtime", None)
     if agent_runtime is not None and agent_runtime is not runtime:
-        await _close_runtime(agent_runtime)
+        await _close_runtime_unbounded(agent_runtime)
 
 
 def _runtime_path_directories(runtime: Any | None) -> tuple[list[str], list[str], list[str]]:
@@ -1884,7 +1911,11 @@ def _close_runtime_task_when_done(
         if loop.is_closed():
             discard_marker(done)
             return
-        loop.create_task(_close_runtime(runtime))
+        # This callback is already detached from request/execution progress.
+        # Start the close body directly so waiters observe the same cleanup
+        # ordering without adding another scheduling hop.
+        runtime_close_task = loop.create_task(_close_runtime_unbounded(runtime))
+        runtime_close_task.add_done_callback(_consume_runtime_close_result)
         if discarded_task_waiters is None or discarded_task_waiters.get(done, 0) <= 0:
             discard_marker(done)
 

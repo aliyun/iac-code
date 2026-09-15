@@ -1605,6 +1605,33 @@ async def test_cancel_inactive_input_required_task_updates_internal_and_sdk_stat
 
 
 @pytest.mark.asyncio
+async def test_commit_inactive_execution_task_expected_state_mismatch_preserves_snapshots(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_INPUT_REQUIRED))
+
+    committed = await store.commit_inactive_execution_task(
+        task_id="task-1",
+        context_id="ctx-1",
+        expected_state="canceled",
+    )
+
+    assert committed is False
+    assert (await store.get_task_record("task-1")).state == "input-required"
+    assert (await store.get_context_record("ctx-1")).active_task_id == "task-1"
+    assert persistence.load_task("task-1").state == "input-required"
+    assert persistence.load_context("ctx-1").active_task_id == "task-1"
+
+
+@pytest.mark.asyncio
 async def test_cancel_inactive_input_required_task_retries_strict_session_snapshot(tmp_path, monkeypatch) -> None:
     from iac_code.a2a import task_store as task_store_module
 

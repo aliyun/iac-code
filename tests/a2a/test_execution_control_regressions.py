@@ -95,11 +95,15 @@ async def test_slow_termination_commit_keeps_event_loop_and_other_contexts_avail
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fail_first_task_commit", [False, True])
+@pytest.mark.parametrize(
+    ("fail_first_task_commit", "runtime_close_mode"),
+    [(False, "ok"), (True, "ok"), (False, "raises"), (False, "hangs")],
+)
 async def test_disconnect_timeout_backup_preserves_candidate_selection_for_sandbox_restore(
     tmp_path,
     monkeypatch,
     fail_first_task_commit,
+    runtime_close_mode,
 ):
     from iac_code.a2a.pipeline_journal import A2APipelineJournal
     from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
@@ -117,10 +121,43 @@ async def test_disconnect_timeout_backup_preserves_candidate_selection_for_sandb
         backup_service=backup,
         execution_control_service=service,
     )
+    runtime_closed = asyncio.Event()
+    lifecycle_order = []
+
+    async def close_runtime():
+        lifecycle_order.append("runtime_closed")
+        runtime_closed.set()
+        if runtime_close_mode == "raises":
+            raise RuntimeError("injected runtime close failure")
+        if runtime_close_mode == "hangs":
+            await asyncio.Event().wait()
+
+    if runtime_close_mode == "hangs":
+        monkeypatch.setattr(
+            "iac_code.a2a.task_store._RUNTIME_CLOSE_TIMEOUT_SECONDS",
+            0.01,
+            raising=False,
+        )
+
+    original_persist_snapshots = store._persist_terminated_task_snapshots_strict
+
+    def record_persist_snapshots(*args):
+        original_persist_snapshots(*args)
+        lifecycle_order.append("task_committed")
+
+    monkeypatch.setattr(store, "_persist_terminated_task_snapshots_strict", record_persist_snapshots)
+    original_backup_session = backup.backup_session
+
+    def record_backup_session(*args, **kwargs):
+        lifecycle_order.append("backup_started")
+        return original_backup_session(*args, **kwargs)
+
+    monkeypatch.setattr(backup, "backup_session", record_backup_session)
+
     context = await store.get_or_create_context(
         context_id="ctx-1",
         cwd=str(tmp_path),
-        runtime_factory=lambda _session_id: object(),
+        runtime_factory=lambda _session_id: SimpleNamespace(aclose=close_runtime),
     )
     context.active_task_id = "task-1"
     store.mirror_context(context)
@@ -196,11 +233,14 @@ async def test_disconnect_timeout_backup_preserves_candidate_selection_for_sandb
                 reason="disconnect_timeout",
                 pause_id=pause_id,
             )
-        await wait_until(lambda: control.release_ready)
+        await wait_until(lambda: control.release_ready, timeout=1 if runtime_close_mode == "hangs" else 10)
 
         assert control.phase == "terminated"
         assert control.execution_status == "input-required"
         assert control.backup["status"] == "shared_committed"
+        assert runtime_closed.is_set()
+        assert lifecycle_order.index("task_committed") < lifecycle_order.index("runtime_closed")
+        assert lifecycle_order.index("runtime_closed") < lifecycle_order.index("backup_started")
         assert json.loads(next(shared.rglob("a2a/task.json")).read_text(encoding="utf-8"))["state"] == (
             "input-required"
         )
@@ -214,6 +254,10 @@ async def test_disconnect_timeout_backup_preserves_candidate_selection_for_sandb
         restored = backup.restore_session(str(tmp_path), context.session_id)
         assert restored.restored
         restored_pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(tmp_path), session_id=context.session_id)
+        restored_task = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
+        restored_context = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
+        assert restored_task["state"] == "input-required"
+        assert restored_context["active_task_id"] is None
         assert A2APipelineSnapshotStore(restored_pipeline_dir).load()["status"] == "waiting_input"
         assert all(
             event["eventType"] != "pipeline_canceled" for event in A2APipelineJournal(restored_pipeline_dir).read_all()
