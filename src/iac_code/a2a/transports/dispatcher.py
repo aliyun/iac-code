@@ -740,12 +740,18 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         if permission_response is not None:
             if not params.message.task_id:
                 params.message.task_id = permission_response.task_id
-            resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
-            if callable(resolve):
-                ack = await resolve(permission_response, metadata=params.message)
-                if ack is not None:
-                    yield ack
-                    return
+            task_active = False
+            task_id_for_check = params.message.task_id
+            task_store = getattr(self, "task_store", None)
+            if task_id_for_check and isinstance(task_store, A2ATaskStore):
+                task_active = await task_store.is_task_active(task_id_for_check)
+            if not task_active:
+                resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
+                if callable(resolve):
+                    ack = await resolve(permission_response, metadata=params.message)
+                    if ack is not None:
+                        yield ack
+                        return
         if permission_response is None:
             await self._hydrate_recoverable_pipeline_task_id(params)
             admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
