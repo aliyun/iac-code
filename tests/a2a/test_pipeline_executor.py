@@ -9211,6 +9211,9 @@ async def test_pipeline_executor_resumes_waiting_input_after_stale_active_task_r
 ) -> None:
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
     from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.a2a.request_scoped_active_task import (
+        PipelineLifecycleEventQueueCarrier,
+    )
 
     cwd = tmp_path / "workspace"
     cwd.mkdir()
@@ -9271,13 +9274,16 @@ async def test_pipeline_executor_resumes_waiting_input_after_stale_active_task_r
     monkeypatch.setattr(executor, "_create_pipeline", lambda **_kwargs: fake_pipeline)
     queue = FakeEventQueue()
 
+    request_context = FakeRequestContext(
+        task_id=task_id,
+        context_id=context_id,
+        text="0",
+        metadata={"iac_code": {"cwd": str(cwd)}},
+    )
+    PipelineLifecycleEventQueueCarrier.attach(request_context)
+
     await executor.execute(
-        context=FakeRequestContext(
-            task_id=task_id,
-            context_id=context_id,
-            text="0",
-            metadata={"iac_code": {"cwd": str(cwd)}},
-        ),
+        context=request_context,
         event_queue=queue,
         task=task,
         task_id=task_id,
@@ -9287,6 +9293,7 @@ async def test_pipeline_executor_resumes_waiting_input_after_stale_active_task_r
     )
 
     assert fake_pipeline.resume_prompts == ["0"]
+    assert _status_events(queue)[0]["status"]["state"] == "TASK_STATE_WORKING"
     assert task.state == "input-required"
     assert ctx.active_task_id is None
     assert all(

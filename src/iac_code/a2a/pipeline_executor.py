@@ -742,6 +742,21 @@ class IacCodeA2APipelineExecutor:
                 # an input boundary.  Fence the new continuation before it
                 # publishes into that still-active lifecycle.
                 await direct_route_gate.activate(event_queue)
+            elif (
+                task.state == TASK_STATE_INPUT_REQUIRED
+                and PipelineLifecycleEventQueueCarrier.read(context)
+            ):
+                # A recovered SDK lifecycle reuses the existing Task projection,
+                # so the SDK does not emit another initial Task.  Publish a
+                # request-scoped frame before restoring the finite sidecar stream;
+                # otherwise a cold resume that has no public Pipeline event can
+                # complete as a successful but empty response.
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                )
             owner_task = asyncio.current_task()
             task_persistence_started = False
 
