@@ -47,6 +47,7 @@ from iac_code.services.session_layout import SessionPaths, ensure_session_owned_
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
 from iac_code.utils.file_security import atomic_write_text
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 A2ATaskSnapshotList: TypeAlias = list[A2ATaskSnapshot]
@@ -1243,6 +1244,11 @@ class A2ATaskStore(TaskStore):
             record = self._tasks.get(validate_protocol_id(task_id))
             if record is None or record.active_task is None or record.active_task.done():
                 return False
+            logger.warning(
+                "A2A task store canceling active task task_id=%s asyncio_task=%s source=cancel_task",
+                sanitize_strict_text(task_id),
+                sanitize_strict_text(record.active_task.get_name()),
+            )
             record.active_task.cancel()
             return True
 
@@ -1385,6 +1391,12 @@ class A2ATaskStore(TaskStore):
             if record is None or record.active_task is None or record.active_task.done():
                 return False
             active_task = record.active_task
+            logger.warning(
+                "A2A task store canceling active task task_id=%s asyncio_task=%s "
+                "source=cancel_task_and_wait",
+                sanitize_strict_text(task_id),
+                sanitize_strict_text(active_task.get_name()),
+            )
             active_task.cancel()
 
         if active_task is asyncio.current_task():

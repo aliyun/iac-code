@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import time
 import uuid
@@ -23,7 +24,10 @@ from typing import Any, AsyncIterator, Literal, TypeVar, cast
 from iac_code.a2a.backup import await_fenced, run_sync_fenced, run_sync_fenced_with_cancel_completion
 from iac_code.services.session_backup import BackupReason, BackupResult
 from iac_code.services.session_storage import SessionStorage
+from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
+
+logger = logging.getLogger(__name__)
 
 ExecutionPhase = Literal[
     "running",
@@ -1058,6 +1062,15 @@ class ExecutionController:
                 if task is not current and not task.done()
             )
         )
+        if managed_tasks:
+            logger.warning(
+                "A2A execution control close canceling tasks context_id=%s execution_id=%s "
+                "phase=%s task_names=%s",
+                sanitize_strict_text(self.context_id),
+                sanitize_strict_text(self.execution_id),
+                sanitize_strict_text(self.phase),
+                ",".join(sanitize_strict_text(task.get_name()) for task in managed_tasks),
+            )
         for task in managed_tasks:
             task.cancel()
         if managed_tasks:
@@ -1359,6 +1372,15 @@ class ExecutionController:
             )
         cleanup_error = await self._run_termination_cleanup(cleanup, mark_complete=False)
         tasks = tuple(dict.fromkeys((*execution_tasks, *activity_tasks, *participant_tasks)))
+        if tasks:
+            logger.warning(
+                "A2A execution termination canceling tasks context_id=%s execution_id=%s "
+                "reason=%s task_names=%s",
+                sanitize_strict_text(self.context_id),
+                sanitize_strict_text(self.execution_id),
+                sanitize_strict_text(self.termination_reason or "none"),
+                ",".join(sanitize_strict_text(task.get_name()) for task in tasks),
+            )
         for task in tasks:
             task.cancel()
         # A transport may reuse its producer Task after execute() returns (the

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
@@ -21,6 +22,7 @@ from a2a.utils.errors import InvalidParamsError
 
 from iac_code.a2a.backup import await_fenced
 from iac_code.a2a.execution_control import RecoverableInputAdmissionCarrier
+from iac_code.utils.public_errors import sanitize_strict_text
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
@@ -28,6 +30,9 @@ if TYPE_CHECKING:
     from a2a.server.agent_execution import RequestContext
     from a2a.server.context import ServerCallContext
     from a2a.server.events import Event
+
+
+logger = logging.getLogger(__name__)
 
 
 class RequestScopedActiveTask(ActiveTask):
@@ -72,6 +77,12 @@ class RequestScopedActiveTask(ActiveTask):
         await await_fenced(self._finish_retirement_owned(lifecycle_tasks))
 
     async def _finish_retirement_owned(self, lifecycle_tasks: tuple[asyncio.Task[Any], ...]) -> None:
+        if lifecycle_tasks:
+            logger.warning(
+                "A2A SDK lifecycle retirement canceling tasks task_id=%s task_names=%s",
+                sanitize_strict_text(self._task_id),
+                ",".join(sanitize_strict_text(task.get_name()) for task in lifecycle_tasks),
+            )
         for task in lifecycle_tasks:
             if not task.done():
                 task.cancel()
