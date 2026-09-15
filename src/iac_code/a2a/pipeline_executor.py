@@ -1048,15 +1048,13 @@ class IacCodeA2APipelineExecutor:
                     control = current_execution_control()
                     execution_termination_reason = current_execution_termination_reason()
                     cancel_source = "execution_control" if execution_termination_reason is not None else "executor"
-                    current_task = asyncio.current_task()
                     logger.warning(
                         "A2A pipeline execution canceled task_id=%s context_id=%s "
-                        "cancel_source=%s task_cancelling=%s execution_id=%s control_phase=%s "
+                        "cancel_source=%s execution_id=%s control_phase=%s "
                         "termination_reason=%s",
                         task_id,
                         context_id,
                         cancel_source,
-                        current_task.cancelling() if current_task is not None else None,
                         getattr(control, "execution_id", None),
                         getattr(control, "phase", None),
                         sanitize_strict_text(execution_termination_reason or ""),
@@ -5200,11 +5198,9 @@ async def _drive_stream_events(
                 event = await anext(stream)
             except asyncio.CancelledError:
                 control = current_execution_control()
-                current_task = asyncio.current_task()
                 logger.warning(
-                    "A2A pipeline source canceled task_cancelling=%s execution_id=%s "
-                    "control_phase=%s termination_reason=%s",
-                    current_task.cancelling() if current_task is not None else None,
+                    "A2A pipeline source canceled execution_id=%s control_phase=%s "
+                    "termination_reason=%s",
                     getattr(control, "execution_id", None),
                     getattr(control, "phase", None),
                     sanitize_strict_text(current_execution_termination_reason() or ""),
