@@ -92,6 +92,7 @@ from iac_code.types.stream_events import (
     TextDeltaEvent,
 )
 from iac_code.utils.path_locks import PathLockRegistry
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -1044,8 +1045,22 @@ class IacCodeA2APipelineExecutor:
             except asyncio.CancelledError:
                 try:
                     task.state = TASK_STATE_CANCELED
+                    control = current_execution_control()
                     execution_termination_reason = current_execution_termination_reason()
                     cancel_source = "execution_control" if execution_termination_reason is not None else "executor"
+                    current_task = asyncio.current_task()
+                    logger.warning(
+                        "A2A pipeline execution canceled task_id=%s context_id=%s "
+                        "cancel_source=%s task_cancelling=%s execution_id=%s control_phase=%s "
+                        "termination_reason=%s",
+                        task_id,
+                        context_id,
+                        cancel_source,
+                        current_task.cancelling() if current_task is not None else None,
+                        getattr(control, "execution_id", None),
+                        getattr(control, "phase", None),
+                        sanitize_strict_text(execution_termination_reason or ""),
+                    )
                     cancel_reason = execution_termination_reason or _("Task canceled.")
                     cancel_data = {"source": cancel_source, "reason": cancel_reason}
                     cancel_handoff_data = {"canceled": True, "reason": _("Task canceled.")}
@@ -5184,6 +5199,16 @@ async def _drive_stream_events(
             try:
                 event = await anext(stream)
             except asyncio.CancelledError:
+                control = current_execution_control()
+                current_task = asyncio.current_task()
+                logger.warning(
+                    "A2A pipeline source canceled task_cancelling=%s execution_id=%s "
+                    "control_phase=%s termination_reason=%s",
+                    current_task.cancelling() if current_task is not None else None,
+                    getattr(control, "execution_id", None),
+                    getattr(control, "phase", None),
+                    sanitize_strict_text(current_execution_termination_reason() or ""),
+                )
                 completion.cancel()
                 raise
             except BaseException as exc:
