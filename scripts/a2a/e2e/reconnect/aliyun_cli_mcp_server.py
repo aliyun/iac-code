@@ -276,7 +276,10 @@ async def _call_real_cli(argv: list[str], ctx: Context) -> str:
             "the initial or reconnect StartChat command shape violated the E2E contract",
         )
 
-    command = [real_aliyun, *argv, "--profile", profile]
+    executable = [real_aliyun]
+    if Path(real_aliyun).suffix.lower() == ".py":
+        executable = [os.environ.get("IAC_CODE_E2E_PYTHON") or sys.executable, real_aliyun]
+    command = [*executable, *argv, "--profile", profile]
     started = time.monotonic()
     try:
         process = await asyncio.create_subprocess_exec(

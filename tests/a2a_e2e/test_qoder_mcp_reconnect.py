@@ -90,7 +90,7 @@ def test_installed_skill_is_temporarily_patched_to_remote_fake_cli(tmp_path) -> 
     assert config["endpoint"] == "ros-pre.aliyuncs.com"
     assert config["allowedAgentModes"] == ["normal"]
     assert config["aliyunCLIForwardEnv"] == list(runner.FORWARDED_ENV)
-    assert runtime.count(str(fake_cli.resolve())) == 2
+    assert runtime.count(json.dumps(str(fake_cli.resolve()))) == 2
 
     runner._restore_skills(backups)
 
