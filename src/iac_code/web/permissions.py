@@ -67,6 +67,22 @@ class WebPendingQuestion:
         }
 
 
+@dataclass
+class WebPendingResourceSelection:
+    request_id: str
+    session_id: str
+    payload: dict[str, Any]
+    future: asyncio.Future[Any]
+    created_at: str
+    resolved_answer: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "requestId": self.request_id,
+            "payload": normalize_event_payload(self.payload),
+        }
+
+
 ELICITATION_ACCEPT = "accept"
 ELICITATION_DECLINE = "decline"
 ELICITATION_CANCEL = "cancel"

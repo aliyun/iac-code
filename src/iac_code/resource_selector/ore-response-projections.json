@@ -1,0 +1,5231 @@
+{
+  "schemaVersion": 1,
+  "operations": {
+    "ecs.instance.list": {
+      "NextToken": true,
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "Instances": {
+        "Instance": [
+          {
+            "InstanceId": true,
+            "InstanceName": true,
+            "Status": true
+          }
+        ]
+      }
+    },
+    "vpc.instance_type.available": {
+      "AvailableZones": {
+        "AvailableZone": [
+          {
+            "ZoneId": true,
+            "Status": true
+          }
+        ]
+      }
+    },
+    "vpc.vswitch.dataapi.ecs.describesecuritygroups": {
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "SecurityGroups": {
+        "SecurityGroup": [
+          {
+            "SecurityGroupId": true,
+            "VpcId": true
+          }
+        ]
+      }
+    },
+    "vpc.vswitch.dataapi.serverless.describenamespaceresources": {
+      "Data": {
+        "NamespaceId": true,
+        "VpcId": true
+      }
+    },
+    "vpc.vswitch.list": {
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "VSwitches": {
+        "VSwitch": [
+          {
+            "VSwitchId": true,
+            "VSwitchName": true,
+            "ZoneId": true
+          }
+        ]
+      }
+    },
+    "rds.instance.list": {
+      "PageNumber": true,
+      "PageRecordCount": true,
+      "TotalRecordCount": true,
+      "Items": {
+        "DBInstance": [
+          {
+            "DBInstanceId": true,
+            "DBInstanceDescription": true
+          }
+        ]
+      }
+    },
+    "oss.bucket.list": {
+      "ListAllMyBucketsResult": {
+        "IsTruncated": true,
+        "NextMarker": true,
+        "Buckets": {
+          "Bucket": [
+            {
+              "Name": true,
+              "Region": true,
+              "Location": true
+            }
+          ]
+        }
+      }
+    },
+    "oss.object.list": {
+      "ListBucketResult": {
+        "IsTruncated": true,
+        "NextMarker": true,
+        "Name": true,
+        "Contents": [
+          {
+            "Key": true,
+            "Size": true,
+            "Type": true
+          }
+        ],
+        "CommonPrefixes": []
+      }
+    },
+    "redis.instance.list": {
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "Instances": {
+        "KVStoreInstance": [
+          {
+            "InstanceId": true,
+            "InstanceName": true
+          }
+        ]
+      }
+    },
+    "redis.connection.list": {
+      "NetInfoItems": {
+        "InstanceNetInfo": [
+          {
+            "ConnectionString": true,
+            "Port": true,
+            "IPType": true
+          }
+        ]
+      }
+    },
+    "ecs.managed_instance.dataapi.ecs.describemanagedinstances": {
+      "RequestId": true,
+      "Instances": [
+        {
+          "InstanceId": true,
+          "InstanceName": true,
+          "Hostname": true,
+          "OsVersion": true,
+          "MachineId": true,
+          "ActivationId": true,
+          "IntranetIp": true,
+          "InternetIp": true
+        }
+      ],
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true
+    },
+    "ecs.disk.dataapi.ecs.describedisks": {
+      "NextToken": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "Disks": {
+        "Disk": [
+          {
+            "SerialNumber": true,
+            "CreationTime": true,
+            "Status": true,
+            "Type": true,
+            "PerformanceLevel": true,
+            "BdfId": true,
+            "EnableAutoSnapshot": true,
+            "StorageSetId": true,
+            "StorageSetPartitionNumber": true,
+            "DiskId": true,
+            "DeleteAutoSnapshot": true,
+            "StorageClusterId": true,
+            "Encrypted": true,
+            "IOPSRead": true,
+            "MountInstanceNum": true,
+            "Description": true,
+            "Device": true,
+            "DiskName": true,
+            "Portable": true,
+            "ImageId": true,
+            "KMSKeyId": true,
+            "DeleteWithInstance": true,
+            "DetachedTime": true,
+            "SourceSnapshotId": true,
+            "AutoSnapshotPolicyId": true,
+            "EnableAutomatedSnapshotPolicy": true,
+            "IOPSWrite": true,
+            "InstanceId": true,
+            "IOPS": true,
+            "RegionId": true,
+            "ExpiredTime": true,
+            "Size": true,
+            "ResourceGroupId": true,
+            "DiskChargeType": true,
+            "ZoneId": true,
+            "AttachedTime": true,
+            "Category": true,
+            "ProductCode": true,
+            "MultiAttach": true,
+            "OperationLocks": {
+              "OperationLock": [
+                {
+                  "LockReason": true
+                }
+              ]
+            },
+            "MountInstances": {
+              "MountInstance": [
+                {
+                  "AttachedTime": true,
+                  "InstanceId": true,
+                  "Device": true
+                }
+              ]
+            },
+            "Tags": {
+              "Tag": [
+                {
+                  "TagValue": true,
+                  "TagKey": true
+                }
+              ]
+            },
+            "Attachments": {
+              "Attachment": [
+                {
+                  "InstanceId": true,
+                  "Device": true,
+                  "AttachedTime": true,
+                  "NsId": true,
+                  "Nguid": true,
+                  "Identifier": true,
+                  "TargetDevice": true,
+                  "AccessToken": true,
+                  "Vuid": true
+                }
+              ]
+            },
+            "ProvisionedIops": true,
+            "BurstingEnabled": true,
+            "Throughput": true,
+            "ThroughputRead": true,
+            "ThroughputWrite": true,
+            "Placement": {
+              "ZoneIds": true
+            },
+            "SourceDiskId": true,
+            "DataSource": {
+              "Id": true,
+              "Type": true
+            }
+          }
+        ]
+      }
+    },
+    "ecs.image.dataapi.ecs.describeimages": {
+      "Images": {
+        "Image": [
+          {
+            "Architecture": true,
+            "BootMode": true,
+            "CreationTime": true,
+            "Description": true,
+            "DiskDeviceMappings": {
+              "DiskDeviceMapping": [
+                {
+                  "Device": true,
+                  "Format": true,
+                  "ImportOSSBucket": true,
+                  "ImportOSSObject": true,
+                  "Progress": true,
+                  "Size": true,
+                  "SnapshotId": true,
+                  "Type": true
+                }
+              ]
+            },
+            "ImageFamily": true,
+            "ImageId": true,
+            "ImageName": true,
+            "ImageOwnerAlias": true,
+            "IsPublic": true,
+            "ImageVersion": true,
+            "IsCopied": true,
+            "IsSelfShared": true,
+            "IsSubscribed": true,
+            "IsSupportCloudinit": true,
+            "IsSupportIoOptimized": true,
+            "OSName": true,
+            "OSNameEn": true,
+            "OSType": true,
+            "Platform": true,
+            "ProductCode": true,
+            "Progress": true,
+            "ResourceGroupId": true,
+            "Size": true,
+            "Status": true,
+            "Tags": [
+              {
+                "TagKey": true,
+                "TagValue": true
+              }
+            ],
+            "Usage": true
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RegionId": true,
+      "RequestId": true
+    },
+    "ecs.security_group.dataapi.ecs.describesecuritygroups": {
+      "NextToken": true,
+      "SecurityGroups": {
+        "SecurityGroup": [
+          {
+            "CreationTime": true,
+            "VpcId": true,
+            "ServiceManaged": true,
+            "Description": true,
+            "SecurityGroupId": true,
+            "ResourceGroupId": true,
+            "SecurityGroupName": true,
+            "EcsCount": true,
+            "ServiceID": true,
+            "SecurityGroupType": true,
+            "AvailableInstanceAmount": true,
+            "Tags": [
+              {
+                "TagValue": true,
+                "TagKey": true
+              }
+            ]
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RegionId": true
+    },
+    "ecs.snapshot.dataapi.ecs.describesnapshots": {
+      "RequestId": true,
+      "Snapshots": {
+        "Snapshot": [
+          {
+            "SnapshotId": true,
+            "SnapshotName": true,
+            "Description": true
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true
+    },
+    "ecs.command.dataapi.ecs.describecommands": {
+      "PageSize": true,
+      "RequestId": true,
+      "PageNumber": true,
+      "TotalCount": true,
+      "NextToken": true,
+      "Commands": {
+        "Command": [
+          {
+            "ParameterDefinitions": {
+              "ParameterDefinition": [
+                {
+                  "DefaultValue": true,
+                  "Description": true,
+                  "Required": true,
+                  "ParameterName": true,
+                  "PossibleValues": {
+                    "PossibleValue": [
+                      true
+                    ]
+                  },
+                  "PatternRegex": true
+                }
+              ]
+            },
+            "Description": true,
+            "Category": true,
+            "ResourceGroupId": true,
+            "ParameterNames": {
+              "ParameterName": [
+                true
+              ]
+            },
+            "Timeout": true,
+            "Provider": true,
+            "Name": true,
+            "WorkingDir": true,
+            "CommandContent": true,
+            "Type": true,
+            "Version": true,
+            "InvokeTimes": true,
+            "CreationTime": true,
+            "Launcher": true,
+            "Latest": true,
+            "EnableParameter": true,
+            "CommandId": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagKey": true,
+                  "TagValue": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ecs.command.dataapi.ecs.describeimages": {
+      "Images": {
+        "Image": [
+          {
+            "Architecture": true,
+            "BootMode": true,
+            "CreationTime": true,
+            "Description": true,
+            "DiskDeviceMappings": {
+              "DiskDeviceMapping": [
+                {
+                  "Device": true,
+                  "Format": true,
+                  "ImportOSSBucket": true,
+                  "ImportOSSObject": true,
+                  "Progress": true,
+                  "Size": true,
+                  "SnapshotId": true,
+                  "Type": true
+                }
+              ]
+            },
+            "ImageFamily": true,
+            "ImageId": true,
+            "ImageName": true,
+            "ImageOwnerAlias": true,
+            "IsPublic": true,
+            "ImageVersion": true,
+            "IsCopied": true,
+            "IsSelfShared": true,
+            "IsSubscribed": true,
+            "IsSupportCloudinit": true,
+            "IsSupportIoOptimized": true,
+            "OSName": true,
+            "OSNameEn": true,
+            "OSType": true,
+            "Platform": true,
+            "ProductCode": true,
+            "Progress": true,
+            "ResourceGroupId": true,
+            "Size": true,
+            "Status": true,
+            "Tags": [
+              {
+                "TagKey": true,
+                "TagValue": true
+              }
+            ],
+            "Usage": true
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RegionId": true,
+      "RequestId": true
+    },
+    "ecs.key_pair.dataapi.ecs.describekeypairs": {
+      "KeyPairs": {
+        "KeyPair": [
+          {
+            "CreationTime": true,
+            "KeyPairFingerPrint": true,
+            "KeyPairName": true,
+            "ResourceGroupId": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagKey": true,
+                  "TagValue": true
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RequestId": true
+    },
+    "ecs.auto_snapshot_policy.dataapi.ecs.describeautosnapshotpolicyex": {
+      "AutoSnapshotPolicies": {
+        "AutoSnapshotPolicy": [
+          {
+            "Status": true,
+            "TimePoints": true,
+            "VolumeNums": true,
+            "AutoSnapshotPolicyId": true,
+            "RetentionDays": true,
+            "RepeatWeekdays": true,
+            "DiskNums": true,
+            "CopiedSnapshotsRetentionDays": true,
+            "EnableCrossRegionCopy": true,
+            "CreationTime": true,
+            "RegionId": true,
+            "AutoSnapshotPolicyName": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagKey": true,
+                  "TagValue": true
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RequestId": true
+    },
+    "ecs.resource_group.dataapi.resourcemanager.listresourcegroups": {
+      "TotalCount": true,
+      "RequestId": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "ResourceGroups": {
+        "ResourceGroup": [
+          {
+            "DisplayName": true,
+            "Status": true,
+            "AccountId": true,
+            "Name": true,
+            "CreateDate": true,
+            "Id": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagKey": true,
+                  "TagValue": true
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "ResourceGroupListAclMode": true
+    },
+    "ecs.deployment_set.dataapi.ecs.describedeploymentsets": {
+      "PageSize": true,
+      "PageNumber": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "RegionId": true,
+      "DeploymentSets": {
+        "DeploymentSet": [
+          {
+            "CreationTime": true,
+            "Strategy": true,
+            "DeploymentSetId": true,
+            "AccountId": true,
+            "DeploymentStrategy": true,
+            "DeploymentSetDescription": true,
+            "Domain": true,
+            "GroupCount": true,
+            "Granularity": true,
+            "DeploymentSetName": true,
+            "InstanceAmount": true,
+            "InstanceIds": {
+              "InstanceId": [
+                true
+              ]
+            },
+            "Capacities": {
+              "Capacity": [
+                {
+                  "ZoneId": true,
+                  "UsedAmount": true,
+                  "AvailableAmount": true
+                }
+              ]
+            },
+            "Type": true,
+            "Affinity": true
+          }
+        ]
+      }
+    },
+    "ecs.launch_template.dataapi.ecs.describelaunchtemplates": {
+      "PageSize": true,
+      "RequestId": true,
+      "PageNumber": true,
+      "TotalCount": true,
+      "LaunchTemplateSets": {
+        "LaunchTemplateSet": [
+          {
+            "LaunchTemplateName": true,
+            "DefaultVersionNumber": true,
+            "ModifiedTime": true,
+            "LaunchTemplateId": true,
+            "CreateTime": true,
+            "ResourceGroupId": true,
+            "CreatedBy": true,
+            "LatestVersionNumber": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagValue": true,
+                  "TagKey": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "ecs.vswitch.dataapi.ecs.describeavailableresource": {
+      "RequestId": true,
+      "AvailableZones": {
+        "AvailableZone": [
+          {
+            "AvailableResources": {
+              "AvailableResource": [
+                {
+                  "SupportedResources": {
+                    "SupportedResource": [
+                      {
+                        "Max": {},
+                        "Min": {},
+                        "Status": {},
+                        "StatusCategory": {},
+                        "Unit": {},
+                        "Value": {}
+                      }
+                    ]
+                  },
+                  "Type": true
+                }
+              ]
+            },
+            "RegionId": true,
+            "Status": true,
+            "StatusCategory": true,
+            "ZoneId": true,
+            "InstanceType": true
+          }
+        ]
+      }
+    },
+    "ecs.vswitch.dataapi.ecs20160314.describeresources": {
+      "EstimatedTotal": true,
+      "Resources": {
+        "Resource": [
+          {
+            "Arn": true,
+            "CreateTime": true,
+            "MatchedAttributes": {},
+            "Product": true,
+            "RegionId": true,
+            "ResourceId": true,
+            "ResourceName": true,
+            "ResourceType": true,
+            "UpdateTime": true
+          }
+        ]
+      },
+      "Marker": true,
+      "Truncated": true,
+      "RequestId": true
+    },
+    "ecs.vswitch.dataapi.serverless.describenamespaceresources": {
+      "RequestId": true,
+      "Data": {
+        "VpcId": true,
+        "VpcName": true,
+        "NamespaceId": true,
+        "NamespaceName": true,
+        "VSwitchId": true,
+        "VSwitchName": true,
+        "Description": true
+      }
+    },
+    "ecs.vswitch.dataapi.vpc.describevswitches": {
+      "VSwitches": {
+        "VSwitch": [
+          {
+            "Status": true,
+            "IsDefault": true,
+            "Description": true,
+            "ZoneId": true,
+            "ResourceGroupId": true,
+            "NetworkAclId": true,
+            "VSwitchId": true,
+            "AvailableIpAddressCount": true,
+            "CidrBlock": true,
+            "RouteTable": {
+              "RouteTableId": true,
+              "RouteTableType": true
+            },
+            "VpcId": true,
+            "OwnerId": true,
+            "CreationTime": true,
+            "VSwitchName": true,
+            "Ipv6CidrBlock": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "Key": true,
+                  "Value": true
+                }
+              ]
+            },
+            "ShareType": true
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RequestId": true
+    },
+    "vpc.vpc.dataapi.ecs20160314.describeresources": {
+      "EstimatedTotal": true,
+      "Resources": {
+        "Resource": [
+          {
+            "Arn": true,
+            "CreateTime": true,
+            "MatchedAttributes": {},
+            "Product": true,
+            "RegionId": true,
+            "ResourceId": true,
+            "ResourceName": true,
+            "ResourceType": true,
+            "UpdateTime": true
+          }
+        ]
+      },
+      "Marker": true,
+      "Truncated": true,
+      "RequestId": true
+    },
+    "vpc.vpc.dataapi.vpc.describevpcs": {
+      "Vpcs": {
+        "Vpc": [
+          {
+            "Status": true,
+            "IsDefault": true,
+            "CenStatus": true,
+            "Description": true,
+            "ResourceGroupId": true,
+            "VSwitchIds": {
+              "VSwitchId": [
+                true
+              ]
+            },
+            "SecondaryCidrBlocks": {
+              "SecondaryCidrBlock": [
+                true
+              ]
+            },
+            "CidrBlock": true,
+            "RouterTableIds": {
+              "RouterTableIds": [
+                true
+              ]
+            },
+            "UserCidrs": {
+              "UserCidr": [
+                true
+              ]
+            },
+            "NetworkAclNum": true,
+            "VRouterId": true,
+            "AdvancedResource": true,
+            "NatGatewayIds": {
+              "NatGatewayIds": [
+                true
+              ]
+            },
+            "VpcId": true,
+            "OwnerId": true,
+            "CreationTime": true,
+            "VpcName": true,
+            "RegionId": true,
+            "Ipv6CidrBlock": true,
+            "Ipv6CidrBlocks": {
+              "Ipv6CidrBlock": [
+                {
+                  "Ipv6Isp": true,
+                  "Ipv6CidrBlock": true
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RequestId": true
+    },
+    "vpc.route_table.dataapi.vpc.describevirtualborderrouters": {
+      "RequestId": true,
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "VirtualBorderRouterSet": {
+        "VirtualBorderRouterType": [
+          {
+            "CreationTime": true,
+            "Status": true,
+            "Type": true,
+            "MinTxInterval": true,
+            "PeerIpv6GatewayIp": true,
+            "PConnVbrExpireTime": true,
+            "PhysicalConnectionOwnerUid": true,
+            "ActivationTime": true,
+            "PhysicalConnectionBusinessStatus": true,
+            "Description": true,
+            "TerminationTime": true,
+            "MinRxInterval": true,
+            "PeerGatewayIp": true,
+            "Name": true,
+            "VbrId": true,
+            "VlanId": true,
+            "VlanInterfaceId": true,
+            "CircuitCode": true,
+            "LocalIpv6GatewayIp": true,
+            "LocalGatewayIp": true,
+            "PeeringSubnetMask": true,
+            "EnableIpv6": true,
+            "RouteTableId": true,
+            "DetectMultiplier": true,
+            "EccId": true,
+            "CloudBoxInstanceId": true,
+            "RecoveryTime": true,
+            "PhysicalConnectionStatus": true,
+            "PeeringIpv6SubnetMask": true,
+            "AccessPointId": true,
+            "PConnVbrChargeType": true,
+            "PhysicalConnectionId": true,
+            "AssociatedPhysicalConnections": {
+              "AssociatedPhysicalConnection": [
+                {
+                  "Status": true,
+                  "VlanInterfaceId": true,
+                  "CircuitCode": true,
+                  "PeerIpv6GatewayIp": true,
+                  "LocalIpv6GatewayIp": true,
+                  "PhysicalConnectionOwnerUid": true,
+                  "LocalGatewayIp": true,
+                  "PhysicalConnectionBusinessStatus": true,
+                  "PeeringSubnetMask": true,
+                  "EnableIpv6": true,
+                  "PhysicalConnectionStatus": true,
+                  "PeerGatewayIp": true,
+                  "PeeringIpv6SubnetMask": true,
+                  "PhysicalConnectionId": true,
+                  "VlanId": true
+                }
+              ]
+            },
+            "AssociatedCens": {
+              "AssociatedCen": [
+                {
+                  "CenOwnerId": true,
+                  "CenId": true,
+                  "CenStatus": true
+                }
+              ]
+            },
+            "Bandwidth": true,
+            "ResourceGroupId": true,
+            "Tags": {
+              "Tags": [
+                {
+                  "Key": true,
+                  "Value": true
+                }
+              ]
+            },
+            "EcrId": true,
+            "SitelinkEnable": true,
+            "EcrAttatchStatus": true
+          }
+        ]
+      }
+    },
+    "vpc.nat_gateway.dataapi.vpc.describenatgateways": {
+      "PageSize": true,
+      "RequestId": true,
+      "PageNumber": true,
+      "TotalCount": true,
+      "NatGateways": {
+        "NatGateway": [
+          {
+            "Status": true,
+            "CreationTime": true,
+            "VpcId": true,
+            "NatType": true,
+            "AutoPay": true,
+            "Spec": true,
+            "DeletionProtection": true,
+            "NetworkType": true,
+            "SecurityProtectionEnabled": true,
+            "InstanceChargeType": true,
+            "RegionId": true,
+            "EcsMetricEnabled": true,
+            "IcmpReplyEnabled": true,
+            "Description": true,
+            "ExpiredTime": true,
+            "ResourceGroupId": true,
+            "NatGatewayId": true,
+            "InternetChargeType": true,
+            "BusinessStatus": true,
+            "Name": true,
+            "IpLists": {
+              "IpList": [
+                {
+                  "UsingStatus": true,
+                  "IpAddress": true,
+                  "SnatEntryEnabled": true,
+                  "AllocationId": true,
+                  "ApAccessEnabled": true,
+                  "PrivateIpAddress": true
+                }
+              ]
+            },
+            "ForwardTableIds": {
+              "ForwardTableId": [
+                true
+              ]
+            },
+            "SnatTableIds": {
+              "SnatTableId": [
+                true
+              ]
+            },
+            "FullNatTableIds": {
+              "FullNatTableId": [
+                true
+              ]
+            },
+            "BandwidthPackageIds": {
+              "BandwidthPackageId": [
+                true
+              ]
+            },
+            "NatGatewayPrivateInfo": {
+              "VswitchId": true,
+              "EniInstanceId": true,
+              "MaxBandwidth": true,
+              "MaxSessionQuota": true,
+              "MaxSessionEstablishRate": true,
+              "PrivateIpAddress": true,
+              "IzNo": true,
+              "EniType": true
+            },
+            "PrivateLinkEnabled": true,
+            "PrivateLinkMode": true,
+            "EipBindMode": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagKey": true,
+                  "TagValue": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "vpc.eip.dataapi.vpc.describeeipaddresses": {
+      "PageSize": true,
+      "RequestId": true,
+      "PageNumber": true,
+      "TotalCount": true,
+      "EipAddresses": {
+        "EipAddress": [
+          {
+            "ReservationActiveTime": true,
+            "Status": true,
+            "ReservationOrderType": true,
+            "AllocationTime": true,
+            "Netmode": true,
+            "ChargeType": true,
+            "Descritpion": true,
+            "Description": true,
+            "Mode": true,
+            "SegmentInstanceId": true,
+            "ReservationInternetChargeType": true,
+            "BandwidthPackageId": true,
+            "IpAddress": true,
+            "Bandwidth": true,
+            "ReservationBandwidth": true,
+            "EipBandwidth": true,
+            "Name": true,
+            "PrivateIpAddress": true,
+            "InstanceRegionId": true,
+            "DeletionProtection": true,
+            "InstanceId": true,
+            "SecondLimited": true,
+            "InstanceType": true,
+            "HDMonitorStatus": true,
+            "RegionId": true,
+            "BandwidthPackageBandwidth": true,
+            "ServiceManaged": true,
+            "ExpiredTime": true,
+            "ResourceGroupId": true,
+            "AllocationId": true,
+            "InternetChargeType": true,
+            "BusinessStatus": true,
+            "BandwidthPackageType": true,
+            "HasReservationData": true,
+            "ISP": true,
+            "OperationLocks": {
+              "LockReason": [
+                {
+                  "LockReason": true
+                }
+              ]
+            },
+            "Tags": {
+              "Tag": [
+                {
+                  "Key": true,
+                  "Value": true
+                }
+              ]
+            },
+            "AvailableRegions": {
+              "AvailableRegion": [
+                true
+              ]
+            },
+            "SecurityProtectionTypes": {
+              "SecurityProtectionType": [
+                true
+              ]
+            },
+            "PublicIpAddressPoolId": true,
+            "VpcId": true,
+            "Zone": true,
+            "BizType": true
+          }
+        ]
+      }
+    },
+    "privatelink.endpoint_service.dataapi.privatelink20200415.listvpcendpointservices": {
+      "Services": [
+        {
+          "Payer": true,
+          "ServiceName": true,
+          "ServiceType": true,
+          "ServiceDomain": true,
+          "ServiceId": true,
+          "Zones": [
+            true
+          ]
+        }
+      ],
+      "RequestId": true,
+      "NextToken": true
+    },
+    "cen.instance.dataapi.cbn.describecens": {
+      "Cens": {
+        "Cen": [
+          {
+            "Name": true,
+            "CenId": true
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true
+    },
+    "cen.transit_router.dataapi.cbn.listtransitrouters": {
+      "TransitRouters": [
+        {
+          "CenId": true,
+          "TransitRouterId": true,
+          "TransitRouterName": true,
+          "TransitRouterDescription": true
+        }
+      ],
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true
+    },
+    "slb.load_balancer.dataapi.slb.describeloadbalancers": {
+      "RequestId": true,
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "LoadBalancers": {
+        "LoadBalancer": [
+          {
+            "VpcId": true,
+            "CreateTimeStamp": true,
+            "LoadBalancerId": true,
+            "CreateTime": true,
+            "PayType": true,
+            "AddressType": true,
+            "NetworkType": true,
+            "ServiceManagedMode": true,
+            "SpecBpsFlag": true,
+            "AddressIPVersion": true,
+            "LoadBalancerName": true,
+            "Bandwidth": true,
+            "Address": true,
+            "SlaveZoneId": true,
+            "MasterZoneId": true,
+            "InternetChargeTypeAlias": true,
+            "LoadBalancerSpec": true,
+            "SpecType": true,
+            "RegionId": true,
+            "ModificationProtectionReason": true,
+            "ModificationProtectionStatus": true,
+            "VSwitchId": true,
+            "LoadBalancerStatus": true,
+            "ResourceGroupId": true,
+            "InternetChargeType": true,
+            "BusinessStatus": true,
+            "DeleteProtection": true,
+            "RegionIdAlias": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagValue": true,
+                  "TagKey": true
+                }
+              ]
+            },
+            "InstanceChargeType": true,
+            "IneffectiveOrderList": {
+              "IneffectiveOrder": [
+                true
+              ]
+            },
+            "ServiceManagedReason": true
+          }
+        ]
+      }
+    },
+    "slb.acl.dataapi.slb.describeaccesscontrollists": {
+      "PageNumber": true,
+      "PageSize": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "Count": true,
+      "Acls": {
+        "Acl": [
+          {
+            "ServiceManagedMode": true,
+            "AclId": true,
+            "AddressIPVersion": true,
+            "AclName": true,
+            "ResourceGroupId": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagValue": true,
+                  "TagKey": true
+                }
+              ]
+            },
+            "CreateTime": true
+          }
+        ]
+      }
+    },
+    "slb.certificate.dataapi.slb.describecacertificates": {
+      "RequestId": true,
+      "CACertificates": {
+        "CACertificate": [
+          {
+            "CreateTimeStamp": true,
+            "StandardType": true,
+            "ExpireTime": true,
+            "CreateTime": true,
+            "EncryptionKeyLength": true,
+            "ExpireTimeStamp": true,
+            "CACertificateId": true,
+            "RegionId": true,
+            "EncryptionAlgorithm": true,
+            "Fingerprint": true,
+            "ResourceGroupId": true,
+            "CommonName": true,
+            "CACertificateName": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagValue": true,
+                  "TagKey": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "slb.certificate.dataapi.slb.describeservercertificates": {
+      "RequestId": true,
+      "ServerCertificates": {
+        "ServerCertificate": [
+          {
+            "CreateTimeStamp": true,
+            "AliCloudCertificateName": true,
+            "StandardType": true,
+            "ExpireTime": true,
+            "EncryptionKeyLength": true,
+            "CreateTime": true,
+            "ServerCertificateId": true,
+            "ExpireTimeStamp": true,
+            "RegionId": true,
+            "EncryptionAlgorithm": true,
+            "ServerCertificateName": true,
+            "Fingerprint": true,
+            "CommonName": true,
+            "ResourceGroupId": true,
+            "RegionIdAlias": true,
+            "IsAliCloudCertificate": true,
+            "AliCloudCertificateId": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagValue": true,
+                  "TagKey": true
+                }
+              ]
+            },
+            "SubjectAlternativeNames": {
+              "SubjectAlternativeName": [
+                true
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "nlb.load_balancer.dataapi.nlb.listloadbalancers": {
+      "RequestId": true,
+      "Success": true,
+      "Code": true,
+      "Message": true,
+      "HttpStatusCode": true,
+      "DynamicCode": true,
+      "DynamicMessage": true,
+      "LoadBalancers": [
+        {
+          "RegionId": true,
+          "LoadBalancerId": true,
+          "LoadBalancerName": true,
+          "LoadBalancerType": true,
+          "AddressType": true,
+          "AddressIpVersion": true,
+          "Ipv6AddressType": true,
+          "LoadBalancerStatus": true,
+          "LoadBalancerBusinessStatus": true,
+          "OperationLocks": [
+            {
+              "LockType": true,
+              "LockReason": true
+            }
+          ],
+          "VpcId": true,
+          "CapacityUnitCount": true,
+          "CreateTime": true,
+          "ResourceGroupId": true,
+          "DNSName": true,
+          "ZoneMappings": [
+            {
+              "VSwitchId": true,
+              "ZoneId": true,
+              "EipType": true,
+              "LoadBalancerAddresses": [
+                {
+                  "EniId": true,
+                  "PrivateIPv4Address": true,
+                  "AllocationId": true,
+                  "PublicIPv4Address": true,
+                  "Ipv6Address": true,
+                  "PrivateIPv4HcStatus": true,
+                  "PrivateIPv6HcStatus": true
+                }
+              ],
+              "Status": true
+            }
+          ],
+          "BandwidthPackageId": true,
+          "SysSecurityGroupId": true,
+          "SecurityGroupIds": [
+            true
+          ],
+          "CrossZoneEnabled": true,
+          "TrafficAffinityEnabled": true,
+          "LoadBalancerBillingConfig": {
+            "InternetBandwidth": true,
+            "InternetChargeType": true,
+            "PayType": true
+          },
+          "DeletionProtectionConfig": {
+            "Enabled": true,
+            "Reason": true,
+            "EnabledTime": true
+          },
+          "ModificationProtectionConfig": {
+            "Status": true,
+            "Reason": true,
+            "EnabledTime": true
+          },
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "AliUid": true
+        }
+      ],
+      "TotalCount": true,
+      "NextToken": true,
+      "MaxResults": true
+    },
+    "nlb.server_group.dataapi.nlb.listservergroups": {
+      "RequestId": true,
+      "Success": true,
+      "Code": true,
+      "Message": true,
+      "HttpStatusCode": true,
+      "DynamicCode": true,
+      "DynamicMessage": true,
+      "ServerGroups": [
+        {
+          "RegionId": true,
+          "ServerGroupId": true,
+          "ServerGroupName": true,
+          "ServerGroupType": true,
+          "AddressIPVersion": true,
+          "VpcId": true,
+          "Scheduler": true,
+          "Protocol": true,
+          "HealthCheck": {
+            "HealthCheckEnabled": true,
+            "HealthCheckType": true,
+            "HealthCheckConnectPort": true,
+            "HealthyThreshold": true,
+            "UnhealthyThreshold": true,
+            "HealthCheckConnectTimeout": true,
+            "HealthCheckInterval": true,
+            "HealthCheckDomain": true,
+            "HealthCheckUrl": true,
+            "HealthCheckHttpCode": [
+              true
+            ],
+            "HttpCheckMethod": true
+          },
+          "PersistenceEnabled": true,
+          "PersistenceTimeout": true,
+          "ConnectionDrainEnabled": true,
+          "ConnectionDrainTimeout": true,
+          "PreserveClientIpEnabled": true,
+          "AnyPortEnabled": true,
+          "ResourceGroupId": true,
+          "ServerGroupStatus": true,
+          "AliUid": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "RelatedLoadBalancerIds": [
+            true
+          ],
+          "ServerCount": true,
+          "QuicVersion": true
+        }
+      ],
+      "TotalCount": true,
+      "NextToken": true,
+      "MaxResults": true
+    },
+    "nlb.security_policy.dataapi.nlb.listsecuritypolicy": {
+      "RequestId": true,
+      "Success": true,
+      "Code": true,
+      "Message": true,
+      "HttpStatusCode": true,
+      "DynamicCode": true,
+      "DynamicMessage": true,
+      "SecurityPolicies": [
+        {
+          "SecurityPolicyId": true,
+          "SecurityPolicyName": true,
+          "TlsVersion": true,
+          "Ciphers": true,
+          "RegionId": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "RelatedListeners": [
+            {
+              "ListenerId": true,
+              "ListenerPort": true,
+              "ListenerProtocol": true,
+              "LoadBalancerId": true
+            }
+          ],
+          "ResourceGroupId": true,
+          "SecurityPolicyStatus": true
+        }
+      ],
+      "TotalCount": true,
+      "NextToken": true,
+      "MaxResults": true
+    },
+    "alb.load_balancer.dataapi.alb.listloadbalancers": {
+      "MaxResults": true,
+      "TotalCount": true,
+      "NextToken": true,
+      "LoadBalancers": [
+        {
+          "LoadBalancerEdition": true,
+          "ResourceGroupId": true,
+          "LoadBalancerBillingConfig": {
+            "PayType": true
+          },
+          "CreateTime": true,
+          "LoadBalancerId": true,
+          "DNSName": true,
+          "ModificationProtectionConfig": {},
+          "LoadBalancerName": true,
+          "ConfigManagedEnabled": true,
+          "AccessLogConfig": {},
+          "LoadBalancerBussinessStatus": true,
+          "DeletionProtectionConfig": {
+            "Enabled": true
+          },
+          "AddressAllocatedMode": true,
+          "AddressType": true,
+          "LoadBalancerStatus": true,
+          "Tags": [
+            {
+              "Value": true,
+              "Key": true
+            }
+          ]
+        }
+      ],
+      "RequestId": true
+    },
+    "alb.acl.dataapi.alb.listacls": {
+      "MaxResults": true,
+      "TotalCount": true,
+      "NextToken": true,
+      "Acls": [
+        {
+          "AclId": true,
+          "AclName": true,
+          "AclStatus": true,
+          "AddressIPVersion": true,
+          "ConfigManagedEnabled": true,
+          "ResourceGroupId": true
+        }
+      ],
+      "RequestId": true
+    },
+    "cas.certificate.dataapi.cas20200407.listusercertificateorder": {
+      "RequestId": true,
+      "ShowSize": true,
+      "CurrentPage": true,
+      "TotalCount": true,
+      "CertificateOrderList": [
+        {
+          "Algorithm": true,
+          "AliyunOrderId": true,
+          "BuyDate": true,
+          "CertEndTime": true,
+          "CertStartTime": true,
+          "CertType": true,
+          "Domain": true,
+          "DomainCount": true,
+          "DomainType": true,
+          "InstanceId": true,
+          "OrderId": true,
+          "PartnerOrderId": true,
+          "ProductCode": true,
+          "ProductName": true,
+          "RootBrand": true,
+          "SourceType": true,
+          "Status": true,
+          "TrusteeStatus": true,
+          "WildDomainCount": true,
+          "CertificateId": true,
+          "Name": true,
+          "CommonName": true,
+          "Fingerprint": true,
+          "Sha2": true,
+          "SerialNo": true,
+          "Issuer": true,
+          "OrgName": true,
+          "Province": true,
+          "City": true,
+          "Country": true,
+          "Sans": true,
+          "Expired": true,
+          "Upload": true,
+          "StartDate": true,
+          "EndDate": true,
+          "ResourceGroupId": true
+        }
+      ]
+    },
+    "ess.scaling_configuration.dataapi.ess.describescalingconfigurations": {
+      "RequestId": true,
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "ScalingConfigurations": {
+        "ScalingConfiguration": [
+          {
+            "DeploymentSetId": true,
+            "CreationTime": true,
+            "ScalingConfigurationName": true,
+            "SystemDiskDescription": true,
+            "KeyPairName": true,
+            "SecurityGroupId": true,
+            "PrivatePoolOptions.Id": true,
+            "SystemDiskAutoSnapshotPolicyId": true,
+            "SpotStrategy": true,
+            "ScalingGroupId": true,
+            "Affinity": true,
+            "Tenancy": true,
+            "SystemDiskSize": true,
+            "Ipv6AddressCount": true,
+            "SpotDuration": true,
+            "LifecycleState": true,
+            "InstanceName": true,
+            "SecurityEnhancementStrategy": true,
+            "UserData": true,
+            "PrivatePoolOptions.MatchCriteria": true,
+            "DedicatedHostId": true,
+            "InstanceGeneration": true,
+            "HpcClusterId": true,
+            "PasswordInherit": true,
+            "Memory": true,
+            "ImageId": true,
+            "ImageFamily": true,
+            "ImageOwnerAlias": true,
+            "LoadBalancerWeight": true,
+            "SystemDiskCategory": true,
+            "HostName": true,
+            "SystemDiskName": true,
+            "InternetMaxBandwidthOut": true,
+            "InternetMaxBandwidthIn": true,
+            "InstanceType": true,
+            "InstanceDescription": true,
+            "IoOptimized": true,
+            "RamRoleName": true,
+            "SystemDiskPerformanceLevel": true,
+            "Cpu": true,
+            "ResourceGroupId": true,
+            "ZoneId": true,
+            "InternetChargeType": true,
+            "ImageName": true,
+            "ScalingConfigurationId": true,
+            "CreditSpecification": true,
+            "SpotInterruptionBehavior": true,
+            "DataDisks": {
+              "DataDisk": [
+                {
+                  "PerformanceLevel": true,
+                  "Description": true,
+                  "SnapshotId": true,
+                  "Device": true,
+                  "Size": true,
+                  "DiskName": true,
+                  "AutoSnapshotPolicyId": true,
+                  "Category": true,
+                  "KMSKeyId": true,
+                  "DeleteWithInstance": true,
+                  "Encrypted": true,
+                  "Categories": {
+                    "Category": [
+                      true
+                    ]
+                  },
+                  "ProvisionedIops": true,
+                  "BurstingEnabled": true
+                }
+              ]
+            },
+            "Tags": {
+              "Tag": [
+                {
+                  "Key": true,
+                  "Value": true
+                }
+              ]
+            },
+            "SpotPriceLimit": {
+              "SpotPriceModel": [
+                {
+                  "InstanceType": true,
+                  "PriceLimit": true
+                }
+              ]
+            },
+            "InstancePatternInfos": {
+              "InstancePatternInfo": [
+                {
+                  "MaxPrice": true,
+                  "Cores": true,
+                  "Memory": true,
+                  "InstanceFamilyLevel": true,
+                  "Architectures": {
+                    "Architecture": [
+                      true
+                    ]
+                  },
+                  "BurstablePerformance": true,
+                  "ExcludedInstanceTypes": {
+                    "ExcludedInstanceType": [
+                      true
+                    ]
+                  },
+                  "InstanceTypeFamilies": {
+                    "InstanceTypeFamily": [
+                      true
+                    ]
+                  },
+                  "MinimumCpuCoreCount": true,
+                  "MaximumCpuCoreCount": true,
+                  "GpuSpecs": {
+                    "GpuSpec": [
+                      true
+                    ]
+                  },
+                  "InstanceCategories": {
+                    "InstanceCategory": [
+                      true
+                    ]
+                  },
+                  "CpuArchitectures": {
+                    "CpuArchitecture": [
+                      true
+                    ]
+                  },
+                  "PhysicalProcessorModels": {
+                    "PhysicalProcessorModel": [
+                      true
+                    ]
+                  },
+                  "MinimumEniQuantity": true,
+                  "MinimumEniPrivateIpAddressQuantity": true,
+                  "MinimumEniIpv6AddressQuantity": true,
+                  "MinimumInitialCredit": true,
+                  "MinimumBaselineCredit": true,
+                  "MinimumMemorySize": true,
+                  "MaximumMemorySize": true,
+                  "MinimumGpuAmount": true,
+                  "MaximumGpuAmount": true
+                }
+              ]
+            },
+            "SystemDiskCategories": {
+              "SystemDiskCategory": [
+                true
+              ]
+            },
+            "WeightedCapacities": {
+              "WeightedCapacity": [
+                true
+              ]
+            },
+            "InstanceTypes": {
+              "InstanceType": [
+                true
+              ]
+            },
+            "SecurityGroupIds": {
+              "SecurityGroupId": [
+                true
+              ]
+            },
+            "SchedulerOptions": {
+              "ManagedPrivateSpaceId": true
+            },
+            "SystemDisk.Encrypted": true,
+            "SystemDisk.KMSKeyId": true,
+            "SystemDisk.EncryptAlgorithm": true,
+            "SystemDisk.ProvisionedIops": true,
+            "SystemDisk.BurstingEnabled": true,
+            "ImageOptions.LoginAsNonRoot": true,
+            "DeletionProtection": true,
+            "StorageSetId": true,
+            "StorageSetPartitionNumber": true,
+            "CustomPriorities": {
+              "CustomPriority": [
+                {
+                  "InstanceType": true,
+                  "VswitchId": true
+                }
+              ]
+            },
+            "NetworkInterfaces": {
+              "NetworkInterface": [
+                {
+                  "InstanceType": true,
+                  "NetworkInterfaceTrafficMode": true,
+                  "Ipv6AddressCount": true,
+                  "SecurityGroupIds": {
+                    "SecurityGroupId": [
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            "DedicatedHostClusterId": true,
+            "PasswordSetted": true,
+            "SecurityOptions": {
+              "ConfidentialComputingMode": true
+            },
+            "HttpEndpoint": true,
+            "HttpTokens": true,
+            "ResourcePoolOptions": {
+              "Strategy": true,
+              "PrivatePoolIds": {
+                "PrivatePoolId": [
+                  true
+                ]
+              }
+            }
+          }
+        ]
+      }
+    },
+    "ess.scaling_group.dataapi.ess.describescalinggroups": {
+      "RequestId": true,
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "ScalingGroups": {
+        "ScalingGroup": [
+          {
+            "VpcId": true,
+            "CreationTime": true,
+            "TotalInstanceCount": true,
+            "ScalingGroupName": true,
+            "Weighted": true,
+            "SpotInstancePools": true,
+            "StoppedCapacity": true,
+            "OnDemandPercentageAboveBaseCapacity": true,
+            "ModificationTime": true,
+            "MinSize": true,
+            "ScalingGroupId": true,
+            "CompensateWithOnDemand": true,
+            "ScalingPolicy": true,
+            "RemovingWaitCapacity": true,
+            "ActiveCapacity": true,
+            "OnDemandBaseCapacity": true,
+            "ProtectedCapacity": true,
+            "HealthCheckType": true,
+            "LifecycleState": true,
+            "GroupDeletionProtection": true,
+            "ActiveScalingConfigurationId": true,
+            "GroupType": true,
+            "MultiAZPolicy": true,
+            "RemovingCapacity": true,
+            "PendingWaitCapacity": true,
+            "StandbyCapacity": true,
+            "CurrentHostName": true,
+            "PendingCapacity": true,
+            "LaunchTemplateId": true,
+            "TotalCapacity": true,
+            "DesiredCapacity": true,
+            "SpotInstanceRemedy": true,
+            "LaunchTemplateVersion": true,
+            "RegionId": true,
+            "VSwitchId": true,
+            "MaxSize": true,
+            "ScaleOutAmountCheck": true,
+            "DefaultCooldown": true,
+            "VServerGroups": {
+              "VServerGroup": [
+                {
+                  "LoadBalancerId": true,
+                  "VServerGroupAttributes": {
+                    "VServerGroupAttribute": [
+                      {
+                        "VServerGroupId": {},
+                        "Weight": {},
+                        "Port": {}
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "LaunchTemplateOverrides": {
+              "LaunchTemplateOverride": [
+                {
+                  "WeightedCapacity": true,
+                  "InstanceType": true,
+                  "SpotPriceLimit": true
+                }
+              ]
+            },
+            "AlbServerGroups": {
+              "AlbServerGroup": [
+                {
+                  "AlbServerGroupId": true,
+                  "Weight": true,
+                  "Port": true
+                }
+              ]
+            },
+            "ServerGroups": {
+              "ServerGroup": [
+                {
+                  "ServerGroupId": true,
+                  "Type": true,
+                  "Weight": true,
+                  "Port": true
+                }
+              ]
+            },
+            "RemovalPolicies": {
+              "RemovalPolicy": [
+                true
+              ]
+            },
+            "DBInstanceIds": {
+              "DBInstanceId": [
+                true
+              ]
+            },
+            "LoadBalancerIds": {
+              "LoadBalancerId": [
+                true
+              ]
+            },
+            "VSwitchIds": {
+              "VSwitchId": [
+                true
+              ]
+            },
+            "SuspendedProcesses": {
+              "SuspendedProcess": [
+                true
+              ]
+            },
+            "SystemSuspended": true,
+            "IsElasticStrengthInAlarm": true,
+            "MonitorGroupId": true,
+            "AzBalance": true,
+            "AllocationStrategy": true,
+            "SpotAllocationStrategy": true,
+            "MaxInstanceLifetime": true,
+            "CustomPolicyARN": true,
+            "InitCapacity": true,
+            "ResourceGroupId": true,
+            "LoadBalancerConfigs": {
+              "LoadBalancerConfig": [
+                {
+                  "LoadBalancerId": true,
+                  "Weight": true
+                }
+              ]
+            },
+            "EnableDesiredCapacity": true,
+            "Tags": {
+              "Tag": [
+                {
+                  "TagKey": true,
+                  "TagValue": true,
+                  "Propagate": true
+                }
+              ]
+            },
+            "HealthCheckTypes": {
+              "HealthCheckType": [
+                true
+              ]
+            },
+            "DBInstances": {
+              "DBInstance": [
+                {
+                  "DBInstanceId": true,
+                  "Type": true,
+                  "SecurityGroupIds": {
+                    "SecurityGroupId": [
+                      true
+                    ]
+                  }
+                }
+              ]
+            },
+            "SpotCapacity": true,
+            "StopInstanceTimeout": true,
+            "CapacityOptions": {
+              "OnDemandBaseCapacity": true,
+              "OnDemandPercentageAboveBaseCapacity": true,
+              "CompensateWithOnDemand": true,
+              "SpotAutoReplaceOnDemand": true,
+              "PriceComparisonMode": true
+            }
+          }
+        ]
+      }
+    },
+    "ess.eci_scaling_configuration.dataapi.ess.describeeciscalingconfigurations": {
+      "PageNumber": true,
+      "PageSize": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "ScalingConfigurations": [
+        {
+          "CreationTime": true,
+          "ScalingConfigurationName": true,
+          "SecurityGroupId": true,
+          "ActiveDeadlineSeconds": true,
+          "SpotStrategy": true,
+          "AutoCreateEip": true,
+          "ScalingGroupId": true,
+          "EphemeralStorage": true,
+          "Ipv6AddressCount": true,
+          "Description": true,
+          "EipBandwidth": true,
+          "ImageSnapshotId": true,
+          "Memory": true,
+          "RestartPolicy": true,
+          "SpotPriceLimit": true,
+          "IngressBandwidth": true,
+          "CpuOptionsThreadsPerCore": true,
+          "TerminationGracePeriodSeconds": true,
+          "LoadBalancerWeight": true,
+          "DnsPolicy": true,
+          "HostName": true,
+          "EgressBandwidth": true,
+          "RegionId": true,
+          "RamRoleName": true,
+          "Cpu": true,
+          "AutoMatchImageCache": true,
+          "ResourceGroupId": true,
+          "ContainerGroupName": true,
+          "ScalingConfigurationId": true,
+          "CpuOptionsCore": true,
+          "SlsEnable": true,
+          "Containers": [
+            {
+              "ReadinessProbeHttpGetPath": true,
+              "ReadinessProbeSuccessThreshold": true,
+              "LivenessProbePeriodSeconds": true,
+              "LivenessProbeTcpSocketPort": true,
+              "LivenessProbeHttpGetScheme": true,
+              "WorkingDir": true,
+              "Tty": true,
+              "LivenessProbeHttpGetPort": true,
+              "Gpu": true,
+              "ReadinessProbeInitialDelaySeconds": true,
+              "Stdin": true,
+              "Memory": true,
+              "Name": true,
+              "SecurityContextReadOnlyRootFilesystem": true,
+              "LivenessProbeHttpGetPath": true,
+              "Image": true,
+              "ReadinessProbeTcpSocketPort": true,
+              "ReadinessProbeHttpGetScheme": true,
+              "ReadinessProbeHttpGetPort": true,
+              "LivenessProbeSuccessThreshold": true,
+              "ReadinessProbeTimeoutSeconds": true,
+              "SecurityContextRunAsUser": true,
+              "LivenessProbeInitialDelaySeconds": true,
+              "ReadinessProbePeriodSeconds": true,
+              "ImagePullPolicy": true,
+              "StdinOnce": true,
+              "Cpu": true,
+              "LivenessProbeTimeoutSeconds": true,
+              "ReadinessProbeFailureThreshold": true,
+              "LivenessProbeFailureThreshold": true,
+              "Ports": [
+                {
+                  "Port": true,
+                  "Protocol": true
+                }
+              ],
+              "VolumeMounts": [
+                {
+                  "ReadOnly": true,
+                  "SubPath": true,
+                  "Name": true,
+                  "MountPropagation": true,
+                  "MountPath": true
+                }
+              ],
+              "EnvironmentVars": [
+                {
+                  "Key": true,
+                  "Value": true,
+                  "FieldRefFieldPath": true
+                }
+              ],
+              "Commands": [
+                true
+              ],
+              "LivenessProbeExecCommands": [
+                true
+              ],
+              "Args": [
+                true
+              ],
+              "ReadinessProbeExecCommands": [
+                true
+              ],
+              "SecurityContextCapabilityAdds": [
+                true
+              ],
+              "LifecyclePostStartHandlerHttpGetHost": true,
+              "LifecyclePostStartHandlerHttpGetPort": true,
+              "LifecyclePostStartHandlerHttpGetPath": true,
+              "LifecyclePostStartHandlerHttpGetScheme": true,
+              "LifecyclePostStartHandlerExecs": [
+                true
+              ],
+              "LifecyclePostStartHandlerTcpSocketHost": true,
+              "LifecyclePostStartHandlerTcpSocketPort": true,
+              "LifecyclePreStopHandlerHttpGetHost": true,
+              "LifecyclePreStopHandlerHttpGetPort": true,
+              "LifecyclePreStopHandlerHttpGetPath": true,
+              "LifecyclePreStopHandlerHttpGetScheme": true,
+              "LifecyclePreStopHandlerExecs": [
+                true
+              ],
+              "LifecyclePreStopHandlerTcpSocketHost": true,
+              "LifecyclePreStopHandlerTcpSocketPort": true
+            }
+          ],
+          "InitContainers": [
+            {
+              "SecurityContextReadOnlyRootFilesystem": true,
+              "ImagePullPolicy": true,
+              "WorkingDir": true,
+              "Cpu": true,
+              "Image": true,
+              "Gpu": true,
+              "SecurityContextRunAsUser": true,
+              "Memory": true,
+              "Name": true,
+              "InitContainerEnvironmentVars": [
+                {
+                  "Key": true,
+                  "Value": true,
+                  "FieldRefFieldPath": true
+                }
+              ],
+              "InitContainerPorts": [
+                {
+                  "Port": true,
+                  "Protocol": true
+                }
+              ],
+              "InitContainerVolumeMounts": [
+                {
+                  "ReadOnly": true,
+                  "SubPath": true,
+                  "Name": true,
+                  "MountPropagation": true,
+                  "MountPath": true
+                }
+              ],
+              "SecurityContextCapabilityAdds": [
+                true
+              ],
+              "InitContainerCommands": [
+                true
+              ],
+              "InitContainerArgs": [
+                true
+              ]
+            }
+          ],
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "Volumes": [
+            {
+              "Type": true,
+              "DiskVolumeDiskId": true,
+              "DiskVolumeFsType": true,
+              "EmptyDirVolumeMedium": true,
+              "NFSVolumePath": true,
+              "DiskVolumeDiskSize": true,
+              "NFSVolumeReadOnly": true,
+              "FlexVolumeFsType": true,
+              "ConfigFileVolumeDefaultMode": true,
+              "FlexVolumeDriver": true,
+              "FlexVolumeOptions": true,
+              "NFSVolumeServer": true,
+              "Name": true,
+              "ConfigFileVolumeConfigFileToPaths": [
+                {
+                  "Path": true,
+                  "Mode": true,
+                  "Content": true
+                }
+              ],
+              "EmptyDirVolumeSizeLimit": true,
+              "HostPathVolumeType": true,
+              "HostPathVolumePath": true
+            }
+          ],
+          "ImageRegistryCredentials": [
+            {
+              "Password": true,
+              "Server": true,
+              "UserName": true
+            }
+          ],
+          "DnsConfigOptions": [
+            {
+              "Name": true,
+              "Value": true
+            }
+          ],
+          "HostAliases": [
+            {
+              "Ip": true,
+              "Hostnames": [
+                true
+              ]
+            }
+          ],
+          "SecurityContextSysCtls": [
+            {
+              "Name": true,
+              "Value": true
+            }
+          ],
+          "AcrRegistryInfos": [
+            {
+              "InstanceId": true,
+              "InstanceName": true,
+              "RegionId": true,
+              "Domains": [
+                true
+              ]
+            }
+          ],
+          "DnsConfigNameServers": [
+            true
+          ],
+          "DnsConfigSearches": [
+            true
+          ],
+          "NtpServers": [
+            true
+          ],
+          "LifecycleState": true,
+          "CostOptimization": true,
+          "InstanceFamilyLevel": true,
+          "InstanceTypes": [
+            true
+          ],
+          "DataCacheBucket": true,
+          "DataCachePL": true,
+          "DataCacheProvisionedIops": true,
+          "DataCacheBurstingEnabled": true,
+          "GpuDriverVersion": true
+        }
+      ]
+    },
+    "eci.container_group.dataapi.eci.describecontainergroups": {
+      "TotalCount": true,
+      "NextToken": true,
+      "RequestId": true,
+      "ContainerGroups": [
+        {
+          "Status": true,
+          "CreationTime": true,
+          "VpcId": true,
+          "InternetIp": true,
+          "TenantSecurityGroupId": true,
+          "SecurityGroupId": true,
+          "HostAliases": [
+            {
+              "Hostnames": [
+                true
+              ],
+              "Ip": true
+            }
+          ],
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "Events": [
+            {
+              "Type": true,
+              "LastTimestamp": true,
+              "Message": true,
+              "Name": true,
+              "Reason": true,
+              "Count": true,
+              "FirstTimestamp": true
+            }
+          ],
+          "SucceededTime": true,
+          "SpotStrategy": true,
+          "SpotPriceLimit": true,
+          "EphemeralStorage": true,
+          "TenantEniInstanceId": true,
+          "Discount": true,
+          "RestartPolicy": true,
+          "Memory": true,
+          "TenantVSwitchId": true,
+          "Containers": [
+            {
+              "LivenessProbe": {
+                "SuccessThreshold": true,
+                "InitialDelaySeconds": true,
+                "FailureThreshold": true,
+                "TimeoutSeconds": true,
+                "TcpSocket": {
+                  "Host": true,
+                  "Port": true
+                },
+                "Execs": [
+                  true
+                ],
+                "HttpGet": {
+                  "Scheme": true,
+                  "Path": true,
+                  "Port": true
+                },
+                "PeriodSeconds": true
+              },
+              "Commands": [
+                true
+              ],
+              "VolumeMounts": [
+                {
+                  "MountPropagation": true,
+                  "MountPath": true,
+                  "ReadOnly": true,
+                  "Name": true,
+                  "SubPath": true
+                }
+              ],
+              "Args": [
+                true
+              ],
+              "Image": true,
+              "Ports": [
+                {
+                  "Protocol": true,
+                  "Port": true
+                }
+              ],
+              "RestartCount": true,
+              "ImagePullPolicy": true,
+              "StdinOnce": true,
+              "Cpu": true,
+              "PreviousState": {
+                "StartTime": true,
+                "FinishTime": true,
+                "DetailStatus": true,
+                "State": true,
+                "Message": true,
+                "Signal": true,
+                "ExitCode": true,
+                "Reason": true
+              },
+              "Tty": true,
+              "WorkingDir": true,
+              "CurrentState": {
+                "StartTime": true,
+                "FinishTime": true,
+                "DetailStatus": true,
+                "State": true,
+                "Message": true,
+                "Signal": true,
+                "ExitCode": true,
+                "Reason": true
+              },
+              "Ready": true,
+              "Gpu": true,
+              "SecurityContext": {
+                "ReadOnlyRootFilesystem": true,
+                "RunAsUser": true,
+                "Capability": {
+                  "Adds": [
+                    true
+                  ]
+                }
+              },
+              "Memory": true,
+              "Stdin": true,
+              "Name": true,
+              "EnvironmentVars": [
+                {
+                  "Key": true,
+                  "Value": true,
+                  "ValueFrom": {
+                    "FieldRef": {
+                      "FieldPath": true
+                    }
+                  }
+                }
+              ],
+              "ReadinessProbe": {
+                "SuccessThreshold": true,
+                "InitialDelaySeconds": true,
+                "FailureThreshold": true,
+                "TimeoutSeconds": true,
+                "TcpSocket": {
+                  "Host": true,
+                  "Port": true
+                },
+                "Execs": [
+                  true
+                ],
+                "HttpGet": {
+                  "Scheme": true,
+                  "Path": true,
+                  "Port": true
+                },
+                "PeriodSeconds": true
+              }
+            }
+          ],
+          "EniInstanceId": true,
+          "InitContainers": [
+            {
+              "VolumeMounts": [
+                {
+                  "MountPropagation": true,
+                  "MountPath": true,
+                  "ReadOnly": true,
+                  "Name": true
+                }
+              ],
+              "Args": [
+                true
+              ],
+              "Image": true,
+              "Ports": [
+                {
+                  "Protocol": true,
+                  "Port": true
+                }
+              ],
+              "RestartCount": true,
+              "ImagePullPolicy": true,
+              "PreviousState": {
+                "StartTime": true,
+                "FinishTime": true,
+                "DetailStatus": true,
+                "State": true,
+                "Message": true,
+                "Signal": true,
+                "ExitCode": true,
+                "Reason": true
+              },
+              "WorkingDir": true,
+              "Cpu": true,
+              "CurrentState": {
+                "StartTime": true,
+                "FinishTime": true,
+                "DetailStatus": true,
+                "State": true,
+                "Message": true,
+                "Signal": true,
+                "ExitCode": true,
+                "Reason": true
+              },
+              "Command": [
+                true
+              ],
+              "Ready": true,
+              "Gpu": true,
+              "SecurityContext": {
+                "ReadOnlyRootFilesystem": true,
+                "RunAsUser": true,
+                "Capability": {
+                  "Adds": [
+                    true
+                  ]
+                }
+              },
+              "Memory": true,
+              "Name": true,
+              "EnvironmentVars": [
+                {
+                  "Key": true,
+                  "Value": true,
+                  "ValueFrom": {
+                    "FieldRef": {
+                      "FieldPath": true
+                    }
+                  }
+                }
+              ]
+            }
+          ],
+          "ContainerGroupId": true,
+          "TenantEniIp": true,
+          "InstanceType": true,
+          "IntranetIp": true,
+          "Ipv6Address": true,
+          "RegionId": true,
+          "DnsConfig": {
+            "Searches": [
+              true
+            ],
+            "Options": [
+              {
+                "Value": true,
+                "Name": true
+              }
+            ],
+            "NameServers": [
+              true
+            ]
+          },
+          "Volumes": [
+            {
+              "Type": true,
+              "DiskVolumeDiskId": true,
+              "NFSVolumeReadOnly": true,
+              "ConfigFileVolumeConfigFileToPaths": [
+                {
+                  "Path": true,
+                  "Content": true
+                }
+              ],
+              "FlexVolumeFsType": true,
+              "FlexVolumeDriver": true,
+              "DiskVolumeFsType": true,
+              "FlexVolumeOptions": true,
+              "NFSVolumeServer": true,
+              "NFSVolumePath": true,
+              "Name": true,
+              "EmptyDirVolumeMedium": true,
+              "EmptyDirVolumeSizeLimit": true
+            }
+          ],
+          "RamRoleName": true,
+          "VSwitchId": true,
+          "Cpu": true,
+          "ExpiredTime": true,
+          "ResourceGroupId": true,
+          "ZoneId": true,
+          "ContainerGroupName": true,
+          "EciSecurityContext": {
+            "Sysctls": [
+              {
+                "Value": true,
+                "Name": true
+              }
+            ]
+          },
+          "FailedTime": true,
+          "ComputeCategory": true
+        }
+      ]
+    },
+    "cs.cluster.dataapi.cs.describeclustersv1": {
+      "clusters": [
+        {
+          "name": true,
+          "cluster_id": true,
+          "size": true,
+          "region_id": true,
+          "state": true,
+          "cluster_type": true,
+          "created": true,
+          "updated": true,
+          "init_version": true,
+          "current_version": true,
+          "meta_data": true,
+          "resource_group_id": true,
+          "master_url": true,
+          "security_group_id": true,
+          "vpc_id": true,
+          "vswitch_id": true,
+          "external_loadbalancer_id": true,
+          "tags": [
+            {
+              "key": true,
+              "value": true
+            }
+          ]
+        }
+      ],
+      "page_info": {
+        "page_number": true,
+        "page_size": true,
+        "total_count": true
+      }
+    },
+    "cs.node_pool.dataapi.cs.describeclusternodepools": {
+      "nodepools": [
+        {
+          "nodepool_info": {
+            "nodepool_id": true,
+            "region_id": true,
+            "name": true,
+            "created": true,
+            "updated": true,
+            "is_default": true,
+            "type": true,
+            "resource_group_id": true
+          },
+          "status": {},
+          "management": {},
+          "kubernetes_config": {},
+          "scaling_group": {},
+          "auto_scaling": {},
+          "tee_config": {},
+          "node_config": {}
+        }
+      ],
+      "NextToken": true,
+      "TotalCount": true
+    },
+    "sae.namespace.dataapi.serverless.listnamespacesv2": {
+      "Data": {
+        "Namespaces": [
+          {
+            "NamespaceName": true,
+            "NamespaceDescription": true,
+            "NamespaceId": true,
+            "VpcId": true,
+            "VpcName": true,
+            "NamespaceShortId": true
+          }
+        ],
+        "CurrentPage": true,
+        "PageSize": true,
+        "TotalSize": true
+      }
+    },
+    "polardb.cluster.dataapi.polardb.describedbclusters": {
+      "TotalRecordCount": true,
+      "PageRecordCount": true,
+      "PageNumber": true,
+      "RequestId": true,
+      "Items": {
+        "DBCluster": [
+          {
+            "VpcId": true,
+            "ExpireTime": true,
+            "Expired": true,
+            "DBNodeNumber": true,
+            "CreateTime": true,
+            "PayType": true,
+            "StoragePayType": true,
+            "ServerlessType": true,
+            "DBNodeClass": true,
+            "Tags": {
+              "Tag": {
+                "Key": true,
+                "Value": true
+              }
+            },
+            "DBType": true,
+            "LockMode": true,
+            "DBNodes": {
+              "DBNodeClass": true,
+              "ZoneId": true,
+              "DBNodeRole": true,
+              "DBNodeId": true,
+              "RegionId": true
+            },
+            "RegionId": true,
+            "DeletionLock": true,
+            "DBVersion": true,
+            "DBClusterId": true,
+            "DBClusterStatus": true,
+            "ResourceGroupId": true,
+            "StorageUsed": true,
+            "StorageSpace": true,
+            "DBClusterNetworkType": true,
+            "DBClusterDescription": true,
+            "ZoneId": true,
+            "Engine": true,
+            "Category": true
+          }
+        ]
+      }
+    },
+    "gpdb.instance.dataapi.gpdb.describedbinstances": {
+      "Items": {
+        "DBInstance": [
+          {
+            "DBInstanceId": true,
+            "DBInstanceDescription": true
+          }
+        ]
+      },
+      "TotalRecordCount": true,
+      "PageRecordCount": true,
+      "PageNumber": true,
+      "RequestId": true
+    },
+    "kafka.instance.dataapi.alikafka20190916.getinstancelist": {
+      "InstanceList": {
+        "0": [
+          {
+            "Name": true,
+            "InstanceId": true,
+            "EndPoint": true,
+            "SslEndPoint": true,
+            "SaslDomainEndpoint": true,
+            "ZoneId": true,
+            "SpecType": true,
+            "DeployType": true,
+            "UpgradeServiceDetailInfo": {
+              "Current2OpenSourceVersion": true
+            }
+          }
+        ]
+      }
+    },
+    "emr.cluster.dataapi.emr_new.listclusters": {
+      "Clusters": [
+        {
+          "Status": true,
+          "ClusterState": true,
+          "ReadyTime": true,
+          "EndTime": true,
+          "ResourceGroupId": true,
+          "ClusterId": true,
+          "CreateTime": true,
+          "EmrDefaultRole": true,
+          "ClusterType": true,
+          "ReleaseVersion": true,
+          "ClusterName": true,
+          "PaymentType": true,
+          "StateChangeReason": {
+            "Message": true,
+            "Code": true
+          }
+        }
+      ],
+      "NextToken": true,
+      "MaxResults": true,
+      "TotalCount": true
+    },
+    "lindorm.instance.dataapi.hitsdb20200615.getlindorminstancelist": {
+      "InstanceList": [
+        {
+          "VpcId": true,
+          "EngineType": true,
+          "ExpireTime": true,
+          "CreateTime": true,
+          "ResourceGroupId": true,
+          "PayType": true,
+          "InstanceId": true,
+          "NetworkType": true,
+          "ZoneId": true,
+          "ServiceType": true,
+          "InstanceStatus": true,
+          "AliUid": true,
+          "EnableCompute": true
+        }
+      ],
+      "PageNumber": true,
+      "PageSize": true,
+      "Total": true
+    },
+    "hologres.instance.dataapi.hologram_2022.listinstances": {
+      "InstanceList": [
+        {
+          "CommodityCode": true,
+          "CreationTime": true,
+          "ExpirationTime": true,
+          "EndTime": true,
+          "InstanceId": true,
+          "InstanceName": true,
+          "InstanceStatus": true,
+          "InstanceType": true,
+          "InstanceChargeType": true,
+          "LeaderInstanceId": true,
+          "SuspendReason": true,
+          "EnableHiveAccess": true,
+          "Version": true,
+          "ResourceGroupId": true,
+          "RegionId": true,
+          "ZoneId": true
+        }
+      ]
+    },
+    "dashvector.cluster.dataapi.centaur_console.listclusters": {
+      "Data": {
+        "Clusters": [
+          {
+            "Name": true,
+            "ClusterType": true
+          }
+        ],
+        "TotalCount": true,
+        "PageSize": true,
+        "PageNumber": true
+      }
+    },
+    "eas.resource.dataapi.eas.listresources": {
+      "Resources": [
+        {
+          "ResourceId": true,
+          "ResourceName": true,
+          "ClusterId": true,
+          "CreateTime": true,
+          "UpdateTime": true,
+          "OwnerUid": true,
+          "InstanceCount": true,
+          "PrePaidInstanceCount": true,
+          "PostPaidInstanceCount": true,
+          "ServiceCount": true,
+          "CpuCount": true,
+          "GpuCount": true,
+          "Status": true,
+          "Message": true,
+          "ExtraData": {
+            "gpu_share": true,
+            "network_model": true,
+            "role_arn": true,
+            "security_group_id": true,
+            "vpc_id": true,
+            "vswitch_id": true
+          }
+        }
+      ],
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true
+    },
+    "oss.object.dataapi.oss.getbucket": {
+      "ListBucketResult": {
+        "Contents": [
+          {
+            "ETag": true,
+            "Key": true,
+            "LastModified": true,
+            "Owner": {
+              "ID": true,
+              "DisplayName": true
+            },
+            "DisplayName": true,
+            "ID": true,
+            "Size": true,
+            "StorageClass": true,
+            "Type": true
+          }
+        ],
+        "CommonPrefixes": [
+          {
+            "Prefix": true
+          }
+        ],
+        "Delimiter": {},
+        "IsTruncated": true,
+        "Marker": true,
+        "MaxKeys": true,
+        "Name": true,
+        "NextMarker": true,
+        "Prefix": {}
+      }
+    },
+    "nas.file_system.dataapi.nas.describefilesystems": {
+      "FileSystems": {
+        "FileSystem": [
+          {
+            "Status": true,
+            "MountTargetCountLimit": true,
+            "StorageType": true,
+            "Description": true,
+            "KMSKeyId": true,
+            "ZoneId": true,
+            "MeteredIASize": true,
+            "CreateTime": true,
+            "SupportedFeatures": {
+              "SupportedFeature": [
+                true
+              ]
+            },
+            "MountTargets": {
+              "MountTarget": [
+                {
+                  "Status": true,
+                  "VpcId": true,
+                  "VswId": true,
+                  "MountTargetDomain": true,
+                  "NetworkType": true,
+                  "AccessGroupName": true,
+                  "MountTargetIp": true
+                }
+              ]
+            },
+            "AutoSnapshotPolicyId": true,
+            "MeteredSize": true,
+            "EncryptType": true,
+            "VpcId": true,
+            "Capacity": true,
+            "ChargeType": true,
+            "ProtocolType": true,
+            "FileSystemType": true,
+            "ExpiredTime": true,
+            "FileSystemId": true,
+            "RegionId": true
+          }
+        ]
+      },
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true
+    },
+    "ehpc.file_system.dataapi.ehpc.listfilesystemwithmounttargets": {
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "FileSystemList": {
+        "FileSystems": [
+          {
+            "Status": true,
+            "StorageType": true,
+            "EncryptType": true,
+            "Capacity": true,
+            "ProtocolType": true,
+            "FileSystemType": true,
+            "CreateTime": true,
+            "PackageList": {
+              "Packages": [
+                {}
+              ]
+            },
+            "MountTargetList": {
+              "MountTargets": [
+                {
+                  "Status": true,
+                  "VswId": true,
+                  "VpcId": true,
+                  "MountTargetDomain": true,
+                  "NetworkType": true
+                }
+              ]
+            },
+            "FileSystemId": true,
+            "RegionId": true,
+            "MeteredSize": true
+          }
+        ]
+      }
+    },
+    "ehpc.cluster.dataapi.ehpc.listclusters": {
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "Clusters": {
+        "ClusterInfoSimple": [
+          {
+            "Id": true,
+            "Name": true,
+            "Status": true,
+            "Description": true
+          }
+        ]
+      }
+    },
+    "ram.user.dataapi.ram.listusers": {
+      "RequestId": true,
+      "IsTruncated": true,
+      "Marker": true,
+      "Users": {
+        "User": [
+          {
+            "DisplayName": true,
+            "Email": true,
+            "UpdateDate": true,
+            "MobilePhone": true,
+            "UserId": true,
+            "Comments": true,
+            "CreateDate": true,
+            "UserName": true
+          }
+        ]
+      }
+    },
+    "ram.role.dataapi.ram.listroles": {
+      "RequestId": true,
+      "IsTruncated": true,
+      "Roles": {
+        "Role": [
+          {
+            "Description": true,
+            "UpdateDate": true,
+            "MaxSessionDuration": true,
+            "RoleName": true,
+            "CreateDate": true,
+            "RoleId": true,
+            "Arn": true
+          }
+        ]
+      },
+      "Marker": true
+    },
+    "ram.service_role.dataapi.ram.listrolesforservice": {
+      "RequestId": true,
+      "IsTruncated": true,
+      "Roles": {
+        "Role": [
+          {
+            "Description": true,
+            "UpdateDate": true,
+            "MaxSessionDuration": true,
+            "RoleName": true,
+            "CreateDate": true,
+            "RoleId": true,
+            "Arn": true
+          }
+        ]
+      },
+      "Marker": true
+    },
+    "ram.service_role.dataapi.resourcegroup.listrolesforservice": {
+      "IsTruncated": true,
+      "Marker": true,
+      "Roles": {
+        "Role": [
+          {
+            "RoleName": true,
+            "IsServiceLinkedRole": true
+          }
+        ]
+      }
+    },
+    "ram.policy.dataapi.ram.listpolicies": {
+      "Policies": {
+        "Policy": [
+          {
+            "DefaultVersion": true,
+            "Description": true,
+            "UpdateDate": true,
+            "AttachmentCount": true,
+            "PolicyName": true,
+            "CreateDate": true,
+            "PolicyType": true
+          }
+        ]
+      },
+      "RequestId": true,
+      "IsTruncated": true,
+      "Marker": true
+    },
+    "ecs.ram_role.dataapi.ram.listrolesforservice": {
+      "RequestId": true,
+      "IsTruncated": true,
+      "Roles": {
+        "Role": [
+          {
+            "Description": true,
+            "UpdateDate": true,
+            "MaxSessionDuration": true,
+            "RoleName": true,
+            "CreateDate": true,
+            "RoleId": true,
+            "Arn": true
+          }
+        ]
+      },
+      "Marker": true
+    },
+    "resource_manager.folder.dataapi.resource_directory.listauthorizedfolders": {
+      "RequestId": true,
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "Folders": {
+        "Folder": [
+          {
+            "CreateTime": true,
+            "FolderId": true,
+            "FolderName": true,
+            "ResourceDirectoryPath": true
+          }
+        ]
+      }
+    },
+    "resource_manager.folder.dataapi.resourcemanager.getresourcedirectory": {
+      "RequestId": true,
+      "ResourceDirectory": {
+        "ResourceDirectoryId": true,
+        "ScpStatus": true,
+        "MemberDeletionStatus": true,
+        "RootFolderId": true,
+        "CreateTime": true,
+        "MasterAccountName": true,
+        "ControlPolicyStatus": true,
+        "MasterAccountId": true
+      }
+    },
+    "resource_manager.folder.dataapi.resourcemanager.listaccountsforparent": {
+      "RequestId": true,
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "Accounts": {
+        "Account": [
+          {
+            "AccountId": true,
+            "DisplayName": true,
+            "ResourceDirectoryId": true,
+            "Status": true,
+            "Type": true,
+            "JoinTime": true,
+            "JoinMethod": true,
+            "ModifyTime": true
+          }
+        ]
+      }
+    },
+    "resource_manager.folder.dataapi.resourcemanager.listfoldersforparent": {
+      "RequestId": true,
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "Folders": {
+        "Folder": [
+          {
+            "CreateTime": true,
+            "FolderId": true,
+            "FolderName": true,
+            "ResourceDirectoryPath": true
+          }
+        ]
+      }
+    },
+    "resource_manager.folder.multiapi.resourcemanager.multiapi": {
+      "*": {
+        "TotalCount": true,
+        "PageNumber": true,
+        "PageSize": true,
+        "Accounts": {
+          "Account": [
+            {
+              "AccountId": true,
+              "DisplayName": true
+            }
+          ]
+        }
+      }
+    },
+    "resource_manager.account.dataapi.resourcemanager.getresourcedirectory": {
+      "RequestId": true,
+      "ResourceDirectory": {
+        "ResourceDirectoryId": true,
+        "RootFolderId": true,
+        "MasterAccountId": true,
+        "MasterAccountName": true
+      }
+    },
+    "resource_manager.account.dataapi.resourcemanager.listaccountsforparent": {
+      "RequestId": true,
+      "TotalCount": true,
+      "PageNumber": true,
+      "PageSize": true,
+      "Accounts": {
+        "Account": [
+          {
+            "AccountId": true,
+            "DisplayName": true
+          }
+        ]
+      }
+    },
+    "resource_manager.account.dataapi.resourcemanager.listfoldersforparent": {
+      "RequestId": true,
+      "TotalCount": true,
+      "PageNumber": true,
+      "PageSize": true,
+      "Folders": {
+        "Folder": [
+          {
+            "FolderId": true,
+            "FolderName": true
+          }
+        ]
+      }
+    },
+    "kms.key.dataapi.kms.describekey": {
+      "RequestId": true,
+      "KeyMetadata": {
+        "DeletionProtection": true,
+        "KeyId": true,
+        "NextRotationDate": true,
+        "KeyState": true,
+        "RotationInterval": true,
+        "Arn": true,
+        "Creator": true,
+        "LastRotationDate": true,
+        "DeleteDate": true,
+        "PrimaryKeyVersion": true,
+        "Description": true,
+        "KeySpec": true,
+        "Origin": true,
+        "MaterialExpireTime": true,
+        "DeletionProtectionDescription": true,
+        "AutomaticRotation": true,
+        "ProtectionLevel": true,
+        "KeyUsage": true,
+        "CreationDate": true,
+        "DKMSInstanceId": true
+      }
+    },
+    "kms.key.dataapi.kms.listkeys": {
+      "PageNumber": true,
+      "PageSize": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "Keys": {
+        "Key": [
+          {
+            "KeyId": true,
+            "KeyArn": true
+          }
+        ]
+      }
+    },
+    "kms.key.multiapi.kms.multiapi": {
+      "*": {
+        "Aliases": {
+          "Alias": [
+            {
+              "KeyId": true,
+              "AliasName": true
+            }
+          ]
+        }
+      }
+    },
+    "kms.instance.dataapi.kms.listkmsinstances": {
+      "RequestId": true,
+      "KmsInstances": {
+        "KmsInstance": [
+          {
+            "KmsInstanceArn": true,
+            "KmsInstanceId": true
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageNumber": true,
+      "PageSize": true
+    },
+    "cloudsso.directory.dataapi.cloudsso.listdirectories": {
+      "RequestId": true,
+      "TotalCounts": true,
+      "Directories": [
+        {
+          "DirectoryId": true,
+          "DirectoryName": true,
+          "Region": true,
+          "CreateTime": true,
+          "UpdateTime": true
+        }
+      ]
+    },
+    "cloudsso.user.dataapi.cloudsso.listusers": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "TotalCounts": true,
+      "IsTruncated": true,
+      "Users": [
+        {
+          "UserId": true,
+          "UserName": true,
+          "DisplayName": true,
+          "Description": true
+        }
+      ]
+    },
+    "cloudsso.group.dataapi.cloudsso.listgroups": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "TotalCounts": true,
+      "IsTruncated": true,
+      "Groups": [
+        {
+          "GroupId": true,
+          "GroupName": true,
+          "Description": true
+        }
+      ]
+    },
+    "cloudsso.access_configuration.dataapi.cloudsso.listaccessconfigurations": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "TotalCounts": true,
+      "IsTruncated": true,
+      "AccessConfigurations": [
+        {
+          "AccessConfigurationId": true,
+          "AccessConfigurationName": true,
+          "Description": true
+        }
+      ]
+    },
+    "cr.instance.dataapi.cr.listinstance": {
+      "RequestId": true,
+      "Code": true,
+      "PageNo": true,
+      "IsSuccess": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "Instances": [
+        {
+          "ModifiedTime": true,
+          "InstanceName": true,
+          "CreateTime": true,
+          "InstanceSpecification": true,
+          "InstanceStatus": true,
+          "InstanceId": true,
+          "RegionId": true,
+          "ResourceGroupId": true,
+          "InstanceIssue": true,
+          "Tags": [
+            {
+              "TagKey": true,
+              "TagValue": true
+            }
+          ]
+        }
+      ]
+    },
+    "cr.namespace.dataapi.cr.listnamespace": {
+      "RequestId": true,
+      "Code": true,
+      "PageNo": true,
+      "IsSuccess": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "Namespaces": [
+        {
+          "DefaultRepoType": true,
+          "NamespaceStatus": true,
+          "NamespaceId": true,
+          "AutoCreateRepo": true,
+          "InstanceId": true,
+          "NamespaceName": true,
+          "ResourceGroupId": true
+        }
+      ]
+    },
+    "cr.repository.dataapi.cr.listrepository": {
+      "RequestId": true,
+      "Code": true,
+      "PageNo": true,
+      "IsSuccess": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "Repositories": [
+        {
+          "Summary": true,
+          "RepoBuildType": true,
+          "ModifiedTime": true,
+          "RepoId": true,
+          "CreateTime": true,
+          "RepoNamespaceName": true,
+          "TagImmutability": true,
+          "InstanceId": true,
+          "RepoType": true,
+          "RepoStatus": true,
+          "RepoName": true,
+          "ResourceGroupId": true
+        }
+      ]
+    },
+    "acr.repo_attribute.dataapi.acr.listrepo": {
+      "data": {
+        "page": true,
+        "pageSize": true,
+        "total": true,
+        "repos": [
+          {
+            "downloads": true,
+            "gmtCreate": true,
+            "gmtModified": true,
+            "logo": true,
+            "regionId": true,
+            "repoAuthorizeType": true,
+            "repoBuildType": true,
+            "repoDomainList": {
+              "internal": true,
+              "public": true,
+              "vpc": true
+            },
+            "repoId": true,
+            "repoName": true,
+            "repoNamespace": true,
+            "repoOriginType": true,
+            "repoStatus": true,
+            "repoType": true,
+            "stars": true,
+            "summary": true
+          }
+        ]
+      }
+    },
+    "acr.namespace.dataapi.acr.listnamespace": {
+      "data": {
+        "page": true,
+        "pageSize": true,
+        "total": true,
+        "namespaces": [
+          {
+            "authorizeType": true,
+            "namespace": true,
+            "namespaceStatus": true
+          }
+        ]
+      }
+    },
+    "fc.service.dataapi.fc_api.listservices": {
+      "nextToken": true,
+      "services": [
+        {
+          "createdTime": true,
+          "description": true,
+          "internetAccess": true,
+          "lastModifiedTime": true,
+          "logConfig": {},
+          "nasConfig": {},
+          "role": true,
+          "serviceId": true,
+          "serviceName": true,
+          "vpcConfig": {},
+          "tracingConfig": {},
+          "ossMountConfig": {},
+          "useSLRAuthentication": true
+        }
+      ]
+    },
+    "fc.function.dataapi.fc_api.listfunctions": {
+      "nextToken": true,
+      "functions": [
+        {
+          "codeChecksum": true,
+          "codeSize": true,
+          "cpu": true,
+          "createdTime": true,
+          "description": true,
+          "diskSize": true,
+          "functionArn": true,
+          "functionId": true,
+          "functionName": true,
+          "handler": true,
+          "instanceConcurrency": true,
+          "internetAccess": true,
+          "lastModifiedTime": true,
+          "lastUpdateStatus": true,
+          "lastUpdateStatusReason": true,
+          "lastUpdateStatusReasonCode": true,
+          "memorySize": true,
+          "role": true,
+          "runtime": true,
+          "state": true,
+          "stateReason": true,
+          "stateReasonCode": true,
+          "timeout": true,
+          "vpcConfig": {},
+          "tracingConfig": {},
+          "ossMountConfig": {},
+          "nasConfig": {},
+          "logConfig": {},
+          "layers": {},
+          "instanceLifecycleConfig": {},
+          "gpuConfig": {},
+          "environmentVariables": {},
+          "customRuntimeConfig": {},
+          "customDNS": {},
+          "customContainerConfig": {}
+        }
+      ]
+    },
+    "fc3.function.dataapi.fc3_api.listfunctions": {
+      "nextToken": true,
+      "functions": [
+        {
+          "codeChecksum": true,
+          "codeSize": true,
+          "cpu": true,
+          "createdTime": true,
+          "description": true,
+          "diskSize": true,
+          "functionArn": true,
+          "functionId": true,
+          "functionName": true,
+          "handler": true,
+          "instanceConcurrency": true,
+          "internetAccess": true,
+          "lastModifiedTime": true,
+          "lastUpdateStatus": true,
+          "lastUpdateStatusReason": true,
+          "lastUpdateStatusReasonCode": true,
+          "memorySize": true,
+          "role": true,
+          "runtime": true,
+          "state": true,
+          "stateReason": true,
+          "stateReasonCode": true,
+          "timeout": true,
+          "vpcConfig": {},
+          "tracingConfig": {},
+          "ossMountConfig": {},
+          "nasConfig": {},
+          "logConfig": {},
+          "layers": {},
+          "instanceLifecycleConfig": {},
+          "gpuConfig": {},
+          "environmentVariables": {},
+          "customRuntimeConfig": {},
+          "customDNS": {},
+          "customContainerConfig": {}
+        }
+      ]
+    },
+    "computenest.service_instance.dataapi.computenest.listserviceinstances": {
+      "NextToken": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "MaxResults": true,
+      "ServiceInstances": [
+        {
+          "Name": true,
+          "Status": true,
+          "Outputs": true,
+          "UpdateTime": true,
+          "Parameters": true,
+          "ServiceInstanceId": true,
+          "CreateTime": true,
+          "StatusDetail": true,
+          "Progress": true,
+          "Resources": true,
+          "TemplateName": true,
+          "OperatedServiceInstanceId": true,
+          "Service": {
+            "Status": true,
+            "PublishTime": true,
+            "Version": true,
+            "DeployType": true,
+            "ServiceId": true,
+            "SupplierUrl": true,
+            "ServiceType": true,
+            "SupplierName": true,
+            "ServiceInfos": [
+              {
+                "Locale": true,
+                "Image": true,
+                "Name": true,
+                "ShortDescription": true
+              }
+            ],
+            "VersionName": true,
+            "Commodity": {
+              "SaasBoostMetadata": true,
+              "Type": true
+            }
+          },
+          "OperationStartTime": true,
+          "OperationEndTime": true,
+          "EnableInstanceOps": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "Source": true,
+          "EndTime": true,
+          "ServiceType": true,
+          "PayType": true,
+          "MarketInstanceId": true,
+          "ResourceGroupId": true,
+          "BizStatus": true,
+          "OrderId": true
+        }
+      ]
+    },
+    "computenest.service.dataapi.computenest.listservices": {
+      "NextToken": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "MaxResults": true,
+      "Services": [
+        {
+          "Status": true,
+          "PublishTime": true,
+          "Version": true,
+          "DeployType": true,
+          "ServiceId": true,
+          "SupplierUrl": true,
+          "ServiceType": true,
+          "SupplierName": true,
+          "ServiceInfos": [
+            {
+              "Locale": true,
+              "Image": true,
+              "Name": true,
+              "ShortDescription": true
+            }
+          ],
+          "CommodityCode": true,
+          "ServiceProductUrl": true,
+          "Categories": true,
+          "VersionName": true,
+          "DeployFrom": true,
+          "Score": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "TrialDuration": true,
+          "TrialType": true,
+          "TenantType": true,
+          "VirtualInternetService": true,
+          "SupplierUid": true,
+          "Commodity": {
+            "DeployPage": true,
+            "CommodityCode": true
+          },
+          "SupplierNameEng": true
+        }
+      ]
+    },
+    "computenest.service.dataapi.computenest0521.listservices": {
+      "NextToken": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "MaxResults": true,
+      "Services": [
+        {
+          "Status": true,
+          "PublishTime": true,
+          "Version": true,
+          "DeployType": true,
+          "ServiceId": true,
+          "SupplierUrl": true,
+          "ServiceType": true,
+          "SupplierName": true,
+          "ServiceInfos": [
+            {
+              "Locale": true,
+              "Image": true,
+              "Name": true,
+              "ShortDescription": true
+            }
+          ],
+          "CommodityCode": true,
+          "ServiceProductUrl": true,
+          "Categories": true,
+          "VersionName": true,
+          "DeployFrom": true,
+          "Score": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "TrialDuration": true,
+          "TrialType": true,
+          "TenantType": true,
+          "VirtualInternetService": true,
+          "SupplierUid": true,
+          "Commodity": {
+            "DeployPage": true,
+            "CommodityCode": true
+          },
+          "SupplierNameEng": true
+        }
+      ]
+    },
+    "computenest.artifact.dataapi.computenest0521.listartifacts": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "TotalCount": true,
+      "Artifacts": [
+        {
+          "ArtifactId": true,
+          "ArtifactType": true,
+          "Name": true,
+          "MaxVersion": true,
+          "Description": true,
+          "GmtModified": true,
+          "Status": true,
+          "ResourceGroupId": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ]
+        }
+      ]
+    },
+    "nest.service.dataapi.computenest.listservices": {
+      "NextToken": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "MaxResults": true,
+      "Services": [
+        {
+          "Status": true,
+          "PublishTime": true,
+          "Version": true,
+          "DeployType": true,
+          "ServiceId": true,
+          "SupplierUrl": true,
+          "ServiceType": true,
+          "SupplierName": true,
+          "ServiceInfos": [
+            {
+              "Locale": true,
+              "Image": true,
+              "Name": true,
+              "ShortDescription": true
+            }
+          ],
+          "CommodityCode": true,
+          "ServiceProductUrl": true,
+          "Categories": true,
+          "VersionName": true,
+          "DeployFrom": true,
+          "Score": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "TrialDuration": true,
+          "TrialType": true,
+          "TenantType": true,
+          "VirtualInternetService": true,
+          "SupplierUid": true,
+          "Commodity": {
+            "DeployPage": true,
+            "CommodityCode": true
+          },
+          "SupplierNameEng": true
+        }
+      ]
+    },
+    "nest.service.dataapi.computenest0521.listservices": {
+      "NextToken": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "MaxResults": true,
+      "Services": [
+        {
+          "Status": true,
+          "PublishTime": true,
+          "Version": true,
+          "DeployType": true,
+          "ServiceId": true,
+          "SupplierUrl": true,
+          "ServiceType": true,
+          "SupplierName": true,
+          "ServiceInfos": [
+            {
+              "Locale": true,
+              "Image": true,
+              "Name": true,
+              "ShortDescription": true
+            }
+          ],
+          "CommodityCode": true,
+          "ServiceProductUrl": true,
+          "Categories": true,
+          "VersionName": true,
+          "DeployFrom": true,
+          "Score": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "TrialDuration": true,
+          "TrialType": true,
+          "TenantType": true,
+          "VirtualInternetService": true,
+          "SupplierUid": true,
+          "Commodity": {
+            "DeployPage": true,
+            "CommodityCode": true
+          },
+          "SupplierNameEng": true
+        }
+      ]
+    },
+    "service_catalog.portfolio.dataapi.servicecatalog.listlaunchoptions": {
+      "RequestId": true,
+      "LaunchOptionSummaries": [
+        {
+          "PortfolioId": true,
+          "PortfolioName": true,
+          "ConstraintSummaries": {
+            "ConstraintType": true,
+            "Description": true
+          }
+        }
+      ]
+    },
+    "service_catalog.product_version.dataapi.servicecatalog.listproductversions": {
+      "RequestId": true,
+      "ProductVersionDetails": [
+        {
+          "Active": true,
+          "Description": true,
+          "CreateTime": true,
+          "Guidance": true,
+          "ProductVersionId": true,
+          "ProductVersionName": true,
+          "TemplateUrl": true,
+          "TemplateType": true,
+          "ProductId": true
+        }
+      ]
+    },
+    "flow.connection.dataapi.devops2020.listserviceconnections": {
+      "requestId": true,
+      "errorMessage": true,
+      "errorCode": true,
+      "success": true,
+      "serviceConnections": [
+        {
+          "ownerAccountId": true,
+          "name": true,
+          "id": true,
+          "type": true,
+          "createTime": true,
+          "uuid": true
+        }
+      ]
+    },
+    "flow.organization.dataapi.devops2020.listjoinedorganizations": {
+      "requestId": true,
+      "errorMessage": true,
+      "errorCode": true,
+      "success": true,
+      "organizations": [
+        {
+          "id": true,
+          "name": true,
+          "isOrgAdmin": true
+        }
+      ]
+    },
+    "eds.bundle.dataapi.clouddesktopnew.describebundles": {
+      "RequestId": true,
+      "NextToken": true,
+      "Bundles": [
+        {
+          "Description": true,
+          "BundleType": true,
+          "OsType": true,
+          "StockState": true,
+          "DesktopType": true,
+          "ProtocolType": true,
+          "BundleId": true,
+          "ImageId": true,
+          "ImageName": true,
+          "Language": true,
+          "BundleName": true,
+          "Disks": [
+            {}
+          ],
+          "DesktopTypeAttribute": [
+            {}
+          ],
+          "DesktopTypeFamily": true,
+          "CreationTime": true,
+          "SessionType": true,
+          "VolumeEncryptionEnabled": true,
+          "VolumeEncryptionKey": true,
+          "Platform": true,
+          "ImageStatus": true
+        }
+      ]
+    },
+    "eds.office_site.dataapi.clouddesktopnew.describeofficesites": {
+      "RequestId": true,
+      "NextToken": true,
+      "TotalCount": true,
+      "OfficeSites": [
+        {
+          "Status": true,
+          "CreationTime": true,
+          "VpcId": true,
+          "VpcType": true,
+          "EnableAdminAccess": true,
+          "EnableCrossDesktopAccess": true,
+          "DesktopVpcEndpoint": true,
+          "DesktopAccessType": true,
+          "DomainName": true,
+          "SsoEnabled": true,
+          "CidrBlock": true,
+          "Bandwidth": true,
+          "TrustPassword": true,
+          "Name": true,
+          "EnableInternetAccess": true,
+          "DomainPassword": true,
+          "CustomSecurityGroupId": true,
+          "OuName": true,
+          "DomainUserName": true,
+          "SubDomainName": true,
+          "OfficeSiteId": true,
+          "CenId": true,
+          "CenAttachStatus": true,
+          "MfaEnabled": true,
+          "NetworkPackageId": true,
+          "DnsUserName": true,
+          "OfficeSiteType": true,
+          "ADConnectors": [
+            {}
+          ],
+          "Logs": [
+            {}
+          ],
+          "VSwitchIds": [
+            true
+          ],
+          "FileSystemIds": [
+            true
+          ],
+          "SubDnsAddress": [
+            true
+          ],
+          "DnsAddress": [
+            true
+          ],
+          "NeedVerifyLoginRisk": true,
+          "DesktopCount": true,
+          "TotalEdsCount": true,
+          "TotalEdsCountForGroup": true,
+          "NeedVerifyZeroDevice": true,
+          "CloudBoxOfficeSite": true,
+          "SsoType": true,
+          "ProtocolType": true,
+          "AdHostname": true,
+          "RdsLicenseStatus": true,
+          "RdsLicenseAddress": true,
+          "RdsLicenseDomainName": true,
+          "BackupDns": true,
+          "BackupDCHostname": true,
+          "EnableServiceRoute": true,
+          "SubnetMode": true,
+          "SecurityProtection": true
+        }
+      ]
+    },
+    "eds.policy_group.dataapi.clouddesktopnew.describepolicygroups": {
+      "RequestId": true,
+      "NextToken": true,
+      "DescribePolicyGroups": [
+        {
+          "PolicyStatus": true,
+          "Html5Access": true,
+          "WatermarkType": true,
+          "PreemptLogin": true,
+          "WatermarkCustomText": true,
+          "Clipboard": true,
+          "DomainList": true,
+          "PolicyGroupId": true,
+          "PrinterRedirection": true,
+          "WatermarkTransparency": true,
+          "Html5FileTransfer": true,
+          "UsbRedirect": true,
+          "PolicyGroupType": true,
+          "Watermark": true,
+          "VisualQuality": true,
+          "EdsCount": true,
+          "Name": true,
+          "LocalDrive": true,
+          "AuthorizeSecurityPolicyRules": [
+            {}
+          ],
+          "AuthorizeAccessPolicyRules": [
+            {}
+          ],
+          "ClientTypes": [
+            {}
+          ],
+          "PreemptLoginUsers": [
+            true
+          ],
+          "GpuAcceleration": true,
+          "UsbSupplyRedirectRule": [
+            {}
+          ],
+          "DomainResolveRuleType": true,
+          "DomainResolveRule": [
+            {}
+          ],
+          "NetRedirectRule": [
+            {}
+          ],
+          "Recording": true,
+          "RecordingStartTime": true,
+          "RecordingEndTime": true,
+          "RecordingFps": true,
+          "RecordingExpires": true,
+          "CameraRedirect": true,
+          "NetRedirect": true,
+          "AppContentProtection": true,
+          "RecordContent": true,
+          "RecordContentExpires": true,
+          "RemoteCoordinate": true,
+          "RecordingDuration": true,
+          "Scope": true,
+          "ScopeValue": [
+            true
+          ],
+          "RecordingAudio": true,
+          "InternetCommunicationProtocol": true,
+          "VideoRedirect": true,
+          "WatermarkTransparencyValue": true,
+          "WatermarkColor": true,
+          "WatermarkFontSize": true,
+          "WatermarkFontStyle": true,
+          "WatermarkDegree": true,
+          "WatermarkRowAmount": true,
+          "EndUserApplyAdminCoordinate": true,
+          "EndUserGroupCoordinate": true,
+          "CpuProtectedMode": true,
+          "CpuRateLimit": true,
+          "CpuSampleDuration": true,
+          "CpuSingleRateLimit": true,
+          "CpuDownGradeDuration": true,
+          "CpuProcessors": [
+            true
+          ],
+          "MemoryProtectedMode": true,
+          "MemoryRateLimit": true,
+          "MemorySampleDuration": true,
+          "MemorySingleRateLimit": true,
+          "MemoryDownGradeDuration": true,
+          "MemoryProcessors": [
+            true
+          ],
+          "WatermarkSecurity": true,
+          "WatermarkAntiCam": true,
+          "WatermarkPower": true,
+          "RecordingUserNotify": true,
+          "RecordingUserNotifyMessage": true,
+          "AdminAccess": true,
+          "MaxReconnectTime": true,
+          "DisplayMode": true,
+          "StreamingMode": true,
+          "ColorEnhancement": true,
+          "SmoothEnhancement": true,
+          "QualityEnhancement": true,
+          "VideoEncPolicy": true,
+          "TargetFps": true,
+          "VideoEncMinQP": true,
+          "VideoEncMaxQP": true,
+          "VideoEncAvgKbps": true,
+          "VideoEncPeakKbps": true
+        }
+      ]
+    },
+    "appflow.user_auth_config.dataapi.appflow.listuserauthconfigs": {
+      "RequestId": true,
+      "TotalCount": true,
+      "MaxResults": true,
+      "NextToken": true,
+      "UserAuthConfigs": [
+        {
+          "AuthConfigId": true,
+          "AuthConfigName": true,
+          "ConnectorId": true,
+          "AuthType": true,
+          "ConnectorVersion": true,
+          "FlowCount": true,
+          "GmtCreate": true,
+          "GmtModified": true
+        }
+      ]
+    },
+    "apig.gateway.dataapi.apig.listgateways": {
+      "data": {
+        "pageNumber": true,
+        "pageSize": true,
+        "totalSize": true,
+        "items": [
+          {
+            "gatewayId": true,
+            "name": true,
+            "chargeType": true,
+            "status": true,
+            "version": true
+          }
+        ]
+      }
+    },
+    "swas.instance.dataapi.swas_open.listinstances": {
+      "PageNumber": true,
+      "PageSize": true,
+      "RequestId": true,
+      "Instances": [
+        {
+          "InstanceId": true,
+          "Status": true,
+          "CreationTime": true,
+          "ExpiredTime": true,
+          "ImageId": true,
+          "ImageName": true,
+          "ImageOwnerAlias": true,
+          "InstanceName": true,
+          "InstanceType": true,
+          "RegionId": true,
+          "ZoneId": true,
+          "VpcId": true,
+          "VSwitchId": true,
+          "PrivateIpAddress": true
+        }
+      ],
+      "Status": true,
+      "TotalCount": true
+    },
+    "cms.workspace.dataapi.cms20240330.listworkspaces": {
+      "nextToken": true,
+      "maxResults": true,
+      "requestId": true,
+      "total": true,
+      "workspaces": [
+        {
+          "createTime": true,
+          "displayName": true,
+          "description": true,
+          "lastModifyTime": true,
+          "regionId": true,
+          "slsProject": true,
+          "workspaceName": true
+        }
+      ]
+    },
+    "domain.domain.dataapi.cdn.checkcdndomainicp": {
+      "Status": true
+    },
+    "domain.domain.dataapi.domain.querydomainlist": {
+      "RequestId": true,
+      "Data": {
+        "Domain": [
+          {
+            "DomainName": true,
+            "Remark": true
+          }
+        ]
+      },
+      "PrePage": true,
+      "NextPage": true
+    },
+    "oos.template.dataapi.oos.listtemplates": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "Templates": [
+        {
+          "CreatedBy": true,
+          "Description": true,
+          "Category": true,
+          "TemplateFormat": true,
+          "UpdatedDate": true,
+          "Popularity": true,
+          "Constraints": true,
+          "Publisher": true,
+          "TemplateVersion": true,
+          "VersionName": true,
+          "TemplateType": true,
+          "Hash": true,
+          "UpdatedBy": true,
+          "HasTrigger": true,
+          "TotalExecutionCount": true,
+          "CreatedDate": true,
+          "TemplateName": true,
+          "TemplateId": true,
+          "Tags": {
+            "0": true
+          },
+          "ShareType": true
+        }
+      ]
+    },
+    "oos.parameter.dataapi.oos.listparameters": {
+      "NextToken": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "MaxResults": true,
+      "Parameters": [
+        {
+          "Type": true,
+          "UpdatedDate": true,
+          "UpdatedBy": true,
+          "Tags": {},
+          "Description": true,
+          "CreatedBy": true,
+          "ResourceGroupId": true,
+          "CreatedDate": true,
+          "ParameterVersion": true,
+          "Name": true,
+          "Id": true,
+          "ShareType": true
+        }
+      ]
+    },
+    "oos.secret_parameter.dataapi.oos.listsecretparameters": {
+      "NextToken": true,
+      "RequestId": true,
+      "MaxResults": true,
+      "Parameters": [
+        {
+          "Type": true,
+          "UpdatedDate": true,
+          "UpdatedBy": true,
+          "KeyId": true,
+          "Tags": {},
+          "Description": true,
+          "ResourceGroupId": true,
+          "CreatedBy": true,
+          "CreatedDate": true,
+          "ParameterVersion": true,
+          "Name": true,
+          "Id": true,
+          "ShareType": true
+        }
+      ]
+    },
+    "oos.package.dataapi.ecs.describeimages": {
+      "Images": {
+        "Image": [
+          {
+            "Architecture": true,
+            "BootMode": true,
+            "CreationTime": true,
+            "Description": true,
+            "DiskDeviceMappings": {
+              "DiskDeviceMapping": [
+                {
+                  "Device": true,
+                  "Format": true,
+                  "ImportOSSBucket": true,
+                  "ImportOSSObject": true,
+                  "Progress": true,
+                  "Size": true,
+                  "SnapshotId": true,
+                  "Type": true
+                }
+              ]
+            },
+            "ImageFamily": true,
+            "ImageId": true,
+            "ImageName": true,
+            "ImageOwnerAlias": true,
+            "IsPublic": true,
+            "ImageVersion": true,
+            "IsCopied": true,
+            "IsSelfShared": true,
+            "IsSubscribed": true,
+            "IsSupportCloudinit": true,
+            "IsSupportIoOptimized": true,
+            "OSName": true,
+            "OSNameEn": true,
+            "OSType": true,
+            "Platform": true,
+            "ProductCode": true,
+            "Progress": true,
+            "ResourceGroupId": true,
+            "Size": true,
+            "Status": true,
+            "Tags": [
+              {
+                "TagKey": true,
+                "TagValue": true
+              }
+            ],
+            "Usage": true
+          }
+        ]
+      },
+      "TotalCount": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RegionId": true,
+      "RequestId": true
+    },
+    "oos.package.dataapi.ecs.describeinstances": {
+      "NextToken": true,
+      "PageSize": true,
+      "PageNumber": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "Instances": {
+        "Instance": [
+          {
+            "CreationTime": true,
+            "SerialNumber": true,
+            "Status": true,
+            "DeploymentSetId": true,
+            "KeyPairName": true,
+            "SaleCycle": true,
+            "SpotStrategy": true,
+            "DeviceAvailable": true,
+            "LocalStorageCapacity": true,
+            "Description": true,
+            "SpotDuration": true,
+            "InstanceNetworkType": true,
+            "InstanceName": true,
+            "OSNameEn": true,
+            "HpcClusterId": true,
+            "SpotPriceLimit": true,
+            "Memory": true,
+            "OSName": true,
+            "DeploymentSetGroupNo": true,
+            "ImageId": true,
+            "VlanId": true,
+            "ClusterId": true,
+            "ClockOptions": {
+              "PtpStatus": true
+            },
+            "GPUSpec": true,
+            "AutoReleaseTime": true,
+            "DeletionProtection": true,
+            "StoppedMode": true,
+            "GPUAmount": true,
+            "HostName": true,
+            "InstanceId": true,
+            "InternetMaxBandwidthOut": true,
+            "InternetMaxBandwidthIn": true,
+            "InstanceType": true,
+            "InstanceChargeType": true,
+            "RegionId": true,
+            "IoOptimized": true,
+            "StartTime": true,
+            "Cpu": true,
+            "LocalStorageAmount": true,
+            "ExpiredTime": true,
+            "ResourceGroupId": true,
+            "InternetChargeType": true,
+            "ZoneId": true,
+            "Recyclable": true,
+            "ISP": true,
+            "CreditSpecification": true,
+            "InstanceTypeFamily": true,
+            "OSType": true,
+            "NetworkInterfaces": {
+              "NetworkInterface": [
+                {
+                  "Type": true,
+                  "MacAddress": true,
+                  "PrimaryIpAddress": true,
+                  "NetworkInterfaceId": true,
+                  "PrivateIpSets": {
+                    "PrivateIpSet": [
+                      {
+                        "PrivateIpAddress": {},
+                        "Primary": {},
+                        "PrivateDnsName": {}
+                      }
+                    ]
+                  },
+                  "Ipv6Sets": {
+                    "Ipv6Set": [
+                      {
+                        "Ipv6Address": {}
+                      }
+                    ]
+                  },
+                  "Ipv4PrefixSets": {
+                    "Ipv4PrefixSet": [
+                      {
+                        "Ipv4Prefix": {}
+                      }
+                    ]
+                  },
+                  "Ipv6PrefixSets": {
+                    "Ipv6PrefixSet": [
+                      {
+                        "Ipv6Prefix": {}
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            "OperationLocks": {
+              "LockReason": [
+                {
+                  "LockMsg": true,
+                  "LockReason": true
+                }
+              ]
+            },
+            "Tags": {
+              "Tag": [
+                {
+                  "TagValue": true,
+                  "TagKey": true
+                }
+              ]
+            },
+            "RdmaIpAddress": {
+              "IpAddress": [
+                true
+              ]
+            },
+            "SecurityGroupIds": {
+              "SecurityGroupId": [
+                true
+              ]
+            },
+            "PublicIpAddress": {
+              "IpAddress": [
+                true
+              ]
+            },
+            "InnerIpAddress": {
+              "IpAddress": [
+                true
+              ]
+            },
+            "VpcAttributes": {
+              "VpcId": true,
+              "NatIpAddress": true,
+              "VSwitchId": true,
+              "PrivateIpAddress": {
+                "IpAddress": [
+                  true
+                ]
+              }
+            },
+            "EipAddress": {
+              "IsSupportUnassociate": true,
+              "InternetChargeType": true,
+              "IpAddress": true,
+              "Bandwidth": true,
+              "AllocationId": true
+            },
+            "HibernationOptions": {
+              "Configured": true
+            },
+            "DedicatedHostAttribute": {
+              "DedicatedHostId": true,
+              "DedicatedHostName": true,
+              "DedicatedHostClusterId": true
+            },
+            "EcsCapacityReservationAttr": {
+              "CapacityReservationPreference": true,
+              "CapacityReservationId": true
+            },
+            "DedicatedInstanceAttribute": {
+              "Affinity": true,
+              "Tenancy": true
+            },
+            "CpuOptions": {
+              "Numa": true,
+              "CoreCount": true,
+              "ThreadsPerCore": true,
+              "TopologyType": true,
+              "EnableVISST": true,
+              "TurboMode": true,
+              "EnableVRDT": true,
+              "NestedVirtualization": true
+            },
+            "MetadataOptions": {
+              "HttpEndpoint": true,
+              "HttpPutResponseHopLimit": true,
+              "HttpTokens": true,
+              "InstanceMetadataTags": true
+            },
+            "ImageOptions": {
+              "LoginAsNonRoot": true,
+              "CurrentOSNVMeSupported": true
+            },
+            "SpotInterruptionBehavior": true,
+            "PrivateDnsNameOptions": {
+              "EnableInstanceIdDnsARecord": true,
+              "EnableInstanceIdDnsAAAARecord": true,
+              "EnableIpDnsARecord": true,
+              "EnableIpDnsPtrRecord": true,
+              "HostnameType": true
+            },
+            "AdditionalInfo": {
+              "EnableHighDensityMode": true,
+              "NodeSerialNumber": true
+            },
+            "EnableNVS": true
+          }
+        ]
+      }
+    },
+    "oos.package.dataapi.oos.listtemplates": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "Templates": [
+        {
+          "CreatedBy": true,
+          "Description": true,
+          "Category": true,
+          "TemplateFormat": true,
+          "UpdatedDate": true,
+          "Popularity": true,
+          "Constraints": true,
+          "Publisher": true,
+          "TemplateVersion": true,
+          "VersionName": true,
+          "TemplateType": true,
+          "Hash": true,
+          "UpdatedBy": true,
+          "HasTrigger": true,
+          "TotalExecutionCount": true,
+          "CreatedDate": true,
+          "TemplateName": true,
+          "TemplateId": true,
+          "Tags": {
+            "0": true
+          },
+          "ShareType": true
+        }
+      ]
+    },
+    "oos.application.dataapi.oos.listapplications": {
+      "NextToken": true,
+      "RequestId": true,
+      "MaxResults": true,
+      "Applications": [
+        {
+          "Description": true,
+          "UpdateDate": true,
+          "ResourceGroupId": true,
+          "Tags": {},
+          "Name": true,
+          "CreateDate": true,
+          "ApplicationType": true
+        }
+      ]
+    },
+    "oos.application_group.dataapi.oos.listapplicationgroups": {
+      "NextToken": true,
+      "RequestId": true,
+      "MaxResults": true,
+      "ApplicationGroups": [
+        {
+          "CmsGroupId": true,
+          "DeployRegionId": true,
+          "UpdateDate": true,
+          "Description": true,
+          "ImportTagKey": true,
+          "ApplicationName": true,
+          "ImportTagValue": true,
+          "Name": true,
+          "CreateDate": true,
+          "Status": true,
+          "DeployParameters": true,
+          "StatusReason": true
+        }
+      ]
+    },
+    "oos.git_account.dataapi.oos.listgitaccounts": {
+      "RequestId": true,
+      "GitAccounts": [
+        {
+          "Owner": true,
+          "IsValid": true,
+          "IsActive": true
+        }
+      ]
+    },
+    "oos.git_organization.dataapi.oos.listgitorganizations": {
+      "RequestId": true,
+      "GitOrgs": [
+        {
+          "OrgName": true,
+          "OrgId": true
+        }
+      ]
+    },
+    "oos.git_repository.dataapi.oos.listgitrepositories": {
+      "RequestId": true,
+      "GitRepos": [
+        {
+          "FullName": true,
+          "HtmlUrl": true,
+          "Description": true,
+          "IsPrivate": true,
+          "RepoId": true
+        }
+      ],
+      "Count": true
+    },
+    "oos.git_branch.dataapi.oos.listgitbranches": {
+      "RequestId": true,
+      "GitBranches": [
+        {
+          "Name": true
+        }
+      ]
+    },
+    "oos.patch_baseline.dataapi.oos.listpatchbaselines": {
+      "NextToken": true,
+      "RequestId": true,
+      "MaxResults": true,
+      "PatchBaselines": [
+        {
+          "OperationSystem": true,
+          "IsDefault": true,
+          "Description": true,
+          "UpdatedDate": true,
+          "UpdatedBy": true,
+          "CreatedBy": true,
+          "CreatedDate": true,
+          "Name": true,
+          "Id": true,
+          "ShareType": true,
+          "Tags": [
+            {
+              "TagKey": true,
+              "TagValue": true
+            }
+          ],
+          "ApprovedPatches": [
+            true
+          ],
+          "ApprovedPatchesEnableNonSecurity": true,
+          "Sources": [
+            true
+          ],
+          "ResourceGroupId": true
+        }
+      ]
+    },
+    "ecs.launch_template_version.dataapi.ecs.describelaunchtemplateversions": {
+      "PageSize": true,
+      "RequestId": true,
+      "PageNumber": true,
+      "TotalCount": true,
+      "LaunchTemplateVersionSets": {
+        "LaunchTemplateVersionSet": [
+          {
+            "LaunchTemplateName": true,
+            "DefaultVersion": true,
+            "VersionNumber": true,
+            "ModifiedTime": true,
+            "LaunchTemplateId": true,
+            "CreateTime": true,
+            "CreatedBy": true,
+            "VersionDescription": true,
+            "LaunchTemplateData": {
+              "DeploymentSetId": true,
+              "VpcId": true,
+              "SystemDisk.PerformanceLevel": true,
+              "KeyPairName": true,
+              "SecurityGroupId": true,
+              "NetworkType": true,
+              "SpotStrategy": true,
+              "EnableVmOsConfig": true,
+              "Description": true,
+              "SpotDuration": true,
+              "InstanceName": true,
+              "SecurityEnhancementStrategy": true,
+              "UserData": true,
+              "SystemDisk.DiskName": true,
+              "SystemDisk.Size": true,
+              "SpotPriceLimit": true,
+              "PasswordInherit": true,
+              "PrivateIpAddress": true,
+              "ImageId": true,
+              "SystemDisk.DeleteWithInstance": true,
+              "SystemDisk.Category": true,
+              "AutoReleaseTime": true,
+              "SystemDisk.Description": true,
+              "ImageOwnerAlias": true,
+              "HostName": true,
+              "SystemDisk.Iops": true,
+              "SystemDisk.AutoSnapshotPolicyId": true,
+              "InternetMaxBandwidthOut": true,
+              "InternetMaxBandwidthIn": true,
+              "InstanceType": true,
+              "Period": true,
+              "InstanceChargeType": true,
+              "IoOptimized": true,
+              "RamRoleName": true,
+              "VSwitchId": true,
+              "ResourceGroupId": true,
+              "InternetChargeType": true,
+              "ZoneId": true,
+              "Ipv6AddressCount": true,
+              "DataDisks": {
+                "DataDisk": [
+                  {
+                    "PerformanceLevel": true,
+                    "Description": true,
+                    "SnapshotId": true,
+                    "Device": true,
+                    "Size": true,
+                    "DiskName": true,
+                    "Category": true,
+                    "DeleteWithInstance": true,
+                    "Encrypted": true,
+                    "ProvisionedIops": true,
+                    "BurstingEnabled": true,
+                    "AutoSnapshotPolicyId": true,
+                    "KMSKeyId": true
+                  }
+                ]
+              },
+              "NetworkInterfaces": {
+                "NetworkInterface": [
+                  {
+                    "NetworkInterfaceName": true,
+                    "VSwitchId": true,
+                    "Description": true,
+                    "PrimaryIpAddress": true,
+                    "SecurityGroupId": true,
+                    "SecurityGroupIds": {
+                      "SecurityGroupId": [
+                        {}
+                      ]
+                    },
+                    "InstanceType": true,
+                    "NetworkInterfaceTrafficMode": true,
+                    "DeleteOnRelease": true
+                  }
+                ]
+              },
+              "Tags": {
+                "InstanceTag": [
+                  {
+                    "Key": true,
+                    "Value": true
+                  }
+                ]
+              },
+              "SecurityGroupIds": {
+                "SecurityGroupId": [
+                  true
+                ]
+              },
+              "SystemDisk.ProvisionedIops": true,
+              "SystemDisk.BurstingEnabled": true,
+              "SystemDisk.Encrypted": true,
+              "DeletionProtection": true,
+              "CreditSpecification": true,
+              "AutoRenew": true,
+              "AutoRenewPeriod": true,
+              "PeriodUnit": true,
+              "HttpEndpoint": true,
+              "HttpTokens": true,
+              "HttpPutResponseHopLimit": true,
+              "SystemDisk.KMSKeyId": true,
+              "ImageOptions": {
+                "LoginAsNonRoot": true
+              },
+              "SecurityOptions": {
+                "TrustedSystemMode": true
+              }
+            }
+          }
+        ]
+      }
+    },
+    "ess.eci_container.dataapi.ess.describeeciscalingconfigurations": {
+      "PageNumber": true,
+      "PageSize": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "ScalingConfigurations": [
+        {
+          "CreationTime": true,
+          "ScalingConfigurationName": true,
+          "SecurityGroupId": true,
+          "ActiveDeadlineSeconds": true,
+          "SpotStrategy": true,
+          "AutoCreateEip": true,
+          "ScalingGroupId": true,
+          "EphemeralStorage": true,
+          "Ipv6AddressCount": true,
+          "Description": true,
+          "EipBandwidth": true,
+          "ImageSnapshotId": true,
+          "Memory": true,
+          "RestartPolicy": true,
+          "SpotPriceLimit": true,
+          "IngressBandwidth": true,
+          "CpuOptionsThreadsPerCore": true,
+          "TerminationGracePeriodSeconds": true,
+          "LoadBalancerWeight": true,
+          "DnsPolicy": true,
+          "HostName": true,
+          "EgressBandwidth": true,
+          "RegionId": true,
+          "RamRoleName": true,
+          "Cpu": true,
+          "AutoMatchImageCache": true,
+          "ResourceGroupId": true,
+          "ContainerGroupName": true,
+          "ScalingConfigurationId": true,
+          "CpuOptionsCore": true,
+          "SlsEnable": true,
+          "Containers": [
+            {
+              "ReadinessProbeHttpGetPath": true,
+              "ReadinessProbeSuccessThreshold": true,
+              "LivenessProbePeriodSeconds": true,
+              "LivenessProbeTcpSocketPort": true,
+              "LivenessProbeHttpGetScheme": true,
+              "WorkingDir": true,
+              "Tty": true,
+              "LivenessProbeHttpGetPort": true,
+              "Gpu": true,
+              "ReadinessProbeInitialDelaySeconds": true,
+              "Stdin": true,
+              "Memory": true,
+              "Name": true,
+              "SecurityContextReadOnlyRootFilesystem": true,
+              "LivenessProbeHttpGetPath": true,
+              "Image": true,
+              "ReadinessProbeTcpSocketPort": true,
+              "ReadinessProbeHttpGetScheme": true,
+              "ReadinessProbeHttpGetPort": true,
+              "LivenessProbeSuccessThreshold": true,
+              "ReadinessProbeTimeoutSeconds": true,
+              "SecurityContextRunAsUser": true,
+              "LivenessProbeInitialDelaySeconds": true,
+              "ReadinessProbePeriodSeconds": true,
+              "ImagePullPolicy": true,
+              "StdinOnce": true,
+              "Cpu": true,
+              "LivenessProbeTimeoutSeconds": true,
+              "ReadinessProbeFailureThreshold": true,
+              "LivenessProbeFailureThreshold": true,
+              "Ports": [
+                {
+                  "Port": true,
+                  "Protocol": true
+                }
+              ],
+              "VolumeMounts": [
+                {
+                  "ReadOnly": true,
+                  "SubPath": true,
+                  "Name": true,
+                  "MountPropagation": true,
+                  "MountPath": true
+                }
+              ],
+              "EnvironmentVars": [
+                {
+                  "Key": true,
+                  "Value": true,
+                  "FieldRefFieldPath": true
+                }
+              ],
+              "Commands": [
+                true
+              ],
+              "LivenessProbeExecCommands": [
+                true
+              ],
+              "Args": [
+                true
+              ],
+              "ReadinessProbeExecCommands": [
+                true
+              ],
+              "SecurityContextCapabilityAdds": [
+                true
+              ],
+              "LifecyclePostStartHandlerHttpGetHost": true,
+              "LifecyclePostStartHandlerHttpGetPort": true,
+              "LifecyclePostStartHandlerHttpGetPath": true,
+              "LifecyclePostStartHandlerHttpGetScheme": true,
+              "LifecyclePostStartHandlerExecs": [
+                true
+              ],
+              "LifecyclePostStartHandlerTcpSocketHost": true,
+              "LifecyclePostStartHandlerTcpSocketPort": true,
+              "LifecyclePreStopHandlerHttpGetHost": true,
+              "LifecyclePreStopHandlerHttpGetPort": true,
+              "LifecyclePreStopHandlerHttpGetPath": true,
+              "LifecyclePreStopHandlerHttpGetScheme": true,
+              "LifecyclePreStopHandlerExecs": [
+                true
+              ],
+              "LifecyclePreStopHandlerTcpSocketHost": true,
+              "LifecyclePreStopHandlerTcpSocketPort": true
+            }
+          ],
+          "InitContainers": [
+            {
+              "SecurityContextReadOnlyRootFilesystem": true,
+              "ImagePullPolicy": true,
+              "WorkingDir": true,
+              "Cpu": true,
+              "Image": true,
+              "Gpu": true,
+              "SecurityContextRunAsUser": true,
+              "Memory": true,
+              "Name": true,
+              "InitContainerEnvironmentVars": [
+                {
+                  "Key": true,
+                  "Value": true,
+                  "FieldRefFieldPath": true
+                }
+              ],
+              "InitContainerPorts": [
+                {
+                  "Port": true,
+                  "Protocol": true
+                }
+              ],
+              "InitContainerVolumeMounts": [
+                {
+                  "ReadOnly": true,
+                  "SubPath": true,
+                  "Name": true,
+                  "MountPropagation": true,
+                  "MountPath": true
+                }
+              ],
+              "SecurityContextCapabilityAdds": [
+                true
+              ],
+              "InitContainerCommands": [
+                true
+              ],
+              "InitContainerArgs": [
+                true
+              ]
+            }
+          ],
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "Volumes": [
+            {
+              "Type": true,
+              "DiskVolumeDiskId": true,
+              "DiskVolumeFsType": true,
+              "EmptyDirVolumeMedium": true,
+              "NFSVolumePath": true,
+              "DiskVolumeDiskSize": true,
+              "NFSVolumeReadOnly": true,
+              "FlexVolumeFsType": true,
+              "ConfigFileVolumeDefaultMode": true,
+              "FlexVolumeDriver": true,
+              "FlexVolumeOptions": true,
+              "NFSVolumeServer": true,
+              "Name": true,
+              "ConfigFileVolumeConfigFileToPaths": [
+                {
+                  "Path": true,
+                  "Mode": true,
+                  "Content": true
+                }
+              ],
+              "EmptyDirVolumeSizeLimit": true,
+              "HostPathVolumeType": true,
+              "HostPathVolumePath": true
+            }
+          ],
+          "ImageRegistryCredentials": [
+            {
+              "Password": true,
+              "Server": true,
+              "UserName": true
+            }
+          ],
+          "DnsConfigOptions": [
+            {
+              "Name": true,
+              "Value": true
+            }
+          ],
+          "HostAliases": [
+            {
+              "Ip": true,
+              "Hostnames": [
+                true
+              ]
+            }
+          ],
+          "SecurityContextSysCtls": [
+            {
+              "Name": true,
+              "Value": true
+            }
+          ],
+          "AcrRegistryInfos": [
+            {
+              "InstanceId": true,
+              "InstanceName": true,
+              "RegionId": true,
+              "Domains": [
+                true
+              ]
+            }
+          ],
+          "DnsConfigNameServers": [
+            true
+          ],
+          "DnsConfigSearches": [
+            true
+          ],
+          "NtpServers": [
+            true
+          ],
+          "LifecycleState": true,
+          "CostOptimization": true,
+          "InstanceFamilyLevel": true,
+          "InstanceTypes": [
+            true
+          ],
+          "DataCacheBucket": true,
+          "DataCachePL": true,
+          "DataCacheProvisionedIops": true,
+          "DataCacheBurstingEnabled": true,
+          "GpuDriverVersion": true
+        }
+      ]
+    },
+    "oss.object_version.dataapi.oss.listobjectversions": {
+      "ListVersionsResult": {
+        "Name": true,
+        "Prefix": true,
+        "IsTruncated": true,
+        "Version": {
+          "ETag": true,
+          "Key": true,
+          "LastModified": true,
+          "Owner": {
+            "DisplayName": true,
+            "ID": true
+          },
+          "Size": true,
+          "StorageClass": true,
+          "VersionId": true
+        }
+      }
+    },
+    "nas.mount_target.dataapi.nas.describemounttargets": {
+      "MountTargets": {
+        "MountTarget": [
+          {
+            "Status": true,
+            "VpcId": true,
+            "VswId": true,
+            "MountTargetDomain": true,
+            "AccessGroup": true,
+            "NetworkType": true,
+            "MountTargetIp": true,
+            "IPVersion": true
+          }
+        ]
+      },
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true
+    },
+    "ehpc.mount_target.dataapi.ehpc.listfilesystemwithmounttargets": {
+      "PageNumber": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "FileSystemList": {
+        "FileSystems": [
+          {
+            "FileSystemId": true,
+            "MountTargetList": {
+              "MountTargets": [
+                {
+                  "MountTargetDomain": true,
+                  "VpcId": true,
+                  "VswId": true
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "cr.repository_tag.dataapi.cr.getinstance": {
+      "ModifiedTime": true,
+      "RequestId": true,
+      "CreateTime": true,
+      "InstanceName": true,
+      "InstanceSpecification": true,
+      "Code": true,
+      "InstanceStatus": true,
+      "InstanceId": true,
+      "IsSuccess": true,
+      "ResourceGroupId": true,
+      "InstanceIssue": true,
+      "Tags": [
+        {
+          "TagKey": true,
+          "TagValue": true
+        }
+      ]
+    },
+    "cr.repository_tag.dataapi.cr.getrepository": {
+      "IsSuccess": true,
+      "InstanceId": true,
+      "RepoId": true,
+      "RepoName": true,
+      "RepoNamespaceName": true
+    },
+    "cr.repository_tag.dataapi.cr.listrepotag": {
+      "RequestId": true,
+      "Code": true,
+      "PageNo": true,
+      "IsSuccess": true,
+      "PageSize": true,
+      "TotalCount": true,
+      "Images": [
+        {
+          "Status": true,
+          "ImageSize": true,
+          "ImageCreate": true,
+          "Digest": true,
+          "ImageUpdate": true,
+          "Tag": true,
+          "ImageId": true
+        }
+      ]
+    },
+    "acr.repository_tag.dataapi.acr.listrepotag": {
+      "data": {
+        "page": true,
+        "pageSize": true,
+        "total": true,
+        "tags": [
+          {
+            "digest": true,
+            "imageCreate": true,
+            "imageId": true,
+            "imageSize": true,
+            "imageUpdate": true,
+            "status": true,
+            "tag": true
+          }
+        ]
+      }
+    },
+    "computenest.artifact_version.dataapi.computenest0521.listartifactversions": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "TotalCount": true,
+      "Artifacts": [
+        {
+          "ArtifactId": true,
+          "ArtifactType": true,
+          "VersionName": true,
+          "ArtifactVersion": true,
+          "Status": true,
+          "ArtifactProperty": true,
+          "SupportRegionIds": true,
+          "GmtModified": true,
+          "Progress": true,
+          "GmtCreate": true,
+          "ImageDelivery": {},
+          "SecurityAuditResult": true,
+          "ResultFile": true,
+          "StatusDetail": true,
+          "ArtifactBuildProperty": true,
+          "ArtifactBuildType": true
+        }
+      ]
+    },
+    "computenest.service_version.dataapi.computenest0521.listservices": {
+      "NextToken": true,
+      "RequestId": true,
+      "TotalCount": true,
+      "MaxResults": true,
+      "Services": [
+        {
+          "Status": true,
+          "PublishTime": true,
+          "Version": true,
+          "DeployType": true,
+          "ServiceId": true,
+          "SupplierUrl": true,
+          "ServiceType": true,
+          "SupplierName": true,
+          "ServiceInfos": [
+            {
+              "Locale": true,
+              "Image": true,
+              "Name": true,
+              "ShortDescription": true
+            }
+          ],
+          "CommodityCode": true,
+          "ServiceProductUrl": true,
+          "Categories": true,
+          "VersionName": true,
+          "DeployFrom": true,
+          "Score": true,
+          "Tags": [
+            {
+              "Key": true,
+              "Value": true
+            }
+          ],
+          "TrialDuration": true,
+          "TrialType": true,
+          "TenantType": true,
+          "VirtualInternetService": true,
+          "SupplierUid": true,
+          "Commodity": {
+            "DeployPage": true,
+            "CommodityCode": true
+          },
+          "SupplierNameEng": true
+        }
+      ]
+    },
+    "apig.domain.dataapi.apig.listdomains": {
+      "data": {
+        "pageNumber": true,
+        "pageSize": true,
+        "totalSize": true,
+        "items": [
+          {
+            "domainId": true,
+            "name": true,
+            "createFrom": true,
+            "status": true,
+            "protocol": true
+          }
+        ]
+      }
+    },
+    "oos.template_version.dataapi.oos.listtemplateversions": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "TemplateVersions": [
+        {
+          "Description": true,
+          "TemplateFormat": true,
+          "TemplateVersion": true,
+          "VersionName": true,
+          "UpdatedBy": true,
+          "UpdatedDate": true
+        }
+      ]
+    },
+    "oos.package_version.dataapi.oos.listtemplateversions": {
+      "RequestId": true,
+      "NextToken": true,
+      "MaxResults": true,
+      "TemplateVersions": [
+        {
+          "Description": true,
+          "TemplateFormat": true,
+          "TemplateVersion": true,
+          "VersionName": true,
+          "UpdatedBy": true,
+          "UpdatedDate": true
+        }
+      ]
+    },
+    "oos.deploy_revision.dataapi.oos.listdeployrevisions": {
+      "Revisions": [
+        {
+          "ApplicationName": true,
+          "CreateDate": true,
+          "Description": true,
+          "Hooks": true,
+          "Location": true,
+          "RevisionId": true,
+          "RevisionType": true
+        }
+      ],
+      "NextToken": true
+    },
+    "oos.git_commit.dataapi.oos.getgitbranch": {
+      "Commit": {
+        "Sha": true,
+        "Message": true
+      }
+    },
+    "oos.git_latest_commit.dataapi.oos.getgitbranch": {
+      "Commit": {
+        "Sha": true,
+        "Message": true
+      }
+    }
+  }
+}

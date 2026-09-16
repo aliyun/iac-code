@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -19,7 +20,15 @@ def _build_module():
     return module
 
 
+def test_resource_selector_bundle_checkout_preserves_manifest_hash_on_windows() -> None:
+    attributes = (Path(__file__).parents[2] / ".gitattributes").read_text(encoding="utf-8").splitlines()
+
+    assert "src/iac_code/web/static/js/vendor/ore-resource-selector.min.js text eol=lf" in attributes
+
+
 def test_sidecar_staging_materializes_resources_and_desktop_helper_instructions(tmp_path: Path) -> None:
+    from iac_code.resource_selector.profiles import PROFILE_HASH
+
     module = _build_module()
     package = module.prepare_staging(tmp_path / "staging", warm_tokenizers=False)
 
@@ -40,6 +49,17 @@ def test_sidecar_staging_materializes_resources_and_desktop_helper_instructions(
     assert list((package / "i18n/locales").glob("*/LC_MESSAGES/webui.mo"))
     assert (package / "pipeline/engine/architecture_rules.json").is_file()
     assert (package / "tools/cloud/aliyun/ros_validation/data/ros_official_resource_index.json").is_file()
+    selector_vendor = package / "web/static/js/vendor"
+    selector_bundle = selector_vendor / "ore-resource-selector.min.js"
+    selector_manifest = json.loads(
+        (selector_vendor / "ore-resource-selector.manifest.json").read_text(encoding="utf-8")
+    )
+    assert selector_bundle.is_file()
+    assert selector_manifest["profileHash"] == PROFILE_HASH
+    assert selector_manifest["sha256"] == hashlib.sha256(selector_bundle.read_bytes()).hexdigest()
+    assert len(selector_manifest["selectors"]) == 116
+    assert (selector_vendor / "ore-resource-selector.THIRD_PARTY_NOTICES").is_file()
+    assert not list(selector_vendor.glob("ore-resource-selector*.map"))
     markdown = list(package.rglob("*.md"))
     assert markdown
     assert all("tf2ros.py" not in path.read_text(encoding="utf-8") for path in markdown)

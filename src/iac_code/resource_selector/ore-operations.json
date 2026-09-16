@@ -1,0 +1,2272 @@
+{
+  "schemaVersion": 1,
+  "counts": {
+    "selectors": 117,
+    "selectorOperations": 143,
+    "uniqueApiSignatures": 121
+  },
+  "selectors": [
+    {
+      "selectorId": "ecs.instance",
+      "operations": [
+        {
+          "key": "ecs.instance.list",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeInstances",
+          "allowedParameters": [
+            "InstanceName",
+            "MaxResults",
+            "NextToken"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "vpc.vswitch",
+      "operations": [
+        {
+          "key": "vpc.instance_type.available",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeAvailableResource",
+          "allowedParameters": []
+        },
+        {
+          "key": "vpc.vswitch.dataapi.ecs.describesecuritygroups",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeSecurityGroups",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "SecurityGroupId"
+          ]
+        },
+        {
+          "key": "vpc.vswitch.dataapi.serverless.describenamespaceresources",
+          "requestKind": "dataApi",
+          "product": "serverless",
+          "action": "DescribeNamespaceResources",
+          "allowedParameters": [
+            "NamespaceId"
+          ]
+        },
+        {
+          "key": "vpc.vswitch.list",
+          "requestKind": "dataApi",
+          "product": "vpc",
+          "action": "DescribeVSwitches",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "VSwitchName"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "rds.instance",
+      "operations": [
+        {
+          "key": "rds.instance.list",
+          "requestKind": "dataApi",
+          "product": "rds",
+          "action": "DescribeDBInstances",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "SearchKey"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oss.bucket",
+      "operations": [
+        {
+          "key": "oss.bucket.list",
+          "requestKind": "dataApi",
+          "product": "oss",
+          "action": "ListBuckets",
+          "allowedParameters": [
+            "marker",
+            "prefix"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oss.bucket_object",
+      "operations": [
+        {
+          "key": "oss.bucket.list",
+          "requestKind": "dataApi",
+          "product": "oss",
+          "action": "ListBuckets",
+          "allowedParameters": [
+            "marker",
+            "prefix"
+          ]
+        },
+        {
+          "key": "oss.object.list",
+          "requestKind": "dataApi",
+          "product": "oss",
+          "action": "GetBucket",
+          "allowedParameters": [
+            "BucketName",
+            "delimiter",
+            "marker",
+            "max-keys",
+            "prefix"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "redis.instance",
+      "operations": [
+        {
+          "key": "redis.instance.list",
+          "requestKind": "dataApi",
+          "product": "r-kvstore",
+          "action": "DescribeInstances",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "SearchKey"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "redis.connection_url",
+      "operations": [
+        {
+          "key": "redis.connection.list",
+          "requestKind": "dataApi",
+          "product": "r-kvstore",
+          "action": "DescribeDBInstanceNetInfo",
+          "allowedParameters": []
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.managed_instance",
+      "operations": [
+        {
+          "key": "ecs.managed_instance.dataapi.ecs.describemanagedinstances",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeManagedInstances",
+          "allowedParameters": [
+            "OsType",
+            "PageNumber",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.disk",
+      "operations": [
+        {
+          "key": "ecs.disk.dataapi.ecs.describedisks",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeDisks",
+          "allowedParameters": [
+            "Category",
+            "DiskChargeType",
+            "DiskType",
+            "InstanceId",
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "SnapshotId",
+            "Tag",
+            "ZoneId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.image",
+      "operations": [
+        {
+          "key": "ecs.image.dataapi.ecs.describeimages",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeImages",
+          "allowedParameters": [
+            "Architecture",
+            "ImageFamily",
+            "ImageId",
+            "ImageOwnerAlias",
+            "InstanceType",
+            "IsSupportCloudinit",
+            "IsSupportIoOptimized",
+            "OSType",
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "Usage"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.security_group",
+      "operations": [
+        {
+          "key": "ecs.security_group.dataapi.ecs.describesecuritygroups",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeSecurityGroups",
+          "allowedParameters": [
+            "NetworkType",
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "ResourceGroupId",
+            "SecurityGroupType",
+            "VpcId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.snapshot",
+      "operations": [
+        {
+          "key": "ecs.snapshot.dataapi.ecs.describesnapshots",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeSnapshots",
+          "allowedParameters": [
+            "Category",
+            "DiskId",
+            "InstanceId",
+            "PageNumber",
+            "RegionId",
+            "SnapshotType",
+            "Status"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.command",
+      "operations": [
+        {
+          "key": "ecs.command.dataapi.ecs.describecommands",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeCommands",
+          "allowedParameters": [
+            "CommandId",
+            "PageNumber",
+            "Provider",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "ecs.command.dataapi.ecs.describeimages",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeImages",
+          "allowedParameters": [
+            "ImageId",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.key_pair",
+      "operations": [
+        {
+          "key": "ecs.key_pair.dataapi.ecs.describekeypairs",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeKeyPairs",
+          "allowedParameters": [
+            "PageNumber",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.auto_snapshot_policy",
+      "operations": [
+        {
+          "key": "ecs.auto_snapshot_policy.dataapi.ecs.describeautosnapshotpolicyex",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeAutoSnapshotPolicyEx",
+          "allowedParameters": [
+            "PageNumber",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.resource_group",
+      "operations": [
+        {
+          "key": "ecs.resource_group.dataapi.resourcemanager.listresourcegroups",
+          "requestKind": "dataApi",
+          "product": "ResourceManager",
+          "action": "ListResourceGroups",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.deployment_set",
+      "operations": [
+        {
+          "key": "ecs.deployment_set.dataapi.ecs.describedeploymentsets",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeDeploymentSets",
+          "allowedParameters": [
+            "NetworkType",
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "Strategy"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.launch_template",
+      "operations": [
+        {
+          "key": "ecs.launch_template.dataapi.ecs.describelaunchtemplates",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeLaunchTemplates",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.vswitch",
+      "operations": [
+        {
+          "key": "ecs.vswitch.dataapi.ecs.describeavailableresource",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeAvailableResource",
+          "allowedParameters": [
+            "DestinationResource",
+            "InstanceType",
+            "RegionId",
+            "ZoneId"
+          ]
+        },
+        {
+          "key": "ecs.vswitch.dataapi.ecs20160314.describeresources",
+          "requestKind": "dataApi",
+          "product": "ecs20160314",
+          "action": "DescribeResources",
+          "allowedParameters": [
+            "Filter.1.AttributeName",
+            "Filter.1.AttributeValue",
+            "Filter.1.Operation",
+            "Filter.2.AttributeName",
+            "Filter.2.AttributeValue",
+            "Filter.2.Operation",
+            "Global",
+            "Keyword",
+            "Marker",
+            "MaxItems",
+            "Product",
+            "RegionId",
+            "RegionNo",
+            "ResourceGroupId",
+            "ResourceType"
+          ]
+        },
+        {
+          "key": "ecs.vswitch.dataapi.serverless.describenamespaceresources",
+          "requestKind": "dataApi",
+          "product": "serverless",
+          "action": "DescribeNamespaceResources",
+          "allowedParameters": [
+            "NamespaceId"
+          ]
+        },
+        {
+          "key": "ecs.vswitch.dataapi.vpc.describevswitches",
+          "requestKind": "dataApi",
+          "product": "vpc",
+          "action": "DescribeVSwitches",
+          "allowedParameters": [
+            "PageSize",
+            "RegionId",
+            "VSwitchId",
+            "VpcId",
+            "ZoneId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "vpc.vpc",
+      "operations": [
+        {
+          "key": "vpc.vpc.dataapi.ecs20160314.describeresources",
+          "requestKind": "dataApi",
+          "product": "ecs20160314",
+          "action": "DescribeResources",
+          "allowedParameters": [
+            "Global",
+            "Keyword",
+            "Marker",
+            "MaxItems",
+            "Product",
+            "RegionId",
+            "RegionNo",
+            "ResourceGroupId",
+            "ResourceType"
+          ]
+        },
+        {
+          "key": "vpc.vpc.dataapi.vpc.describevpcs",
+          "requestKind": "dataApi",
+          "product": "vpc",
+          "action": "DescribeVpcs",
+          "allowedParameters": [
+            "PageSize",
+            "RegionId",
+            "ResourceGroupId",
+            "VpcId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "vpc.route_table",
+      "operations": [
+        {
+          "key": "vpc.route_table.dataapi.vpc.describevirtualborderrouters",
+          "requestKind": "dataApi",
+          "product": "vpc",
+          "action": "DescribeVirtualBorderRouters",
+          "allowedParameters": [
+            "PageNumber",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "vpc.nat_gateway",
+      "operations": [
+        {
+          "key": "vpc.nat_gateway.dataapi.vpc.describenatgateways",
+          "requestKind": "dataApi",
+          "product": "vpc",
+          "action": "DescribeNatGateways",
+          "allowedParameters": [
+            "InstanceChargeType",
+            "NatType",
+            "NetworkType",
+            "PageNumber",
+            "RegionId",
+            "VpcId",
+            "ZoneId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "vpc.eip",
+      "operations": [
+        {
+          "key": "vpc.eip.dataapi.vpc.describeeipaddresses",
+          "requestKind": "dataApi",
+          "product": "vpc",
+          "action": "DescribeEipAddresses",
+          "allowedParameters": [
+            "ChargeType",
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "Status"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "privatelink.endpoint_service",
+      "operations": [
+        {
+          "key": "privatelink.endpoint_service.dataapi.privatelink20200415.listvpcendpointservices",
+          "requestKind": "dataApi",
+          "product": "privatelink20200415",
+          "action": "ListVpcEndpointServices",
+          "allowedParameters": [
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cen.instance",
+      "operations": [
+        {
+          "key": "cen.instance.dataapi.cbn.describecens",
+          "requestKind": "dataApi",
+          "product": "cbn",
+          "action": "DescribeCens",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "ResourceGroupId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cen.transit_router",
+      "operations": [
+        {
+          "key": "cen.transit_router.dataapi.cbn.listtransitrouters",
+          "requestKind": "dataApi",
+          "product": "cbn",
+          "action": "ListTransitRouters",
+          "allowedParameters": [
+            "CenId",
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "slb.load_balancer",
+      "operations": [
+        {
+          "key": "slb.load_balancer.dataapi.slb.describeloadbalancers",
+          "requestKind": "dataApi",
+          "product": "slb",
+          "action": "DescribeLoadBalancers",
+          "allowedParameters": [
+            "AddressType",
+            "InternetChargeType",
+            "MasterZoneId",
+            "NetworkType",
+            "PageNumber",
+            "PageSize",
+            "PayType",
+            "RegionId",
+            "SlaveZoneId",
+            "VSwitchId",
+            "VpcId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "slb.acl",
+      "operations": [
+        {
+          "key": "slb.acl.dataapi.slb.describeaccesscontrollists",
+          "requestKind": "dataApi",
+          "product": "slb",
+          "action": "DescribeAccessControlLists",
+          "allowedParameters": [
+            "AddressIPVersion",
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "slb.certificate",
+      "operations": [
+        {
+          "key": "slb.certificate.dataapi.slb.describecacertificates",
+          "requestKind": "dataApi",
+          "product": "slb",
+          "action": "DescribeCACertificates",
+          "allowedParameters": [
+            "RegionId",
+            "ResourceGroupId"
+          ]
+        },
+        {
+          "key": "slb.certificate.dataapi.slb.describeservercertificates",
+          "requestKind": "dataApi",
+          "product": "slb",
+          "action": "DescribeServerCertificates",
+          "allowedParameters": [
+            "RegionId",
+            "ResourceGroupId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "nlb.load_balancer",
+      "operations": [
+        {
+          "key": "nlb.load_balancer.dataapi.nlb.listloadbalancers",
+          "requestKind": "dataApi",
+          "product": "nlb",
+          "action": "ListLoadBalancers",
+          "allowedParameters": [
+            "AddressType",
+            "MaxResults",
+            "RegionId",
+            "ZoneId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "nlb.server_group",
+      "operations": [
+        {
+          "key": "nlb.server_group.dataapi.nlb.listservergroups",
+          "requestKind": "dataApi",
+          "product": "nlb",
+          "action": "ListServerGroups",
+          "allowedParameters": [
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "nlb.security_policy",
+      "operations": [
+        {
+          "key": "nlb.security_policy.dataapi.nlb.listsecuritypolicy",
+          "requestKind": "dataApi",
+          "product": "nlb",
+          "action": "ListSecurityPolicy",
+          "allowedParameters": [
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "alb.load_balancer",
+      "operations": [
+        {
+          "key": "alb.load_balancer.dataapi.alb.listloadbalancers",
+          "requestKind": "dataApi",
+          "product": "alb",
+          "action": "ListLoadBalancers",
+          "allowedParameters": [
+            "AddressType",
+            "MaxResults",
+            "PayType",
+            "RegionId",
+            "ZoneId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "alb.acl",
+      "operations": [
+        {
+          "key": "alb.acl.dataapi.alb.listacls",
+          "requestKind": "dataApi",
+          "product": "alb",
+          "action": "ListAcls",
+          "allowedParameters": [
+            "MaxResults",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cas.certificate",
+      "operations": [
+        {
+          "key": "cas.certificate.dataapi.cas20200407.listusercertificateorder",
+          "requestKind": "dataApi",
+          "product": "cas20200407",
+          "action": "ListUserCertificateOrder",
+          "allowedParameters": [
+            "OrderType",
+            "RegionId",
+            "ResourceGroupId",
+            "Status"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ess.scaling_configuration",
+      "operations": [
+        {
+          "key": "ess.scaling_configuration.dataapi.ess.describescalingconfigurations",
+          "requestKind": "dataApi",
+          "product": "ess",
+          "action": "DescribeScalingConfigurations",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "ScalingGroupId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ess.scaling_group",
+      "operations": [
+        {
+          "key": "ess.scaling_group.dataapi.ess.describescalinggroups",
+          "requestKind": "dataApi",
+          "product": "ess",
+          "action": "DescribeScalingGroups",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ess.eci_scaling_configuration",
+      "operations": [
+        {
+          "key": "ess.eci_scaling_configuration.dataapi.ess.describeeciscalingconfigurations",
+          "requestKind": "dataApi",
+          "product": "ess",
+          "action": "DescribeEciScalingConfigurations",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "ScalingGroupId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "eci.container_group",
+      "operations": [
+        {
+          "key": "eci.container_group.dataapi.eci.describecontainergroups",
+          "requestKind": "dataApi",
+          "product": "eci",
+          "action": "DescribeContainerGroups",
+          "allowedParameters": [
+            "ComputeCategory",
+            "RegionId",
+            "SecurityGroupId",
+            "Status",
+            "VSwitchId",
+            "ZoneId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cs.cluster",
+      "operations": [
+        {
+          "key": "cs.cluster.dataapi.cs.describeclustersv1",
+          "requestKind": "dataApi",
+          "product": "cs",
+          "action": "DescribeClustersV1",
+          "allowedParameters": [
+            "RegionId",
+            "cluster_id",
+            "cluster_spec",
+            "cluster_type",
+            "name",
+            "page_number",
+            "page_size",
+            "profile",
+            "region_id"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cs.node_pool",
+      "operations": [
+        {
+          "key": "cs.node_pool.dataapi.cs.describeclusternodepools",
+          "requestKind": "dataApi",
+          "product": "cs",
+          "action": "DescribeClusterNodePools",
+          "allowedParameters": [
+            "ClusterId",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "sae.namespace",
+      "operations": [
+        {
+          "key": "sae.namespace.dataapi.serverless.listnamespacesv2",
+          "requestKind": "dataApi",
+          "product": "serverless",
+          "action": "ListNamespacesV2",
+          "allowedParameters": [
+            "CurrentPage",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "polardb.cluster",
+      "operations": [
+        {
+          "key": "polardb.cluster.dataapi.polardb.describedbclusters",
+          "requestKind": "dataApi",
+          "product": "polardb",
+          "action": "DescribeDBClusters",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "gpdb.instance",
+      "operations": [
+        {
+          "key": "gpdb.instance.dataapi.gpdb.describedbinstances",
+          "requestKind": "dataApi",
+          "product": "gpdb",
+          "action": "DescribeDBInstances",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "kafka.instance",
+      "operations": [
+        {
+          "key": "kafka.instance.dataapi.alikafka20190916.getinstancelist",
+          "requestKind": "dataApi",
+          "product": "alikafka20190916",
+          "action": "GetInstanceList",
+          "allowedParameters": [
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "emr.cluster",
+      "operations": [
+        {
+          "key": "emr.cluster.dataapi.emr_new.listclusters",
+          "requestKind": "dataApi",
+          "product": "emr_new",
+          "action": "ListClusters",
+          "allowedParameters": [
+            "ClusterStates",
+            "ClusterTypes",
+            "PaymentTypes",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "lindorm.instance",
+      "operations": [
+        {
+          "key": "lindorm.instance.dataapi.hitsdb20200615.getlindorminstancelist",
+          "requestKind": "dataApi",
+          "product": "hitsdb20200615",
+          "action": "GetLindormInstanceList",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "ServiceType",
+            "SupportEngine"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "hologres.instance",
+      "operations": [
+        {
+          "key": "hologres.instance.dataapi.hologram_2022.listinstances",
+          "requestKind": "dataApi",
+          "product": "hologram_2022",
+          "action": "ListInstances",
+          "allowedParameters": [
+            "RegionId",
+            "cmsInstanceType"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "dashvector.cluster",
+      "operations": [
+        {
+          "key": "dashvector.cluster.dataapi.centaur_console.listclusters",
+          "requestKind": "dataApi",
+          "product": "centaur-console",
+          "action": "ListClusters",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "eas.resource",
+      "operations": [
+        {
+          "key": "eas.resource.dataapi.eas.listresources",
+          "requestKind": "dataApi",
+          "product": "eas",
+          "action": "ListResources",
+          "allowedParameters": [
+            "PageNumber",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oss.object",
+      "operations": [
+        {
+          "key": "oss.object.dataapi.oss.getbucket",
+          "requestKind": "dataApi",
+          "product": "oss",
+          "action": "GetBucket",
+          "allowedParameters": [
+            "BucketName",
+            "RegionId",
+            "delimiter",
+            "max-keys",
+            "prefix"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "nas.file_system",
+      "operations": [
+        {
+          "key": "nas.file_system.dataapi.nas.describefilesystems",
+          "requestKind": "dataApi",
+          "product": "nas",
+          "action": "DescribeFileSystems",
+          "allowedParameters": [
+            "FileSystemType",
+            "PageNumber",
+            "RegionId",
+            "VpcId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ehpc.file_system",
+      "operations": [
+        {
+          "key": "ehpc.file_system.dataapi.ehpc.listfilesystemwithmounttargets",
+          "requestKind": "dataApi",
+          "product": "ehpc",
+          "action": "ListFileSystemWithMountTargets",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ehpc.cluster",
+      "operations": [
+        {
+          "key": "ehpc.cluster.dataapi.ehpc.listclusters",
+          "requestKind": "dataApi",
+          "product": "ehpc",
+          "action": "ListClusters",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ram.user",
+      "operations": [
+        {
+          "key": "ram.user.dataapi.ram.listusers",
+          "requestKind": "dataApi",
+          "product": "ram",
+          "action": "ListUsers",
+          "allowedParameters": [
+            "MaxItems",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ram.role",
+      "operations": [
+        {
+          "key": "ram.role.dataapi.ram.listroles",
+          "requestKind": "dataApi",
+          "product": "ram",
+          "action": "ListRoles",
+          "allowedParameters": [
+            "MaxItems",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ram.service_role",
+      "operations": [
+        {
+          "key": "ram.service_role.dataapi.ram.listrolesforservice",
+          "requestKind": "dataApi",
+          "product": "ram",
+          "action": "ListRolesForService",
+          "allowedParameters": [
+            "MaxItems",
+            "RegionId",
+            "Service"
+          ]
+        },
+        {
+          "key": "ram.service_role.dataapi.resourcegroup.listrolesforservice",
+          "requestKind": "dataApi",
+          "product": "resourcegroup",
+          "action": "ListRolesForService",
+          "allowedParameters": [
+            "Marker",
+            "MaxItems",
+            "RegionId",
+            "Service"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ram.policy",
+      "operations": [
+        {
+          "key": "ram.policy.dataapi.ram.listpolicies",
+          "requestKind": "dataApi",
+          "product": "ram",
+          "action": "ListPolicies",
+          "allowedParameters": [
+            "MaxItems",
+            "PolicyType"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.ram_role",
+      "operations": [
+        {
+          "key": "ecs.ram_role.dataapi.ram.listrolesforservice",
+          "requestKind": "dataApi",
+          "product": "ram",
+          "action": "ListRolesForService",
+          "allowedParameters": [
+            "MaxItems",
+            "RegionId",
+            "Service"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "resource_manager.folder",
+      "operations": [
+        {
+          "key": "resource_manager.folder.dataapi.resource_directory.listauthorizedfolders",
+          "requestKind": "dataApi",
+          "product": "resource-directory",
+          "action": "ListAuthorizedFolders",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "resource_manager.folder.dataapi.resourcemanager.getresourcedirectory",
+          "requestKind": "dataApi",
+          "product": "ResourceManager",
+          "action": "GetResourceDirectory",
+          "allowedParameters": [
+            "RegionId"
+          ]
+        },
+        {
+          "key": "resource_manager.folder.dataapi.resourcemanager.listaccountsforparent",
+          "requestKind": "dataApi",
+          "product": "ResourceManager",
+          "action": "ListAccountsForParent",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "ParentFolderId",
+            "QueryKeyword",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "resource_manager.folder.dataapi.resourcemanager.listfoldersforparent",
+          "requestKind": "dataApi",
+          "product": "ResourceManager",
+          "action": "ListFoldersForParent",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "ParentFolderId",
+            "QueryKeyword",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "resource_manager.folder.multiapi.resourcemanager.multiapi",
+          "requestKind": "multiApi",
+          "product": "ResourceManager",
+          "action": "ListAccountsForParent",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "ParentFolderId",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "resource_manager.account",
+      "operations": [
+        {
+          "key": "resource_manager.account.dataapi.resourcemanager.getresourcedirectory",
+          "requestKind": "dataApi",
+          "product": "ResourceManager",
+          "action": "GetResourceDirectory",
+          "allowedParameters": [
+            "RegionId"
+          ]
+        },
+        {
+          "key": "resource_manager.account.dataapi.resourcemanager.listaccountsforparent",
+          "requestKind": "dataApi",
+          "product": "ResourceManager",
+          "action": "ListAccountsForParent",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "ParentFolderId",
+            "QueryKeyword",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "resource_manager.account.dataapi.resourcemanager.listfoldersforparent",
+          "requestKind": "dataApi",
+          "product": "ResourceManager",
+          "action": "ListFoldersForParent",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "ParentFolderId",
+            "QueryKeyword",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "kms.key",
+      "operations": [
+        {
+          "key": "kms.key.dataapi.kms.describekey",
+          "requestKind": "dataApi",
+          "product": "kms",
+          "action": "DescribeKey",
+          "allowedParameters": [
+            "KeyId"
+          ]
+        },
+        {
+          "key": "kms.key.dataapi.kms.listkeys",
+          "requestKind": "dataApi",
+          "product": "kms",
+          "action": "ListKeys",
+          "allowedParameters": [
+            "Filters",
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "kms.key.multiapi.kms.multiapi",
+          "requestKind": "multiApi",
+          "product": "kms",
+          "action": "ListAliasesByKeyId",
+          "allowedParameters": [
+            "KeyId",
+            "RegionId",
+            "requests"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "kms.instance",
+      "operations": [
+        {
+          "key": "kms.instance.dataapi.kms.listkmsinstances",
+          "requestKind": "dataApi",
+          "product": "kms",
+          "action": "ListKmsInstances",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cloudsso.directory",
+      "operations": [
+        {
+          "key": "cloudsso.directory.dataapi.cloudsso.listdirectories",
+          "requestKind": "dataApi",
+          "product": "cloudsso",
+          "action": "ListDirectories",
+          "allowedParameters": [
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cloudsso.user",
+      "operations": [
+        {
+          "key": "cloudsso.user.dataapi.cloudsso.listusers",
+          "requestKind": "dataApi",
+          "product": "cloudsso",
+          "action": "ListUsers",
+          "allowedParameters": [
+            "DirectoryId",
+            "MaxResults",
+            "ProvisionType",
+            "RegionId",
+            "Status"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cloudsso.group",
+      "operations": [
+        {
+          "key": "cloudsso.group.dataapi.cloudsso.listgroups",
+          "requestKind": "dataApi",
+          "product": "cloudsso",
+          "action": "ListGroups",
+          "allowedParameters": [
+            "DirectoryId",
+            "MaxResults",
+            "ProvisionType",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cloudsso.access_configuration",
+      "operations": [
+        {
+          "key": "cloudsso.access_configuration.dataapi.cloudsso.listaccessconfigurations",
+          "requestKind": "dataApi",
+          "product": "cloudsso",
+          "action": "ListAccessConfigurations",
+          "allowedParameters": [
+            "DirectoryId",
+            "MaxResults",
+            "RegionId",
+            "StatusNotifications"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cr.instance",
+      "operations": [
+        {
+          "key": "cr.instance.dataapi.cr.listinstance",
+          "requestKind": "dataApi",
+          "product": "cr",
+          "action": "ListInstance",
+          "allowedParameters": [
+            "InstanceStatus",
+            "PageNo",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cr.namespace",
+      "operations": [
+        {
+          "key": "cr.namespace.dataapi.cr.listnamespace",
+          "requestKind": "dataApi",
+          "product": "cr",
+          "action": "ListNamespace",
+          "allowedParameters": [
+            "InstanceId",
+            "PageNo",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cr.repository",
+      "operations": [
+        {
+          "key": "cr.repository.dataapi.cr.listrepository",
+          "requestKind": "dataApi",
+          "product": "cr",
+          "action": "ListRepository",
+          "allowedParameters": [
+            "InstanceId",
+            "PageNo",
+            "RegionId",
+            "RepoName",
+            "RepoNamespaceName",
+            "RepoStatus"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "acr.repo_attribute",
+      "operations": [
+        {
+          "key": "acr.repo_attribute.dataapi.acr.listrepo",
+          "requestKind": "dataApi",
+          "product": "acr",
+          "action": "ListRepo",
+          "allowedParameters": [
+            "Page",
+            "PageSize",
+            "RegionId",
+            "RepoName",
+            "RepoNamespace"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "acr.namespace",
+      "operations": [
+        {
+          "key": "acr.namespace.dataapi.acr.listnamespace",
+          "requestKind": "dataApi",
+          "product": "acr",
+          "action": "ListNamespace",
+          "allowedParameters": [
+            "Page",
+            "RegionId",
+            "Status"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "fc.service",
+      "operations": [
+        {
+          "key": "fc.service.dataapi.fc_api.listservices",
+          "requestKind": "dataApi",
+          "product": "fc-api",
+          "action": "ListServices",
+          "allowedParameters": [
+            "X-Fc-Account-Id",
+            "X-Fc-Date",
+            "X-Fc-Trace-Id",
+            "limit",
+            "prefix",
+            "regionId",
+            "startKey"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "fc.function",
+      "operations": [
+        {
+          "key": "fc.function.dataapi.fc_api.listfunctions",
+          "requestKind": "dataApi",
+          "product": "fc-api",
+          "action": "ListFunctions",
+          "allowedParameters": [
+            "X-Fc-Account-Id",
+            "X-Fc-Date",
+            "X-Fc-Trace-Id",
+            "limit",
+            "prefix",
+            "qualifier",
+            "regionId",
+            "serviceName",
+            "startKey"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "fc3.function",
+      "operations": [
+        {
+          "key": "fc3.function.dataapi.fc3_api.listfunctions",
+          "requestKind": "dataApi",
+          "product": "fc3-api",
+          "action": "ListFunctions",
+          "allowedParameters": [
+            "limit",
+            "prefix",
+            "regionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "computenest.service_instance",
+      "operations": [
+        {
+          "key": "computenest.service_instance.dataapi.computenest.listserviceinstances",
+          "requestKind": "dataApi",
+          "product": "computenest",
+          "action": "ListServiceInstances",
+          "allowedParameters": [
+            "Filter.1.Name",
+            "Filter.1.Value.1",
+            "Filter.2.Name",
+            "Filter.2.Value.1",
+            "Filter.3.Name",
+            "Filter.3.Value.1",
+            "Filter.4.Name",
+            "Filter.4.Value.1",
+            "Filter.5.Name",
+            "Filter.5.Value.1",
+            "Filter.6.Name",
+            "Filter.6.Value.1",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "computenest.service",
+      "operations": [
+        {
+          "key": "computenest.service.dataapi.computenest.listservices",
+          "requestKind": "dataApi",
+          "product": "computenest",
+          "action": "ListServices",
+          "allowedParameters": [
+            "AllVersions",
+            "Filter.1.Name",
+            "Filter.2.Name",
+            "MaxResults",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "computenest.service.dataapi.computenest0521.listservices",
+          "requestKind": "dataApi",
+          "product": "computenest0521",
+          "action": "ListServices",
+          "allowedParameters": [
+            "AllVersions",
+            "Filter.1.Name",
+            "Filter.2.Name",
+            "MaxResults",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "computenest.artifact",
+      "operations": [
+        {
+          "key": "computenest.artifact.dataapi.computenest0521.listartifacts",
+          "requestKind": "dataApi",
+          "product": "computenest0521",
+          "action": "ListArtifacts",
+          "allowedParameters": [
+            "ArtifactType",
+            "Filter.1.Name",
+            "Filter.1.Values.1",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "nest.service",
+      "operations": [
+        {
+          "key": "nest.service.dataapi.computenest.listservices",
+          "requestKind": "dataApi",
+          "product": "computenest",
+          "action": "ListServices",
+          "allowedParameters": [
+            "AllVersions",
+            "Filter.1.Name",
+            "Filter.2.Name",
+            "MaxResults",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "nest.service.dataapi.computenest0521.listservices",
+          "requestKind": "dataApi",
+          "product": "computenest0521",
+          "action": "ListServices",
+          "allowedParameters": [
+            "AllVersions",
+            "Filter.1.Name",
+            "Filter.2.Name",
+            "MaxResults",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "service_catalog.portfolio",
+      "operations": [
+        {
+          "key": "service_catalog.portfolio.dataapi.servicecatalog.listlaunchoptions",
+          "requestKind": "dataApi",
+          "product": "servicecatalog",
+          "action": "ListLaunchOptions",
+          "allowedParameters": [
+            "ProductId",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "service_catalog.product_version",
+      "operations": [
+        {
+          "key": "service_catalog.product_version.dataapi.servicecatalog.listproductversions",
+          "requestKind": "dataApi",
+          "product": "servicecatalog",
+          "action": "ListProductVersions",
+          "allowedParameters": [
+            "Active",
+            "ProductId",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "flow.connection",
+      "operations": [
+        {
+          "key": "flow.connection.dataapi.devops2020.listserviceconnections",
+          "requestKind": "dataApi",
+          "product": "devops2020",
+          "action": "ListServiceConnections",
+          "allowedParameters": [
+            "organizationId",
+            "sericeConnectionType"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "flow.organization",
+      "operations": [
+        {
+          "key": "flow.organization.dataapi.devops2020.listjoinedorganizations",
+          "requestKind": "dataApi",
+          "product": "devops2020",
+          "action": "ListJoinedOrganizations",
+          "allowedParameters": []
+        }
+      ]
+    },
+    {
+      "selectorId": "eds.bundle",
+      "operations": [
+        {
+          "key": "eds.bundle.dataapi.clouddesktopnew.describebundles",
+          "requestKind": "dataApi",
+          "product": "clouddesktopnew",
+          "action": "DescribeBundles",
+          "allowedParameters": [
+            "BundleType",
+            "MaxResults",
+            "ProtocolType",
+            "RegionId",
+            "SupportMultiSession"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "eds.office_site",
+      "operations": [
+        {
+          "key": "eds.office_site.dataapi.clouddesktopnew.describeofficesites",
+          "requestKind": "dataApi",
+          "product": "clouddesktopnew",
+          "action": "DescribeOfficeSites",
+          "allowedParameters": [
+            "MaxResults",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "eds.policy_group",
+      "operations": [
+        {
+          "key": "eds.policy_group.dataapi.clouddesktopnew.describepolicygroups",
+          "requestKind": "dataApi",
+          "product": "clouddesktopnew",
+          "action": "DescribePolicyGroups",
+          "allowedParameters": [
+            "MaxResults",
+            "RegionId",
+            "Scope"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "appflow.user_auth_config",
+      "operations": [
+        {
+          "key": "appflow.user_auth_config.dataapi.appflow.listuserauthconfigs",
+          "requestKind": "dataApi",
+          "product": "appflow",
+          "action": "ListUserAuthConfigs",
+          "allowedParameters": [
+            "AuthType",
+            "ConnectorId",
+            "ConnectorVersion",
+            "MaxResults",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "apig.gateway",
+      "operations": [
+        {
+          "key": "apig.gateway.dataapi.apig.listgateways",
+          "requestKind": "dataApi",
+          "product": "APIG",
+          "action": "ListGateways",
+          "allowedParameters": [
+            "gatewayType",
+            "keyword",
+            "pageNumber",
+            "pageSize",
+            "regionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "swas.instance",
+      "operations": [
+        {
+          "key": "swas.instance.dataapi.swas_open.listinstances",
+          "requestKind": "dataApi",
+          "product": "swas-open",
+          "action": "ListInstances",
+          "allowedParameters": [
+            "PageSize",
+            "RegionId",
+            "Status"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cms.workspace",
+      "operations": [
+        {
+          "key": "cms.workspace.dataapi.cms20240330.listworkspaces",
+          "requestKind": "dataApi",
+          "product": "cms20240330",
+          "action": "ListWorkspaces",
+          "allowedParameters": [
+            "RegionId",
+            "maxResults",
+            "nextToken",
+            "region"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "domain.domain",
+      "operations": [
+        {
+          "key": "domain.domain.dataapi.cdn.checkcdndomainicp",
+          "requestKind": "dataApi",
+          "product": "cdn",
+          "action": "CheckCdnDomainICP",
+          "allowedParameters": [
+            "DomainName"
+          ]
+        },
+        {
+          "key": "domain.domain.dataapi.domain.querydomainlist",
+          "requestKind": "dataApi",
+          "product": "domain",
+          "action": "QueryDomainList",
+          "allowedParameters": [
+            "PageNum",
+            "PageSize"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.template",
+      "operations": [
+        {
+          "key": "oos.template.dataapi.oos.listtemplates",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListTemplates",
+          "allowedParameters": [
+            "RegionId",
+            "ShareType"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.parameter",
+      "operations": [
+        {
+          "key": "oos.parameter.dataapi.oos.listparameters",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListParameters",
+          "allowedParameters": [
+            "Name",
+            "NextToken",
+            "RegionId",
+            "ShareType"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.secret_parameter",
+      "operations": [
+        {
+          "key": "oos.secret_parameter.dataapi.oos.listsecretparameters",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListSecretParameters",
+          "allowedParameters": [
+            "Name",
+            "NextToken",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.package",
+      "operations": [
+        {
+          "key": "oos.package.dataapi.ecs.describeimages",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeImages",
+          "allowedParameters": [
+            "ImageId",
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "oos.package.dataapi.ecs.describeinstances",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeInstances",
+          "allowedParameters": [
+            "InstanceIds",
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "oos.package.dataapi.oos.listtemplates",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListTemplates",
+          "allowedParameters": [
+            "MaxResults",
+            "RegionId",
+            "ShareType",
+            "TemplateType"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.application",
+      "operations": [
+        {
+          "key": "oos.application.dataapi.oos.listapplications",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListApplications",
+          "allowedParameters": [
+            "ApplicationType",
+            "Tags"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.application_group",
+      "operations": [
+        {
+          "key": "oos.application_group.dataapi.oos.listapplicationgroups",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListApplicationGroups",
+          "allowedParameters": [
+            "ApplicationName",
+            "DeployRegionId",
+            "MaxResults"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.git_account",
+      "operations": [
+        {
+          "key": "oos.git_account.dataapi.oos.listgitaccounts",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListGitAccounts",
+          "allowedParameters": [
+            "Platform",
+            "RoleName"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.git_organization",
+      "operations": [
+        {
+          "key": "oos.git_organization.dataapi.oos.listgitorganizations",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListGitOrganizations",
+          "allowedParameters": [
+            "Owner",
+            "Platform"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.git_repository",
+      "operations": [
+        {
+          "key": "oos.git_repository.dataapi.oos.listgitrepositories",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListGitRepositories",
+          "allowedParameters": [
+            "OrgName",
+            "Owner",
+            "PageNumber",
+            "PageSize",
+            "Platform"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.git_branch",
+      "operations": [
+        {
+          "key": "oos.git_branch.dataapi.oos.listgitbranches",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListGitBranches",
+          "allowedParameters": [
+            "Owner",
+            "PageNumber",
+            "PageSize",
+            "Platform",
+            "RepoFullName"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.patch_baseline",
+      "operations": [
+        {
+          "key": "oos.patch_baseline.dataapi.oos.listpatchbaselines",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListPatchBaselines",
+          "allowedParameters": [
+            "Name",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ecs.launch_template_version",
+      "operations": [
+        {
+          "key": "ecs.launch_template_version.dataapi.ecs.describelaunchtemplateversions",
+          "requestKind": "dataApi",
+          "product": "ecs",
+          "action": "DescribeLaunchTemplateVersions",
+          "allowedParameters": [
+            "LaunchTemplateId",
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ess.eci_container",
+      "operations": [
+        {
+          "key": "ess.eci_container.dataapi.ess.describeeciscalingconfigurations",
+          "requestKind": "dataApi",
+          "product": "ess",
+          "action": "DescribeEciScalingConfigurations",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId",
+            "ScalingConfigurationId",
+            "ScalingGroupId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oss.object_version",
+      "operations": [
+        {
+          "key": "oss.object_version.dataapi.oss.listobjectversions",
+          "requestKind": "dataApi",
+          "product": "oss",
+          "action": "ListObjectVersions",
+          "allowedParameters": [
+            "BucketName",
+            "RegionId",
+            "prefix"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "nas.mount_target",
+      "operations": [
+        {
+          "key": "nas.mount_target.dataapi.nas.describemounttargets",
+          "requestKind": "dataApi",
+          "product": "nas",
+          "action": "DescribeMountTargets",
+          "allowedParameters": [
+            "FileSystemId",
+            "PageNumber",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "ehpc.mount_target",
+      "operations": [
+        {
+          "key": "ehpc.mount_target.dataapi.ehpc.listfilesystemwithmounttargets",
+          "requestKind": "dataApi",
+          "product": "ehpc",
+          "action": "ListFileSystemWithMountTargets",
+          "allowedParameters": [
+            "PageNumber",
+            "PageSize",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "cr.repository_tag",
+      "operations": [
+        {
+          "key": "cr.repository_tag.dataapi.cr.getinstance",
+          "requestKind": "dataApi",
+          "product": "cr",
+          "action": "GetInstance",
+          "allowedParameters": [
+            "InstanceId",
+            "RegionId"
+          ]
+        },
+        {
+          "key": "cr.repository_tag.dataapi.cr.getrepository",
+          "requestKind": "dataApi",
+          "product": "cr",
+          "action": "GetRepository",
+          "allowedParameters": [
+            "InstanceId",
+            "RegionId",
+            "RepoName",
+            "RepoNamespaceName"
+          ]
+        },
+        {
+          "key": "cr.repository_tag.dataapi.cr.listrepotag",
+          "requestKind": "dataApi",
+          "product": "cr",
+          "action": "ListRepoTag",
+          "allowedParameters": [
+            "InstanceId",
+            "PageNo",
+            "RegionId",
+            "RepoId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "acr.repository_tag",
+      "operations": [
+        {
+          "key": "acr.repository_tag.dataapi.acr.listrepotag",
+          "requestKind": "dataApi",
+          "product": "acr",
+          "action": "ListRepoTag",
+          "allowedParameters": [
+            "Page",
+            "RegionId",
+            "RepoName",
+            "RepoNamespace"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "computenest.artifact_version",
+      "operations": [
+        {
+          "key": "computenest.artifact_version.dataapi.computenest0521.listartifactversions",
+          "requestKind": "dataApi",
+          "product": "computenest0521",
+          "action": "ListArtifactVersions",
+          "allowedParameters": [
+            "ArtifactId",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "computenest.service_version",
+      "operations": [
+        {
+          "key": "computenest.service_version.dataapi.computenest0521.listservices",
+          "requestKind": "dataApi",
+          "product": "computenest0521",
+          "action": "ListServices",
+          "allowedParameters": [
+            "AllVersions",
+            "Filter.1.Name",
+            "Filter.1.Value.1",
+            "MaxResults",
+            "RegionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "apig.domain",
+      "operations": [
+        {
+          "key": "apig.domain.dataapi.apig.listdomains",
+          "requestKind": "dataApi",
+          "product": "APIG",
+          "action": "ListDomains",
+          "allowedParameters": [
+            "gatewayId",
+            "gatewayType",
+            "pageNumber",
+            "pageSize",
+            "regionId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.template_version",
+      "operations": [
+        {
+          "key": "oos.template_version.dataapi.oos.listtemplateversions",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListTemplateVersions",
+          "allowedParameters": [
+            "RegionId",
+            "TemplateName"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.package_version",
+      "operations": [
+        {
+          "key": "oos.package_version.dataapi.oos.listtemplateversions",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListTemplateVersions",
+          "allowedParameters": [
+            "RegionId",
+            "ShareType",
+            "TemplateName"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.deploy_revision",
+      "operations": [
+        {
+          "key": "oos.deploy_revision.dataapi.oos.listdeployrevisions",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "ListDeployRevisions",
+          "allowedParameters": [
+            "ApplicationName",
+            "MaxResults"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.git_commit",
+      "operations": [
+        {
+          "key": "oos.git_commit.dataapi.oos.getgitbranch",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "GetGitBranch",
+          "allowedParameters": [
+            "Branch",
+            "OrgId",
+            "Owner",
+            "Platform",
+            "RepoFullName",
+            "RepoId"
+          ]
+        }
+      ]
+    },
+    {
+      "selectorId": "oos.git_latest_commit",
+      "operations": [
+        {
+          "key": "oos.git_latest_commit.dataapi.oos.getgitbranch",
+          "requestKind": "dataApi",
+          "product": "oos",
+          "action": "GetGitBranch",
+          "allowedParameters": [
+            "Branch",
+            "Owner",
+            "Platform",
+            "RepoFullName"
+          ]
+        }
+      ]
+    }
+  ]
+}

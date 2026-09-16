@@ -1,0 +1,4028 @@
+{
+  "schemaVersion": 1,
+  "selectors": [
+    {
+      "selectorId": "ecs.instance",
+      "associationProperty": "ALIYUN::ECS::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::ECS::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceType",
+          "type": "string"
+        },
+        {
+          "key": "InstanceTypeFamily",
+          "type": "string"
+        },
+        {
+          "key": "Platform",
+          "type": "string"
+        },
+        {
+          "key": "OSType",
+          "type": "string"
+        },
+        {
+          "key": "Status",
+          "type": "string"
+        },
+        {
+          "key": "DisabledStatus",
+          "type": "string"
+        },
+        {
+          "key": "NetworkType",
+          "type": "string"
+        },
+        {
+          "key": "DisabledNetworkType",
+          "type": "boolean"
+        },
+        {
+          "key": "ShowNetworkType",
+          "type": "boolean"
+        },
+        {
+          "key": "InternetChargeType",
+          "type": "string"
+        },
+        {
+          "key": "DisabledInternetChargeType",
+          "type": "boolean"
+        },
+        {
+          "key": "ShowInternetChargeType",
+          "type": "boolean"
+        },
+        {
+          "key": "ChargeType",
+          "type": "string"
+        },
+        {
+          "key": "DisabledChargeType",
+          "type": "boolean"
+        },
+        {
+          "key": "ShowChargeType",
+          "type": "boolean"
+        },
+        {
+          "key": "OnlyCloudAssistantExecutable",
+          "type": "boolean"
+        },
+        {
+          "key": "PublicIpRequired",
+          "type": "boolean"
+        },
+        {
+          "key": "OnlyShowSelector",
+          "type": "boolean"
+        },
+        {
+          "key": "PackageName",
+          "type": "string"
+        },
+        {
+          "key": "DisabledOSType",
+          "type": "boolean"
+        },
+        {
+          "key": "ShowOSType",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceType",
+        "InstanceTypeFamily",
+        "Platform",
+        "OSType",
+        "Status",
+        "DisabledStatus",
+        "NetworkType",
+        "DisabledNetworkType",
+        "ShowNetworkType",
+        "InternetChargeType",
+        "DisabledInternetChargeType",
+        "ShowInternetChargeType",
+        "ChargeType",
+        "DisabledChargeType",
+        "ShowChargeType",
+        "OnlyCloudAssistantExecutable",
+        "PublicIpRequired",
+        "OnlyShowSelector",
+        "PackageName",
+        "DisabledOSType",
+        "ShowOSType"
+      ],
+      "operationKeys": [
+        "ecs.instance.list"
+      ]
+    },
+    {
+      "selectorId": "vpc.vswitch",
+      "associationProperty": "ALIYUN::VPC::VSwitch::VSwitchId",
+      "oreAssociationProperty": "ALIYUN::VPC::VSwitch::VSwitchId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ZoneId",
+          "type": "string"
+        },
+        {
+          "key": "VPCId",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceType",
+          "type": "string"
+        },
+        {
+          "key": "SAENamespaceId",
+          "type": "string"
+        },
+        {
+          "key": "SecurityGroupId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ZoneId",
+        "VPCId",
+        "VpcId",
+        "InstanceType",
+        "SAENamespaceId",
+        "SecurityGroupId"
+      ],
+      "operationKeys": [
+        "vpc.instance_type.available",
+        "vpc.vswitch.dataapi.ecs.describesecuritygroups",
+        "vpc.vswitch.dataapi.serverless.describenamespaceresources",
+        "vpc.vswitch.list"
+      ]
+    },
+    {
+      "selectorId": "rds.instance",
+      "associationProperty": "ALIYUN::RDS::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::RDS::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ZoneId",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ZoneId",
+        "VpcId"
+      ],
+      "operationKeys": [
+        "rds.instance.list"
+      ]
+    },
+    {
+      "selectorId": "oss.bucket",
+      "associationProperty": "ALIYUN::OSS::Bucket::BucketName",
+      "oreAssociationProperty": "ALIYUN::OSS::Bucket::BucketName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ShowRegionSelector",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ShowRegionSelector"
+      ],
+      "operationKeys": [
+        "oss.bucket.list"
+      ]
+    },
+    {
+      "selectorId": "oss.bucket_object",
+      "associationProperty": "ALIYUN::OSS::Bucket::Object",
+      "oreAssociationProperty": "ALIYUN::OSS::Bucket::Object",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ObjectType",
+          "type": "string"
+        },
+        {
+          "key": "ValueType",
+          "type": "string"
+        },
+        {
+          "key": "Mode",
+          "type": "string"
+        },
+        {
+          "key": "ShowRegionSelector",
+          "type": "boolean"
+        },
+        {
+          "key": "Multiple",
+          "type": "boolean"
+        },
+        {
+          "key": "Prefix",
+          "type": "string"
+        },
+        {
+          "key": "Delimiter",
+          "type": "string"
+        },
+        {
+          "key": "MaxNumber",
+          "type": "number"
+        },
+        {
+          "key": "ShowUpload",
+          "type": "boolean"
+        },
+        {
+          "key": "UploadFileMetadata",
+          "type": "object",
+          "properties": [
+            {
+              "key": "Directory",
+              "type": "boolean"
+            },
+            {
+              "key": "Multiple",
+              "type": "boolean"
+            },
+            {
+              "key": "MaxCount",
+              "type": "number"
+            },
+            {
+              "key": "AcceptFileSuffixes",
+              "type": "array"
+            },
+            {
+              "key": "AddSuffix",
+              "type": "boolean"
+            },
+            {
+              "key": "SuffixFormat",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ObjectType",
+        "ValueType",
+        "Mode",
+        "ShowRegionSelector",
+        "Multiple",
+        "Prefix",
+        "Delimiter",
+        "MaxNumber",
+        "ShowUpload",
+        "UploadFileMetadata"
+      ],
+      "operationKeys": [
+        "oss.bucket.list",
+        "oss.object.list"
+      ]
+    },
+    {
+      "selectorId": "redis.instance",
+      "associationProperty": "ALIYUN::Redis::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::Redis::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceType",
+          "type": "string"
+        },
+        {
+          "key": "ChargeType",
+          "type": "string"
+        },
+        {
+          "key": "EditionType",
+          "type": "string"
+        },
+        {
+          "key": "InstanceClass",
+          "type": "string"
+        },
+        {
+          "key": "NetworkType",
+          "type": "string"
+        },
+        {
+          "key": "InstanceStatus",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceType",
+        "ChargeType",
+        "EditionType",
+        "InstanceClass",
+        "NetworkType",
+        "InstanceStatus",
+        "VpcId"
+      ],
+      "operationKeys": [
+        "redis.instance.list"
+      ]
+    },
+    {
+      "selectorId": "redis.connection_url",
+      "associationProperty": "ALIYUN::Redis::Instance::ConnectionURL",
+      "oreAssociationProperty": "ALIYUN::Redis::Instance::ConnectionURL",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "endpoint",
+      "sourceSelectorId": "redis.instance",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceId"
+      ],
+      "operationKeys": [
+        "redis.connection.list"
+      ]
+    },
+    {
+      "selectorId": "ecs.managed_instance",
+      "associationProperty": "ALIYUN::ECS::ManagedInstance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::ECS::ManagedInstance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "OsType",
+          "type": "string",
+          "enum": [
+            "windows",
+            "linux"
+          ]
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "OsType"
+      ],
+      "operationKeys": [
+        "ecs.managed_instance.dataapi.ecs.describemanagedinstances"
+      ]
+    },
+    {
+      "selectorId": "ecs.disk",
+      "associationProperty": "ALIYUN::ECS::Disk::DiskId",
+      "oreAssociationProperty": "ALIYUN::ECS::Disk::DiskId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ZoneId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceId",
+          "type": "string"
+        },
+        {
+          "key": "DiskType",
+          "type": "string"
+        },
+        {
+          "key": "Category",
+          "type": "string"
+        },
+        {
+          "key": "SnapshotId",
+          "type": "string"
+        },
+        {
+          "key": "DiskChargeType",
+          "type": "string"
+        },
+        {
+          "key": "Type",
+          "type": "string",
+          "enum": [
+            "table",
+            "select"
+          ]
+        },
+        {
+          "key": "UseScroll",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ZoneId",
+        "InstanceId",
+        "DiskType",
+        "Category",
+        "SnapshotId",
+        "DiskChargeType",
+        "Type",
+        "UseScroll"
+      ],
+      "operationKeys": [
+        "ecs.disk.dataapi.ecs.describedisks"
+      ]
+    },
+    {
+      "selectorId": "ecs.image",
+      "associationProperty": "ALIYUN::ECS::Image::ImageId",
+      "oreAssociationProperty": "ALIYUN::ECS::Image::ImageId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceType",
+          "type": "string"
+        },
+        {
+          "key": "ImageFamily",
+          "type": "string"
+        },
+        {
+          "key": "IsSupportIoOptimized",
+          "type": "boolean"
+        },
+        {
+          "key": "IsSupportCloudinit",
+          "type": "boolean"
+        },
+        {
+          "key": "OSType",
+          "type": "string",
+          "enum": [
+            "windows",
+            "linux"
+          ]
+        },
+        {
+          "key": "Architecture",
+          "type": "string"
+        },
+        {
+          "key": "Usage",
+          "type": "string"
+        },
+        {
+          "key": "SupportedImageOwnerAlias",
+          "type": "array"
+        },
+        {
+          "key": "IsTrial",
+          "type": "boolean"
+        },
+        {
+          "key": "DefaultFilter",
+          "type": "object",
+          "properties": [
+            {
+              "key": "ImageId",
+              "type": "string"
+            },
+            {
+              "key": "ImageName",
+              "type": "string"
+            },
+            {
+              "key": "ImageOwnerAlias",
+              "type": "string"
+            },
+            {
+              "key": "PageNumber",
+              "type": "number"
+            },
+            {
+              "key": "PageSize",
+              "type": "number"
+            },
+            {
+              "key": "RegionId",
+              "type": "string"
+            }
+          ]
+        },
+        {
+          "key": "DefaultValueToText",
+          "type": "string"
+        },
+        {
+          "key": "IsSelfSupportFullImage",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceType",
+        "ImageFamily",
+        "IsSupportIoOptimized",
+        "IsSupportCloudinit",
+        "OSType",
+        "Architecture",
+        "Usage",
+        "SupportedImageOwnerAlias",
+        "IsTrial",
+        "DefaultFilter",
+        "DefaultValueToText",
+        "IsSelfSupportFullImage"
+      ],
+      "operationKeys": [
+        "ecs.image.dataapi.ecs.describeimages"
+      ]
+    },
+    {
+      "selectorId": "ecs.security_group",
+      "associationProperty": "ALIYUN::ECS::SecurityGroup::SecurityGroupId",
+      "oreAssociationProperty": "ALIYUN::ECS::SecurityGroup::SecurityGroupId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "VPCId",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        },
+        {
+          "key": "ResourceGroupId",
+          "type": "string"
+        },
+        {
+          "key": "NetworkType",
+          "type": "string"
+        },
+        {
+          "key": "SecurityGroupType",
+          "type": "string"
+        },
+        {
+          "key": "ServiceManaged",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "VPCId",
+        "VpcId",
+        "ResourceGroupId",
+        "NetworkType",
+        "SecurityGroupType",
+        "ServiceManaged"
+      ],
+      "operationKeys": [
+        "ecs.security_group.dataapi.ecs.describesecuritygroups"
+      ]
+    },
+    {
+      "selectorId": "ecs.snapshot",
+      "associationProperty": "ALIYUN::ECS::Snapshot::SnapshotId",
+      "oreAssociationProperty": "ALIYUN::ECS::Snapshot::SnapshotId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceId",
+          "type": "string"
+        },
+        {
+          "key": "DiskId",
+          "type": "string"
+        },
+        {
+          "key": "Status",
+          "type": "string"
+        },
+        {
+          "key": "SnapshotType",
+          "type": "string"
+        },
+        {
+          "key": "Category",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceId",
+        "DiskId",
+        "Status",
+        "SnapshotType",
+        "Category"
+      ],
+      "operationKeys": [
+        "ecs.snapshot.dataapi.ecs.describesnapshots"
+      ]
+    },
+    {
+      "selectorId": "ecs.command",
+      "associationProperty": "ALIYUN::ECS::Command::CommandId",
+      "oreAssociationProperty": "ALIYUN::ECS::Command::CommandId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ImageId",
+          "type": "string"
+        },
+        {
+          "key": "Provider",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ImageId",
+        "Provider"
+      ],
+      "operationKeys": [
+        "ecs.command.dataapi.ecs.describecommands",
+        "ecs.command.dataapi.ecs.describeimages"
+      ]
+    },
+    {
+      "selectorId": "ecs.key_pair",
+      "associationProperty": "ALIYUN::ECS::KeyPair::KeyPairName",
+      "oreAssociationProperty": "ALIYUN::ECS::KeyPair::KeyPairName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ecs.key_pair.dataapi.ecs.describekeypairs"
+      ]
+    },
+    {
+      "selectorId": "ecs.auto_snapshot_policy",
+      "associationProperty": "ALIYUN::ECS::Snapshot::AutoSnapshotPolicyId",
+      "oreAssociationProperty": "ALIYUN::ECS::Snapshot::AutoSnapshotPolicyId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ecs.auto_snapshot_policy.dataapi.ecs.describeautosnapshotpolicyex"
+      ]
+    },
+    {
+      "selectorId": "ecs.resource_group",
+      "associationProperty": "ALIYUN::ECS::ResourceGroup::ResourceGroupId",
+      "oreAssociationProperty": "ALIYUN::ECS::ResourceGroup::ResourceGroupId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ecs.resource_group.dataapi.resourcemanager.listresourcegroups"
+      ]
+    },
+    {
+      "selectorId": "ecs.deployment_set",
+      "associationProperty": "ALIYUN::ECS::DeploymentSet::DeploymentSetId",
+      "oreAssociationProperty": "ALIYUN::ECS::DeploymentSet::DeploymentSetId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "NetworkType",
+          "type": "string"
+        },
+        {
+          "key": "Strategy",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "NetworkType",
+        "Strategy"
+      ],
+      "operationKeys": [
+        "ecs.deployment_set.dataapi.ecs.describedeploymentsets"
+      ]
+    },
+    {
+      "selectorId": "ecs.launch_template",
+      "associationProperty": "ALIYUN::ECS::LaunchTemplate::LaunchTemplateId",
+      "oreAssociationProperty": "ALIYUN::ECS::LaunchTemplate::LaunchTemplateId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ecs.launch_template.dataapi.ecs.describelaunchtemplates"
+      ]
+    },
+    {
+      "selectorId": "ecs.vswitch",
+      "associationProperty": "ALIYUN::ECS::VSwitch",
+      "oreAssociationProperty": "ALIYUN::ECS::VSwitch",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ZoneId",
+          "type": "string"
+        },
+        {
+          "key": "VPCId",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceType",
+          "type": "string"
+        },
+        {
+          "key": "SAENamespaceId",
+          "type": "string"
+        },
+        {
+          "key": "SecurityGroupId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ZoneId",
+        "VPCId",
+        "VpcId",
+        "InstanceType",
+        "SAENamespaceId",
+        "SecurityGroupId"
+      ],
+      "operationKeys": [
+        "ecs.vswitch.dataapi.ecs.describeavailableresource",
+        "ecs.vswitch.dataapi.ecs20160314.describeresources",
+        "ecs.vswitch.dataapi.serverless.describenamespaceresources",
+        "ecs.vswitch.dataapi.vpc.describevswitches"
+      ]
+    },
+    {
+      "selectorId": "vpc.vpc",
+      "associationProperty": "ALIYUN::ECS::VPC::VPCId",
+      "oreAssociationProperty": "ALIYUN::ECS::VPC::VPCId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "vpc.vpc.dataapi.ecs20160314.describeresources",
+        "vpc.vpc.dataapi.vpc.describevpcs"
+      ]
+    },
+    {
+      "selectorId": "vpc.route_table",
+      "associationProperty": "ALIYUN::VPC::VirtualBorderRouter::RouteTableId",
+      "oreAssociationProperty": "ALIYUN::VPC::VirtualBorderRouter::RouteTableId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "vpc.route_table.dataapi.vpc.describevirtualborderrouters"
+      ]
+    },
+    {
+      "selectorId": "vpc.nat_gateway",
+      "associationProperty": "ALIYUN::VPC::NatGateway::NatGatewayId",
+      "oreAssociationProperty": "ALIYUN::VPC::NatGateway::NatGatewayId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ZoneId",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceChargeType",
+          "type": "string",
+          "enum": [
+            "PrePaid",
+            "PostPaid"
+          ]
+        },
+        {
+          "key": "NatType",
+          "type": "string"
+        },
+        {
+          "key": "NetworkType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ZoneId",
+        "VpcId",
+        "InstanceChargeType",
+        "NatType",
+        "NetworkType"
+      ],
+      "operationKeys": [
+        "vpc.nat_gateway.dataapi.vpc.describenatgateways"
+      ]
+    },
+    {
+      "selectorId": "vpc.eip",
+      "associationProperty": "ALIYUN::VPC::EIP::AllocationId",
+      "oreAssociationProperty": "ALIYUN::VPC::EIP::AllocationId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ChargeType",
+          "type": "string",
+          "enum": [
+            "PostPaid",
+            "PrePaid"
+          ]
+        },
+        {
+          "key": "EIPStatus",
+          "type": "string",
+          "enum": [
+            "Associating",
+            "Unassociating",
+            "InUse",
+            "Available",
+            "Releasing"
+          ]
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ChargeType",
+        "EIPStatus"
+      ],
+      "operationKeys": [
+        "vpc.eip.dataapi.vpc.describeeipaddresses"
+      ]
+    },
+    {
+      "selectorId": "privatelink.endpoint_service",
+      "associationProperty": "ALIYUN::PrivateLink::VpcEndpointService::ServiceId",
+      "oreAssociationProperty": "ALIYUN::PrivateLink::VpcEndpointService::ServiceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "privatelink.endpoint_service.dataapi.privatelink20200415.listvpcendpointservices"
+      ]
+    },
+    {
+      "selectorId": "cen.instance",
+      "associationProperty": "ALIYUN::CEN::Instance::CenId",
+      "oreAssociationProperty": "ALIYUN::CEN::Instance::CenId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "ResourceGroupId",
+          "type": "string"
+        },
+        {
+          "key": "Multiple",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "ResourceGroupId",
+        "Multiple"
+      ],
+      "operationKeys": [
+        "cen.instance.dataapi.cbn.describecens"
+      ]
+    },
+    {
+      "selectorId": "cen.transit_router",
+      "associationProperty": "ALIYUN::CEN::TransitRouter::TransitRouterId",
+      "oreAssociationProperty": "ALIYUN::CEN::TransitRouter::TransitRouterId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "CenId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "CenId"
+      ],
+      "operationKeys": [
+        "cen.transit_router.dataapi.cbn.listtransitrouters"
+      ]
+    },
+    {
+      "selectorId": "slb.load_balancer",
+      "associationProperty": "ALIYUN::SLB::LoadBalancer::LoadBalancerId",
+      "oreAssociationProperty": "ALIYUN::SLB::LoadBalancer::LoadBalancerId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        },
+        {
+          "key": "VSwitchId",
+          "type": "string"
+        },
+        {
+          "key": "NetworkType",
+          "type": "string"
+        },
+        {
+          "key": "InternetChargeType",
+          "type": "string"
+        },
+        {
+          "key": "AddressType",
+          "type": "string"
+        },
+        {
+          "key": "MasterZoneId",
+          "type": "string"
+        },
+        {
+          "key": "SlaveZoneId",
+          "type": "string"
+        },
+        {
+          "key": "PayType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "VpcId",
+        "VSwitchId",
+        "NetworkType",
+        "InternetChargeType",
+        "AddressType",
+        "MasterZoneId",
+        "SlaveZoneId",
+        "PayType"
+      ],
+      "operationKeys": [
+        "slb.load_balancer.dataapi.slb.describeloadbalancers"
+      ]
+    },
+    {
+      "selectorId": "slb.acl",
+      "associationProperty": "ALIYUN::SLB::ACL::ACLId",
+      "oreAssociationProperty": "ALIYUN::SLB::ACL::ACLId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "AddressIPVersion",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "AddressIPVersion"
+      ],
+      "operationKeys": [
+        "slb.acl.dataapi.slb.describeaccesscontrollists"
+      ]
+    },
+    {
+      "selectorId": "slb.certificate",
+      "associationProperty": "ALIYUN::SLB::Certificate::CertificateId",
+      "oreAssociationProperty": "ALIYUN::SLB::Certificate::CertificateId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ResourceGroupId",
+          "type": "string"
+        },
+        {
+          "key": "CertificationType",
+          "type": "string",
+          "enum": [
+            "Server",
+            "CA"
+          ]
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ResourceGroupId",
+        "CertificationType"
+      ],
+      "operationKeys": [
+        "slb.certificate.dataapi.slb.describecacertificates",
+        "slb.certificate.dataapi.slb.describeservercertificates"
+      ]
+    },
+    {
+      "selectorId": "nlb.load_balancer",
+      "associationProperty": "ALIYUN::NLB::LoadBalancer::LoadBalancerId",
+      "oreAssociationProperty": "ALIYUN::NLB::LoadBalancer::LoadBalancerId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "VpcIds",
+          "type": "array"
+        },
+        {
+          "key": "AddressType",
+          "type": "string"
+        },
+        {
+          "key": "ZoneId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "VpcIds",
+        "AddressType",
+        "ZoneId"
+      ],
+      "operationKeys": [
+        "nlb.load_balancer.dataapi.nlb.listloadbalancers"
+      ]
+    },
+    {
+      "selectorId": "nlb.server_group",
+      "associationProperty": "ALIYUN::NLB::ServerGroup::ServerGroupId",
+      "oreAssociationProperty": "ALIYUN::NLB::ServerGroup::ServerGroupId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "nlb.server_group.dataapi.nlb.listservergroups"
+      ]
+    },
+    {
+      "selectorId": "nlb.security_policy",
+      "associationProperty": "ALIYUN::NLB::SecurityPolicy::SecurityPolicyId",
+      "oreAssociationProperty": "ALIYUN::NLB::SecurityPolicy::SecurityPolicyId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "nlb.security_policy.dataapi.nlb.listsecuritypolicy"
+      ]
+    },
+    {
+      "selectorId": "alb.load_balancer",
+      "associationProperty": "ALIYUN::ALB::LoadBalancer::LoadBalancerId",
+      "oreAssociationProperty": "ALIYUN::ALB::LoadBalancer::LoadBalancerId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "VpcIds",
+          "type": "array"
+        },
+        {
+          "key": "AddressType",
+          "type": "string"
+        },
+        {
+          "key": "ZoneId",
+          "type": "string"
+        },
+        {
+          "key": "PayType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "VpcIds",
+        "AddressType",
+        "ZoneId",
+        "PayType"
+      ],
+      "operationKeys": [
+        "alb.load_balancer.dataapi.alb.listloadbalancers"
+      ]
+    },
+    {
+      "selectorId": "alb.acl",
+      "associationProperty": "ALIYUN::ALB::ACL::ACLId",
+      "oreAssociationProperty": "ALIYUN::ALB::ACL::ACLId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "alb.acl.dataapi.alb.listacls"
+      ]
+    },
+    {
+      "selectorId": "cas.certificate",
+      "associationProperty": "ALIYUN::CAS::Certificate::CertificateId",
+      "oreAssociationProperty": "ALIYUN::CAS::Certificate::CertificateId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ResourceGroupId",
+          "type": "string"
+        },
+        {
+          "key": "OrderType",
+          "type": "string"
+        },
+        {
+          "key": "WithRegion",
+          "type": "boolean"
+        },
+        {
+          "key": "Status",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ResourceGroupId",
+        "OrderType",
+        "WithRegion",
+        "Status"
+      ],
+      "operationKeys": [
+        "cas.certificate.dataapi.cas20200407.listusercertificateorder"
+      ]
+    },
+    {
+      "selectorId": "ess.scaling_configuration",
+      "associationProperty": "ALIYUN::ESS::ScalingConfiguration::ScalingConfigurationId",
+      "oreAssociationProperty": "ALIYUN::ESS::ScalingConfiguration::ScalingConfigurationId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ScalingGroupId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ScalingGroupId"
+      ],
+      "operationKeys": [
+        "ess.scaling_configuration.dataapi.ess.describescalingconfigurations"
+      ]
+    },
+    {
+      "selectorId": "ess.scaling_group",
+      "associationProperty": "ALIYUN::ESS::AutoScalingGroup::AutoScalingGroupId",
+      "oreAssociationProperty": "ALIYUN::ESS::AutoScalingGroup::AutoScalingGroupId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ess.scaling_group.dataapi.ess.describescalinggroups"
+      ]
+    },
+    {
+      "selectorId": "ess.eci_scaling_configuration",
+      "associationProperty": "ALIYUN::ESS::ECIScalingConfiguration::ScalingConfigurationId",
+      "oreAssociationProperty": "ALIYUN::ESS::ECIScalingConfiguration::ScalingConfigurationId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ScalingGroupId",
+          "type": "string"
+        },
+        {
+          "key": "AutoSelectFirst",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ScalingGroupId",
+        "AutoSelectFirst"
+      ],
+      "operationKeys": [
+        "ess.eci_scaling_configuration.dataapi.ess.describeeciscalingconfigurations"
+      ]
+    },
+    {
+      "selectorId": "eci.container_group",
+      "associationProperty": "ALIYUN::ECI::ContainerGroup::ContainerGroupId",
+      "oreAssociationProperty": "ALIYUN::ECI::ContainerGroup::ContainerGroupId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "VSwitchId",
+          "type": "string"
+        },
+        {
+          "key": "ZoneId",
+          "type": "string"
+        },
+        {
+          "key": "Status",
+          "type": "string"
+        },
+        {
+          "key": "SecurityGroupId",
+          "type": "string"
+        },
+        {
+          "key": "ComputeCategory",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "VSwitchId",
+        "ZoneId",
+        "Status",
+        "SecurityGroupId",
+        "ComputeCategory"
+      ],
+      "operationKeys": [
+        "eci.container_group.dataapi.eci.describecontainergroups"
+      ]
+    },
+    {
+      "selectorId": "cs.cluster",
+      "associationProperty": "ALIYUN::CS::Cluster::ClusterId",
+      "oreAssociationProperty": "ALIYUN::CS::Cluster::ClusterId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ShowExternalLink",
+          "type": "boolean"
+        },
+        {
+          "key": "ClusterState",
+          "type": "string"
+        },
+        {
+          "key": "ClusterType",
+          "type": "string"
+        },
+        {
+          "key": "Profile",
+          "type": "string"
+        },
+        {
+          "key": "ClusterSpec",
+          "type": "string"
+        },
+        {
+          "key": "Name",
+          "type": "string"
+        },
+        {
+          "key": "ClusterId",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ShowExternalLink",
+        "ClusterState",
+        "ClusterType",
+        "Profile",
+        "ClusterSpec",
+        "Name",
+        "ClusterId",
+        "VpcId"
+      ],
+      "operationKeys": [
+        "cs.cluster.dataapi.cs.describeclustersv1"
+      ]
+    },
+    {
+      "selectorId": "cs.node_pool",
+      "associationProperty": "ALIYUN::CS::Cluster::ClusterNodePool",
+      "oreAssociationProperty": "ALIYUN::CS::Cluster::ClusterNodePool",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ClusterId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ClusterId"
+      ],
+      "operationKeys": [
+        "cs.node_pool.dataapi.cs.describeclusternodepools"
+      ]
+    },
+    {
+      "selectorId": "sae.namespace",
+      "associationProperty": "ALIYUN::SAE::Namespace::NamespaceId",
+      "oreAssociationProperty": "ALIYUN::SAE::Namespace::NamespaceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "sae.namespace.dataapi.serverless.listnamespacesv2"
+      ]
+    },
+    {
+      "selectorId": "polardb.cluster",
+      "associationProperty": "ALIYUN::POLARDB::DBCluster::DBClusterId",
+      "oreAssociationProperty": "ALIYUN::POLARDB::DBCluster::DBClusterId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "polardb.cluster.dataapi.polardb.describedbclusters"
+      ]
+    },
+    {
+      "selectorId": "gpdb.instance",
+      "associationProperty": "ALIYUN::GPDB::DBInstance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::GPDB::DBInstance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "gpdb.instance.dataapi.gpdb.describedbinstances"
+      ]
+    },
+    {
+      "selectorId": "kafka.instance",
+      "associationProperty": "ALIYUN::Kafka::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::Kafka::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "OrderId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "OrderId"
+      ],
+      "operationKeys": [
+        "kafka.instance.dataapi.alikafka20190916.getinstancelist"
+      ]
+    },
+    {
+      "selectorId": "emr.cluster",
+      "associationProperty": "ALIYUN::Emr::ECSCluster::ClusterId",
+      "oreAssociationProperty": "ALIYUN::Emr::ECSCluster::ClusterId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ClusterTypes",
+          "type": "array"
+        },
+        {
+          "key": "ClusterStates",
+          "type": "array"
+        },
+        {
+          "key": "PaymentTypes",
+          "type": "array"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ClusterTypes",
+        "ClusterStates",
+        "PaymentTypes"
+      ],
+      "operationKeys": [
+        "emr.cluster.dataapi.emr_new.listclusters"
+      ]
+    },
+    {
+      "selectorId": "lindorm.instance",
+      "associationProperty": "ALIYUN::Lindorm::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::Lindorm::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "SupportEngine",
+          "type": "number"
+        },
+        {
+          "key": "ServiceType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "SupportEngine",
+        "ServiceType"
+      ],
+      "operationKeys": [
+        "lindorm.instance.dataapi.hitsdb20200615.getlindorminstancelist"
+      ]
+    },
+    {
+      "selectorId": "hologres.instance",
+      "associationProperty": "ALIYUN::Hologres::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::Hologres::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "cmsInstanceType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "cmsInstanceType"
+      ],
+      "operationKeys": [
+        "hologres.instance.dataapi.hologram_2022.listinstances"
+      ]
+    },
+    {
+      "selectorId": "dashvector.cluster",
+      "associationProperty": "ALIYUN::DashVector::Cluster::ClusterName",
+      "oreAssociationProperty": "ALIYUN::DashVector::Cluster::ClusterName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": false,
+      "metadata": [
+        {
+          "key": "ClusterType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "ClusterType"
+      ],
+      "operationKeys": [
+        "dashvector.cluster.dataapi.centaur_console.listclusters"
+      ]
+    },
+    {
+      "selectorId": "eas.resource",
+      "associationProperty": "ALIYUN::EAS::Resource::ResourceId",
+      "oreAssociationProperty": "ALIYUN::EAS::Resource::ResourceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "eas.resource.dataapi.eas.listresources"
+      ]
+    },
+    {
+      "selectorId": "oss.object",
+      "associationProperty": "ALIYUN::OSS::Object::ObjectName",
+      "oreAssociationProperty": "ALIYUN::OSS::Object::ObjectName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "BucketName",
+          "type": "string"
+        },
+        {
+          "key": "ObjectType",
+          "type": "string"
+        },
+        {
+          "key": "ValueType",
+          "type": "string"
+        },
+        {
+          "key": "Prefix",
+          "type": "string"
+        },
+        {
+          "key": "Delimiter",
+          "type": "string"
+        },
+        {
+          "key": "Mode",
+          "type": "string"
+        },
+        {
+          "key": "Multiple",
+          "type": "boolean"
+        },
+        {
+          "key": "MaxNumber",
+          "type": "number"
+        },
+        {
+          "key": "ShowUpload",
+          "type": "boolean"
+        },
+        {
+          "key": "UploadFileMetadata",
+          "type": "object",
+          "properties": [
+            {
+              "key": "Directory",
+              "type": "boolean"
+            },
+            {
+              "key": "Multiple",
+              "type": "boolean"
+            },
+            {
+              "key": "MaxCount",
+              "type": "number"
+            },
+            {
+              "key": "AcceptFileSuffixes",
+              "type": "array"
+            },
+            {
+              "key": "AddSuffix",
+              "type": "boolean"
+            },
+            {
+              "key": "SuffixFormat",
+              "type": "string"
+            }
+          ]
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "BucketName",
+        "ObjectType",
+        "ValueType",
+        "Prefix",
+        "Delimiter",
+        "Mode",
+        "Multiple",
+        "MaxNumber",
+        "ShowUpload",
+        "UploadFileMetadata"
+      ],
+      "operationKeys": [
+        "oss.object.dataapi.oss.getbucket"
+      ]
+    },
+    {
+      "selectorId": "nas.file_system",
+      "associationProperty": "ALIYUN::NAS::FileSystem::FileSystemId",
+      "oreAssociationProperty": "ALIYUN::NAS::FileSystem::FileSystemId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "FileSystemType",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "FileSystemType",
+        "VpcId"
+      ],
+      "operationKeys": [
+        "nas.file_system.dataapi.nas.describefilesystems"
+      ]
+    },
+    {
+      "selectorId": "ehpc.file_system",
+      "associationProperty": "ALIYUN::EHPC::FileSystem::FileSystemId",
+      "oreAssociationProperty": "ALIYUN::EHPC::FileSystem::FileSystemId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "FileSystemType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "FileSystemType"
+      ],
+      "operationKeys": [
+        "ehpc.file_system.dataapi.ehpc.listfilesystemwithmounttargets"
+      ]
+    },
+    {
+      "selectorId": "ehpc.cluster",
+      "associationProperty": "ALIYUN::EHPC::Cluster::ClusterId",
+      "oreAssociationProperty": "ALIYUN::EHPC::Cluster::ClusterId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ehpc.cluster.dataapi.ehpc.listclusters"
+      ]
+    },
+    {
+      "selectorId": "ram.user",
+      "associationProperty": "ALIYUN::RAM::User",
+      "oreAssociationProperty": "ALIYUN::RAM::User",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ram.user.dataapi.ram.listusers"
+      ]
+    },
+    {
+      "selectorId": "ram.role",
+      "associationProperty": "ALIYUN::RAM::Role",
+      "oreAssociationProperty": "ALIYUN::RAM::Role",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ram.role.dataapi.ram.listroles"
+      ]
+    },
+    {
+      "selectorId": "ram.service_role",
+      "associationProperty": "ALIYUN::RAM::Service::Role",
+      "oreAssociationProperty": "ALIYUN::RAM::Service::Role",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Service",
+          "type": "string"
+        },
+        {
+          "key": "APIProduct",
+          "type": "string"
+        },
+        {
+          "key": "IsServiceLinedRole",
+          "type": "Boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Service",
+        "APIProduct",
+        "IsServiceLinedRole"
+      ],
+      "operationKeys": [
+        "ram.service_role.dataapi.ram.listrolesforservice",
+        "ram.service_role.dataapi.resourcegroup.listrolesforservice"
+      ]
+    },
+    {
+      "selectorId": "ram.policy",
+      "associationProperty": "ALIYUN::RAM::Policy::PolicyName",
+      "oreAssociationProperty": "ALIYUN::RAM::Policy::PolicyName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "PolicyType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "PolicyType"
+      ],
+      "operationKeys": [
+        "ram.policy.dataapi.ram.listpolicies"
+      ]
+    },
+    {
+      "selectorId": "ecs.ram_role",
+      "associationProperty": "ALIYUN::ECS::RAM::Role",
+      "oreAssociationProperty": "ALIYUN::ECS::RAM::Role",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "ecs.ram_role.dataapi.ram.listrolesforservice"
+      ]
+    },
+    {
+      "selectorId": "resource_manager.folder",
+      "associationProperty": "ALIYUN::ResourceManager::Folder",
+      "oreAssociationProperty": "ALIYUN::ResourceManager::Folder",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ShowAccounts",
+          "type": "boolean"
+        },
+        {
+          "key": "FilterFolderIds",
+          "type": "array"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ShowAccounts",
+        "FilterFolderIds"
+      ],
+      "operationKeys": [
+        "resource_manager.folder.dataapi.resource_directory.listauthorizedfolders",
+        "resource_manager.folder.dataapi.resourcemanager.getresourcedirectory",
+        "resource_manager.folder.dataapi.resourcemanager.listaccountsforparent",
+        "resource_manager.folder.dataapi.resourcemanager.listfoldersforparent",
+        "resource_manager.folder.multiapi.resourcemanager.multiapi"
+      ]
+    },
+    {
+      "selectorId": "resource_manager.account",
+      "associationProperty": "ALIYUN::ResourceManager::Account",
+      "oreAssociationProperty": "ALIYUN::ResourceManager::Account",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "resource_manager.account.dataapi.resourcemanager.getresourcedirectory",
+        "resource_manager.account.dataapi.resourcemanager.listaccountsforparent",
+        "resource_manager.account.dataapi.resourcemanager.listfoldersforparent"
+      ]
+    },
+    {
+      "selectorId": "kms.key",
+      "associationProperty": "ALIYUN::KMS::Key::KeyId",
+      "oreAssociationProperty": "ALIYUN::KMS::Key::KeyId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "KMSInstanceId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "KMSInstanceId"
+      ],
+      "operationKeys": [
+        "kms.key.dataapi.kms.describekey",
+        "kms.key.dataapi.kms.listkeys",
+        "kms.key.multiapi.kms.multiapi"
+      ]
+    },
+    {
+      "selectorId": "kms.instance",
+      "associationProperty": "ALIYUN::KMS::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::KMS::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "kms.instance.dataapi.kms.listkmsinstances"
+      ]
+    },
+    {
+      "selectorId": "cloudsso.directory",
+      "associationProperty": "ALIYUN::CloudSSO::Directory::DirectoryId",
+      "oreAssociationProperty": "ALIYUN::CloudSSO::Directory::DirectoryId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "cloudsso.directory.dataapi.cloudsso.listdirectories"
+      ]
+    },
+    {
+      "selectorId": "cloudsso.user",
+      "associationProperty": "ALIYUN::CloudSSO::User::UserId",
+      "oreAssociationProperty": "ALIYUN::CloudSSO::User::UserId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "DirectoryId",
+          "type": "string"
+        },
+        {
+          "key": "UserStatus",
+          "type": "string"
+        },
+        {
+          "key": "ProvisionType",
+          "type": "string"
+        },
+        {
+          "key": "FilterPrefix",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "DirectoryId",
+        "UserStatus",
+        "ProvisionType",
+        "FilterPrefix"
+      ],
+      "operationKeys": [
+        "cloudsso.user.dataapi.cloudsso.listusers"
+      ]
+    },
+    {
+      "selectorId": "cloudsso.group",
+      "associationProperty": "ALIYUN::CloudSSO::Group::GroupId",
+      "oreAssociationProperty": "ALIYUN::CloudSSO::Group::GroupId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "DirectoryId",
+          "type": "string"
+        },
+        {
+          "key": "ProvisionType",
+          "type": "string"
+        },
+        {
+          "key": "FilterPrefix",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "DirectoryId",
+        "ProvisionType",
+        "FilterPrefix"
+      ],
+      "operationKeys": [
+        "cloudsso.group.dataapi.cloudsso.listgroups"
+      ]
+    },
+    {
+      "selectorId": "cloudsso.access_configuration",
+      "associationProperty": "ALIYUN::CloudSSO::AccessConfiguration::AccessConfigurationId",
+      "oreAssociationProperty": "ALIYUN::CloudSSO::AccessConfiguration::AccessConfigurationId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "DirectoryId",
+          "type": "string"
+        },
+        {
+          "key": "StatusNotifications",
+          "type": "string"
+        },
+        {
+          "key": "FilterPrefix",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "DirectoryId",
+        "StatusNotifications",
+        "FilterPrefix"
+      ],
+      "operationKeys": [
+        "cloudsso.access_configuration.dataapi.cloudsso.listaccessconfigurations"
+      ]
+    },
+    {
+      "selectorId": "cr.instance",
+      "associationProperty": "ALIYUN::CR::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::CR::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceStatus",
+          "type": "string"
+        },
+        {
+          "key": "Attribute",
+          "type": "string"
+        },
+        {
+          "key": "AcrType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceStatus",
+        "Attribute",
+        "AcrType"
+      ],
+      "operationKeys": [
+        "cr.instance.dataapi.cr.listinstance"
+      ]
+    },
+    {
+      "selectorId": "cr.namespace",
+      "associationProperty": "ALIYUN::CR::NameSpace::Name",
+      "oreAssociationProperty": "ALIYUN::CR::NameSpace::Name",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceId",
+          "type": "string"
+        },
+        {
+          "key": "NamespaceStatus",
+          "type": "string"
+        },
+        {
+          "key": "Attribute",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceId",
+        "NamespaceStatus",
+        "Attribute"
+      ],
+      "operationKeys": [
+        "cr.namespace.dataapi.cr.listnamespace"
+      ]
+    },
+    {
+      "selectorId": "cr.repository",
+      "associationProperty": "ALIYUN::CR::Repository::RepoName",
+      "oreAssociationProperty": "ALIYUN::CR::Repository::RepoName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceId",
+          "type": "string"
+        },
+        {
+          "key": "RepoStatus",
+          "type": "string"
+        },
+        {
+          "key": "RepoName",
+          "type": "string"
+        },
+        {
+          "key": "RepoNamespaceName",
+          "type": "string"
+        },
+        {
+          "key": "AcrType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceId",
+        "RepoStatus",
+        "RepoName",
+        "RepoNamespaceName",
+        "AcrType"
+      ],
+      "operationKeys": [
+        "cr.repository.dataapi.cr.listrepository"
+      ]
+    },
+    {
+      "selectorId": "acr.repo_attribute",
+      "associationProperty": "ALIYUN::ACR::Repo::RepoAttribute",
+      "oreAssociationProperty": "ALIYUN::ACR::Repo::RepoAttribute",
+      "selectionKind": "cloud_resource",
+      "outputKind": "endpoint",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Attribute",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Attribute"
+      ],
+      "operationKeys": [
+        "acr.repo_attribute.dataapi.acr.listrepo"
+      ]
+    },
+    {
+      "selectorId": "acr.namespace",
+      "associationProperty": "ALIYUN::ACR::Namespace::Name",
+      "oreAssociationProperty": "ALIYUN::ACR::Namespace::Name",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Status",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Status"
+      ],
+      "operationKeys": [
+        "acr.namespace.dataapi.acr.listnamespace"
+      ]
+    },
+    {
+      "selectorId": "fc.service",
+      "associationProperty": "ALIYUN::FC::Service::ServiceName",
+      "oreAssociationProperty": "ALIYUN::FC::Service::ServiceName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Prefix",
+          "type": "string"
+        },
+        {
+          "key": "StartKey",
+          "type": "string"
+        },
+        {
+          "key": "AccountId",
+          "type": "string"
+        },
+        {
+          "key": "Date",
+          "type": "string"
+        },
+        {
+          "key": "TraceId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Prefix",
+        "StartKey",
+        "AccountId",
+        "Date",
+        "TraceId"
+      ],
+      "operationKeys": [
+        "fc.service.dataapi.fc_api.listservices"
+      ]
+    },
+    {
+      "selectorId": "fc.function",
+      "associationProperty": "ALIYUN::FC::Function::FunctionName",
+      "oreAssociationProperty": "ALIYUN::FC::Function::FunctionName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ServiceName",
+          "type": "string"
+        },
+        {
+          "key": "Qualifier",
+          "type": "string"
+        },
+        {
+          "key": "Prefix",
+          "type": "string"
+        },
+        {
+          "key": "StartKey",
+          "type": "string"
+        },
+        {
+          "key": "AccountId",
+          "type": "string"
+        },
+        {
+          "key": "Date",
+          "type": "string"
+        },
+        {
+          "key": "TraceId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ServiceName",
+        "Qualifier",
+        "Prefix",
+        "StartKey",
+        "AccountId",
+        "Date",
+        "TraceId"
+      ],
+      "operationKeys": [
+        "fc.function.dataapi.fc_api.listfunctions"
+      ]
+    },
+    {
+      "selectorId": "fc3.function",
+      "associationProperty": "ALIYUN::FC3::Function::FunctionName",
+      "oreAssociationProperty": "ALIYUN::FC3::Function::FunctionName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Prefix",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Prefix"
+      ],
+      "operationKeys": [
+        "fc3.function.dataapi.fc3_api.listfunctions"
+      ]
+    },
+    {
+      "selectorId": "computenest.service_instance",
+      "associationProperty": "ALIYUN::ComputeNest::ServiceInstance::ServiceInstanceId",
+      "oreAssociationProperty": "ALIYUN::ComputeNest::ServiceInstance::ServiceInstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ServiceType",
+          "type": "string",
+          "enum": [
+            "private",
+            "managed",
+            "operation",
+            "poc"
+          ]
+        },
+        {
+          "key": "DeployType",
+          "type": "string"
+        },
+        {
+          "key": "Status",
+          "type": "string"
+        },
+        {
+          "key": "ServiceId",
+          "type": "string"
+        },
+        {
+          "key": "Version",
+          "type": "string"
+        },
+        {
+          "key": "IsVendor",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ServiceType",
+        "DeployType",
+        "Status",
+        "ServiceId",
+        "Version",
+        "IsVendor"
+      ],
+      "operationKeys": [
+        "computenest.service_instance.dataapi.computenest.listserviceinstances"
+      ]
+    },
+    {
+      "selectorId": "computenest.service",
+      "associationProperty": "ALIYUN::ComputeNest::Service::ServiceId",
+      "oreAssociationProperty": "ALIYUN::ComputeNest::Service::ServiceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "Status",
+          "type": "array"
+        },
+        {
+          "key": "ServiceType",
+          "type": "array"
+        },
+        {
+          "key": "IsSupplier",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "Status",
+        "ServiceType",
+        "IsSupplier"
+      ],
+      "operationKeys": [
+        "computenest.service.dataapi.computenest.listservices",
+        "computenest.service.dataapi.computenest0521.listservices"
+      ]
+    },
+    {
+      "selectorId": "computenest.artifact",
+      "associationProperty": "ALIYUN::ComputeNest::Artifact::ArtifactId",
+      "oreAssociationProperty": "ALIYUN::ComputeNest::Artifact::ArtifactId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ArtifactType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ArtifactType"
+      ],
+      "operationKeys": [
+        "computenest.artifact.dataapi.computenest0521.listartifacts"
+      ]
+    },
+    {
+      "selectorId": "nest.service",
+      "associationProperty": "ALIYUN::NEST::Service::ServiceId",
+      "oreAssociationProperty": "ALIYUN::NEST::Service::ServiceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "Status",
+          "type": "array"
+        },
+        {
+          "key": "ServiceType",
+          "type": "array"
+        },
+        {
+          "key": "IsSupplier",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "Status",
+        "ServiceType",
+        "IsSupplier"
+      ],
+      "operationKeys": [
+        "nest.service.dataapi.computenest.listservices",
+        "nest.service.dataapi.computenest0521.listservices"
+      ]
+    },
+    {
+      "selectorId": "service_catalog.portfolio",
+      "associationProperty": "ALIYUN::ServiceCatalog::LaunchOption::PortfolioId",
+      "oreAssociationProperty": "ALIYUN::ServiceCatalog::LaunchOption::PortfolioId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ProductId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ProductId"
+      ],
+      "operationKeys": [
+        "service_catalog.portfolio.dataapi.servicecatalog.listlaunchoptions"
+      ]
+    },
+    {
+      "selectorId": "service_catalog.product_version",
+      "associationProperty": "ALIYUN::ServiceCatalog::ProductVersion::ProductVersionId",
+      "oreAssociationProperty": "ALIYUN::ServiceCatalog::ProductVersion::ProductVersionId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ProductId",
+          "type": "string"
+        },
+        {
+          "key": "Active",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ProductId",
+        "Active"
+      ],
+      "operationKeys": [
+        "service_catalog.product_version.dataapi.servicecatalog.listproductversions"
+      ]
+    },
+    {
+      "selectorId": "flow.connection",
+      "associationProperty": "ALIYUN::Flow::Connection::ConnectionId",
+      "oreAssociationProperty": "ALIYUN::Flow::Connection::ConnectionId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "organizationId",
+          "type": "string"
+        },
+        {
+          "key": "sericeConnectionType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "organizationId",
+        "sericeConnectionType"
+      ],
+      "operationKeys": [
+        "flow.connection.dataapi.devops2020.listserviceconnections"
+      ]
+    },
+    {
+      "selectorId": "flow.organization",
+      "associationProperty": "ALIYUN::Flow::Organization::OrganizationId",
+      "oreAssociationProperty": "ALIYUN::Flow::Organization::OrganizationId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "setInOOS",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "setInOOS"
+      ],
+      "operationKeys": [
+        "flow.organization.dataapi.devops2020.listjoinedorganizations"
+      ]
+    },
+    {
+      "selectorId": "eds.bundle",
+      "associationProperty": "ALIYUN::EDS::Bundle::BundleId",
+      "oreAssociationProperty": "ALIYUN::EDS::Bundle::BundleId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "SupportMultiSession",
+          "type": "boolean"
+        },
+        {
+          "key": "BundleType",
+          "type": "string"
+        },
+        {
+          "key": "ProtocolType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "SupportMultiSession",
+        "BundleType",
+        "ProtocolType"
+      ],
+      "operationKeys": [
+        "eds.bundle.dataapi.clouddesktopnew.describebundles"
+      ]
+    },
+    {
+      "selectorId": "eds.office_site",
+      "associationProperty": "ALIYUN::EDS::OfficeSite::OfficeSiteId",
+      "oreAssociationProperty": "ALIYUN::EDS::OfficeSite::OfficeSiteId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "eds.office_site.dataapi.clouddesktopnew.describeofficesites"
+      ]
+    },
+    {
+      "selectorId": "eds.policy_group",
+      "associationProperty": "ALIYUN::EDS::PolicyGroup::PolicyGroupId",
+      "oreAssociationProperty": "ALIYUN::EDS::PolicyGroup::PolicyGroupId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Scope",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Scope"
+      ],
+      "operationKeys": [
+        "eds.policy_group.dataapi.clouddesktopnew.describepolicygroups"
+      ]
+    },
+    {
+      "selectorId": "appflow.user_auth_config",
+      "associationProperty": "ALIYUN::AppFlow::UserAuthConfig::ConfigId",
+      "oreAssociationProperty": "ALIYUN::AppFlow::UserAuthConfig::ConfigId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ConnectorId",
+          "type": "string"
+        },
+        {
+          "key": "ConnectorVersion",
+          "type": "number"
+        },
+        {
+          "key": "AuthType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ConnectorId",
+        "ConnectorVersion",
+        "AuthType"
+      ],
+      "operationKeys": [
+        "appflow.user_auth_config.dataapi.appflow.listuserauthconfigs"
+      ]
+    },
+    {
+      "selectorId": "apig.gateway",
+      "associationProperty": "ALIYUN::APIG::Gateway::GatewayId",
+      "oreAssociationProperty": "ALIYUN::APIG::Gateway::GatewayId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Keyword",
+          "type": "string"
+        },
+        {
+          "key": "GatewayType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Keyword",
+        "GatewayType"
+      ],
+      "operationKeys": [
+        "apig.gateway.dataapi.apig.listgateways"
+      ]
+    },
+    {
+      "selectorId": "swas.instance",
+      "associationProperty": "ALIYUN::SWAS::Instance::InstanceId",
+      "oreAssociationProperty": "ALIYUN::SWAS::Instance::InstanceId",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Status",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Status"
+      ],
+      "operationKeys": [
+        "swas.instance.dataapi.swas_open.listinstances"
+      ]
+    },
+    {
+      "selectorId": "cms.workspace",
+      "associationProperty": "ALIYUN::CMS::Workspace",
+      "oreAssociationProperty": "ALIYUN::CMS::Workspace",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_id",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "cms.workspace.dataapi.cms20240330.listworkspaces"
+      ]
+    },
+    {
+      "selectorId": "domain.domain",
+      "associationProperty": "ALIYUN::Domain::DomainName",
+      "oreAssociationProperty": "ALIYUN::DomainName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "ShowDomainPrefixInput",
+          "type": "boolean"
+        },
+        {
+          "key": "CheckICP",
+          "type": "boolean"
+        },
+        {
+          "key": "MaxLength",
+          "type": "number"
+        }
+      ],
+      "metadataKeys": [
+        "ShowDomainPrefixInput",
+        "CheckICP",
+        "MaxLength"
+      ],
+      "operationKeys": [
+        "domain.domain.dataapi.cdn.checkcdndomainicp",
+        "domain.domain.dataapi.domain.querydomainlist"
+      ]
+    },
+    {
+      "selectorId": "oos.template",
+      "associationProperty": "ALIYUN::OOS::Template::TemplateName",
+      "oreAssociationProperty": "ALIYUN::OOS::Template::TemplateName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Type",
+          "type": "string"
+        },
+        {
+          "key": "ShareType",
+          "type": "string"
+        },
+        {
+          "key": "NoTrigger",
+          "type": "boolean"
+        },
+        {
+          "key": "ShowShareType",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Type",
+        "ShareType",
+        "NoTrigger",
+        "ShowShareType"
+      ],
+      "operationKeys": [
+        "oos.template.dataapi.oos.listtemplates"
+      ]
+    },
+    {
+      "selectorId": "oos.parameter",
+      "associationProperty": "ALIYUN::OOS::Parameter::Value",
+      "oreAssociationProperty": "ALIYUN::OOS::Parameter::Value",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "oos.parameter.dataapi.oos.listparameters"
+      ]
+    },
+    {
+      "selectorId": "oos.secret_parameter",
+      "associationProperty": "ALIYUN::OOS::SecretParameter::Value",
+      "oreAssociationProperty": "ALIYUN::OOS::SecretParameter::Value",
+      "selectionKind": "cloud_resource",
+      "outputKind": "secret_reference",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId"
+      ],
+      "operationKeys": [
+        "oos.secret_parameter.dataapi.oos.listsecretparameters"
+      ]
+    },
+    {
+      "selectorId": "oos.package",
+      "associationProperty": "ALIYUN::OOS::Package::PackageName",
+      "oreAssociationProperty": "ALIYUN::OOS::Package::PackageName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Type",
+          "type": "string"
+        },
+        {
+          "key": "ShowShareType",
+          "type": "boolean"
+        },
+        {
+          "key": "Target",
+          "type": "string"
+        },
+        {
+          "key": "ShareType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Type",
+        "ShowShareType",
+        "Target",
+        "ShareType"
+      ],
+      "operationKeys": [
+        "oos.package.dataapi.ecs.describeimages",
+        "oos.package.dataapi.ecs.describeinstances",
+        "oos.package.dataapi.oos.listtemplates"
+      ]
+    },
+    {
+      "selectorId": "oos.application",
+      "associationProperty": "ALIYUN::OOS::Application::ApplicationName",
+      "oreAssociationProperty": "ALIYUN::OOS::Application::ApplicationName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "ApplicationType",
+          "type": "string"
+        },
+        {
+          "key": "Tags",
+          "type": "Dictionary<string>"
+        }
+      ],
+      "metadataKeys": [
+        "ApplicationType",
+        "Tags"
+      ],
+      "operationKeys": [
+        "oos.application.dataapi.oos.listapplications"
+      ]
+    },
+    {
+      "selectorId": "oos.application_group",
+      "associationProperty": "ALIYUN::OOS::ApplicationGroup::ApplicationGroupName",
+      "oreAssociationProperty": "ALIYUN::OOS::ApplicationGroup::ApplicationGroupName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "ApplicationName",
+          "type": "string"
+        },
+        {
+          "key": "DeployRegionId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "ApplicationName",
+        "DeployRegionId"
+      ],
+      "operationKeys": [
+        "oos.application_group.dataapi.oos.listapplicationgroups"
+      ]
+    },
+    {
+      "selectorId": "oos.git_account",
+      "associationProperty": "ALIYUN::OOS::GitAccount::Name",
+      "oreAssociationProperty": "ALIYUN::OOS::GitAccount::Name",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "Platform",
+          "type": "string"
+        },
+        {
+          "key": "ShowUnbindCom",
+          "type": "boolean"
+        },
+        {
+          "key": "RoleName",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "Platform",
+        "ShowUnbindCom",
+        "RoleName"
+      ],
+      "operationKeys": [
+        "oos.git_account.dataapi.oos.listgitaccounts"
+      ]
+    },
+    {
+      "selectorId": "oos.git_organization",
+      "associationProperty": "ALIYUN::OOS::GitOrganization::Name",
+      "oreAssociationProperty": "ALIYUN::OOS::GitOrganization::Name",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "Platform",
+          "type": "string"
+        },
+        {
+          "key": "Owner",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "Platform",
+        "Owner"
+      ],
+      "operationKeys": [
+        "oos.git_organization.dataapi.oos.listgitorganizations"
+      ]
+    },
+    {
+      "selectorId": "oos.git_repository",
+      "associationProperty": "ALIYUN::OOS::GitRepository::Name",
+      "oreAssociationProperty": "ALIYUN::OOS::GitRepository::Name",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "Platform",
+          "type": "string"
+        },
+        {
+          "key": "Owner",
+          "type": "string"
+        },
+        {
+          "key": "Organization",
+          "type": "string"
+        },
+        {
+          "key": "AutoSelectFirst",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "Platform",
+        "Owner",
+        "Organization",
+        "AutoSelectFirst"
+      ],
+      "operationKeys": [
+        "oos.git_repository.dataapi.oos.listgitrepositories"
+      ]
+    },
+    {
+      "selectorId": "oos.git_branch",
+      "associationProperty": "ALIYUN::OOS::GitBranch::Name",
+      "oreAssociationProperty": "ALIYUN::OOS::GitBranch::Name",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "Platform",
+          "type": "string"
+        },
+        {
+          "key": "Owner",
+          "type": "string"
+        },
+        {
+          "key": "RepoFullName",
+          "type": "string"
+        },
+        {
+          "key": "Organization",
+          "type": "string"
+        },
+        {
+          "key": "GitFullUrl",
+          "type": "string"
+        },
+        {
+          "key": "AutoSelectFirst",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "Platform",
+        "Owner",
+        "RepoFullName",
+        "Organization",
+        "GitFullUrl",
+        "AutoSelectFirst"
+      ],
+      "operationKeys": [
+        "oos.git_branch.dataapi.oos.listgitbranches"
+      ]
+    },
+    {
+      "selectorId": "oos.patch_baseline",
+      "associationProperty": "ALIYUN::OOS::PatchBaseline::PatchBaselineName",
+      "oreAssociationProperty": "ALIYUN::OOS::PatchBaseline::PatchBaselineName",
+      "selectionKind": "cloud_resource",
+      "outputKind": "resource_name",
+      "sourceSelectorId": null,
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "Name",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "Name"
+      ],
+      "operationKeys": [
+        "oos.patch_baseline.dataapi.oos.listpatchbaselines"
+      ]
+    },
+    {
+      "selectorId": "ecs.launch_template_version",
+      "associationProperty": "ALIYUN::ECS::LaunchTemplate::LaunchTemplateVersion",
+      "oreAssociationProperty": "ALIYUN::ECS::LaunchTemplate::LaunchTemplateVersion",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "ecs.launch_template",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "LaunchTemplateId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "LaunchTemplateId"
+      ],
+      "operationKeys": [
+        "ecs.launch_template_version.dataapi.ecs.describelaunchtemplateversions"
+      ]
+    },
+    {
+      "selectorId": "ess.eci_container",
+      "associationProperty": "ALIYUN::ESS::ECIScalingConfiguration::ContainerName",
+      "oreAssociationProperty": "ALIYUN::ESS::ECIScalingConfiguration::ContainerName",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "derived_value",
+      "sourceSelectorId": "ess.eci_scaling_configuration",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "ScalingGroupId",
+          "type": "string"
+        },
+        {
+          "key": "ScalingConfigurationId",
+          "type": "array"
+        },
+        {
+          "key": "AutoSelectFirst",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "ScalingGroupId",
+        "ScalingConfigurationId",
+        "AutoSelectFirst"
+      ],
+      "operationKeys": [
+        "ess.eci_container.dataapi.ess.describeeciscalingconfigurations"
+      ]
+    },
+    {
+      "selectorId": "oss.object_version",
+      "associationProperty": "ALIYUN::OSS::Object::ObjectVersionId",
+      "oreAssociationProperty": "ALIYUN::OSS::Object::ObjectVersionId",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "oss.object",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "BucketName",
+          "type": "string"
+        },
+        {
+          "key": "ObjectName",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "BucketName",
+        "ObjectName"
+      ],
+      "operationKeys": [
+        "oss.object_version.dataapi.oss.listobjectversions"
+      ]
+    },
+    {
+      "selectorId": "nas.mount_target",
+      "associationProperty": "ALIYUN::NAS::FileSystem::MountTargetDomain",
+      "oreAssociationProperty": "ALIYUN::NAS::FileSystem::MountTargetDomain",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "endpoint",
+      "sourceSelectorId": "nas.file_system",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "FileSystemId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "FileSystemId"
+      ],
+      "operationKeys": [
+        "nas.mount_target.dataapi.nas.describemounttargets"
+      ]
+    },
+    {
+      "selectorId": "ehpc.mount_target",
+      "associationProperty": "ALIYUN::EHPC::FileSystem::MountTargetDomain",
+      "oreAssociationProperty": "ALIYUN::EHPC::FileSystem::MountTargetDomain",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "endpoint",
+      "sourceSelectorId": "ehpc.file_system",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "VolumeId",
+          "type": "string"
+        },
+        {
+          "key": "VpcId",
+          "type": "string"
+        },
+        {
+          "key": "VSwitchId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "VolumeId",
+        "VpcId",
+        "VSwitchId"
+      ],
+      "operationKeys": [
+        "ehpc.mount_target.dataapi.ehpc.listfilesystemwithmounttargets"
+      ]
+    },
+    {
+      "selectorId": "cr.repository_tag",
+      "associationProperty": "ALIYUN::CR::Repository::Tag",
+      "oreAssociationProperty": "ALIYUN::CR::Repository::Tag",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "cr.repository",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "InstanceId",
+          "type": "string"
+        },
+        {
+          "key": "RepoId",
+          "type": "string"
+        },
+        {
+          "key": "RepoName",
+          "type": "string"
+        },
+        {
+          "key": "RepoNamespaceName",
+          "type": "string"
+        },
+        {
+          "key": "ShowImageRepositoryPath",
+          "type": "boolean"
+        },
+        {
+          "key": "AcrType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "InstanceId",
+        "RepoId",
+        "RepoName",
+        "RepoNamespaceName",
+        "ShowImageRepositoryPath",
+        "AcrType"
+      ],
+      "operationKeys": [
+        "cr.repository_tag.dataapi.cr.getinstance",
+        "cr.repository_tag.dataapi.cr.getrepository",
+        "cr.repository_tag.dataapi.cr.listrepotag"
+      ]
+    },
+    {
+      "selectorId": "acr.repository_tag",
+      "associationProperty": "ALIYUN::ACR::Repo::Tag",
+      "oreAssociationProperty": "ALIYUN::ACR::Repo::Tag",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "acr.repo_attribute",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "RepoName",
+          "type": "string"
+        },
+        {
+          "key": "RepoNamespace",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "RepoName",
+        "RepoNamespace"
+      ],
+      "operationKeys": [
+        "acr.repository_tag.dataapi.acr.listrepotag"
+      ]
+    },
+    {
+      "selectorId": "computenest.artifact_version",
+      "associationProperty": "ALIYUN::ComputeNest::Artifact::ArtifactIdVersion",
+      "oreAssociationProperty": "ALIYUN::ComputeNest::Artifact::ArtifactIdVersion",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "computenest.artifact",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "ArtifactId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "ArtifactId"
+      ],
+      "operationKeys": [
+        "computenest.artifact_version.dataapi.computenest0521.listartifactversions"
+      ]
+    },
+    {
+      "selectorId": "computenest.service_version",
+      "associationProperty": "ALIYUN::ComputeNestSupplier::Service::ServiceVersion",
+      "oreAssociationProperty": "ALIYUN::ComputeNestSupplier::Service::ServiceVersion",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "computenest.service",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "ServiceId",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "ServiceId"
+      ],
+      "operationKeys": [
+        "computenest.service_version.dataapi.computenest0521.listservices"
+      ]
+    },
+    {
+      "selectorId": "apig.domain",
+      "associationProperty": "ALIYUN::APIG::Gateway::ListDomains",
+      "oreAssociationProperty": "ALIYUN::APIG::Gateway::ListDomains",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "endpoint",
+      "sourceSelectorId": "apig.gateway",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "GatewayId",
+          "type": "string"
+        },
+        {
+          "key": "GatewayType",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "GatewayId",
+        "GatewayType"
+      ],
+      "operationKeys": [
+        "apig.domain.dataapi.apig.listdomains"
+      ]
+    },
+    {
+      "selectorId": "oos.template_version",
+      "associationProperty": "ALIYUN::OOS::Template::TemplateVersion",
+      "oreAssociationProperty": "ALIYUN::OOS::Template::TemplateVersion",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "oos.template",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "TemplateName",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "TemplateName"
+      ],
+      "operationKeys": [
+        "oos.template_version.dataapi.oos.listtemplateversions"
+      ]
+    },
+    {
+      "selectorId": "oos.package_version",
+      "associationProperty": "ALIYUN::OOS::Package::PackageVersion",
+      "oreAssociationProperty": "ALIYUN::OOS::Package::PackageVersion",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "oos.package",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "RegionId",
+          "type": "string"
+        },
+        {
+          "key": "TemplateName",
+          "type": "string"
+        },
+        {
+          "key": "PublicDisabled",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "RegionId",
+        "TemplateName",
+        "PublicDisabled"
+      ],
+      "operationKeys": [
+        "oos.package_version.dataapi.oos.listtemplateversions"
+      ]
+    },
+    {
+      "selectorId": "oos.deploy_revision",
+      "associationProperty": "ALIYUN::OOS::Application::DeployRevisionId",
+      "oreAssociationProperty": "ALIYUN::OOS::Application::DeployRevisionId",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "oos.application",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "ApplicationName",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "ApplicationName"
+      ],
+      "operationKeys": [
+        "oos.deploy_revision.dataapi.oos.listdeployrevisions"
+      ]
+    },
+    {
+      "selectorId": "oos.git_commit",
+      "associationProperty": "ALIYUN::OOS::GitBranch::CommitHash",
+      "oreAssociationProperty": "ALIYUN::OOS::GitBranch::CommitHash",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "oos.git_branch",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "Platform",
+          "type": "string"
+        },
+        {
+          "key": "Owner",
+          "type": "string"
+        },
+        {
+          "key": "RepoFullName",
+          "type": "string"
+        },
+        {
+          "key": "RepoUrl",
+          "type": "string"
+        },
+        {
+          "key": "Branch",
+          "type": "string"
+        },
+        {
+          "key": "ReadOnly",
+          "type": "boolean"
+        },
+        {
+          "key": "GitFullUrl",
+          "type": "string"
+        },
+        {
+          "key": "Organization",
+          "type": "string"
+        }
+      ],
+      "metadataKeys": [
+        "Platform",
+        "Owner",
+        "RepoFullName",
+        "RepoUrl",
+        "Branch",
+        "ReadOnly",
+        "GitFullUrl",
+        "Organization"
+      ],
+      "operationKeys": [
+        "oos.git_commit.dataapi.oos.getgitbranch"
+      ]
+    },
+    {
+      "selectorId": "oos.git_latest_commit",
+      "associationProperty": "ACS::OOS::GitBranch::LatestCommitId",
+      "oreAssociationProperty": "ACS::OOS::GitBranch::LatestCommitId",
+      "selectionKind": "cloud_resource_derived_value",
+      "outputKind": "version",
+      "sourceSelectorId": "oos.git_branch",
+      "enabled": true,
+      "metadata": [
+        {
+          "key": "Platform",
+          "type": "string"
+        },
+        {
+          "key": "Owner",
+          "type": "string"
+        },
+        {
+          "key": "RepoFullName",
+          "type": "string"
+        },
+        {
+          "key": "Branch",
+          "type": "string"
+        },
+        {
+          "key": "Selectable",
+          "type": "boolean"
+        }
+      ],
+      "metadataKeys": [
+        "Platform",
+        "Owner",
+        "RepoFullName",
+        "Branch",
+        "Selectable"
+      ],
+      "operationKeys": [
+        "oos.git_latest_commit.dataapi.oos.getgitbranch"
+      ]
+    }
+  ]
+}

@@ -171,6 +171,9 @@ export function reduceEvent(state = {}, event = {}) {
   if (!next.questions || typeof next.questions !== "object") {
     next.questions = {};
   }
+  if (!next.resourceSelections || typeof next.resourceSelections !== "object") {
+    next.resourceSelections = {};
+  }
   if (!next.elicitations || typeof next.elicitations !== "object") {
     next.elicitations = {};
   }
@@ -179,6 +182,9 @@ export function reduceEvent(state = {}, event = {}) {
   }
   if (!next.resolvedQuestions || typeof next.resolvedQuestions !== "object") {
     next.resolvedQuestions = {};
+  }
+  if (!next.resolvedResourceSelections || typeof next.resolvedResourceSelections !== "object") {
+    next.resolvedResourceSelections = {};
   }
   if (!next.resolvedElicitations || typeof next.resolvedElicitations !== "object") {
     next.resolvedElicitations = {};
@@ -550,6 +556,25 @@ export function reduceEvent(state = {}, event = {}) {
       if (payload.requestId) {
         delete next.questions[payload.requestId];
         next.resolvedQuestions[payload.requestId] = {
+          requestId: payload.requestId,
+          answer: payload.answer || {},
+        };
+      }
+      break;
+    }
+    case "resource-selector.request": {
+      if (payload.requestId) {
+        next.resourceSelections[payload.requestId] = {
+          requestId: payload.requestId,
+          payload: payload.payload || {},
+        };
+      }
+      break;
+    }
+    case "resource-selector.resolved": {
+      if (payload.requestId) {
+        delete next.resourceSelections[payload.requestId];
+        next.resolvedResourceSelections[payload.requestId] = {
           requestId: payload.requestId,
           answer: payload.answer || {},
         };

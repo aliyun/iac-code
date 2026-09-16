@@ -38,6 +38,7 @@ from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.interrupt import InterruptVerdict
 from iac_code.pipeline.engine.prerequisites import PrerequisiteDecision, PrerequisiteResolution
 from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
+from iac_code.resource_selector.profiles import PROFILE_HASH
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
@@ -51,6 +52,7 @@ from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, Sessio
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
+    CloudResourceSelectionEvent,
     PermissionRequestEvent,
     PermissionWaitOutcome,
     PermissionWaitSuspended,
@@ -3744,6 +3746,73 @@ async def test_sub_pipeline_permission_stays_working_without_global_pause(
     await _wait_for_pipeline_event(queue, "permission_resolved")
     release_pipeline.set()
     await execution
+
+
+@pytest.mark.asyncio
+async def test_sub_pipeline_resource_selection_reports_surface_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    future = asyncio.get_running_loop().create_future()
+    pipeline = FakePipeline(
+        [
+            SubPipelineStreamEvent(
+                sub_pipeline_id="candidate-0",
+                candidate_index=0,
+                inner=CloudResourceSelectionEvent(
+                    tool_use_id="tool-1",
+                    input_id="resource-" + "a" * 32,
+                    question="请选择 ECS 实例",
+                    selector_id="ecs.instance",
+                    association_property="ALIYUN::ECS::Instance::InstanceId",
+                    output_kind="resource_id",
+                    association_property_metadata={"RegionId": "cn-hangzhou"},
+                    source=None,
+                    profile_hash=PROFILE_HASH,
+                    response_future=future,
+                ),
+            )
+        ],
+        session_dir=tmp_path / "sidecar",
+    )
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
+
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        FakeEventQueue(),
+    )
+
+    assert future.result() == {
+        "status": "selector_surface_unavailable",
+        "input_id": "resource-" + "a" * 32,
+        "selector_id": "ecs.instance",
+    }
+
+
+@pytest.mark.asyncio
+async def test_recovered_pipeline_resource_selection_publishes_empty_options_signal() -> None:
+    published: list[dict] = []
+
+    class Publisher:
+        snapshot_store = SimpleNamespace(load=lambda: {})
+
+        async def publish_manual(self, event_type, scope, **kwargs):
+            published.append({"event_type": event_type, "scope": scope, **kwargs})
+            return {"eventId": "event-1"}
+
+    checkpoint = {
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "tool-1",
+        "selector": {"id": "ecs.instance"},
+        "response": {"status": "canceled", "optionsEmpty": True},
+    }
+
+    await IacCodeA2APipelineExecutor._publish_recovered_resource_selection(Publisher(), checkpoint)
+
+    assert published[0]["data"]["optionsEmpty"] is True
 
 
 @pytest.mark.asyncio

@@ -3,6 +3,7 @@
 from iac_code.types.permissions import PermissionMode, PermissionResult
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
+    CloudResourceSelectionEvent,
     CompactionEvent,
     ErrorEvent,
     MCPProgressEvent,
@@ -23,6 +24,7 @@ from iac_code.types.stream_events import (
 
 __all__ = [
     "AskUserQuestionEvent",
+    "CloudResourceSelectionEvent",
     "CompactionEvent",
     "ErrorEvent",
     "MCPProgressEvent",

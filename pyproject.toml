@@ -128,6 +128,7 @@ version = {attr = "iac_code.__version__"}
     "**/*.svg",
     "**/*.LICENSE",
     "**/*.NOTICE",
+    "**/*THIRD_PARTY_NOTICES",
     "**/*.rego",
     "**/*.mo",
     "**/*.po",
@@ -155,6 +156,7 @@ default = true
 timeout = 30
 markers = [
     "integration: process-level integration tests that use local services only",
+    "resource_selector_live: explicit read-only Alibaba Cloud selector API contract smoke tests",
 ]
 
 [tool.coverage.run]

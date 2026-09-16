@@ -61,6 +61,7 @@ from iac_code.services.session_backup import BackupReason, SessionBackupBlocked,
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
+    CloudResourceSelectionEvent,
     PermissionRequestEvent,
     ResourceObservedEvent,
     StreamEvent,
@@ -580,7 +581,7 @@ def _parallel_sub_pipeline_event_priority(event: Any) -> int:
     if isinstance(event, (PipelineStatePersistenceError, SessionBackupBlocked)):
         return 0
     inner = _unwrap_sub_pipeline_stream_event(event)
-    if isinstance(inner, (PermissionRequestEvent, AskUserQuestionEvent)):
+    if isinstance(inner, (PermissionRequestEvent, AskUserQuestionEvent, CloudResourceSelectionEvent)):
         return 0
     return 1
 
@@ -1934,6 +1935,24 @@ class PipelineRunner:
             resume_messages=messages,
             resume_running_step=True,
             permission_checkpoint=checkpoint,
+        ):
+            yield event
+
+    async def resume_resource_selection_boundary(
+        self,
+        checkpoint: dict[str, Any],
+    ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+        """Resume the current top-level step from an exact selector boundary."""
+
+        transcript_id = self._execution.get("transcript_id") if isinstance(self._execution, dict) else None
+        transcript_id = transcript_id if isinstance(transcript_id, str) else None
+        messages = self._load_unrepaired_resume_messages(transcript_id)
+        if not messages:
+            raise ValueError("resource_selection_resume_invalid: pipeline transcript is unavailable")
+        async for event in self._continue_from_current(
+            resume_messages=messages,
+            resume_running_step=True,
+            resource_selection_checkpoint=checkpoint,
         ):
             yield event
 
@@ -4242,6 +4261,7 @@ class PipelineRunner:
         resume_waiting_step: bool = False,
         resume_running_step: bool = False,
         permission_checkpoint: dict[str, Any] | None = None,
+        resource_selection_checkpoint: dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         is_first_step = True
         terminal_pipeline_telemetry_emitted = False
@@ -4504,7 +4524,10 @@ class PipelineRunner:
                 if (
                     self._transcript_storage is not None
                     and attempt.get("status") == "running"
-                    and not (first_step and permission_checkpoint is not None)
+                    and not (
+                        first_step
+                        and (permission_checkpoint is not None or resource_selection_checkpoint is not None)
+                    )
                 ):
                     loaded = self._transcript_storage.load(self._cwd, attempt["transcript_id"])
                     repaired_resume_messages = self._transcript_storage.repair_interrupted(loaded)
@@ -4537,6 +4560,7 @@ class PipelineRunner:
                     "rollback_count": self.state_machine.rollback_count,
                     "max_rollbacks": self.state_machine.max_rollbacks,
                     "permission_checkpoint": permission_checkpoint if first_step else None,
+                    "resource_selection_checkpoint": resource_selection_checkpoint if first_step else None,
                 }
                 if step_precompleted_tools is not None:
                     execute_kwargs["precompleted_tools"] = step_precompleted_tools

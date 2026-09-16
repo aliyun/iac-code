@@ -376,6 +376,7 @@ msgid "Later"
 msgstr "後で"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Refresh"
 msgstr "更新"
@@ -1232,6 +1233,36 @@ msgstr "承認"
 msgid "Decline"
 msgstr "拒否"
 
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Region"
+msgstr "リージョン"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Source"
+msgstr "ソース"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Submitting..."
+msgstr "送信中..."
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Resource selection failed. Please try again."
+msgstr "リソースの選択に失敗しました。もう一度お試しください。"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Confirm"
+msgstr "確認"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Retry refresh"
+msgstr "再試行して更新"
+
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Enter sends; Shift+Enter inserts a newline."
 msgstr "Enter で送信、Shift+Enter で改行を挿入します。"
@@ -1557,10 +1588,6 @@ msgid "Select candidate"
 msgstr "候補を選択"
 
 #: src/iac_code/web/static/js/components/pipeline.js
-msgid "Submitting..."
-msgstr "送信中..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Summary"
 msgstr "サマリー"
@@ -1622,12 +1649,6 @@ msgstr "{n} 個のリソース"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Resource"
 msgstr "リソース"
-
-#: src/iac_code/web/static/js/components/pipeline.js
-#: src/iac_code/web/static/js/components/tool_cards.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Region"
-msgstr "リージョン"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No cleanup resources."
@@ -1744,10 +1765,6 @@ msgstr "クラウド製品"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Role"
 msgstr "ロール"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Source"
-msgstr "ソース"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Notes"
@@ -4104,10 +4121,6 @@ msgstr "再起動を確認"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The restart is taking a while. Please refresh manually."
 msgstr "再起動に時間がかかっています。手動で更新してください。"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Retry refresh"
-msgstr "再試行して更新"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restarting; the page refreshes automatically once the service recovers…"

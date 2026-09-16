@@ -374,6 +374,7 @@ msgid "Later"
 msgstr "稍后"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Refresh"
 msgstr "刷新"
@@ -1230,6 +1231,36 @@ msgstr "接受"
 msgid "Decline"
 msgstr "拒绝"
 
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Region"
+msgstr "地域"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Source"
+msgstr "来源"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Submitting..."
+msgstr "提交中..."
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Resource selection failed. Please try again."
+msgstr "资源选择失败，请重试。"
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Confirm"
+msgstr "确认"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Retry refresh"
+msgstr "重试刷新"
+
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Enter sends; Shift+Enter inserts a newline."
 msgstr "Enter sends; Shift+Enter inserts a newline."
@@ -1555,10 +1586,6 @@ msgid "Select candidate"
 msgstr "选择候选方案"
 
 #: src/iac_code/web/static/js/components/pipeline.js
-msgid "Submitting..."
-msgstr "提交中..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Summary"
 msgstr "摘要"
@@ -1620,12 +1647,6 @@ msgstr "{n} 个资源"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Resource"
 msgstr "资源"
-
-#: src/iac_code/web/static/js/components/pipeline.js
-#: src/iac_code/web/static/js/components/tool_cards.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Region"
-msgstr "地域"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No cleanup resources."
@@ -1742,10 +1763,6 @@ msgstr "云产品"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Role"
 msgstr "角色"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Source"
-msgstr "来源"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Notes"
@@ -4096,10 +4113,6 @@ msgstr "确认重启"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The restart is taking a while. Please refresh manually."
 msgstr "重启耗时较长,请手动刷新。"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Retry refresh"
-msgstr "重试刷新"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restarting; the page refreshes automatically once the service recovers…"

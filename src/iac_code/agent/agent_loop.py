@@ -23,6 +23,7 @@ from iac_code.a2a.execution_control import (
 )
 from iac_code.agent.message import (
     ContentBlock,
+    Message,
     RedactedThinkingBlock,
     TextBlock,
     ThinkingBlock,
@@ -64,6 +65,7 @@ from iac_code.types.stream_events import (
     TOOL_RENDER_RESULT_COMPACT_KEY,
     TOOL_RENDER_RESULT_VERBOSE_KEY,
     TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY,
+    CloudResourceSelectionEvent,
     CompactionEvent,
     MessageEndEvent,
     PermissionRequestEvent,
@@ -1606,6 +1608,123 @@ class AgentLoop:
         async for event in self.continue_streaming():
             yield event
 
+    async def resume_resource_selection_boundary(
+        self,
+        frame: Mapping[str, Any],
+        *,
+        input_id: str,
+        selector_id: str,
+        profile_hash: str,
+        response: dict[str, Any],
+    ) -> AsyncGenerator[StreamEvent, None]:
+        """Resume one durable resource-selector tool call without a new user message."""
+
+        from iac_code.resource_selector.tools import resource_selection_resume_scope
+
+        messages = self.context_manager.get_messages()
+        if not messages or messages[-1].role != "assistant":
+            raise ValueError("resource_selection_resume_invalid: assistant tool message is missing")
+        assistant_message = messages[-1]
+        tool_uses = assistant_message.get_tool_use_blocks()
+        ordered_ids = [tool_use.id for tool_use in tool_uses]
+        if ordered_ids != frame.get("orderedToolUseIds") or len(tool_uses) != 1:
+            raise ValueError("resource_selection_resume_invalid: tool ordering changed")
+        message_index = len(messages) - 1
+        expected_ref = f"session.jsonl:{message_index}"
+        if self._transcript_id is not None:
+            expected_ref = f"pipeline/transcripts/{self._transcript_id}/session.jsonl:{message_index}"
+        if frame.get("assistantMessageRef") != expected_ref:
+            raise ValueError("resource_selection_resume_invalid: assistant message reference changed")
+        assistant_digest = canonical_digest(
+            [block.model_dump(mode="json") for block in assistant_message.content]
+            if isinstance(assistant_message.content, list)
+            else assistant_message.content
+        )
+        if assistant_digest != frame.get("assistantMessageDigest"):
+            raise ValueError("resource_selection_resume_invalid: assistant message changed")
+        tool_use = tool_uses[0]
+        if tool_use.name != "select_cloud_resource" or tool_use.id != frame.get("orderedToolUseIds", [None])[0]:
+            raise ValueError("resource_selection_resume_invalid: selector tool changed")
+        if canonical_digest({"name": tool_use.name, "input": tool_use.input}) != frame.get(
+            "currentPayloadDigest"
+        ):
+            raise ValueError("resource_selection_resume_invalid: selector payload changed")
+
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        request = ToolCallRequest(
+            id=tool_use.id,
+            name=tool_use.name,
+            input=tool_use.input,
+            event_queue=queue,
+            invocation_binding=InvocationBinding(
+                runtime_nonce=self._runtime_nonce,
+                session_id=self._session_id,
+                tool_use_id=tool_use.id,
+                tool_name=tool_use.name,
+                canonical_input_sha256=canonical_input_sha256(tool_use.input),
+            ),
+        )
+        context = ToolContext(
+            cwd=self._cwd,
+            trusted_read_directories=list(self._tool_context_trusted_read_directories),
+            relative_read_directories=list(self._tool_context_relative_read_directories),
+            pipeline_mode=self._pipeline_mode,
+            env_overrides=dict(self._tool_context_env_overrides),
+            telemetry_attributes=dict(self._telemetry_attributes),
+        )
+        with resource_selection_resume_scope(
+            {
+                tool_use.id: {
+                    "input_id": input_id,
+                    "selector_id": selector_id,
+                    "profile_hash": profile_hash,
+                    "response": response,
+                }
+            }
+        ):
+            results = await self._execute_tool_batch_with_execution_control([request], context)
+        result = results[0]
+        processed = self._result_storage.process(request.id, result.content)
+        result_metadata = self._tool_result_event_metadata(result.metadata, processed)
+        result_metadata = self._tool_result_render_metadata(
+            result_metadata,
+            self.tool_registry.get(request.name),
+            processed.content,
+            is_error=result.is_error,
+            tool_name=request.name,
+            tool_input=request.input,
+        )
+        public_path_roots = build_public_path_roots(
+            cwd=context.cwd,
+            additional_directories=context.additional_directories,
+            trusted_read_directories=context.trusted_read_directories,
+            relative_read_directories=context.relative_read_directories,
+        )
+        yield ToolResultEvent(
+            tool_use_id=request.id,
+            tool_name=request.name,
+            result=processed.content,
+            is_error=result.is_error,
+            public_path_roots=public_path_roots,
+            metadata=result_metadata,
+        )
+        result_block = ToolResultBlock(
+            tool_use_id=request.id,
+            content=processed.content,
+            is_error=result.is_error,
+            metadata=self._tool_result_block_metadata(processed, result_metadata),
+        )
+        self.context_manager.add_tool_results([result_block])
+        if self._session_storage:
+            self._session_storage.append(
+                self._cwd,
+                self._session_id,
+                Message(role="user", content=[result_block]),
+                git_branch=self._current_git_branch,
+            )
+        async for event in self.continue_streaming():
+            yield event
+
     async def _permission_for_recovered_request(
         self,
         request: ToolCallRequest,
@@ -2141,6 +2260,20 @@ class AgentLoop:
                     }
                     for request in requests
                 ]
+                permission_requests = requests
+                if len(requests) > 1 and any(request.name == "select_cloud_resource" for request in requests):
+                    selector_batch_error = _(
+                        "select_cloud_resource must be called alone. Retry it as a standalone tool call; "
+                        "no tool in this batch was executed."
+                    )
+                    for request_index, request in enumerate(requests):
+                        denied_results.append((request, ToolResult.error(selector_batch_error)))
+                        continuation_decisions[request_index].update(
+                            state="deny",
+                            source="invalid_tool_batch",
+                            deniedResult=selector_batch_error,
+                        )
+                    permission_requests = []
                 for decision in continuation_decisions:
                     input_error = input_errors.get(str(decision["toolUseId"]))
                     if input_error:
@@ -2151,7 +2284,7 @@ class AgentLoop:
                         )
                 previous_permission_boundary_id: str | None = None
                 permission_assistant_message_ref: str | None = None
-                for request_index, request in enumerate(requests):
+                for request_index, request in enumerate(permission_requests):
                     # Arguments the provider could not parse never reach the tool: running it on
                     # `{}` would answer with a schema error about fields the model actually sent,
                     # and the model would burn another generation resending the same call.
@@ -2441,6 +2574,34 @@ class AgentLoop:
                                     if item is None:
                                         break
                                     if isinstance(item, ToolEmittedEvent):
+                                        if isinstance(item, CloudResourceSelectionEvent):
+                                            request_index = next(
+                                                (
+                                                    index
+                                                    for index, request in enumerate(requests)
+                                                    if request.id == item.tool_use_id
+                                                ),
+                                                -1,
+                                            )
+                                            if request_index >= 0:
+                                                assistant_message_ref = (
+                                                    self._canonical_permission_assistant_message_ref(
+                                                        assistant_message_digest=assistant_message_digest,
+                                                        ordered_tool_use_ids=[request.id for request in requests],
+                                                    )
+                                                )
+                                                item.continuation_frame = {
+                                                    "assistantMessageRef": assistant_message_ref,
+                                                    "assistantMessageDigest": assistant_message_digest,
+                                                    "orderedToolUseIds": [request.id for request in requests],
+                                                    "currentIndex": request_index,
+                                                    "currentPayloadDigest": canonical_digest(
+                                                        {
+                                                            "name": requests[request_index].name,
+                                                            "input": requests[request_index].input,
+                                                        }
+                                                    ),
+                                                }
                                         yield item
                                     elif isinstance(item, dict):
                                         yield SubAgentToolEvent(
@@ -2460,6 +2621,32 @@ class AgentLoop:
                             if item is None:
                                 continue
                             if isinstance(item, ToolEmittedEvent):
+                                if isinstance(item, CloudResourceSelectionEvent):
+                                    request_index = next(
+                                        (
+                                            index
+                                            for index, request in enumerate(requests)
+                                            if request.id == item.tool_use_id
+                                        ),
+                                        -1,
+                                    )
+                                    if request_index >= 0:
+                                        assistant_message_ref = self._canonical_permission_assistant_message_ref(
+                                            assistant_message_digest=assistant_message_digest,
+                                            ordered_tool_use_ids=[request.id for request in requests],
+                                        )
+                                        item.continuation_frame = {
+                                            "assistantMessageRef": assistant_message_ref,
+                                            "assistantMessageDigest": assistant_message_digest,
+                                            "orderedToolUseIds": [request.id for request in requests],
+                                            "currentIndex": request_index,
+                                            "currentPayloadDigest": canonical_digest(
+                                                {
+                                                    "name": requests[request_index].name,
+                                                    "input": requests[request_index].input,
+                                                }
+                                            ),
+                                        }
                                 yield item
                             elif isinstance(item, dict):
                                 yield SubAgentToolEvent(

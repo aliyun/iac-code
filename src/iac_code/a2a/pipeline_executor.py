@@ -47,6 +47,14 @@ from iac_code.a2a.pipeline_stream import (
     pending_backup_publication_envelope,
 )
 from iac_code.a2a.pipeline_transport_delivery import PipelineTransportDeliveryClosedError
+from iac_code.a2a.resource_selector import (
+    PendingResourceSelection,
+    ResourceSelectionCheckpointStore,
+    ResourceSelectionInputRegistry,
+)
+from iac_code.a2a.resource_selector import (
+    checkpoint_record as resource_selection_checkpoint_record,
+)
 from iac_code.a2a.runtime_overrides import (
     a2a_request_context,
     configure_runtime_model,
@@ -82,6 +90,7 @@ from iac_code.services.session_layout import SessionPaths
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
+    CloudResourceSelectionEvent,
     PermissionRequestEvent,
     PermissionWaitSuspended,
     SubPipelineStreamEvent,
@@ -213,6 +222,7 @@ class _StreamConsumeResult:
     restart_requested: bool
     terminal_handoff_unavailable: bool = False
     detached_permission: "_DetachedPipelinePermission | None" = None
+    detached_resource_selection: "_DetachedPipelineResourceSelection | None" = None
 
 
 @dataclass
@@ -269,6 +279,42 @@ class _DetachedPipelinePermission:
             await self.on_suspend()
         finally:
             await self.registry.complete(pending)
+
+
+@dataclass
+class _DetachedPipelineResourceSelection:
+    """One top-level selector whose continuation moves to the answer request."""
+
+    stream: Any
+    pending: PendingResourceSelection
+    _continuation: Callable[[Any, PendingResourceSelection], Awaitable[None]] | None = None
+    _ready: asyncio.Event = field(default_factory=asyncio.Event)
+    _close_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    _closed: bool = False
+
+    def prepare(self) -> None:
+        self.pending.continuation = self._run
+
+    def install(self, continuation: Callable[[Any, PendingResourceSelection], Awaitable[None]]) -> None:
+        self._continuation = continuation
+        self._ready.set()
+
+    async def close_stream(self) -> None:
+        async with self._close_lock:
+            if self._closed:
+                return
+            self._closed = True
+            close = getattr(self.stream, "aclose", None)
+            if callable(close):
+                with contextlib.suppress(RuntimeError):
+                    await close()
+
+    async def _run(self, event_queue: Any, pending: PendingResourceSelection) -> None:
+        await self._ready.wait()
+        continuation = self._continuation
+        if continuation is None:
+            raise RuntimeError("detached Pipeline resource selection continuation is unavailable")
+        await continuation(event_queue, pending)
 
 
 @dataclass(frozen=True)
@@ -399,6 +445,7 @@ class IacCodeA2APipelineExecutor:
         push_notifier: Any | None,
         permission_resolver: Any | None,
         permission_input_registry: Any | None = None,
+        resource_selection_registry: ResourceSelectionInputRegistry | None = None,
         auto_approve_permissions: bool,
         thinking_exposure_types: Any,
         user_id: str | None = None,
@@ -418,6 +465,7 @@ class IacCodeA2APipelineExecutor:
         aliyun_delegated_executor_factory: Any | None = None,
         pipeline_name: str | None = None,
         context_ready_callback: Callable[[], Awaitable[None]] | None = None,
+        resource_selector_enabled: bool = False,
     ) -> None:
         self._task_store = task_store
         self._model = model
@@ -426,6 +474,7 @@ class IacCodeA2APipelineExecutor:
         self._push_notifier = push_notifier
         self._permission_resolver = permission_resolver
         self._permission_input_registry = permission_input_registry
+        self._resource_selection_registry = resource_selection_registry
         self._auto_approve_permissions = auto_approve_permissions
         self._thinking_exposure_types = thinking_exposure_types
         self._user_id = user_id
@@ -445,6 +494,7 @@ class IacCodeA2APipelineExecutor:
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._pipeline_name_override = pipeline_name or None
         self._context_ready_callback = context_ready_callback
+        self._resource_selector_enabled = resource_selector_enabled
 
     def _resolve_pipeline_name(self) -> str:
         """Pipeline this executor must run.
@@ -552,6 +602,7 @@ class IacCodeA2APipelineExecutor:
                 provider_config_override=self._provider_config_override,
                 effort_override=self._effort_override,
                 source="a2a-pipeline",
+                resource_selector_enabled=self._resource_selector_enabled,
             )
         )
         try:
@@ -584,6 +635,7 @@ class IacCodeA2APipelineExecutor:
         prompt: str | None = None,
         active_followup_only: bool = False,
         permission_checkpoint: dict[str, Any] | None = None,
+        resource_selection_checkpoint: dict[str, Any] | None = None,
     ) -> bool | None:
         if pipeline_input is None:
             pipeline_input = prompt or ""
@@ -609,6 +661,7 @@ class IacCodeA2APipelineExecutor:
                     provider_config_override=self._provider_config_override,
                     effort_override=self._effort_override,
                     source="a2a-pipeline",
+                    resource_selector_enabled=self._resource_selector_enabled,
                 )
             )
 
@@ -788,6 +841,11 @@ class IacCodeA2APipelineExecutor:
                     )
                     if permission_checkpoint is not None:
                         await self._publish_recovered_permission_resolution(publisher, permission_checkpoint)
+                    if resource_selection_checkpoint is not None:
+                        await self._publish_recovered_resource_selection(
+                            publisher,
+                            resource_selection_checkpoint,
+                        )
                     pipeline_runtime = A2APipelineRuntime(
                         agent_runtime=agent_runtime,
                         pipeline=pipeline,
@@ -829,7 +887,17 @@ class IacCodeA2APipelineExecutor:
                     else:
                         fresh_pipeline_factory = create_fresh_pipeline
 
-                    if permission_checkpoint is not None:
+                    if resource_selection_checkpoint is not None:
+                        resume_resource_selection = getattr(pipeline, "resume_resource_selection_boundary", None)
+                        if not callable(resume_resource_selection):
+                            raise RuntimeError(
+                                "resource_selection_resume_invalid: Pipeline cannot resume resource selection"
+                            )
+                        selected = _SelectedPipelineStream(
+                            pipeline=pipeline,
+                            stream=resume_resource_selection(resource_selection_checkpoint),
+                        )
+                    elif permission_checkpoint is not None:
                         resume_permission = getattr(pipeline, "resume_permission_boundary", None)
                         if not callable(resume_permission):
                             raise RuntimeError("permission_resume_invalid: Pipeline cannot resume permissions")
@@ -877,6 +945,7 @@ class IacCodeA2APipelineExecutor:
                 stream_had_events = False
                 terminal_handoff_unavailable = False
                 detached_permission: _DetachedPipelinePermission | None = None
+                detached_resource_selection: _DetachedPipelineResourceSelection | None = None
 
                 async def release_detached_runtime() -> None:
                     await self._task_store.discard_context_runtime(context_id)
@@ -898,6 +967,9 @@ class IacCodeA2APipelineExecutor:
                         if stream_result.detached_permission is not None:
                             detached_permission = stream_result.detached_permission
                             break
+                        if stream_result.detached_resource_selection is not None:
+                            detached_resource_selection = stream_result.detached_resource_selection
+                            break
 
                         if not stream_result.restart_requested:
                             break
@@ -909,6 +981,11 @@ class IacCodeA2APipelineExecutor:
                             cwd=cwd,
                             session_id=ctx.session_id,
                         )
+
+                if resource_selection_checkpoint is not None:
+                    recovered_input_id = resource_selection_checkpoint.get("inputId")
+                    if isinstance(recovered_input_id, str):
+                        ResourceSelectionCheckpointStore(cwd, ctx.session_id).resolve(recovered_input_id)
 
                 if detached_permission is not None:
                     pending = detached_permission.pending
@@ -949,6 +1026,48 @@ class IacCodeA2APipelineExecutor:
                             await permission_input_registry.complete(resumed)
 
                     detached_permission.install(resume_detached_pipeline)
+                    task.state = TASK_STATE_INPUT_REQUIRED
+                    ctx.active_task_id = None
+                    task.touch()
+                    ctx.touch()
+                    self._task_store.mirror_task(task)
+                    self._task_store.mirror_context(ctx)
+                    await self._notify_terminal_task(
+                        task_id=task.task_id,
+                        context_id=task.context_id,
+                        state=task.state,
+                    )
+                    return
+
+                if detached_resource_selection is not None:
+                    resource_registry = self._resource_selection_registry
+                    if resource_registry is None:
+                        raise RuntimeError("detached Pipeline resource selection registry is unavailable")
+
+                    async def resume_detached_resource_selection(
+                        target_queue: Any,
+                        resumed: PendingResourceSelection,
+                    ) -> None:
+                        await detached_resource_selection.close_stream()
+                        record = resumed.store.load(resumed.event.input_id)
+                        if record is None:
+                            raise RuntimeError("resource selection checkpoint is unavailable")
+                        try:
+                            await self.execute(
+                                context=context,
+                                event_queue=target_queue,
+                                task=task,
+                                task_id=task_id,
+                                context_id=context_id,
+                                cwd=cwd,
+                                pipeline_input="",
+                                resource_selection_checkpoint=record,
+                            )
+                            resumed.store.resolve(resumed.event.input_id)
+                        finally:
+                            await resource_registry.complete(resumed)
+
+                    detached_resource_selection.install(resume_detached_resource_selection)
                     task.state = TASK_STATE_INPUT_REQUIRED
                     ctx.active_task_id = None
                     task.touch()
@@ -1195,6 +1314,9 @@ class IacCodeA2APipelineExecutor:
         )
         if self._aliyun_credential is not None:
             refresh_runtime_cloud_tools(agent_runtime)
+        set_resource_selector_enabled = getattr(agent_runtime, "set_resource_selector_enabled", None)
+        if callable(set_resource_selector_enabled):
+            set_resource_selector_enabled(self._resource_selector_enabled)
 
     def _pipeline_runtime_from_context(self, runtime: Any, *, session_id: str, cwd: str) -> A2APipelineRuntime:
         if isinstance(runtime, A2APipelineRuntime):
@@ -1214,6 +1336,7 @@ class IacCodeA2APipelineExecutor:
                     provider_config_override=self._provider_config_override,
                     effort_override=self._effort_override,
                     source="a2a-pipeline",
+                    resource_selector_enabled=self._resource_selector_enabled,
                 )
             ),
         )
@@ -2109,6 +2232,22 @@ class IacCodeA2APipelineExecutor:
                 finally:
                     next_event = None
 
+                resource_selection = _resource_selection_from_stream_event(event)
+                if resource_selection is not None and event is not resource_selection:
+                    # Parallel candidate streams do not own the parent Pipeline transcript.
+                    # Resolve locally instead of publishing a boundary that cannot be recovered
+                    # from the parent step after a process restart.
+                    future = resource_selection.response_future
+                    if future is not None and not future.done():
+                        future.set_result(
+                            {
+                                "status": "selector_surface_unavailable",
+                                "input_id": resource_selection.input_id,
+                                "selector_id": resource_selection.selector_id,
+                            }
+                        )
+                    continue
+
                 if _is_pipeline_terminal_stream_event(event):
                     terminal_publication = await self._publish_terminal_stream_event(
                         runtime=runtime,
@@ -2148,6 +2287,51 @@ class IacCodeA2APipelineExecutor:
                     if terminal_handoff_result.attempted:
                         text = None
                     else:
+                        if isinstance(event, CloudResourceSelectionEvent):
+                            if self._resource_selection_registry is None:
+                                raise RuntimeError("Pipeline resource selection registry is unavailable")
+                            if outbound is not None:
+                                await outbound.flush()
+                            selector_context = publisher.translator.context
+                            selector_cwd = selector_context.trusted_workspace_root
+                            selector_session_id = selector_context.iac_code_session_id
+                            if not selector_cwd or not selector_session_id:
+                                raise RuntimeError("Pipeline resource selection session is unavailable")
+                            store = ResourceSelectionCheckpointStore(selector_cwd, selector_session_id)
+                            pending_resource = PendingResourceSelection(
+                                task_id=selector_context.task_id,
+                                context_id=selector_context.context_id,
+                                session_id=selector_session_id,
+                                cwd=selector_cwd,
+                                event=event,
+                                store=store,
+                                resume_from_checkpoint=True,
+                            )
+                            record = resource_selection_checkpoint_record(pending_resource)
+                            translated = publisher.translator.translate(event)
+                            for envelope in translated:
+                                for key in ("step", "candidate", "candidateStep"):
+                                    coordinate = envelope.get(key)
+                                    if isinstance(coordinate, dict):
+                                        record.setdefault("pipelineCoordinates", {})[key] = dict(coordinate)
+                            store.create(record)
+                            await self._resource_selection_registry.register(pending_resource)
+                            detached_resource = _DetachedPipelineResourceSelection(
+                                stream=stream_iter,
+                                pending=pending_resource,
+                            )
+                            detached_resource.prepare()
+                            await publisher.publish(
+                                event,
+                                permission_resolver=self._permission_resolver,
+                                auto_approve_permissions=self._auto_approve_permissions,
+                            )
+                            return _StreamConsumeResult(
+                                had_events=had_events,
+                                restart_requested=False,
+                                terminal_handoff_unavailable=terminal_handoff_unavailable,
+                                detached_resource_selection=detached_resource,
+                            )
                         if self._uses_interactive_sub_pipeline_permission(event):
                             if outbound is not None:
                                 await outbound.flush()
@@ -2452,6 +2636,68 @@ class IacCodeA2APipelineExecutor:
         )
         if resolved is None:
             raise RuntimeError(_("permission_resume_invalid: recovered Pipeline decision could not be published"))
+
+    @staticmethod
+    async def _publish_recovered_resource_selection(
+        publisher: PipelineA2AEventPublisher,
+        checkpoint: dict[str, Any],
+    ) -> None:
+        """Persist the claimed selector answer before the recovered tool executes."""
+
+        input_id = checkpoint.get("inputId")
+        tool_use_id = checkpoint.get("toolUseId")
+        selector = checkpoint.get("selector")
+        response = checkpoint.get("response")
+        if (
+            not isinstance(input_id, str)
+            or not input_id
+            or not isinstance(tool_use_id, str)
+            or not tool_use_id
+            or not isinstance(selector, dict)
+            or not isinstance(response, dict)
+            or response.get("status") not in {"selected", "canceled"}
+        ):
+            raise RuntimeError("resource_selection_resume_invalid: recovered Pipeline answer is incomplete")
+
+        snapshot = publisher.snapshot_store.load() or {}
+        control = snapshot.get("control") if isinstance(snapshot, dict) else None
+        history = control.get("inputHistory") if isinstance(control, dict) else None
+        if isinstance(history, list) and any(
+            isinstance(item, dict)
+            and item.get("eventType") == "input_received"
+            and isinstance(item.get("data"), dict)
+            and item["data"].get("inputId") == input_id
+            for item in history
+        ):
+            return
+
+        data: dict[str, Any] = {
+            "schemaVersion": 1,
+            "kind": "cloud_resource_selection",
+            "inputId": input_id,
+            "toolUseId": tool_use_id,
+            "selectorId": selector.get("id"),
+            "status": response.get("status"),
+        }
+        if response.get("status") == "selected":
+            data.update(
+                value=response.get("value"),
+                label=response.get("label") or response.get("value"),
+            )
+        elif response.get("status") == "canceled" and isinstance(response.get("optionsEmpty"), bool):
+            data["optionsEmpty"] = response["optionsEmpty"]
+        coordinates = checkpoint.get("pipelineCoordinates")
+        resolved = await publisher.publish_manual(
+            "input_received",
+            "step" if isinstance(coordinates, dict) and isinstance(coordinates.get("step"), dict) else "pipeline",
+            status="working",
+            data=data,
+            coordinates=coordinates if isinstance(coordinates, dict) else None,
+            require_durable_metadata=True,
+            require_journal_metadata=True,
+        )
+        if resolved is None:
+            raise RuntimeError("resource_selection_resume_invalid: recovered Pipeline answer could not be published")
 
     def _publisher(
         self,
@@ -4101,6 +4347,13 @@ async def _resume_pending_ask_user_question_stream(
 def _ask_user_question_from(event: Any) -> AskUserQuestionEvent | None:
     inner = event.inner if isinstance(event, SubPipelineStreamEvent) else event
     return inner if isinstance(inner, AskUserQuestionEvent) else None
+
+
+def _resource_selection_from_stream_event(event: Any) -> CloudResourceSelectionEvent | None:
+    inner = event
+    while isinstance(inner, SubPipelineStreamEvent):
+        inner = inner.inner
+    return inner if isinstance(inner, CloudResourceSelectionEvent) else None
 
 
 def _permission_request_from_stream_event(event: Any) -> PermissionRequestEvent | None:

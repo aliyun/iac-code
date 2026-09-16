@@ -1,6 +1,9 @@
-import * as api from "./api.js?v=web-repl-ui-313";
+import * as api from "./api.js?v=web-repl-ui-314";
 import { createComposerController } from "./components/composer.js?v=session-model-v22";
-import { renderBlockingPanels } from "./components/blocking.js?v=blocking-keys-v5";
+import {
+  destroyResourceSelectionPanels,
+  renderBlockingPanels,
+} from "./components/blocking.js?v=blocking-keys-v8";
 import {
   deploymentConfirmationKey,
   renderDeploymentConfirmationPanel,
@@ -10,7 +13,7 @@ import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v60";
 import { createOutputController } from "./components/output_panel.js?v=output-panel-v38";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
-import { reduceEvent } from "./events.js?v=web-repl-ui-323";
+import { reduceEvent } from "./events.js?v=web-repl-ui-324";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 
 const root = document.getElementById("iac-code-web-root");
@@ -699,9 +702,11 @@ function emptyState() {
     localShell: {},
     permissions: {},
     questions: {},
+    resourceSelections: {},
     elicitations: {},
     resolvedPermissions: {},
     resolvedQuestions: {},
+    resolvedResourceSelections: {},
     resolvedElicitations: {},
     queuedInputs: [],
     queuedInputsSeedSequence: 0,
@@ -1680,13 +1685,15 @@ function sessionActivityState(session, state = {}) {
   if (isCurrent) {
     const pendingPermissions = Object.keys(state.permissions || {}).length;
     const pendingQuestions = Object.keys(state.questions || {}).length;
+    const pendingResourceSelections = Object.keys(state.resourceSelections || {}).length;
     const pendingElicitations = Object.keys(state.elicitations || {}).length;
-    awaiting = pendingPermissions + pendingQuestions + pendingElicitations > 0;
+    awaiting = pendingPermissions + pendingQuestions + pendingResourceSelections + pendingElicitations > 0;
     running = Boolean(state.currentTurnActive);
   } else {
     awaiting =
       (Number(session.pendingPermissionCount) || 0) +
         (Number(session.pendingQuestionCount) || 0) +
+        (Number(session.pendingResourceSelectionCount) || 0) +
         (Number(session.pendingElicitationCount) || 0) >
       0;
     running = Boolean(session.currentTurnActive) || session.status === "running";
@@ -4675,35 +4682,77 @@ function renderBlocking(state) {
   if (!stack) {
     return;
   }
+  const resourceSelectionPanels = new Map(
+    Array.from(stack.querySelectorAll?.(".blocking-panel-resource-selector") || []).map((panel) => [
+      text(panel.dataset?.requestId),
+      panel,
+    ]),
+  );
+  const pendingResourceSelectionIds = new Set(
+    Object.values(state.resourceSelections || {}).map((request) => text(request?.requestId)),
+  );
+  destroyResourceSelectionPanels(stack, pendingResourceSelectionIds);
   stack.replaceChildren(
-    renderBlockingPanels(state, {
-      onPermissionAnswer: async (requestId, answer) => {
-        await api.answerPermission(requestId, answer);
-      },
-      onQuestionAnswer: async (requestId, answer) => {
-        // 售卖流水线的 ask_user_question 暂停点没有在 question manager 里注册,
-        // 它的答案得走标准 pipeline 消息通道(与用户手敲「1」/选项文字等价),
-        // 由 _route_pending_question_answer 把序号/label/自由文本喂回暂停的引擎。
-        if (state.questions?.[requestId]?.payload?.pipeline) {
-          const freeText = text(answer?.free_text).trim();
-          const label = text(answer?.selected_label).trim();
-          const message = freeText || label;
-          if (!message) {
+    renderBlockingPanels(
+      state,
+      {
+        onPermissionAnswer: async (requestId, answer) => {
+          await api.answerPermission(requestId, answer);
+        },
+        onQuestionAnswer: async (requestId, answer) => {
+          // 售卖流水线的 ask_user_question 暂停点没有在 question manager 里注册,
+          // 它的答案得走标准 pipeline 消息通道(与用户手敲「1」/选项文字等价),
+          // 由 _route_pending_question_answer 把序号/label/自由文本喂回暂停的引擎。
+          if (state.questions?.[requestId]?.payload?.pipeline) {
+            const freeText = text(answer?.free_text).trim();
+            const label = text(answer?.selected_label).trim();
+            const message = freeText || label;
+            if (!message) {
+              return;
+            }
+            const sessionId = state.currentSession?.sessionId;
+            if (!sessionId) {
+              return;
+            }
+            await api.postMessage(sessionId, { text: message });
             return;
           }
-          const sessionId = state.currentSession?.sessionId;
-          if (!sessionId) {
-            return;
+          await api.answerQuestion(requestId, answer);
+        },
+        onResourceSelectionAnswer: async (requestId, answer) => {
+          const result = await api.answerResourceSelection(requestId, answer);
+          if (result?.resolved && state.resourceSelections?.[requestId]) {
+            const resourceSelections = { ...state.resourceSelections };
+            delete resourceSelections[requestId];
+            state = { ...state, resourceSelections };
+            render(state);
           }
-          await api.postMessage(sessionId, { text: message });
-          return;
-        }
-        await api.answerQuestion(requestId, answer);
+          return result;
+        },
+        onResourceSelectionCancel: async (requestId, answer) => {
+          const result = await api.cancelResourceSelection(requestId, answer);
+          if (result?.resolved && state.resourceSelections?.[requestId]) {
+            const resourceSelections = { ...state.resourceSelections };
+            delete resourceSelections[requestId];
+            state = { ...state, resourceSelections };
+            render(state);
+          }
+          return result;
+        },
+        onResourceSelectionQuery: async (requestId, query) => {
+          const result = await api.queryResourceSelector({
+            ...query,
+            requestId,
+          });
+          return result?.response || {};
+        },
+        onOpenExternal: DESKTOP_RUNTIME ? (url) => invokeDesktop("open_external_url", { url }) : null,
+        onElicitationAnswer: async (requestId, answer) => {
+          await api.answerElicitation(requestId, answer);
+        },
       },
-      onElicitationAnswer: async (requestId, answer) => {
-        await api.answerElicitation(requestId, answer);
-      },
-    }),
+      { resourceSelectionPanels },
+    ),
   );
   // 权限面板首次出现时把焦点从输入框移到面板，让上下键 / 回车立即可用，
   // 无需用户先用鼠标点击面板。
@@ -4758,8 +4807,9 @@ function renderStatus(state) {
   const session = state.currentSession || {};
   const pendingPermissions = Object.keys(state.permissions || {}).length;
   const pendingQuestions = Object.keys(state.questions || {}).length;
+  const pendingResourceSelections = Object.keys(state.resourceSelections || {}).length;
   const pendingElicitations = Object.keys(state.elicitations || {}).length;
-  const pendingTotal = pendingPermissions + pendingQuestions + pendingElicitations;
+  const pendingTotal = pendingPermissions + pendingQuestions + pendingResourceSelections + pendingElicitations;
 
   const pipelineWorkspaceOpen = byShell("pipeline-workspace-open");
   if (pipelineWorkspaceOpen) {
@@ -5985,6 +6035,9 @@ async function loadSession(sessionId, options = {}) {
   const pendingQuestions = Object.fromEntries(
     (session.pendingQuestions || []).map((request) => [request.requestId, request]),
   );
+  const pendingResourceSelections = Object.fromEntries(
+    (session.pendingResourceSelections || []).map((request) => [request.requestId, request]),
+  );
   const pipelineQuestion = pipelinePendingQuestionRequest(hydratedPipelineState.pipelineSnapshot);
   if (pipelineQuestion && !pendingQuestions[pipelineQuestion.requestId]) {
     pendingQuestions[pipelineQuestion.requestId] = pipelineQuestion;
@@ -6001,6 +6054,7 @@ async function loadSession(sessionId, options = {}) {
     tools: storedTools,
     permissions: Object.fromEntries((session.pendingPermissions || []).map((request) => [request.requestId, request])),
     questions: pendingQuestions,
+    resourceSelections: pendingResourceSelections,
     elicitations: Object.fromEntries(
       (session.pendingElicitations || []).map((request) => [request.requestId, request]),
     ),

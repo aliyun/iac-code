@@ -28,6 +28,7 @@ from iac_code.tools.cloud.base_stack import stack_result_from_metadata
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
+    CloudResourceSelectionEvent,
     CompactionEvent,
     ContextUsageEvent,
     DiagramEvent,
@@ -302,6 +303,8 @@ class PipelineEventTranslator:
             return [self._translate_thinking_delta_event(event)]
         if isinstance(event, AskUserQuestionEvent):
             return [self._translate_ask_user_question_event(event)]
+        if isinstance(event, CloudResourceSelectionEvent):
+            return [self._translate_cloud_resource_selection_event(event)]
         if isinstance(event, PermissionRequestEvent):
             return [self._translate_permission_request_event(event)]
         if isinstance(event, ToolUseEndEvent):
@@ -650,6 +653,11 @@ class PipelineEventTranslator:
             data = _ask_user_question_data(inner)
             input_data = _ask_user_question_input(inner)
             permission = None
+        elif isinstance(inner, CloudResourceSelectionEvent):
+            event_type = "input_required"
+            data = _cloud_resource_selection_data(inner)
+            input_data = dict(data)
+            permission = None
         elif isinstance(inner, CandidateDetailEvent):
             if self._has_emitted_candidate_detail(inner.tool_use_id):
                 return []
@@ -763,6 +771,13 @@ class PipelineEventTranslator:
         envelope = self._translate_parent_scoped_display_event("input_required", _ask_user_question_data(event))
         envelope["status"] = "input_required"
         envelope["input"] = _ask_user_question_input(event)
+        return envelope
+
+    def _translate_cloud_resource_selection_event(self, event: CloudResourceSelectionEvent) -> dict[str, Any]:
+        data = _cloud_resource_selection_data(event)
+        envelope = self._translate_parent_scoped_display_event("input_required", data)
+        envelope["status"] = "input_required"
+        envelope["input"] = dict(data)
         return envelope
 
     def _translate_permission_request_event(self, event: PermissionRequestEvent) -> dict[str, Any]:
@@ -1474,6 +1489,25 @@ def _ask_user_question_input(event: AskUserQuestionEvent) -> dict[str, Any]:
 def _ask_user_question_input_id(event: AskUserQuestionEvent) -> str:
     suffix = event.tool_use_id or "unknown"
     return f"ask-{suffix}"
+
+
+def _cloud_resource_selection_data(event: CloudResourceSelectionEvent) -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "inputId": event.input_id,
+        "toolUseId": event.tool_use_id,
+        "prompt": event.question,
+        "required": True,
+        "selector": {
+            "id": event.selector_id,
+            "associationProperty": event.association_property,
+            "outputKind": event.output_kind,
+            "associationPropertyMetadata": copy.deepcopy(event.association_property_metadata),
+            "source": copy.deepcopy(event.source),
+            "profileHash": event.profile_hash,
+        },
+    }
 
 
 def _permission_request_metadata(event: PermissionRequestEvent) -> dict[str, Any]:

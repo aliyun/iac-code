@@ -49,6 +49,36 @@ const permissionSelection = new Map();
 // 记录已经自动聚焦过的权限请求，确保面板首次出现时把焦点从输入框移到面板，
 // 让键盘（上下键 / 回车）立即可用，且后续重渲染不再抢占焦点。
 const permissionAutofocused = new Set();
+let resourceSelectorBundlePromise;
+const resourceSelectionCandidates = new Map();
+
+export function resourceSelectorExternalUrl(value) {
+  const raw = text(value).trim();
+  if (!/^https?:\/\//i.test(raw)) {
+    return "";
+  }
+  try {
+    const url = new URL(raw);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+export function resourceSelectionLabel(label, value) {
+  const fallback = text(value);
+  return typeof label === "string" && label.length <= 1024 ? label || fallback : fallback;
+}
+
+function loadResourceSelectorBundle() {
+  if (!resourceSelectorBundlePromise) {
+    resourceSelectorBundlePromise = import("../vendor/ore-resource-selector.min.js?v=16").catch((error) => {
+      resourceSelectorBundlePromise = undefined;
+      throw error;
+    });
+  }
+  return resourceSelectorBundlePromise;
+}
 
 // 计算上下键切换后的选项序号，按边界收敛（不循环）。
 export function nextPermissionSelection(index, key, count) {
@@ -456,7 +486,233 @@ export function renderElicitationRequest(request = {}, handlers = {}) {
   return panel;
 }
 
-export function renderBlockingPanels(state = {}, handlers = {}) {
+export function renderResourceSelectionRequest(request = {}, handlers = {}) {
+  const payload = request.payload || {};
+  const selector = payload.selector || {};
+  const requestId = text(request.requestId);
+  const panel = document.createElement("article");
+  panel.className = "blocking-panel blocking-panel-resource-selector";
+  panel.dataset.requestId = requestId;
+
+  const title = document.createElement("h3");
+  const question = text(payload.question || t("Input required"));
+  title.textContent = question;
+  panel.append(title);
+
+  const metadata = selector.associationPropertyMetadata || {};
+  const regionId = text(metadata.RegionId);
+  if (regionId && !question.includes(regionId)) {
+    appendParagraph(panel, "blocking-detail", t("Region") + ": " + regionId);
+  }
+  if (selector.source?.value) {
+    appendParagraph(panel, "blocking-detail", t("Source") + ": " + text(selector.source.value));
+  }
+
+  let candidate = resourceSelectionCandidates.get(requestId) || null;
+  let mounted = null;
+  const controlRow = document.createElement("div");
+  controlRow.className = "resource-selector-control-row";
+  const mountPoint = document.createElement("div");
+  mountPoint.className = "resource-selector-island";
+  mountPoint.addEventListener("click", (event) => {
+    const anchor = event.target?.closest?.("a[href]");
+    if (!anchor || !mountPoint.contains(anchor)) {
+      return;
+    }
+    const url = resourceSelectorExternalUrl(anchor.getAttribute("href"));
+    if (!url || typeof handlers.onOpenExternal !== "function") {
+      return;
+    }
+    event.preventDefault();
+    try {
+      Promise.resolve(handlers.onOpenExternal(url)).catch((error) => {
+        console.warn("[resource-selector] open external URL failed", error);
+      });
+    } catch (error) {
+      console.warn("[resource-selector] open external URL failed", error);
+    }
+  });
+  const refreshLabel = t("Refresh");
+  const refresh = makeButton("", "blocking-action resource-selector-refresh", () => {
+    refresh.classList.remove("is-error");
+    refresh.classList.add("is-loading");
+    refresh.disabled = true;
+    refresh.setAttribute("aria-busy", "true");
+    refresh.setAttribute("aria-label", refreshLabel);
+    refresh.title = refreshLabel;
+    mounted?.refresh?.();
+  });
+  refresh.setAttribute("aria-busy", "false");
+  refresh.setAttribute("aria-label", refreshLabel);
+  refresh.title = refreshLabel;
+  const refreshIcon = document.createElement("span");
+  refreshIcon.className = "resource-selector-refresh-icon";
+  refreshIcon.setAttribute("aria-hidden", "true");
+  refresh.append(refreshIcon);
+  controlRow.append(mountPoint, refresh);
+  panel.append(controlRow);
+
+  const footer = document.createElement("div");
+  footer.className = "blocking-option-footer resource-selector-footer";
+  const submitError = document.createElement("p");
+  submitError.className = "blocking-detail resource-selector-submit-error";
+  submitError.hidden = true;
+  let submitting = false;
+  let confirm;
+  let cancel;
+  const submit = (button, handler, answer) => {
+    if (submitting || typeof handler !== "function") {
+      return;
+    }
+    submitting = true;
+    const idleLabel = button.textContent;
+    panel.classList.add("is-submitting");
+    panel.setAttribute("aria-busy", "true");
+    button.classList.add("is-submitting");
+    button.textContent = t("Submitting...");
+    confirm.disabled = true;
+    cancel.disabled = true;
+    refresh.disabled = true;
+    mountPoint.inert = true;
+    submitError.hidden = true;
+    Promise.resolve(handler(requestId, answer)).catch((error) => {
+      if (!panel.isConnected) {
+        return;
+      }
+      submitting = false;
+      panel.classList.remove("is-submitting");
+      panel.setAttribute("aria-busy", "false");
+      button.classList.remove("is-submitting");
+      button.textContent = idleLabel;
+      confirm.disabled = !candidate;
+      cancel.disabled = false;
+      refresh.disabled = refresh.classList.contains("is-loading");
+      mountPoint.inert = false;
+      console.warn("[resource-selector] answer failed", error);
+      submitError.textContent = t("Resource selection failed. Please try again.");
+      submitError.hidden = false;
+    });
+  };
+  confirm = makeButton(t("Confirm"), "blocking-action resource-selector-confirm", () => {
+    if (!candidate) {
+      return;
+    }
+    submit(confirm, handlers.onResourceSelectionAnswer, {
+      sessionId: text(payload.sessionId),
+      inputId: text(payload.inputId),
+      selectorId: text(selector.id),
+      value: text(candidate.value),
+      label: resourceSelectionLabel(candidate.label, candidate.value),
+    });
+  });
+  confirm.disabled = !candidate;
+  cancel = makeButton(t("Cancel"), "blocking-action", () => {
+    submit(cancel, handlers.onResourceSelectionCancel, {
+      sessionId: text(payload.sessionId),
+      inputId: text(payload.inputId),
+      selectorId: text(selector.id),
+    });
+  });
+  footer.append(confirm, cancel);
+  panel.append(submitError, footer);
+
+  queueMicrotask(async () => {
+    try {
+      const bundle = await loadResourceSelectorBundle();
+      if (!panel.isConnected) {
+        return;
+      }
+      const capabilities = bundle.capabilities?.() || {};
+      if (capabilities.profileHash !== selector.profileHash) {
+        throw new Error("selector_profile_mismatch");
+      }
+      mounted = bundle.mount(mountPoint, {
+        selectorId: text(selector.id),
+        associationProperty: text(selector.associationProperty),
+        associationPropertyMetadata: metadata,
+        source: selector.source || null,
+        selection: candidate,
+        locale: text(document.documentElement.lang || "en"),
+        query: (operationKey, params = {}) =>
+          handlers.onResourceSelectionQuery?.(requestId, {
+            sessionId: text(payload.sessionId),
+            inputId: text(payload.inputId),
+            operationKey,
+            params,
+          }),
+        onChange: (selection) => {
+          const valid =
+            selection &&
+            typeof selection.value === "string" &&
+            selection.value.length > 0 &&
+            !Array.isArray(selection.value);
+          candidate = valid
+            ? { value: selection.value, label: resourceSelectionLabel(selection.label, selection.value) }
+            : null;
+          if (candidate) {
+            resourceSelectionCandidates.set(requestId, candidate);
+          } else {
+            resourceSelectionCandidates.delete(requestId);
+          }
+          confirm.disabled = submitting || !candidate;
+        },
+        onStatus: (next) => {
+          if (next === "loading") {
+            refresh.classList.remove("is-error");
+            refresh.classList.add("is-loading");
+            refresh.disabled = true;
+            refresh.setAttribute("aria-busy", "true");
+          } else if (next === "error") {
+            refresh.classList.remove("is-loading");
+            refresh.classList.add("is-error");
+            refresh.disabled = submitting;
+            refresh.setAttribute("aria-busy", "false");
+            const retryLabel = t("Retry refresh");
+            refresh.setAttribute("aria-label", retryLabel);
+            refresh.title = retryLabel;
+          } else if (next === "ready") {
+            refresh.classList.remove("is-loading");
+            refresh.classList.remove("is-error");
+            refresh.disabled = submitting;
+            refresh.setAttribute("aria-busy", "false");
+            refresh.setAttribute("aria-label", refreshLabel);
+            refresh.title = refreshLabel;
+          }
+        },
+      });
+      panel._resourceSelectorDestroy = () => {
+        mounted?.destroy?.();
+        mounted = null;
+      };
+    } catch (_error) {
+      if (panel.isConnected) {
+        refresh.classList.remove("is-loading");
+        refresh.classList.add("is-error");
+        refresh.disabled = false;
+        refresh.setAttribute("aria-busy", "false");
+        const retryLabel = t("Retry refresh");
+        refresh.setAttribute("aria-label", retryLabel);
+        refresh.title = retryLabel;
+      }
+    }
+  });
+
+  return panel;
+}
+
+export function destroyResourceSelectionPanels(root, preservedRequestIds = new Set()) {
+  const panels = root?.querySelectorAll?.(".blocking-panel-resource-selector") || [];
+  panels.forEach((panel) => {
+    const requestId = text(panel.dataset?.requestId);
+    if (preservedRequestIds.has(requestId)) {
+      return;
+    }
+    panel._resourceSelectorDestroy?.();
+    resourceSelectionCandidates.delete(requestId);
+  });
+}
+
+export function renderBlockingPanels(state = {}, handlers = {}, options = {}) {
   const container = document.createElement("section");
   container.className = "blocking-panels";
 
@@ -465,6 +721,11 @@ export function renderBlockingPanels(state = {}, handlers = {}) {
   }
   for (const request of Object.values(state.questions || {})) {
     container.append(renderQuestionRequest(request, handlers));
+  }
+  for (const request of Object.values(state.resourceSelections || {})) {
+    const requestId = text(request?.requestId);
+    const existing = options.resourceSelectionPanels?.get?.(requestId);
+    container.append(existing || renderResourceSelectionRequest(request, handlers));
   }
   for (const request of Object.values(state.elicitations || {})) {
     container.append(renderElicitationRequest(request, handlers));
