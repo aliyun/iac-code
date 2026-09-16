@@ -8318,15 +8318,17 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
 }
 
 .markdown-body pre {
+  box-sizing: border-box;
   max-width: 100%;
   margin: 0.45rem 0;
   padding: 0.72rem 0.82rem;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   border: 1px solid var(--codex-border);
   border-radius: 9px;
   background: color-mix(in srgb, var(--codex-ink) 3.5%, transparent);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  white-space: pre;
+  overflow-wrap: normal;
 }
 
 .markdown-body pre code {
@@ -8334,6 +8336,165 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
   padding: 0;
   background: transparent;
 }
+
+.markdown-code-block {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  margin: 0.45rem 0;
+  overflow: hidden;
+  border: 1px solid var(--codex-border);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--codex-ink) 3.5%, transparent);
+}
+
+.markdown-code-toolbar {
+  position: absolute;
+  top: 0.42rem;
+  right: 0.42rem;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.22rem 0.28rem 0.22rem 0.48rem;
+  border: 1px solid color-mix(in srgb, var(--codex-ink) 12%, transparent);
+  border-radius: 7px;
+  color: var(--codex-muted);
+  background: color-mix(in srgb, var(--codex-panel-raised) 94%, transparent);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-2px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+  user-select: none;
+}
+
+.markdown-code-block:hover > .markdown-code-toolbar,
+.markdown-code-block:focus-within > .markdown-code-toolbar {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.markdown-code-language {
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.055em;
+}
+
+.markdown-code-copy {
+  display: inline-grid;
+  place-items: center;
+  width: 1.45rem;
+  height: 1.45rem;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.markdown-code-copy:hover,
+.markdown-code-copy:focus-visible {
+  color: var(--codex-text);
+  background: color-mix(in srgb, var(--codex-ink) 8%, transparent);
+  outline: none;
+}
+
+.markdown-code-copy[data-copied="yes"] {
+  color: #52a96f;
+}
+
+.markdown-code-copy[data-copied="no"] {
+  color: #d9655b;
+}
+
+.markdown-code-copy[data-copied="yes"] .markdown-code-copy-icon {
+  -webkit-mask: var(--icon-check) center / contain no-repeat;
+  mask: var(--icon-check) center / contain no-repeat;
+}
+
+/* 含代码围栏的回答占满正文列，但不越过与分隔线、输入框一致的 40rem 阅读边界。 */
+.transcript-panel .message-agent > .message-body:has(.markdown-code-block) {
+  width: min(40rem, 100%);
+  max-width: 100%;
+}
+
+.markdown-code-block > pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.markdown-code-block.is-collapsed > pre {
+  max-height: 22rem;
+  overflow-y: hidden;
+}
+
+.markdown-code-toggle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  box-sizing: border-box;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  min-height: 4rem;
+  padding: 1.6rem 0.7rem 0.48rem;
+  border: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in srgb, var(--codex-panel-raised) 96%, transparent) 62%
+  );
+  color: var(--codex-muted);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 560;
+  cursor: pointer;
+}
+
+.markdown-code-toggle:hover,
+.markdown-code-toggle:focus-visible {
+  color: var(--codex-text);
+  outline: none;
+}
+
+.markdown-code-block.is-expanded > .markdown-code-toggle {
+  position: static;
+}
+
+.markdown-code-block > .markdown-mermaid {
+  padding: 0.72rem 0.82rem;
+  overflow-x: auto;
+}
+
+.markdown-code-block > .markdown-mermaid > .mermaid-fallback {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.markdown-code-block .tok-key { color: #79c0ff; }
+.markdown-code-block .tok-string { color: #a5d6ff; }
+.markdown-code-block .tok-number { color: #ffa657; }
+.markdown-code-block .tok-boolean { color: #d2a8ff; }
+.markdown-code-block .tok-comment { color: #8b949e; font-style: italic; }
+
+:root[data-theme="ivory"] .markdown-code-block .tok-key { color: #0550ae; }
+:root[data-theme="ivory"] .markdown-code-block .tok-string { color: #0a3069; }
+:root[data-theme="ivory"] .markdown-code-block .tok-number { color: #953800; }
+:root[data-theme="ivory"] .markdown-code-block .tok-boolean { color: #8250df; }
+:root[data-theme="ivory"] .markdown-code-block .tok-comment { color: #6e7781; font-style: italic; }
 
 .markdown-body table {
   width: 100%;

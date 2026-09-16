@@ -902,6 +902,9 @@ def test_app_renders_replayed_markdown_thinking_and_attached_tools() -> None:
         ".markdown-body code",
         ".markdown-body table",
         ".markdown-body ul",
+        ".markdown-code-block",
+        ".markdown-code-toolbar",
+        ".markdown-code-copy",
     ]:
         assert snippet in styles
 
@@ -936,6 +939,473 @@ def test_markdown_links_open_in_new_tab_without_opener(tmp_path) -> None:
     assert output == {
         "attributes": {"target": "_blank", "rel": "noopener noreferrer"},
         "rendered": "<a>",
+    }
+
+
+def test_markdown_mermaid_fence_uses_shared_renderer(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            let replacement = null;
+            const initialized = [];
+            function makeElement(tagName) {
+              return {
+                tagName,
+                className: "",
+                textContent: "",
+                dataset: {},
+                children: [],
+                attributes: {},
+                append(...children) { this.children.push(...children); },
+                addEventListener() {},
+                setAttribute(name, value) { this.attributes[name] = value; },
+                replaceChildren(...children) { this.children = children; },
+                set innerHTML(value) { this.html = value; },
+              };
+            }
+            globalThis.window = {
+              markdownit() {
+                return {
+                  renderer: { rules: {} },
+                  render() { return '<pre><code class="language-mermaid">graph LR</code></pre>'; },
+                };
+              },
+              mermaid: {
+                initialize(options) { initialized.push(options); },
+                async render(_id, source) { return { svg: `<svg>${source}</svg>` }; },
+              },
+            };
+            globalThis.document = {
+              getElementById() { return null; },
+              querySelectorAll() { return []; },
+              documentElement: { getAttribute() { return "ivory"; } },
+              createElement: makeElement,
+              head: { append() {} },
+            };
+            const pre = { replaceWith(node) { replacement = node; } };
+            const newline = String.fromCharCode(10);
+            const code = { parentElement: pre, textContent: ["graph LR", "A --> B"].join(newline) };
+            const target = {
+              set innerHTML(value) { this.html = value; },
+              querySelectorAll(selector) { this.selector = selector; return [code]; },
+            };
+            const { renderMarkdownInto } = await import(__APP_MODULE__);
+            renderMarkdownInto(target, ["```mermaid", "graph LR", "A --> B", "```"].join(newline));
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            console.log(JSON.stringify({
+              selector: target.selector,
+              containerClass: replacement.className,
+              language: replacement.children[0].children[0].textContent,
+              copyIcon: replacement.children[0].children[1].children[0].className,
+              diagramClass: replacement.children[1].children[0].className,
+              svg: replacement.children[1].children[0].html,
+              theme: initialized.at(-1).theme,
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "selector": "pre > code",
+        "containerClass": "markdown-code-block",
+        "language": "Mermaid",
+        "copyIcon": "workspace-status-copy-icon markdown-code-copy-icon",
+        "diagramClass": "mermaid-diagram",
+        "svg": "<svg>graph LR\nA --> B</svg>",
+        "theme": "default",
+    }
+
+
+def test_markdown_code_highlighting_and_mermaid_detection(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById() { return null; } };
+            const { highlightMarkdownCode, looksLikeMermaid } = await import(__APP_MODULE__);
+            const python = highlightMarkdownCode(
+              ['def run():', '  return "<ok>" # note'].join(String.fromCharCode(10)),
+              "python",
+            );
+            const shell = highlightMarkdownCode("if true; then # note", "bash");
+            const javascript = highlightMarkdownCode('const value = "<script>";', "js");
+            const html = highlightMarkdownCode("<!-- note --!><main>", "html");
+            console.log(JSON.stringify({
+              pythonKeyword: python.includes('class="tok-key">def</span>'),
+              pythonComment: python.includes('class="tok-comment"># note</span>'),
+              pythonEscaped: python.includes("&lt;ok&gt;"),
+              shellKeyword: shell.includes('class="tok-key">if</span>'),
+              javascriptKeyword: javascript.includes('class="tok-key">const</span>'),
+              javascriptEscaped: !javascript.includes("<script>"),
+              htmlBangComment: html.includes('class="tok-comment">&lt;!-- note --!&gt;</span>'),
+              graph: looksLikeMermaid("graph LR\\nA --> B"),
+              flowchart: looksLikeMermaid("flowchart TD\\nA --> B"),
+              ordinary: looksLikeMermaid("print('graph LR')"),
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "pythonKeyword": True,
+        "pythonComment": True,
+        "pythonEscaped": True,
+        "shellKeyword": True,
+        "javascriptKeyword": True,
+        "javascriptEscaped": True,
+        "htmlBangComment": True,
+        "graph": True,
+        "flowchart": True,
+        "ordinary": False,
+    }
+
+    app_source = _source(APP_JS)
+    assert '["mermaid", "mmd"].includes(declaredLanguage)' in app_source
+
+
+def test_markdown_code_toolbar_labels_highlights_and_copies(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            let replacement = null;
+            let copied = "";
+            function makeElement(tagName) {
+              return {
+                tagName,
+                className: "",
+                textContent: "",
+                dataset: {},
+                children: [],
+                listeners: {},
+                attributes: {},
+                append(...children) { this.children.push(...children); },
+                addEventListener(name, listener) { this.listeners[name] = listener; },
+                setAttribute(name, value) { this.attributes[name] = value; },
+                set innerHTML(value) { this.html = value; },
+              };
+            }
+            globalThis.document = {
+              getElementById() { return null; },
+              querySelectorAll() { return []; },
+              createElement: makeElement,
+            };
+            Object.defineProperty(globalThis, "navigator", {
+              configurable: true,
+              value: { clipboard: { async writeText(value) { copied = value; } } },
+            });
+            const pre = { replaceWith(node) { replacement = node; } };
+            const code = { className: "language-python", parentElement: pre, textContent: "return 42" };
+            const target = { querySelectorAll() { return [code]; } };
+            const { enhanceMarkdownCodeBlocks } = await import(__APP_MODULE__);
+            enhanceMarkdownCodeBlocks(target, { renderMermaid: false });
+            const toolbar = replacement.children[0];
+            const button = toolbar.children[1];
+            globalThis.setTimeout = () => 0;
+            await button.listeners.click();
+            console.log(JSON.stringify({
+              language: toolbar.children[0].textContent,
+              icon: button.children[0].className,
+              copiedState: button.dataset.copied,
+              label: button.attributes["aria-label"],
+              copied,
+              highlighted: code.innerHTML.includes('class="tok-key">return</span>'),
+              keptPre: replacement.children[1] === pre,
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "language": "Python",
+        "icon": "workspace-status-copy-icon markdown-code-copy-icon",
+        "copiedState": "yes",
+        "label": "Copied",
+        "copied": "return 42",
+        "highlighted": True,
+        "keptPre": True,
+    }
+
+
+def test_markdown_code_toolbar_floats_on_hover_and_stays_within_reading_width() -> None:
+    styles = _source(STYLES_CSS)
+    block = _css_block(styles, ".markdown-code-block")
+    toolbar = _css_block(styles, ".markdown-code-toolbar")
+    hover = _css_block(
+        styles,
+        ".markdown-code-block:hover > .markdown-code-toolbar,\n"
+        ".markdown-code-block:focus-within > .markdown-code-toolbar",
+    )
+    copy = _css_block(styles, ".markdown-code-copy")
+    wide_message = _css_block(styles, ".transcript-panel .message-agent > .message-body:has(.markdown-code-block)")
+    collapsed_code = _css_block(styles, ".markdown-code-block.is-collapsed > pre")
+    toggle = _css_block(styles, ".markdown-code-toggle")
+    expanded_toggle = _css_block(styles, ".markdown-code-block.is-expanded > .markdown-code-toggle")
+
+    assert "position: relative;" in block
+    assert "width: 100%;" in block
+    assert "position: absolute;" in toolbar
+    assert "opacity: 0;" in toolbar
+    assert "pointer-events: none;" in toolbar
+    assert "opacity: 1;" in hover
+    assert "pointer-events: auto;" in hover
+    assert "width: 1.45rem;" in copy
+    assert "min-width" not in copy
+    assert "width: min(40rem, 100%);" in wide_message
+    assert "max-width: 100%;" in wide_message
+    assert "max-height: 22rem;" in collapsed_code
+    assert "position: absolute;" in toggle
+    assert "width: 100%;" in toggle
+    assert "justify-content: center;" in toggle
+    assert "position: static;" in expanded_toggle
+    assert "min-height" not in expanded_toggle
+    assert "background" not in expanded_toggle
+
+
+def test_long_markdown_code_collapses_and_can_expand_then_collapse(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            function makeElement(tagName) {
+              return {
+                tagName,
+                className: "",
+                textContent: "",
+                children: [],
+                listeners: {},
+                attributes: {},
+                append(...children) { this.children.push(...children); },
+                addEventListener(name, listener) { this.listeners[name] = listener; },
+                setAttribute(name, value) { this.attributes[name] = value; },
+                set innerHTML(value) { this.html = value; },
+              };
+            }
+            globalThis.document = {
+              getElementById() { return null; },
+              querySelectorAll() { return []; },
+              createElement: makeElement,
+            };
+            const source = Array.from({ length: 30 }, (_, index) => `print(${index})`).join("\\n");
+            const { enhanceMarkdownCodeBlocks } = await import(__APP_MODULE__);
+            function render() {
+              let replacement = null;
+              const pre = { replaceWith(node) { replacement = node; } };
+              const code = { className: "language-python", parentElement: pre, textContent: source };
+              const target = { querySelectorAll() { return [code]; } };
+              enhanceMarkdownCodeBlocks(target, {
+                renderMermaid: false,
+                codeBlockKeyPrefix: "message:stable-id",
+              });
+              return replacement;
+            }
+            const first = render();
+            const toggle = first.children[2];
+            const initial = {
+              className: first.className,
+              label: toggle.textContent,
+              expanded: toggle.attributes["aria-expanded"],
+            };
+            toggle.listeners.click();
+            const rerenderedOpen = render();
+            const rerenderedToggle = rerenderedOpen.children[2];
+            const opened = {
+              className: rerenderedOpen.className,
+              label: rerenderedToggle.textContent,
+              expanded: rerenderedToggle.attributes["aria-expanded"],
+            };
+            rerenderedToggle.listeners.click();
+            const rerenderedClosed = render();
+            console.log(JSON.stringify({
+              initial,
+              opened,
+              closedAgain: rerenderedClosed.className,
+              finalLabel: rerenderedClosed.children[2].textContent,
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "initial": {
+            "className": "markdown-code-block is-collapsible is-collapsed",
+            "label": "Show more",
+            "expanded": "false",
+        },
+        "opened": {
+            "className": "markdown-code-block is-collapsible is-expanded",
+            "label": "Show less",
+            "expanded": "true",
+        },
+        "closedAgain": "markdown-code-block is-collapsible is-collapsed",
+        "finalLabel": "Show more",
+    }
+
+
+def test_long_markdown_code_stays_expanded_while_streaming(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            let replacement = null;
+            function makeElement(tagName) {
+              return {
+                tagName,
+                className: "",
+                textContent: "",
+                children: [],
+                append(...children) { this.children.push(...children); },
+                addEventListener() {},
+                setAttribute() {},
+                set innerHTML(value) { this.html = value; },
+              };
+            }
+            globalThis.document = {
+              getElementById() { return null; },
+              querySelectorAll() { return []; },
+              createElement: makeElement,
+            };
+            const pre = { replaceWith(node) { replacement = node; } };
+            const source = Array.from({ length: 40 }, (_, index) => `print(${index})`).join("\\n");
+            const code = { className: "language-python", parentElement: pre, textContent: source };
+            const target = { querySelectorAll() { return [code]; } };
+            const { enhanceMarkdownCodeBlocks } = await import(__APP_MODULE__);
+            enhanceMarkdownCodeBlocks(target, {
+              renderMermaid: false,
+              codeBlockKeyPrefix: "message:streaming",
+              codeBlockStreaming: true,
+            });
+            console.log(JSON.stringify({
+              className: replacement.className,
+              childCount: replacement.children.length,
+              keptPre: replacement.children[1] === pre,
+            }));
+            """
+        ),
+    )
+
+    assert output == {"className": "markdown-code-block", "childCount": 2, "keptPre": True}
+
+
+def test_message_stack_selection_detection(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById() { return null; } };
+            const {
+              copyRememberedMessageStackSelection,
+              rememberMessageStackSelection,
+              selectionTouchesMessageStack,
+            } = await import(__APP_MODULE__);
+            const inside = {};
+            const outside = {};
+            const stack = { contains(node) { return node === inside; } };
+            const selected = {
+              isCollapsed: false,
+              anchorNode: inside,
+              focusNode: inside,
+              toString() { return "selected output"; },
+            };
+            const remembered = rememberMessageStackSelection(stack, selected, 100);
+            const clipboard = { value: "", setData(_type, value) { this.value = value; } };
+            const copyEvent = { clipboardData: clipboard, preventDefault() { this.prevented = true; } };
+            const copied = copyRememberedMessageStackSelection(
+              copyEvent,
+              { isCollapsed: true, toString() { return ""; } },
+              101,
+            );
+            console.log(JSON.stringify({
+              inside: selectionTouchesMessageStack(stack, {
+                isCollapsed: false, anchorNode: inside, focusNode: inside,
+              }),
+              crossing: selectionTouchesMessageStack(stack, {
+                isCollapsed: false, anchorNode: outside, focusNode: inside,
+              }),
+              outside: selectionTouchesMessageStack(stack, {
+                isCollapsed: false, anchorNode: outside, focusNode: outside,
+              }),
+              collapsed: selectionTouchesMessageStack(stack, {
+                isCollapsed: true, anchorNode: inside, focusNode: inside,
+              }),
+              remembered,
+              copied,
+              copiedText: clipboard.value,
+              prevented: copyEvent.prevented,
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "inside": True,
+        "crossing": True,
+        "outside": False,
+        "collapsed": False,
+        "remembered": True,
+        "copied": True,
+        "copiedText": "selected output",
+        "prevented": True,
+    }
+
+
+def test_message_stack_selection_range_restores_after_dom_rebuild(tmp_path) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const fullText = "alpha beta gamma";
+            const textNode = { nodeValue: fullText };
+            globalThis.document = {
+              getElementById() { return null; },
+              createRange() {
+                return {
+                  start: 0,
+                  end: fullText.length,
+                  selectNodeContents() { this.start = 0; this.end = fullText.length; },
+                  setStart(_node, offset) { this.start = offset; },
+                  setEnd(_node, offset) { this.end = offset; },
+                  toString() { return fullText.slice(this.start, this.end); },
+                };
+              },
+              createTreeWalker() {
+                let sent = false;
+                return { nextNode() { if (sent) return null; sent = true; return textNode; } };
+              },
+            };
+            const stack = { textContent: fullText, contains(node) { return node === textNode; } };
+            const originalRange = {
+              startContainer: textNode,
+              startOffset: 6,
+              endContainer: textNode,
+              endOffset: 10,
+              toString() { return "beta"; },
+            };
+            const originalSelection = {
+              isCollapsed: false,
+              rangeCount: 1,
+              anchorNode: textNode,
+              focusNode: textNode,
+              getRangeAt() { return originalRange; },
+            };
+            const { captureMessageStackSelection, restoreMessageStackSelection } = await import(__APP_MODULE__);
+            const snapshot = captureMessageStackSelection(stack, originalSelection);
+            let restoredRange = null;
+            const restoredSelection = {
+              removeAllRanges() {},
+              addRange(range) { restoredRange = range; },
+            };
+            const restored = restoreMessageStackSelection(stack, snapshot, restoredSelection);
+            console.log(JSON.stringify({ snapshot, restored, restoredText: restoredRange?.toString() }));
+            """
+        ),
+    )
+
+    assert output == {
+        "snapshot": {"start": 6, "end": 10, "text": "beta"},
+        "restored": True,
+        "restoredText": "beta",
     }
 
 
@@ -1299,8 +1769,8 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-319" in html
-    assert "/static/js/app.js?v=web-repl-ui-365" in html
+    assert "/static/styles.css?v=web-repl-ui-323" in html
+    assert "/static/js/app.js?v=web-repl-ui-375" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1334,7 +1804,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-365" in index_html
+    assert "web-repl-ui-375" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-324" in app_source
@@ -6192,13 +6662,16 @@ def test_transcript_hides_scrollbars_and_wraps_markdown_content() -> None:
     assert "padding-bottom: 1rem;" in active_blocking_block
     assert 'setElementClassFlag(stack, "is-overflowing", true);' in app_source
     assert 'setElementClassFlag(stack, "is-overflowing", isOverflowing);' in app_source
-    for block in [markdown_pre_block, thinking_pre_block]:
-        assert "overflow: hidden;" in block
-        assert "white-space: pre-wrap;" in block
-        assert "overflow-wrap: anywhere;" in block
-        # 回归:pre 走「换行 + 页面滚动」,不得设裁剪高度。曾经思考块用 max-height:18rem +
-        # overflow:hidden,展开长思考只看得到一部分且无法滚动(超高部分被裁、页面也够不到)。
-        assert "max-height" not in block
+    assert "overflow-x: auto;" in markdown_pre_block
+    assert "overflow-y: hidden;" in markdown_pre_block
+    assert "white-space: pre;" in markdown_pre_block
+    assert "overflow-wrap: normal;" in markdown_pre_block
+    assert "max-height" not in markdown_pre_block
+    assert "overflow: hidden;" in thinking_pre_block
+    assert "white-space: pre-wrap;" in thinking_pre_block
+    assert "overflow-wrap: anywhere;" in thinking_pre_block
+    # 思考块仍走「换行 + 页面滚动」且不得裁剪高度；代码块改为自身横向滚动以保留缩进。
+    assert "max-height" not in thinking_pre_block
     assert "table-layout: fixed;" in table_block
     assert "max-width: 100%;" in table_block
     assert "overflow-wrap: anywhere;" in cell_block
@@ -8547,7 +9020,7 @@ def test_app_renders_command_status_as_codex_like_inline_panel() -> None:
     # 会话 ID 复制按钮:内联「状态」面板须有可点击复制图标(Issue: 状态界面缺复制按钮),
     # 复用 workspace 状态页同款 .workspace-status-copy 视觉,并写入剪贴板。
     assert "makeSessionStatusCopyButton" in app_source
-    assert "copyStatusTextToClipboard" in app_source
+    assert "copyTextToClipboard" in app_source
     assert "navigator?.clipboard?.writeText" in app_source
     assert "workspace-status-copy session-status-copy" in app_source
     assert ".workspace-status-copy" in styles
@@ -10932,7 +11405,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-365" in html
+    assert "web-repl-ui-375" in html
     assert "web-repl-ui-343" not in html
 
 
@@ -11337,6 +11810,20 @@ def test_stream_render_throttles_while_pointer_over_message_stack() -> None:
     assert "messageStackPointerInside = false;" in leave_body
     assert "clearHoverThrottle();" in leave_body
     assert "scheduleStreamRender();" in leave_body
+
+
+def test_stream_render_caches_selection_without_pausing_output() -> None:
+    app_source = _source(APP_JS)
+    render_body = app_source.split("function renderMessages(state) {", 1)[1].split("\n}\n", 1)[0]
+    assert "selectionTouchesMessageStack(stack)" not in render_body
+    assert "messageStackRenderDeferredForSelection" not in app_source
+    assert 'document.addEventListener("selectionchange"' in app_source
+    assert 'document.addEventListener("copy"' in app_source
+    assert "copyRememberedMessageStackSelection(event)" in app_source
+    assert "MESSAGE_SELECTION_COPY_GRACE_MS" in app_source
+    assert "const selectionSnapshot = captureMessageStackSelection(stack);" in render_body
+    assert "restoreMessageStackSelection(stack, selectionSnapshot);" in render_body
+    assert "messageStackSelectionGestureActive" not in app_source
 
 
 def test_api_exposes_output_helpers() -> None:

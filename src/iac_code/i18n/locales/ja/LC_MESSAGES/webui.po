@@ -461,6 +461,19 @@ msgid ""
 msgstr "まず概算費用付きのアーキテクチャ候補から 1 つを選び、その方案だけを実装してデプロイします"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Copy"
+msgstr "コピー"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Copied"
+msgstr "コピーしました"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Copy failed"
+msgstr "コピーに失敗しました"
+
+#: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
 msgstr "コンテキストの使用記録はまだありません"
 
@@ -501,11 +514,6 @@ msgstr "セッション ID をコピー"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session ID copied"
 msgstr "セッション ID をコピーしました"
-
-#: src/iac_code/web/static/js/app.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Copy failed"
-msgstr "コピーに失敗しました"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -4168,4 +4176,3 @@ msgstr "ローカルランタイムを再起動できませんでした。詳細
 
 #~ msgid "Changes take effect after restarting the Desktop local runtime."
 #~ msgstr "変更は Desktop ローカルランタイムの再起動後に反映されます。"
-

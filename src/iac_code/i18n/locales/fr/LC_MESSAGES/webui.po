@@ -473,6 +473,19 @@ msgstr ""
 "chiffrés, puis mettez en œuvre et déployez uniquement cette solution"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Copy"
+msgstr "Copier"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Copied"
+msgstr "Copié"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Copy failed"
+msgstr "Échec de la copie"
+
+#: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
 msgstr "Aucune utilisation du contexte enregistrée pour l’instant"
 
@@ -513,11 +526,6 @@ msgstr "Copier l’ID de session"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session ID copied"
 msgstr "ID de session copié"
-
-#: src/iac_code/web/static/js/app.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Copy failed"
-msgstr "Échec de la copie"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -4333,4 +4341,3 @@ msgstr ""
 #~ "Les modifications prennent effet après "
 #~ "le redémarrage de l’environnement d’exécution"
 #~ " local Desktop."
-

@@ -459,6 +459,19 @@ msgid ""
 msgstr "先从带粗估价格的架构候选方案中选定一个，再只实现并部署该方案"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Copy"
+msgstr "复制"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Copied"
+msgstr "已复制"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Copy failed"
+msgstr "复制失败"
+
+#: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
 msgstr "暂无上下文使用记录"
 
@@ -499,11 +512,6 @@ msgstr "复制会话 ID"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session ID copied"
 msgstr "已复制会话 ID"
-
-#: src/iac_code/web/static/js/app.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Copy failed"
-msgstr "复制失败"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -4160,4 +4168,3 @@ msgstr "本地运行时无法重新启动。请打开诊断目录查看详情。
 
 #~ msgid "Changes take effect after restarting the Desktop local runtime."
 #~ msgstr "重新启动 Desktop 本地运行时后，更改才会生效。"
-

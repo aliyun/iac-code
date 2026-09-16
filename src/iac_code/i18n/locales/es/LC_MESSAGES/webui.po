@@ -475,6 +475,19 @@ msgstr ""
 "estimado y luego implemente y despliegue solo esa solución"
 
 #: src/iac_code/web/static/js/app.js
+msgid "Copy"
+msgstr "Copiar"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Copied"
+msgstr "Copiado"
+
+#: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Copy failed"
+msgstr "Error al copiar"
+
+#: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
 msgstr "Aún no se ha registrado uso de contexto"
 
@@ -515,11 +528,6 @@ msgstr "Copiar ID de sesión"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Session ID copied"
 msgstr "ID de sesión copiado"
-
-#: src/iac_code/web/static/js/app.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Copy failed"
-msgstr "Error al copiar"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/workspace.js
@@ -4319,4 +4327,3 @@ msgstr ""
 #~ "Los cambios se aplican después de "
 #~ "reiniciar el entorno de ejecución local"
 #~ " de Desktop."
-
