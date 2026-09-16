@@ -50,6 +50,41 @@ def test_create_agent_runtime_minimal_options(tmp_path, monkeypatch) -> None:
     assert runtime.session_id  # non-empty
 
 
+@pytest.mark.parametrize(
+    ("has_aliyun_credentials", "selector_capability_enabled", "selectors_expected"),
+    (
+        (True, True, True),
+        (False, True, False),
+        (True, False, False),
+    ),
+)
+def test_resource_selector_tools_share_the_aliyun_credential_gate(
+    tmp_path,
+    monkeypatch,
+    has_aliyun_credentials: bool,
+    selector_capability_enabled: bool,
+    selectors_expected: bool,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(
+        "iac_code.services.cloud_credentials.CloudCredentials.has_provider",
+        lambda self, provider: provider == "aliyun" and has_aliyun_credentials,
+    )
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.7-max",
+            cwd=str(tmp_path),
+            resource_selector_enabled=selector_capability_enabled,
+        )
+    )
+
+    assert (runtime.tool_registry.get("aliyun_api") is not None) is has_aliyun_credentials
+    assert (runtime.tool_registry.get("resolve_cloud_resource_selector") is not None) is selectors_expected
+    assert (runtime.tool_registry.get("select_cloud_resource") is not None) is selectors_expected
+
+
 def test_create_agent_runtime_logs_session_start_parameters(tmp_path, monkeypatch, caplog) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("IAC_CODE_PROVIDER", "dashscope")
@@ -385,6 +420,7 @@ def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path
             mcp_configs=[{"name": "ros", "command": "uvx"}],
             mcp_manager_factory=mcp_manager_factory,
             a2a_safe_mode=True,
+            resource_selector_enabled=True,
         )
     )
 
@@ -397,6 +433,8 @@ def test_create_agent_runtime_a2a_safe_mode_filters_tools_and_skips_mcp(tmp_path
         "aliyun_api",
         "aliyun_doc_search",
         "aliyun_api_doc",
+        "resolve_cloud_resource_selector",
+        "select_cloud_resource",
         "ros_stack",
         "ros_stack_instances",
         "ros_stack_group",

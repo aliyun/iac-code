@@ -7,6 +7,8 @@ description: ECS RAM ロール認証を含む Alibaba Cloud 認証情報の設�
 
 Alibaba Cloud の認証情報は、クラウドリソースの検査や管理を行う操作に必要です。
 
+`resolve_cloud_resource_selector` と `select_cloud_resource` は、`aliyun_api` と同じ有効認証情報の判定を使用します。A2A ではリクエストまたはセッションの認証情報が優先され、ない場合は通常どおりローカル設定、環境変数、Alibaba Cloud CLI 認証情報へフォールバックします。有効な認証情報がない場合、`aliyun_api` と 2 つのリソースセレクターツールはいずれも登録されません。
+
 ## ECS RAM ロール
 
 IaC Code を RAM ロールが割り当てられた Alibaba Cloud ECS インスタンス上で実行する場合は、**ECS RAM Role** を使用できます。IaC Code は ECS インスタンスメタデータサービス（IMDS）から一時 STS 認証情報を取得して自動更新し、AccessKey ID、AccessKey Secret、STS トークンを設定ファイルに保存しません。

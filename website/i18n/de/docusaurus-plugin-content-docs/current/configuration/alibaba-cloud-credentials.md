@@ -7,6 +7,8 @@ description: Alibaba Cloud-Anmeldedaten einschließlich ECS-RAM-Rollen-Authentif
 
 Alibaba Cloud-Anmeldedaten werden fuer Operationen benoetigt, die Cloud-Ressourcen ueberpruefen oder verwalten.
 
+Die Tools `resolve_cloud_resource_selector` und `select_cloud_resource` verwenden dieselbe Entscheidung ueber effektive Anmeldedaten wie `aliyun_api`. In A2A haben Anfrage-/Sitzungsanmeldedaten Vorrang; fehlen sie, greift die normale Kette aus lokaler Konfiguration, Umgebungsvariablen und Alibaba-Cloud-CLI-Anmeldedaten. Ohne gueltige effektive Anmeldedaten werden weder `aliyun_api` noch die beiden Ressourcenselektor-Tools registriert.
+
 ## ECS-RAM-Rolle
 
 Verwenden Sie **ECS RAM Role**, wenn IaC Code auf einer Alibaba-Cloud-ECS-Instanz mit zugewiesener RAM-Rolle ausgeführt wird. IaC Code bezieht temporäre STS-Anmeldedaten vom Metadatendienst der ECS-Instanz (IMDS), aktualisiert sie automatisch und speichert weder AccessKey-ID, AccessKey-Secret noch STS-Token in der Konfiguration.

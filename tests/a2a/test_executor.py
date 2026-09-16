@@ -4890,6 +4890,115 @@ async def test_executor_refreshes_cloud_tools_with_aliyun_metadata_for_reused_co
 
 
 @pytest.mark.asyncio
+async def test_a2a_normal_selector_registration_tracks_capability_and_request_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.resource_selector.profiles import PROFILE_HASH
+    from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED", "true")
+    for name in (
+        "ALIBABA_CLOUD_ACCESS_KEY_ID",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+        "ALIBABA_CLOUD_SECURITY_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "iac_code.services.providers.aliyun.AliyunCredentials._load_from_aliyun_cli",
+        lambda config_path=None: None,
+    )
+
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.6-plus",
+            session_id="session-1",
+            cwd=str(tmp_path),
+            a2a_safe_mode=True,
+        )
+    )
+    observed: list[tuple[bool, bool, bool]] = []
+
+    class ObservingLoop:
+        async def run_streaming(self, _prompt):
+            observed.append(
+                (
+                    runtime.tool_registry.get("aliyun_api") is not None,
+                    runtime.tool_registry.get("resolve_cloud_resource_selector") is not None,
+                    runtime.tool_registry.get("select_cloud_resource") is not None,
+                )
+            )
+            yield TextDeltaEvent(text="ok")
+
+    runtime.agent_loop = ObservingLoop()
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path.resolve()),
+        runtime_factory=lambda _session_id: runtime,
+    )
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    capability = {
+        "schemaVersion": 1,
+        "queryMode": "ros_api_json",
+        "profileHash": PROFILE_HASH,
+    }
+
+    def request_metadata(*, advertise_selector: bool, include_credential: bool) -> dict:
+        iac_code: dict = {"cwd": str(tmp_path)}
+        if advertise_selector:
+            iac_code["capabilities"] = {"resourceSelector": capability}
+        if include_credential:
+            iac_code.update(
+                {
+                    "alibaba_cloud_access_key_id": "request-id",
+                    "alibaba_cloud_access_key_secret": "request-secret",
+                    "alibaba_cloud_region_id": "cn-hangzhou",
+                }
+            )
+        return {"iac_code": iac_code}
+
+    try:
+        await executor.execute(
+            FakeRequestContext(
+                context_id="ctx-1",
+                task_id="task-capability-off",
+                metadata=request_metadata(advertise_selector=False, include_credential=True),
+            ),
+            FakeEventQueue(),
+        )
+        await executor.execute(
+            FakeRequestContext(
+                context_id="ctx-1",
+                task_id="task-selector-enabled",
+                metadata=request_metadata(advertise_selector=True, include_credential=True),
+            ),
+            FakeEventQueue(),
+        )
+        await executor.execute(
+            FakeRequestContext(
+                context_id="ctx-1",
+                task_id="task-without-credential",
+                metadata=request_metadata(advertise_selector=True, include_credential=False),
+            ),
+            FakeEventQueue(),
+        )
+    finally:
+        await runtime.aclose()
+
+    assert observed == [
+        (True, False, False),
+        (True, True, True),
+        (False, False, False),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_restart_audit_runtime_refreshes_cloud_tools_with_resume_request_credential(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

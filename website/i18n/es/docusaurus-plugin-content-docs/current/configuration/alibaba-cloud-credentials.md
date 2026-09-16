@@ -7,6 +7,8 @@ description: Configurar credenciales de Alibaba Cloud, incluida la autenticació
 
 Las credenciales de Alibaba Cloud son necesarias para las operaciones que inspeccionan o gestionan recursos en la nube.
 
+Las herramientas `resolve_cloud_resource_selector` y `select_cloud_resource` aplican la misma decisión de credenciales efectivas que `aliyun_api`. En A2A tienen prioridad las credenciales de la solicitud o sesión; si no existen, se usa la cadena normal de configuración local, variables de entorno y credenciales de Alibaba Cloud CLI. Sin credenciales efectivas válidas, no se registran `aliyun_api` ni las dos herramientas de selección.
+
 ## Rol RAM de ECS
 
 Usa **ECS RAM Role** cuando IaC Code se ejecute en una instancia ECS de Alibaba Cloud que tenga un rol RAM asociado. IaC Code obtiene credenciales STS temporales del servicio de metadatos de la instancia ECS (IMDS), las renueva automáticamente y no guarda un AccessKey ID, un AccessKey Secret ni un token STS en la configuración.

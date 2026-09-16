@@ -456,6 +456,12 @@ In pipeline mode, permission requests are published as `permission_requested` an
 
 With `auto-approve-permissions` enabled or explicit permission rules configured, permission requests do not become interactive input; they are auto-approved (with audit) or resolved by the rules. Protected Alibaba Cloud write APIs are not released by ordinary allow rules and still require exact per-API authorization. Permission decisions are audited locally; any allow decision that requires an audit record fails closed when the record cannot be persisted.
 
+## Resource Selector Extension
+
+`urn:iac-code:resource-selector:v1` is an optional extension for selecting one cloud resource or one value derived from it. The Agent Card advertises it only when `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` is enabled. A client opts in per request with `metadata.iac_code.capabilities.resourceSelector`, whose value must contain `schemaVersion: 1`, `queryMode: "ros_api_json"`, and the `profileHash` advertised by the selector capability. Clients must read that hash from the actually loaded selector bundle; they must not hard-code it.
+
+When the model requests a selection, the server enters `input-required` and emits the selector contract. The client queries and renders the selector, then resumes with a structured confirm or cancel response. Credentials and secrets are never included in selector event payloads. Safe Mode retains the selector tools, but the environment flag, client capability, matching profile hash, and an effective Alibaba Cloud credential are still required.
+
 ## Extensions
 
 The Agent Card advertises the optional iac-code artifact metadata extension:

@@ -60,6 +60,11 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
   - `providers/` — LLM provider adapters.
   - `services/` — session, context, credentials, capabilities, permissions, telemetry, and other business services.
   - `services/configuration_readiness.py` — non-secret readiness report (LLM + Alibaba Cloud credential completeness) for runtimes that embed iac-code.
+- Cloud resource selection:
+  - `resource_selector/` — selector profiles and capabilities, the allowlisted query/response-projection layer, parameter/result validation, and the model-facing `resolve_cloud_resource_selector` and `select_cloud_resource` tools. This feature is limited to selecting one cloud resource or one value derived from a selected resource.
+  - The selector tools use the same effective Alibaba Cloud credential decision as `aliyun_api`. Web and Desktop use the normal local credential chain. A2A gives request/session credentials priority and otherwise falls back to local configuration, environment variables, and Alibaba Cloud CLI credentials. If no valid effective credential exists, neither selector tool is registered.
+  - A2A additionally requires `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` and a client resource-selector capability with the matching loaded `profileHash`. Safe Mode keeps both selector tools in its allowlist, but does not bypass the server flag, client capability, profile hash, or credential gate.
+  - iac-code must not contain ORE TypeScript, TSX, or CSS source. It may contain only the obfuscated browser bundle, its manifest, and third-party notices. When updating the bundle, also update the manifest/hash, contract fixtures, E2E cases, and the frontend cache-busting token and tests.
 - Orchestration and integration protocols:
   - `pipeline/` — multi-step IaC pipeline engine (`engine/`) and the selling flow (`selling/`: candidate generation, cost estimation, and `ros_deploy` deployment orchestration). Selling-flow steps support per-surface `surface_overrides` in `pipeline.yaml` (prompt file, injected tools, conclusion schema) — for example the `a2a` and `a2a_rich` variants of `confirm_and_select`; keep rich candidate presentation scoped to Skill/A2A surfaces so REPL/Web behavior stays unchanged.
   - `a2a/` — A2A 1.0 server and client with multiple transports (`transports/`: gRPC, stdio, unix socket, Redis streams), plus input-required permission coordination (`input_required.py`) and request-scoped overrides such as the caller's preferred language (`runtime_overrides.py`).
@@ -76,6 +81,7 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
 - When testing environment variables and credential reading, use `tmp_path`, `patch.dict`, or mocks to isolate state.
 - For small changes, run at least the relevant tests; after changes to shared logic, CLI, providers, credentials, or tool execution paths, run `make test` and `make lint` if necessary.
 - Tests must pass across the full Python matrix (3.10–3.14). Keep code cross-platform: CI also runs on Windows, so watch for path-separator assumptions, binary-vs-text file I/O, `expanduser` reading `USERPROFILE` on Windows, and subprocess encoding (decode Node/other subprocess output with `encoding="utf-8"`).
+- `tests/resource_selector/` contains offline selector contracts and must not require network access or real cloud credentials. `tests/resource_selector_live/` is reserved for explicit, read-only real-cloud checks marked `resource_selector_live`; ordinary offline test runs must exclude them.
 
 ## Desktop Development
 

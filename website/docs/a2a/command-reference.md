@@ -538,3 +538,4 @@ iac-code a2a-client call \
 | `IACCODE_A2A_TEXT_MIME_TYPES` | Extra comma- or semicolon-separated text-like MIME types |
 | `IACCODE_A2A_MULTIMODAL_MIME_TYPES` | Extra comma- or semicolon-separated multimodal MIME types |
 | `IAC_CODE_A2A_PUSH_KEYRING` | Environment-managed encrypted push secret keyring |
+| `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | Enables A2A resource-selector advertisement and registration with `1`, `true`, `yes`, or `on` (case-insensitive); unset, empty, and all other values are disabled (default) |

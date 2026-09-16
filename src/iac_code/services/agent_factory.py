@@ -239,12 +239,17 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
     tool_registry.register_default_tools()
     register_cloud_tools(tool_registry, CloudCredentials(), aliyun_services)
 
-    def refresh_resource_selector_tools(enabled: bool) -> None:
+    resource_selector_requested = options.resource_selector_enabled
+
+    def refresh_resource_selector_tools(enabled: bool | None = None) -> None:
+        nonlocal resource_selector_requested
+        if enabled is not None:
+            resource_selector_requested = enabled
         unregister = getattr(tool_registry, "unregister", None)
         if callable(unregister):
             unregister("resolve_cloud_resource_selector")
             unregister("select_cloud_resource")
-        if not enabled:
+        if not resource_selector_requested or not CloudCredentials().has_provider("aliyun"):
             return
         from iac_code.resource_selector.tools import register_resource_selector_tools
 
@@ -257,6 +262,7 @@ def _create_agent_runtime(options: AgentFactoryOptions, aliyun_services: Any) ->
 
     def refresh_cloud_tools() -> None:
         register_cloud_tools(tool_registry, CloudCredentials(), aliyun_services)
+        refresh_resource_selector_tools()
         if options.a2a_safe_mode:
             _filter_tool_registry_for_a2a_safe_mode(tool_registry)
 

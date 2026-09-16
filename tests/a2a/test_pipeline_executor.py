@@ -1595,6 +1595,89 @@ async def test_pipeline_executor_refreshes_cloud_tools_with_aliyun_metadata_for_
 
 
 @pytest.mark.asyncio
+async def test_a2a_pipeline_selector_registration_tracks_capability_and_effective_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+    from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+    from iac_code.services.providers.aliyun import AliyunCredential
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_ID", "env-id")
+    monkeypatch.setenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET", "env-secret")
+    monkeypatch.setattr(
+        "iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "iac_code.services.providers.aliyun.AliyunCredentials._load_from_aliyun_cli",
+        lambda config_path=None: None,
+    )
+    runtime = create_agent_runtime(
+        AgentFactoryOptions(
+            model="qwen3.6-plus",
+            session_id="pipeline-selector-session",
+            cwd=str(tmp_path),
+            a2a_safe_mode=True,
+        )
+    )
+    session_credential = AliyunCredential(
+        mode="AK",
+        access_key_id="session-id",
+        access_key_secret="session-secret",
+        region_id="cn-beijing",
+    )
+
+    def configure(credential, *, selector_enabled: bool) -> tuple[str | None, tuple[bool, bool, bool]]:
+        executor = IacCodeA2APipelineExecutor(
+            task_store=MagicMock(),
+            model="qwen3.6-plus",
+            metrics=NoOpA2AMetrics(),
+            artifact_store=None,
+            push_notifier=None,
+            permission_resolver=None,
+            auto_approve_permissions=False,
+            thinking_exposure_types=None,
+            aliyun_credential=credential,
+            resource_selector_enabled=selector_enabled,
+        )
+        with executor._request_context(session_id=runtime.session_id):
+            executor._configure_agent_runtime_for_request(runtime)
+            effective = runtime.aliyun_services.credential_provider()
+            return (
+                effective.access_key_id if effective is not None else None,
+                (
+                    runtime.tool_registry.get("aliyun_api") is not None,
+                    runtime.tool_registry.get("resolve_cloud_resource_selector") is not None,
+                    runtime.tool_registry.get("select_cloud_resource") is not None,
+                ),
+            )
+
+    try:
+        assert configure(session_credential, selector_enabled=False) == (
+            "session-id",
+            (True, False, False),
+        )
+        assert configure(session_credential, selector_enabled=True) == (
+            "session-id",
+            (True, True, True),
+        )
+        assert configure(None, selector_enabled=True) == (
+            "env-id",
+            (True, True, True),
+        )
+        monkeypatch.delenv("ALIBABA_CLOUD_ACCESS_KEY_ID")
+        monkeypatch.delenv("ALIBABA_CLOUD_ACCESS_KEY_SECRET")
+        assert configure(None, selector_enabled=True) == (
+            None,
+            (False, False, False),
+        )
+    finally:
+        await runtime.aclose()
+
+
+@pytest.mark.asyncio
 async def test_pipeline_executor_reconfigures_cached_runtime_model_and_api_key_per_call(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

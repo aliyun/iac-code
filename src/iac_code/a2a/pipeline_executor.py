@@ -1312,8 +1312,7 @@ class IacCodeA2APipelineExecutor:
             provider_config_override=self._provider_config_override,
             effort_override=self._effort_override,
         )
-        if self._aliyun_credential is not None:
-            refresh_runtime_cloud_tools(agent_runtime)
+        refresh_runtime_cloud_tools(agent_runtime)
         set_resource_selector_enabled = getattr(agent_runtime, "set_resource_selector_enabled", None)
         if callable(set_resource_selector_enabled):
             set_resource_selector_enabled(self._resource_selector_enabled)

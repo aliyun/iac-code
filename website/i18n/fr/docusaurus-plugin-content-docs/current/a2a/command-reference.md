@@ -532,3 +532,4 @@ iac-code a2a-client call \
 | `IACCODE_A2A_TEXT_MIME_TYPES` | Types MIME de type texte supplémentaires séparés par des virgules ou points-virgules |
 | `IACCODE_A2A_MULTIMODAL_MIME_TYPES` | Types MIME multimodaux supplémentaires séparés par des virgules ou points-virgules |
 | `IAC_CODE_A2A_PUSH_KEYRING` | Trousseau de clés secret push chiffré géré par l'environnement |
+| `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | Active l'annonce et l'enregistrement du sélecteur de ressources A2A avec `1`, `true`, `yes` ou `on` (sans distinction de casse) ; une valeur absente, vide ou différente le désactive (valeur par défaut) |

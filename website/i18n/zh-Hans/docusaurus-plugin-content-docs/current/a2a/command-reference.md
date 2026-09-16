@@ -536,3 +536,4 @@ iac-code a2a-client call \
 | `IACCODE_A2A_TEXT_MIME_TYPES` | 额外的以逗号或分号分隔的 text-like MIME types |
 | `IACCODE_A2A_MULTIMODAL_MIME_TYPES` | 额外的以逗号或分号分隔的 multimodal MIME types |
 | `IAC_CODE_A2A_PUSH_KEYRING` | 由环境管理的 encrypted push secret keyring |
+| `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | 设为 `1`、`true`、`yes` 或 `on`（不区分大小写）时启用 A2A 资源选择器能力发布和注册；未设置、空值及其他值均为关闭（默认） |
