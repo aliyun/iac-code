@@ -83,6 +83,7 @@ Das Schema ist strikt; unbekannte Felder werden abgelehnt.
 | `cwd` | Zeichenfolge | Ja | Absoluter Arbeitsbereichspfad |
 | `model` | Zeichenfolge | Nein | Modellüberschreibung pro Anfrage |
 | `llmApiKey` | Zeichenfolge | Nein | LLM-Anbieterschlüssel pro Anfrage |
+| `llmHeaders` / `llm_headers` | Objekt | Nein | Zusätzliche HTTP-Header als Zeichenfolge-zu-Zeichenfolge-Zuordnung für Aufrufe des LLM-Anbieters |
 | `thinking.enabled` | boolesch | Nein | Reasoning-Ausgabe anfordern |
 | `thinking.effort` | Zeichenfolge | Nein | Anbieterspezifischer Reasoning-Aufwand |
 | `thinking.budget` | positive Ganzzahl | Nein | Anbieterspezifisches Reasoning-Budget |
@@ -97,6 +98,8 @@ Das Schema ist strikt; unbekannte Felder werden abgelehnt.
 | `alibabaCloud.accessKeySecret` | Zeichenfolge | Nein | Anfragebezogenes AccessKey-Secret |
 | `alibabaCloud.securityToken` | Zeichenfolge | Nein | Anfragebezogenes STS-Token |
 | `alibabaCloud.regionId` | Zeichenfolge | Nein | Anfragebezogene Standardregion |
+
+`llmHeaders` folgt den A2A-Kontextbindungsregeln für `metadata.iac_code.llm_headers`: Nach der ersten Angabe erben spätere Anfragen desselben AG-UI-Threads die Header, wenn das Feld fehlt. Eine neue Zuordnung ersetzt die gesamte Bindung, und `{}` löscht sie. Da Headerwerte Anmeldedaten enthalten können, speichert der Adapter sie nicht dauerhaft; nach einem Neustart des lokalen A2A-Prozesses muss der Aufrufer sie erneut senden.
 
 Der erste Lauf und seine Wiederaufnahmen müssen dieselbe `rosInvocationId` behalten. Eine spätere normale Runde darf einen neuen Wert verwenden. Beim Abbruch ist der Wert der aktuellen Ausführung erforderlich.
 

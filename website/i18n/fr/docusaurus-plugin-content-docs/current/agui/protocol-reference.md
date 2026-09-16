@@ -83,6 +83,7 @@ Le schéma est strict : les champs inconnus sont refusés.
 | `cwd` | chaîne | Oui | Chemin absolu de l’espace de travail |
 | `model` | chaîne | Non | Modèle choisi pour cette requête |
 | `llmApiKey` | chaîne | Non | Clé du fournisseur LLM pour cette requête |
+| `llmHeaders` / `llm_headers` | objet | Non | En-têtes HTTP supplémentaires sous forme de chaînes pour les appels au fournisseur LLM |
 | `thinking.enabled` | booléen | Non | Demander la sortie du raisonnement |
 | `thinking.effort` | chaîne | Non | Effort de raisonnement propre au fournisseur |
 | `thinking.budget` | entier positif | Non | Budget de raisonnement propre au fournisseur |
@@ -97,6 +98,8 @@ Le schéma est strict : les champs inconnus sont refusés.
 | `alibabaCloud.accessKeySecret` | chaîne | Non | Secret AccessKey local à la requête |
 | `alibabaCloud.securityToken` | chaîne | Non | Jeton STS local à la requête |
 | `alibabaCloud.regionId` | chaîne | Non | Région par défaut locale à la requête |
+
+`llmHeaders` suit les règles de liaison au contexte A2A de `metadata.iac_code.llm_headers` : après sa première transmission, les requêtes suivantes du même thread AG-UI héritent des en-têtes si le champ est omis. Une nouvelle table remplace toute la liaison et `{}` l’efface. Comme les valeurs peuvent contenir des identifiants secrets, l’adaptateur ne les conserve pas ; le demandeur doit les renvoyer après le redémarrage du processus A2A local.
 
 L’exécution initiale et ses reprises doivent conserver le même `rosInvocationId`. Un tour normal ultérieur peut utiliser une nouvelle valeur. L’annulation doit employer celle de l’exécution courante.
 

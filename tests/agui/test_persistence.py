@@ -1021,6 +1021,7 @@ async def test_persisted_state_excludes_request_messages_and_credentials(tmp_pat
     payload["forwardedProps"]["iacCode"].update(
         {
             "llmApiKey": "llm-secret",
+            "llmHeaders": {"Authorization": "Bearer header-secret"},
             "alibabaCloud": {
                 "accessKeyId": "ak-secret",
                 "accessKeySecret": "sk-secret",
@@ -1035,7 +1036,14 @@ async def test_persisted_state_excludes_request_messages_and_credentials(tmp_pat
 
     thread_path = _thread_state_path(state_dir)
     raw = thread_path.read_text(encoding="utf-8")
-    for secret in ("private-user-message", "llm-secret", "ak-secret", "sk-secret", "sts-secret"):
+    for secret in (
+        "private-user-message",
+        "llm-secret",
+        "header-secret",
+        "ak-secret",
+        "sk-secret",
+        "sts-secret",
+    ):
         assert secret not in raw
     if os.name != "nt":
         assert stat.S_IMODE(state_dir.stat().st_mode) == 0o700
