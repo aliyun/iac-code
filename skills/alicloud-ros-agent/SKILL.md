@@ -33,7 +33,7 @@ The selected credential must be allowed to call `ros:StartChat`. Explicit cancel
 python3 <absolute-bridge-path>/ros_agent.py check
 ```
 
-The bounded JSON result includes the effective `transport`, `aliyunCLIExecutionMode`, endpoint, Agent modes, Thinking policy, configured Profile policy, effective region when locally available, and only non-secret credential metadata. `cli` and `version` are null when the code transport does not need the CLI. In unpinned code mode, `mode: DefaultCredentialChain` means the Credentials SDK resolved the identity without bridge-level credential parsing. In local CLI mode, `rosPluginReady`, `pluginAutoInstallEnabled`, and `pluginInstallRequired` describe plugin readiness. If and only if `pluginInstallRequired` is true, visibly report that the required ROS CLI plugin is being installed, run exactly `aliyun plugin install --name ros`, and then rerun `check`; never add a version, package URL, mirror, or source override. If the plugin is absent but CLI automatic plugin installation is enabled, `pluginInstallRequired` is false and the first `start-chat` invocation may install it. In remote CLI mode, `check` deliberately does not run CLI management commands or inspect local Profiles/plugins; it reports only the configured forwarded environment names and which names are currently present, never their values.
+The bounded JSON result includes the effective `transport`, `aliyunCLIExecutionMode`, endpoint, Agent modes, Thinking policy, configured Profile policy, effective region when locally available, and only non-secret credential metadata. `cli` and `version` are null when the code transport does not need the CLI. `startChatReconnectReady` is the release gate for this workflow; if it is false, report the returned `startChatReconnectBlockers` and stop before `start`. In unpinned code mode, `mode: DefaultCredentialChain` means the Credentials SDK resolved the identity without bridge-level credential parsing. In local CLI mode, `rosPluginReady`, `pluginAutoInstallEnabled`, and `pluginInstallRequired` describe plugin readiness. If and only if `pluginInstallRequired` is true, visibly report that the required reconnect-capable ROS CLI plugin is being installed, run exactly `aliyun plugin install --name ros`, and then rerun `check`; never add a version, package URL, mirror, or source override. This explicit install-and-recheck step is required when the reconnect capability is missing even if CLI automatic plugin installation is enabled. In remote CLI mode, `check` deliberately does not run CLI management commands or inspect local Profiles/plugins; it reports only non-secret executor version/capability metadata and configured forwarded environment names, never their values.
 
 Use the check result as the sole readiness source. Except for the one local-mode plugin install command directed by `pluginInstallRequired`, never run `aliyun configure`, `aliyun plugin`, or other discovery/management commands, enumerate profiles, or read Alibaba Cloud CLI configuration files yourself. The check deliberately excludes credential values and does not prove that a token is still accepted by ROS; the StartChat response is authoritative for authentication and authorization failures.
 
@@ -75,11 +75,12 @@ Unknown fields, invalid values, and duplicate modes fail closed. Never edit `con
 2. Start a normal managed job from the target workspace. The bridge uses its process working directory only for local prompt-file isolation; it never sends a workspace or `cwd` field to StartChat:
 
    ```text
-   python3 <absolute-bridge-path>/ros_agent.py start --prompt-file <prompt-file> --mode normal --follow
+   python3 <absolute-bridge-path>/ros_agent.py start --prompt-file <prompt-file> --mode normal
+   python3 <absolute-bridge-path>/ros_agent.py follow --job-id <jobId> --cursor 0 --wait-seconds 60
    ```
 
    Pass `--region-id` only when the user explicitly supplied a region. Otherwise the bridge uses the first supported region environment variable, then an explicitly pinned Profile region, then `cn-hangzhou`; do not query CLI configuration to fill it. Use `--mode pipeline` only when the user explicitly wants the candidate-architecture, cost-comparison, confirmation, and deployment Pipeline. Thinking is installation policy from `config.json`, not an Agent choice. Forward underspecified infrastructure requirements to ROS Agent as written so its own `ask_user_question` can gather them.
-3. Preserve the returned `jobId` and newest `cursor`. A temporary authenticated loopback manager owns the job, and a detached worker keeps the selected StartChat transport open after the outer tool call returns. In the default code transport, each SSE event is projected as it arrives. `--follow` returns at every step start, step completion/failure, input boundary, completed turn, terminal state, or its bounded wait window so the user can see the Pipeline progressing. A result can contain multiple ordered `userUpdates` when events were already queued, and can also contain `inputRequired` or a terminal result; present all updates first, then handle that result without an extra drain-only `follow`.
+3. Preserve the returned `jobId` and newest `cursor`. Submit `start`, `continue`, and `respond` first, then call `follow`; the legacy `--follow` option remains compatible but is not the recommended Skill flow. A temporary authenticated loopback manager owns the job, and a detached worker keeps the selected StartChat transport open after the outer tool call returns. The worker automatically reconnects the same StartChat stream from the last committed server event ID after a retryable transport failure. Keep the same `jobId`; never start a replacement job or resend the user message to recover a stream. In the default code transport, each SSE event is projected as it arrives. `follow` returns at every step start, step completion/failure, input boundary, completed turn, terminal state, or its bounded wait window so the user can see the Pipeline progressing. A result can contain multiple ordered `userUpdates` when events were already queued, and can also contain `inputRequired` or a terminal result; present all updates first, then handle that result without an extra drain-only `follow`.
 4. When the result has `boundaryReached: true`, present every `userUpdates` string to the user, then immediately follow from the returned cursor:
 
    ```text
@@ -90,7 +91,7 @@ Unknown fields, invalid values, and duplicate modes fail closed. Never edit `con
 5. For every natural-language follow-up, answer to `ask_user_question`, or `candidate_selection`, write a new prompt file and continue the same job:
 
    ```text
-   python3 <absolute-bridge-path>/ros_agent.py continue --job-id <jobId> --prompt-file <prompt-file> --follow
+   python3 <absolute-bridge-path>/ros_agent.py continue --job-id <jobId> --prompt-file <prompt-file>
    ```
 
    Do not invent a `SessionId`; the job binds the remote session, mode, endpoint, region, Profile, and workspace. When a completed Pipeline returns `normalHandoffReady: true` or `conversationMode: normal`, its next user message is a Normal chat turn reached through this same `continue` command and `jobId`; the bridge intentionally keeps the StartChat mode while the remote A2A context performs the handoff. Never replace that handoff with `start --mode normal`. Do not start a new job merely to continue the same task.
@@ -165,13 +166,13 @@ The event classes have different execution behavior:
 Do not answer a permission with natural language or create a permission JSON file. The managed job already owns the exact correlation identifiers. When exactly one permission is waiting, call `respond` with only the job and the user's decision:
 
 ```text
-python3 <absolute-bridge-path>/ros_agent.py respond --job-id <jobId> --decision <allow_once|deny> --follow
+python3 <absolute-bridge-path>/ros_agent.py respond --job-id <jobId> --decision <allow_once|deny>
 ```
 
 If multiple `pendingPermissions` are waiting, keep each returned `permissionRef` associated with the action shown to the user and include only the selected short reference:
 
 ```text
-python3 <absolute-bridge-path>/ros_agent.py respond --job-id <jobId> --permission-ref <permissionRef> --decision <allow_once|deny> --follow
+python3 <absolute-bridge-path>/ros_agent.py respond --job-id <jobId> --permission-ref <permissionRef> --decision <allow_once|deny>
 ```
 
 Never type, copy, reconstruct, transform, or save `requestTaskId`, `contextId`, `inputId`, or `toolUseId`. Do not use a shell or another script to extract `inputRequired`; `respond` resolves those fields atomically from the current job. Without `--permission-ref`, it fails closed if more than one permission is waiting. A supplied reference must match exactly one still-pending permission.
