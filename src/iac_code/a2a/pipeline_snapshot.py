@@ -672,6 +672,7 @@ class _PipelineSnapshotReducer:
             event_kind = _event_kind(event)
             if event_kind in {
                 "ask_user_question",
+                "cloud_resource_selection",
                 "deployment_confirmation",
                 "pipeline_pause_confirmation",
             }:

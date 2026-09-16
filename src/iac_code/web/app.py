@@ -130,6 +130,7 @@ def create_app(
     distribution_channel: str | None = None,
     update_mode: str | None = None,
     desktop_install_context: DesktopInstallContext | None = None,
+    resource_selector_query_service: Any | None = None,
 ) -> Any:
     """Create the loopback-only Web workbench without generic user-data redaction.
 
@@ -169,6 +170,9 @@ def create_app(
         get_provider_config,
         load_credentials,
     )
+    from iac_code.resource_selector.profiles import PROFILE_HASH, get_profile
+    from iac_code.resource_selector.query import ResourceSelectorQueryError, ResourceSelectorQueryService
+    from iac_code.resource_selector.validation import validate_answer_value
     from iac_code.services.capabilities.multimodal import is_model_multimodal
     from iac_code.skills.bundled import init_bundled_skills
     from iac_code.skills.discovery import discover_all_skills
@@ -185,6 +189,8 @@ def create_app(
     from iac_code.web.commands import WebCommandDispatcher, command_metadata
     from iac_code.web.diagrams import TemplateDiagramPreviewError, render_template_diagram_views
     from iac_code.web.events import encode_sse, make_resync_event, normalize_event_payload, observe_published_events
+
+    selector_query_service = resource_selector_query_service or ResourceSelectorQueryService()
     from iac_code.web.mcp_settings import MCPWebError
     from iac_code.web.memory import (
         delete_legacy_memory,
@@ -2836,6 +2842,7 @@ def create_app(
                     active_session_work_running(session)
                     or session.pending_permissions
                     or session.pending_questions
+                    or session.pending_resource_selections
                     or session.pending_elicitations
                 ):
                     return json_error(
@@ -3359,10 +3366,12 @@ def create_app(
             ),
             "pendingPermissionCount": len(session.pending_permissions),
             "pendingQuestionCount": len(session.pending_questions),
+            "pendingResourceSelectionCount": len(session.pending_resource_selections),
             "pendingElicitationCount": len(session.pending_elicitations),
             "pending": {
                 "permissions": len(session.pending_permissions),
                 "questions": len(session.pending_questions),
+                "resourceSelections": len(session.pending_resource_selections),
                 "elicitations": len(session.pending_elicitations),
                 "queuedInputs": len(session.queued_inputs),
             },
@@ -5020,6 +5029,122 @@ def create_app(
         status_code = 200 if result["resolved"] else 404
         return JSONResponse(result, status_code=status_code)
 
+    async def answer_resource_selection(request):
+        request_id = request.path_params["request_id"]
+        try:
+            data = await json_object_body(request)
+            session_id = required_string(data, "sessionId")
+            input_id = required_string(data, "inputId")
+            selector_id = required_string(data, "selectorId")
+            value = required_string(data, "value")
+            label = data.get("label")
+            if label is not None and (not isinstance(label, str) or len(label) > 1024):
+                raise ValueError("invalid resource selection label")
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        pending = manager.get_pending_resource_selection(request_id, session_id=session_id)
+        if pending is None:
+            session = manager.get_session(session_id)
+            previous = session.resolved_resource_selections.get(request_id) if session is not None else None
+            if previous is not None:
+                answer = {
+                    "input_id": input_id,
+                    "selector_id": selector_id,
+                    "value": value,
+                    "label": label or value,
+                }
+                result = manager.resolve_resource_selection(request_id, answer, session_id=session_id)
+                return JSONResponse(result, status_code=200 if result.get("resolved") else 409)
+            return JSONResponse({"requestId": request_id, "resolved": False}, status_code=404)
+        selector = pending.payload.get("selector")
+        if not isinstance(selector, dict):
+            return json_error("selector_profile_mismatch", 409)
+        if (
+            pending.payload.get("inputId") != input_id
+            or selector.get("id") != selector_id
+            or selector.get("profileHash") != PROFILE_HASH
+        ):
+            return json_error("selector_profile_mismatch", 409)
+        profile = get_profile(selector_id)
+        if profile is None or not profile.enabled:
+            return json_error("selector_profile_mismatch", 409)
+        if error := validate_answer_value(profile, value, metadata=selector.get("associationPropertyMetadata")):
+            return json_error(error, 400)
+        try:
+            await selector_query_service.validate_selection(pending_payload=pending.payload, value=value)
+        except ResourceSelectorQueryError as exc:
+            return json_error(str(exc), 409)
+        answer = {
+            "input_id": input_id,
+            "selector_id": selector_id,
+            "value": value,
+            "label": label or value,
+        }
+        result = manager.resolve_resource_selection(request_id, answer, session_id=session_id)
+        if result.get("resolved"):
+            selector_query_service.discard(pending_payload=pending.payload)
+        status_code = 409 if result.get("conflict") else (200 if result["resolved"] else 404)
+        return JSONResponse(result, status_code=status_code)
+
+    async def cancel_resource_selection(request):
+        request_id = request.path_params["request_id"]
+        try:
+            data = await json_object_body(request)
+            session_id = required_string(data, "sessionId")
+            input_id = required_string(data, "inputId")
+            selector_id = required_string(data, "selectorId")
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        pending = manager.get_pending_resource_selection(request_id, session_id=session_id)
+        if pending is None:
+            return JSONResponse({"requestId": request_id, "resolved": False}, status_code=404)
+        selector = pending.payload.get("selector")
+        if (
+            pending.payload.get("inputId") != input_id
+            or not isinstance(selector, dict)
+            or selector.get("id") != selector_id
+        ):
+            return json_error("selector_profile_mismatch", 409)
+        options_empty = selector_query_service.options_empty(pending_payload=pending.payload)
+        manager.cancel_resource_selection_request(
+            request_id,
+            session_id=session_id,
+            options_empty=options_empty,
+        )
+        selector_query_service.discard(pending_payload=pending.payload)
+        return JSONResponse(
+            {
+                "requestId": request_id,
+                "resolved": True,
+                "status": "canceled",
+                **({"optionsEmpty": options_empty} if options_empty is not None else {}),
+            }
+        )
+
+    async def query_resource_selector(request):
+        try:
+            data = await json_object_body(request)
+            request_id = required_string(data, "requestId")
+            session_id = required_string(data, "sessionId")
+            input_id = required_string(data, "inputId")
+            operation_key = required_string(data, "operationKey")
+        except ValueError as exc:
+            return json_error(str(exc), 400)
+        pending = manager.get_pending_resource_selection(request_id, session_id=session_id)
+        if pending is None:
+            return JSONResponse({"requestId": request_id, "queried": False}, status_code=404)
+        if pending.payload.get("inputId") != input_id:
+            return json_error("selector_profile_mismatch", 409)
+        try:
+            response = await selector_query_service.query(
+                pending_payload=pending.payload,
+                operation_key=operation_key,
+                dynamic_parameters=data.get("params", {}),
+            )
+        except ResourceSelectorQueryError as exc:
+            return json_error(str(exc), 400)
+        return JSONResponse({"requestId": request_id, "response": response})
+
     async def answer_elicitation(request):
         request_id = request.path_params["request_id"]
         try:
@@ -5471,6 +5596,9 @@ def create_app(
             Route("/api/pipeline/candidates/select", post_pipeline_candidate_selection, methods=["POST"]),
             Route("/api/permissions/{request_id}/answer", answer_permission, methods=["POST"]),
             Route("/api/questions/{request_id}/answer", answer_question, methods=["POST"]),
+            Route("/api/resource-selections/{request_id}/answer", answer_resource_selection, methods=["POST"]),
+            Route("/api/resource-selections/{request_id}/cancel", cancel_resource_selection, methods=["POST"]),
+            Route("/api/resource-selector/query", query_resource_selector, methods=["POST"]),
             Route("/api/elicitations/{request_id}/answer", answer_elicitation, methods=["POST"]),
             Route("/api/sessions/{session_id}/commands", post_command, methods=["POST"]),
             Route("/api/sessions/{session_id}/cleanup", get_session_cleanup, methods=["GET"]),

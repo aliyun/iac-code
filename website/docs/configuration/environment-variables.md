@@ -66,6 +66,7 @@ See [Alibaba Cloud Credentials](./alibaba-cloud-credentials.md) for more details
 | `IAC_CODE_TENANT_ID` | Tenant identifier for telemetry; auto-prefixed with `iac_tenant_` if not already |
 | `IAC_CODE_GIT_BASH_PATH` | Path to Git Bash `bash.exe` on Windows when it is not on PATH |
 | `IAC_CODE_A2A_PUSH_KEYRING` | Environment-managed encrypted push secret keyring for A2A (JSON format) |
+| `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | A2A Server only. Enables resource-selector capability advertisement and registration when set to `1`, `true`, `yes`, or `on` (case-insensitive). Unset, empty, or any other value disables it; default: disabled |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Standard OpenTelemetry endpoint; when set, enables OTLP export |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | Capture GenAI message/tool content on spans: `SPAN_ONLY`, `EVENT_ONLY`, `SPAN_AND_EVENT` |
 

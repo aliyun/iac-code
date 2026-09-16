@@ -7,6 +7,8 @@ description: Configurer les identifiants Alibaba Cloud, y compris l'authentifica
 
 Les identifiants Alibaba Cloud sont requis pour les opérations qui inspectent ou gèrent des ressources cloud.
 
+Les outils `resolve_cloud_resource_selector` et `select_cloud_resource` suivent la même décision d'identifiants effectifs que `aliyun_api`. Dans A2A, les identifiants de la requête ou de la session sont prioritaires ; à défaut, la chaîne habituelle utilise la configuration locale, les variables d'environnement puis les identifiants Alibaba Cloud CLI. Sans identifiants effectifs valides, ni `aliyun_api` ni les deux outils de sélection ne sont enregistrés.
+
 ## Rôle RAM ECS
 
 Utilisez **ECS RAM Role** lorsque IaC Code s'exécute sur une instance ECS Alibaba Cloud à laquelle un rôle RAM est associé. IaC Code obtient des identifiants STS temporaires auprès du service de métadonnées de l'instance ECS (IMDS), les renouvelle automatiquement et n'enregistre aucun AccessKey ID, AccessKey Secret ou jeton STS dans sa configuration.

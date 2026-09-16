@@ -532,3 +532,4 @@ iac-code a2a-client call \
 | `IACCODE_A2A_TEXT_MIME_TYPES` | 追加のカンマ区切りまたはセミコロン区切りのテキスト風 MIME types |
 | `IACCODE_A2A_MULTIMODAL_MIME_TYPES` | 追加のカンマ区切りまたはセミコロン区切りのマルチモーダル MIME types |
 | `IAC_CODE_A2A_PUSH_KEYRING` | 環境管理の暗号化プッシュシークレット keyring |
+| `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | `1`、`true`、`yes`、`on`（大文字小文字を区別しない）で A2A リソースセレクター機能の公開と登録を有効にします。未設定、空、その他の値では無効（既定）です |

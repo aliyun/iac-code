@@ -60,6 +60,7 @@ from iac_code.web.permissions import (
     WebPendingElicitation,
     WebPendingPermission,
     WebPendingQuestion,
+    WebPendingResourceSelection,
     canceled_elicitation_answer,
     elicitation_schema_from_payload,
     normalize_elicitation_payload,
@@ -236,7 +237,12 @@ def reorder_compaction_markers(messages: list[Message]) -> list[Message]:
 
 
 def _pending_request_details(
-    pending: dict[str, WebPendingPermission] | dict[str, WebPendingQuestion] | dict[str, WebPendingElicitation],
+    pending: (
+        dict[str, WebPendingPermission]
+        | dict[str, WebPendingQuestion]
+        | dict[str, WebPendingResourceSelection]
+        | dict[str, WebPendingElicitation]
+    ),
 ) -> list[dict[str, Any]]:
     return [request.to_dict() for request in pending.values()]
 
@@ -792,6 +798,8 @@ class WebSession:
     # durable boundaries orphan-recoverable until their turn tasks unwind.
     shutdown_preserved_permission_boundaries: set[str] = field(default_factory=set, repr=False)
     pending_questions: dict[str, WebPendingQuestion] = field(default_factory=dict)
+    pending_resource_selections: dict[str, WebPendingResourceSelection] = field(default_factory=dict)
+    resolved_resource_selections: dict[str, dict[str, Any]] = field(default_factory=dict)
     pending_elicitations: dict[str, WebPendingElicitation] = field(default_factory=dict)
     queued_inputs: list[str] = field(default_factory=list)
     active_turn_task: asyncio.Future[Any] | None = field(default=None, repr=False)
@@ -916,9 +924,11 @@ class WebSession:
             "readOnly": self.read_only,
             "pendingPermissionCount": len(self.pending_permissions),
             "pendingQuestionCount": len(self.pending_questions),
+            "pendingResourceSelectionCount": len(self.pending_resource_selections),
             "pendingElicitationCount": len(self.pending_elicitations),
             "pendingPermissions": _pending_request_details(self.pending_permissions),
             "pendingQuestions": _pending_request_details(self.pending_questions),
+            "pendingResourceSelections": _pending_request_details(self.pending_resource_selections),
             "pendingElicitations": _pending_request_details(self.pending_elicitations),
             # 队列消息的完整内容（不只是数量），使前端在 loadSession/resync 重建状态时能恢复
             # “排队中”列表——否则繁忙轮次里权限确认触发 resync 会把排队清空，二者无法共存。
@@ -934,6 +944,7 @@ class WebSession:
                 "status": "running" if active_turn or self.turn_lock.locked() else self.status,
                 "pendingPermissions": len(self.pending_permissions),
                 "pendingQuestions": len(self.pending_questions),
+                "pendingResourceSelections": len(self.pending_resource_selections),
                 "pendingElicitations": len(self.pending_elicitations),
                 "queuedInputs": len(self.queued_inputs),
             },
@@ -1775,6 +1786,7 @@ class WebSessionManager:
                     or any(not task.done() for task in session.active_local_tasks)
                     or session.pending_permissions
                     or session.pending_questions
+                    or session.pending_resource_selections
                     or session.pending_elicitations
                 ):
                     continue
@@ -3512,6 +3524,97 @@ class WebSessionManager:
         session.events.append("question.request", pending.to_dict())
         return request_id
 
+    def add_resource_selection_request(
+        self,
+        session: WebSession | str,
+        payload: dict[str, Any],
+        *,
+        future: asyncio.Future[Any] | None = None,
+    ) -> str:
+        """Persist a resource selection before publishing its replayable event."""
+
+        session = self._resolve_session_arg(session)
+        request_id = uuid.uuid4().hex
+        normalized = dict(payload)
+        normalized["requestId"] = request_id
+        normalized["sessionId"] = session.session_id
+        pending = WebPendingResourceSelection(
+            request_id=request_id,
+            session_id=session.session_id,
+            payload=normalized,
+            future=future or _new_future(),
+            created_at=_utc_now(),
+        )
+        session.pending_resource_selections[request_id] = pending
+        session.events.append("resource-selector.request", pending.to_dict())
+        return request_id
+
+    def get_pending_resource_selection(
+        self,
+        request_id: str,
+        *,
+        session_id: str | None = None,
+    ) -> WebPendingResourceSelection | None:
+        for session in self._sessions.values():
+            pending = session.pending_resource_selections.get(request_id)
+            if pending is None:
+                continue
+            if session_id is not None and pending.session_id != session_id:
+                return None
+            return pending
+        return None
+
+    def resolve_resource_selection(
+        self,
+        request_id: str,
+        answer: dict[str, Any],
+        *,
+        session_id: str,
+    ) -> dict[str, Any]:
+        session = self.get_session(session_id)
+        if session is None:
+            return {"requestId": request_id, "resolved": False}
+        previous = session.resolved_resource_selections.get(request_id)
+        if previous is not None:
+            if previous == answer:
+                return {"requestId": request_id, "resolved": True, "replayed": True}
+            return {"requestId": request_id, "resolved": False, "conflict": True}
+        pending = session.pending_resource_selections.get(request_id)
+        if pending is None:
+            return {"requestId": request_id, "resolved": False}
+        session.pending_resource_selections.pop(request_id)
+        session.resolved_resource_selections[request_id] = dict(answer)
+        _set_future_result(pending.future, answer)
+        session.events.append(
+            "resource-selector.resolved",
+            {"requestId": request_id, "answer": answer},
+        )
+        return {"requestId": request_id, "resolved": True}
+
+    def discard_resource_selection_request(self, request_id: str, *, session_id: str) -> None:
+        session = self.get_session(session_id)
+        if session is not None:
+            session.pending_resource_selections.pop(request_id, None)
+
+    def cancel_resource_selection_request(
+        self,
+        request_id: str,
+        *,
+        session_id: str,
+        options_empty: bool | None = None,
+    ) -> None:
+        pending = self.get_pending_resource_selection(request_id, session_id=session_id)
+        if pending is None:
+            return
+        answer = {
+            "status": "canceled",
+            "input_id": pending.payload.get("inputId"),
+            "selector_id": pending.payload.get("selector", {}).get("id"),
+        }
+        if options_empty is not None:
+            answer["options_empty"] = options_empty
+        self.resolve_resource_selection(request_id, answer, session_id=session_id)
+
     def get_pending_question(
         self,
         request_id: str,
@@ -3765,6 +3868,22 @@ class WebSessionManager:
             _set_future_result(pending.future, question_result)
             session.events.append(
                 "question.resolved",
+                {
+                    "requestId": pending.request_id,
+                    "answer": answer,
+                },
+            )
+        for pending in list(session.pending_resource_selections.values()):
+            session.pending_resource_selections.pop(pending.request_id, None)
+            answer = {
+                "status": "canceled",
+                "input_id": pending.payload.get("inputId"),
+                "selector_id": pending.payload.get("selector", {}).get("id"),
+            }
+            session.resolved_resource_selections[pending.request_id] = answer
+            _set_future_result(pending.future, answer)
+            session.events.append(
+                "resource-selector.resolved",
                 {
                     "requestId": pending.request_id,
                     "answer": answer,

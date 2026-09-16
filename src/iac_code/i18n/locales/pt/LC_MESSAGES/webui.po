@@ -380,6 +380,7 @@ msgid "Later"
 msgstr "Mais tarde"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Refresh"
 msgstr "Atualizar"
@@ -1254,6 +1255,36 @@ msgstr "Aceitar"
 msgid "Decline"
 msgstr "Recusar"
 
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Region"
+msgstr "Região"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Source"
+msgstr "Origem"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/pipeline.js
+msgid "Submitting..."
+msgstr "Enviando..."
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Resource selection failed. Please try again."
+msgstr "Falha ao selecionar o recurso. Tente novamente."
+
+#: src/iac_code/web/static/js/components/blocking.js
+msgid "Confirm"
+msgstr "Confirmar"
+
+#: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Retry refresh"
+msgstr "Tentar atualizar novamente"
+
 #: src/iac_code/web/static/js/components/composer.js
 msgid "Enter sends; Shift+Enter inserts a newline."
 msgstr "Enter envia; Shift+Enter insere uma nova linha."
@@ -1585,10 +1616,6 @@ msgid "Select candidate"
 msgstr "Selecionar candidato"
 
 #: src/iac_code/web/static/js/components/pipeline.js
-msgid "Submitting..."
-msgstr "Enviando..."
-
-#: src/iac_code/web/static/js/components/pipeline.js
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Summary"
 msgstr "Resumo"
@@ -1650,12 +1677,6 @@ msgstr "{n} recursos"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Resource"
 msgstr "Recurso"
-
-#: src/iac_code/web/static/js/components/pipeline.js
-#: src/iac_code/web/static/js/components/tool_cards.js
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Region"
-msgstr "Região"
 
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No cleanup resources."
@@ -1772,10 +1793,6 @@ msgstr "Produtos de nuvem"
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Role"
 msgstr "Função"
-
-#: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Source"
-msgstr "Origem"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Notes"
@@ -4222,10 +4239,6 @@ msgstr "Confirmar reinício"
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "The restart is taking a while. Please refresh manually."
 msgstr "O reinício está demorando. Atualize manualmente."
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Retry refresh"
-msgstr "Tentar atualizar novamente"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Restarting; the page refreshes automatically once the service recovers…"

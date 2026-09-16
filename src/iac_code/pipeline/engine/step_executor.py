@@ -210,6 +210,7 @@ class StepExecutor:
         rollback_count: int = 0,
         max_rollbacks: int = 5,
         permission_checkpoint: dict[str, Any] | None = None,
+        resource_selection_checkpoint: dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Execute a step, yielding AgentLoop events and a final StepResult."""
         preserved_selection = self._preserved_candidate_selection(
@@ -290,9 +291,10 @@ class StepExecutor:
         # AgentLoop therefore emits ToolResultEvent directly instead of replaying
         # ToolUseEndEvent. Seed the correlation map from that canonical trailing
         # assistant message so resumed results remain available to completion guards.
-        if permission_checkpoint is not None and agent_context.resume_messages:
+        resume_checkpoint = permission_checkpoint or resource_selection_checkpoint
+        if resume_checkpoint is not None and agent_context.resume_messages:
             trailing_message = agent_context.resume_messages[-1]
-            frame = permission_checkpoint.get("continuationFrame")
+            frame = resume_checkpoint.get("continuationFrame")
             tool_uses = trailing_message.get_tool_use_blocks() if trailing_message.role == "assistant" else []
             ordered_tool_use_ids = [tool_use.id for tool_use in tool_uses]
             if isinstance(frame, dict) and ordered_tool_use_ids == frame.get("orderedToolUseIds"):
@@ -381,7 +383,33 @@ class StepExecutor:
 
         try:
             first_stream_had_event = False
-            if permission_checkpoint is not None:
+            if resource_selection_checkpoint is not None:
+                frame = resource_selection_checkpoint.get("continuationFrame")
+                selector = resource_selection_checkpoint.get("selector")
+                response = resource_selection_checkpoint.get("response")
+                if not isinstance(frame, dict) or not isinstance(selector, dict) or not isinstance(response, dict):
+                    raise ValueError("resource_selection_resume_invalid: checkpoint is incomplete")
+                status = response.get("status")
+                tool_response: dict[str, Any] = {
+                    "status": status,
+                    "input_id": resource_selection_checkpoint.get("inputId"),
+                    "selector_id": selector.get("id"),
+                }
+                if status == "selected":
+                    tool_response.update(
+                        value=response.get("value"),
+                        label=response.get("label") or response.get("value"),
+                    )
+                elif status == "canceled" and isinstance(response.get("optionsEmpty"), bool):
+                    tool_response["options_empty"] = response["optionsEmpty"]
+                first_stream = agent_loop.resume_resource_selection_boundary(
+                    frame,
+                    input_id=str(resource_selection_checkpoint.get("inputId") or ""),
+                    selector_id=str(selector.get("id") or ""),
+                    profile_hash=str(resource_selection_checkpoint.get("profileHash") or ""),
+                    response=tool_response,
+                )
+            elif permission_checkpoint is not None:
                 first_stream = agent_loop.resume_permission_boundary(permission_checkpoint)
             elif agent_context.resume_messages and user_message is None:
                 first_stream = agent_loop.continue_streaming()

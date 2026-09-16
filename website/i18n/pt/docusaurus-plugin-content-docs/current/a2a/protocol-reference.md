@@ -431,6 +431,12 @@ No modo pipeline, as solicitações são publicadas como eventos `permission_req
 
 Com `auto-approve-permissions` habilitado ou regras de permissão explícitas configuradas, solicitações de permissão não viram entrada interativa; são aprovadas automaticamente (com auditoria) ou resolvidas pelas regras. APIs protegidas de escrita Alibaba Cloud não são liberadas por regras allow comuns e ainda exigem autorização exata por API. Decisões de permissão são auditadas localmente; toda decisão allow que exige um registro de auditoria falha de forma fechada quando o registro não pode ser persistido.
 
+## Extensão do seletor de recursos
+
+`urn:iac-code:resource-selector:v1` é uma extensão opcional para selecionar um único recurso de nuvem ou um valor derivado dele. O Agent Card só a anuncia quando `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` está ativada. O cliente declara suporte em cada solicitação por meio de `metadata.iac_code.capabilities.resourceSelector`, cujo valor deve conter `schemaVersion: 1`, `queryMode: "ros_api_json"` e o `profileHash` anunciado pela capacidade do seletor. O hash deve ser lido do bundle realmente carregado e não pode ser fixado no código.
+
+Quando o modelo solicita uma seleção, o servidor entra em `input-required` e emite o contrato do seletor. O cliente consulta e renderiza o seletor e então retoma a tarefa com uma resposta estruturada de confirmação ou cancelamento. Credenciais e secrets nunca são incluídos nos eventos do seletor. O Safe Mode mantém as ferramentas, mas a flag do servidor, a capacidade do cliente, um profile hash correspondente e uma credencial efetiva da Alibaba Cloud continuam obrigatórios.
+
 ## Extensões
 
 O Agent Card anuncia a extensão opcional de metadados de artefato do iac-code:

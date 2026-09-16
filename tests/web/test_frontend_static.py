@@ -148,6 +148,20 @@ def _run_events_script(tmp_path: Path, source: str) -> dict[str, object]:
     return json.loads(result.stdout)
 
 
+def _run_blocking_script(tmp_path: Path, source: str) -> dict[str, object]:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+
+    script = tmp_path / "blocking-test.mjs"
+    script_source = source.strip().replace("__BLOCKING_MODULE__", json.dumps(BLOCKING_JS.as_uri()))
+    script.write_text(script_source, encoding="utf-8")
+    result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
+
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout)
+
+
 def _run_app_script(tmp_path: Path, source: str) -> dict[str, object]:
     node = shutil.which("node")
     if node is None:
@@ -1285,19 +1299,19 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-318" in html
-    assert "/static/js/app.js?v=web-repl-ui-363" in html
+    assert "/static/styles.css?v=web-repl-ui-319" in html
+    assert "/static/js/app.js?v=web-repl-ui-365" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-313" in app_source
+    assert "./api.js?v=web-repl-ui-314" in app_source
     assert "./components/composer.js?v=session-model-v22" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
     assert "./components/tool_cards.js?v=live-inline-tools-v26" in app_source
-    assert "./components/blocking.js?v=blocking-keys-v5" in app_source
+    assert "./components/blocking.js?v=blocking-keys-v8" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
     # 否则回访浏览器会加载「新 app.js + 旧缓存 events.js」,让队列行为与当前代码不一致。
     assert 'from "./events.js?v=' in app_source
@@ -1320,10 +1334,10 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-363" in index_html
+    assert "web-repl-ui-365" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
-    assert "./events.js?v=web-repl-ui-323" in app_source
+    assert "./events.js?v=web-repl-ui-324" in app_source
     assert "./components/workspace.js?v=cloud-creds-v60" in app_source
     # ECS RAM Role 面板改动后旧 token 不得残留,否则回访浏览器仍加载旧缓存 workspace.js。
     assert "./components/workspace.js?v=cloud-creds-v57" not in app_source
@@ -10918,8 +10932,246 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-363" in html
+    assert "web-repl-ui-365" in html
     assert "web-repl-ui-343" not in html
+
+
+def test_resource_selector_uses_compact_themed_controls() -> None:
+    app = _source(APP_JS)
+    blocking = _source(BLOCKING_JS)
+    styles = _source(STYLES_CSS)
+
+    # ORE's internal ready/loading/error values drive the refresh icon only; the panel
+    # no longer renders a separate status line.
+    assert 'next === "ready"' in blocking
+    assert "status.textContent = next" not in blocking
+    assert 'className = "blocking-detail resource-selector-status"' not in blocking
+    # Refresh stays beside the selector as an accessible icon; only the two answer
+    # actions belong in the footer.
+    assert 'controlRow.append(mountPoint, refresh)' in blocking
+    assert 'refresh.setAttribute("aria-label", refreshLabel)' in blocking
+    assert 'refresh.setAttribute("aria-busy", "true")' in blocking
+    assert 'footer.append(confirm, cancel)' in blocking
+    assert 'footer.append(refresh, confirm, cancel)' not in blocking
+    # Confirmation may perform server-side validation. A click must immediately
+    # expose a busy state, prevent duplicate submissions, and restore controls on
+    # failure instead of appearing inert. A successful response removes the local
+    # pending panel immediately rather than waiting for the SSE echo.
+    assert 'button.textContent = t("Submitting...")' in blocking
+    assert 'panel.setAttribute("aria-busy", "true")' in blocking
+    assert "mountPoint.inert = true" in blocking
+    assert "Promise.resolve(handler(requestId, answer)).catch" in blocking
+    assert 'console.warn("[resource-selector] answer failed", error);' in blocking
+    assert 'submitError.textContent = t("Resource selection failed. Please try again.");' in blocking
+    assert "delete resourceSelections[requestId]" in app
+    assert "state = { ...state, resourceSelections }" in app
+    # The resource-selector-specific confirm button avoids the generic white primary,
+    # and the late-loading ORE Ant Design styles are overridden with app theme tokens.
+    assert '"blocking-action resource-selector-confirm"' in blocking
+    assert 'makeButton(t("Confirm"), "blocking-action resource-selector-confirm"' in blocking
+    assert ".resource-selector-confirm" in styles
+    assert "#iac-code-web-root .resource-selector-island .iac-ore-ant-select" in styles
+    assert "background: var(--codex-panel-raised)" in styles
+    assert ".iac-ore-ant-select-clear" in styles
+    assert "background: transparent" in styles
+    # ORE's Ant Design Form ships a light-theme label color. All five iac-code
+    # schemes must inherit their foreground colors from the active theme tokens.
+    form_label = _css_block(
+        styles,
+        "#iac-code-web-root .resource-selector-island .iac-ore-ant-form-item-label > label",
+    )
+    assert "color: var(--codex-text)" in form_label
+    form_explain = _css_block(
+        styles,
+        "#iac-code-web-root .resource-selector-island .iac-ore-ant-form-item-explain",
+    )
+    assert "color: var(--codex-muted)" in form_explain
+    # Loading disables the host refresh control without rotating its asymmetric
+    # glyph. The selected label must stay within the flex row and truncate.
+    selector_styles = styles.split(".blocking-panel-resource-selector", 1)[1]
+    assert ".resource-selector-refresh.is-loading .resource-selector-refresh-icon" not in selector_styles
+    assert "animation: iac-thread-spin 0.9s" not in selector_styles
+    control_row = _css_block(styles, ".resource-selector-control-row")
+    assert "width: 100%" in control_row
+    assert "min-width: 0" in control_row
+    assert "z-index: 3" in control_row
+    selector_island = _css_block(styles, ".resource-selector-island")
+    assert "flex: 1 1 0" in selector_island
+    assert "isolation:" not in selector_island
+    selector_footer = _css_block(styles, ".resource-selector-footer")
+    assert "z-index: 1" in selector_footer
+    selector_dropdown = _css_block(
+        styles,
+        "#iac-code-web-root .resource-selector-island .iac-ore-ant-select-dropdown",
+    )
+    assert "z-index: 40" in selector_dropdown
+    selection_item = _css_block(
+        styles,
+        "#iac-code-web-root .resource-selector-island .iac-ore-ant-select-selection-item",
+    )
+    assert "overflow: hidden" in selection_item
+    assert "text-overflow: ellipsis" in selection_item
+    assert "white-space: nowrap" in selection_item
+    # Region context is still shown when absent from the question, but not duplicated
+    # when the generated title already contains the concrete RegionId.
+    assert "regionId && !question.includes(regionId)" in blocking
+
+
+def test_resource_selector_theme_overrides_use_every_palette_tokens() -> None:
+    styles = _source(STYLES_CSS)
+    selector_styles = styles.split(".blocking-panel-resource-selector", 1)[1]
+    required_tokens = {
+        "--codex-panel-raised",
+        "--codex-hover",
+        "--codex-active",
+        "--codex-text",
+        "--codex-muted",
+        "--codex-icon",
+        "--codex-border",
+        "--codex-border-strong",
+        "--codex-shadow",
+        "--codex-ink",
+    }
+
+    for token in required_tokens:
+        assert f"var({token})" in selector_styles
+    for theme in ("midnight", "evergreen", "sepia", "ivory"):
+        theme_block = _css_block(styles, f':root[data-theme="{theme}"]')
+        for token in required_tokens:
+            assert f"{token}:" in theme_block
+
+    clear_block = _css_block(
+        styles,
+        "#iac-code-web-root .resource-selector-island .iac-ore-ant-select-clear",
+    )
+    assert "background: transparent" in clear_block
+
+
+def test_resource_selector_preserves_selection_across_app_renders() -> None:
+    app = _source(APP_JS)
+    blocking = _source(BLOCKING_JS)
+
+    # Streaming events redraw the app frequently. Pending resource panels must be
+    # moved into the new blocking container instead of destroying their React roots.
+    assert 'stack.querySelectorAll?.(".blocking-panel-resource-selector")' in app
+    assert "destroyResourceSelectionPanels(stack, pendingResourceSelectionIds)" in app
+    assert "{ resourceSelectionPanels }" in app
+    assert "options.resourceSelectionPanels?.get?.(requestId)" in blocking
+    assert "existing || renderResourceSelectionRequest(request, handlers)" in blocking
+    # If a genuine remount is necessary, restore the cached value through the
+    # standalone bundle's controlled selection contract.
+    assert "selection: candidate" in blocking
+    assert "resourceSelectionCandidates.delete(requestId)" in blocking
+    assert 'ore-resource-selector.min.js?v=16' in blocking
+
+
+def test_resource_selector_external_links_use_host_opener(tmp_path: Path) -> None:
+    blocking = _source(BLOCKING_JS)
+    app = _source(APP_JS)
+
+    # ORE renders helper links inside its React island. Web keeps the native
+    # target=_blank navigation; Desktop overrides it through Tauri.
+    assert 'event.target?.closest?.("a[href]")' in blocking
+    assert 'anchor.getAttribute("href")' in blocking
+    assert "event.preventDefault();" in blocking
+    assert "handlers.onOpenExternal(url)" in blocking
+    assert 'onOpenExternal: DESKTOP_RUNTIME ? (url) => invokeDesktop("open_external_url", { url }) : null' in app
+    assert 'window.open(url, "_blank", "noopener,noreferrer")' not in app
+
+    # Never resolve an empty or relative href against iac-code itself; accept only
+    # explicit HTTP(S) destinations supplied by the component.
+    output = _run_blocking_script(
+        tmp_path,
+        r"""
+        const { resourceSelectorExternalUrl } = await import(__BLOCKING_MODULE__);
+        console.log(JSON.stringify({
+          github: resourceSelectorExternalUrl("https://github.com"),
+          oos: resourceSelectorExternalUrl("https://oos.console.aliyun.com"),
+          empty: resourceSelectorExternalUrl(""),
+          relative: resourceSelectorExternalUrl("/authorize"),
+          script: resourceSelectorExternalUrl("javascript:alert(1)"),
+        }));
+        """,
+    )
+    assert output == {
+        "github": "https://github.com/",
+        "oos": "https://oos.console.aliyun.com/",
+        "empty": "",
+        "relative": "",
+        "script": "",
+    }
+
+
+def test_resource_selector_label_falls_back_to_value_for_invalid_or_oversized_labels(tmp_path: Path) -> None:
+    output = _run_blocking_script(
+        tmp_path,
+        r"""
+        const { resourceSelectionLabel } = await import(__BLOCKING_MODULE__);
+        console.log(JSON.stringify({
+          normal: resourceSelectionLabel("app-server", "i-test123"),
+          empty: resourceSelectionLabel("", "i-test123"),
+          object: resourceSelectionLabel({ description: "not a scalar label" }, "i-test123"),
+          oversized: resourceSelectionLabel("x".repeat(1025), "ACS-ECS-ScheduleToRunCommand"),
+        }));
+        """,
+    )
+    assert output == {
+        "normal": "app-server",
+        "empty": "i-test123",
+        "object": "i-test123",
+        "oversized": "ACS-ECS-ScheduleToRunCommand",
+    }
+
+
+def test_resource_selector_panel_is_reused_and_only_stale_panel_is_destroyed(tmp_path: Path) -> None:
+    output = _run_blocking_script(
+        tmp_path,
+        r"""
+        class Element {
+          constructor(tagName) {
+            this.tagName = tagName;
+            this.children = [];
+            this.parentNode = null;
+            this.dataset = {};
+          }
+          append(...nodes) {
+            for (const node of nodes) {
+              if (node.parentNode) {
+                node.parentNode.children = node.parentNode.children.filter((child) => child !== node);
+              }
+              node.parentNode = this;
+              this.children.push(node);
+            }
+          }
+        }
+        globalThis.document = { createElement: (tagName) => new Element(tagName) };
+        const { destroyResourceSelectionPanels, renderBlockingPanels } = await import(__BLOCKING_MODULE__);
+
+        let keptDestroyCount = 0;
+        let staleDestroyCount = 0;
+        const kept = new Element("article");
+        kept.dataset.requestId = "request-kept";
+        kept._resourceSelectorDestroy = () => { keptDestroyCount += 1; };
+        const stale = new Element("article");
+        stale.dataset.requestId = "request-stale";
+        stale._resourceSelectorDestroy = () => { staleDestroyCount += 1; };
+        const root = { querySelectorAll: () => [kept, stale] };
+
+        destroyResourceSelectionPanels(root, new Set(["request-kept"]));
+        const rendered = renderBlockingPanels(
+          { resourceSelections: { kept: { requestId: "request-kept", payload: {} } } },
+          {},
+          { resourceSelectionPanels: new Map([["request-kept", kept]]) },
+        );
+        console.log(JSON.stringify({
+          keptDestroyCount,
+          staleDestroyCount,
+          reused: rendered.children[0] === kept,
+        }));
+        """,
+    )
+
+    assert output == {"keptDestroyCount": 0, "staleDestroyCount": 1, "reused": True}
 
 
 def test_load_sessions_preserves_expanded_project_groups() -> None:
@@ -11153,7 +11405,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-313" in source
+    assert "./api.js?v=web-repl-ui-314" in source
     assert "./api.js?v=web-repl-ui-311" not in source
     assert "./api.js?v=web-repl-ui-159" not in source
 

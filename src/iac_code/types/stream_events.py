@@ -462,6 +462,24 @@ class AskUserQuestionEvent(ToolEmittedEvent):
     type: Literal["ask_user_question"] = "ask_user_question"
 
 
+@dataclass
+class CloudResourceSelectionEvent(ToolEmittedEvent):
+    """Request one structured cloud resource or derived-value selection."""
+
+    tool_use_id: str
+    input_id: str
+    question: str
+    selector_id: str
+    association_property: str
+    output_kind: str
+    association_property_metadata: dict[str, Any]
+    source: dict[str, Any] | None
+    profile_hash: str
+    continuation_frame: dict[str, Any] | None = field(default=None)
+    response_future: asyncio.Future[dict[str, Any] | None] | None = field(default=None)
+    type: Literal["cloud_resource_selection"] = "cloud_resource_selection"
+
+
 StreamEvent = Union[
     MessageStartEvent,
     TextDeltaEvent,
@@ -489,4 +507,5 @@ StreamEvent = Union[
     DiagramEvent,
     CandidateDetailEvent,
     AskUserQuestionEvent,
+    CloudResourceSelectionEvent,
 ]

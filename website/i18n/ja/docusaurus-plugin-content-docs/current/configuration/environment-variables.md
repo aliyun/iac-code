@@ -64,6 +64,7 @@ ECS メタデータ関連の環境変数は、認証モードを `EcsRamRole` �
 | `IAC_CODE_TENANT_ID` | テレメトリ用テナント識別子。`iac_tenant_` プレフィックスが付いていない場合は自動的に付加されます |
 | `IAC_CODE_GIT_BASH_PATH` | Windows で Git Bash が PATH にない場合の `bash.exe` パス |
 | `IAC_CODE_A2A_PUSH_KEYRING` | 環境管理された A2A 暗号化プッシュシークレットキーリング（JSON 形式） |
+| `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | A2A Server 専用。`1`、`true`、`yes`、`on`（大文字小文字を区別しない）でリソースセレクター機能の公開と登録を有効にします。未設定、空、その他の値では無効になり、既定値は無効です |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 標準 OpenTelemetry エンドポイント。設定すると OTLP エクスポートが有効になります |
 | `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT` | スパンで GenAI メッセージ/ツールコンテンツをキャプチャ：`SPAN_ONLY`、`EVENT_ONLY`、`SPAN_AND_EVENT` |
 

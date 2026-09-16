@@ -455,6 +455,12 @@ Pipeline 模式下，权限请求以 `permission_requested` 和 `permission_reso
 
 启用 `auto-approve-permissions` 或配置了显式权限规则时，权限请求不会进入交互输入，而是按自动批准（带审计）或规则裁决处理。受保护的阿里云写 API 不经过普通允许规则放行，仍需按 API 精确授权；权限决策在本地审计，任何需要审计记录的允许决策在审计记录无法持久化时都会 fail closed。
 
+## 资源选择器扩展
+
+`urn:iac-code:resource-selector:v1` 是用于选择单个云资源或其派生值的可选扩展。仅当启用 `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` 时，Agent Card 才会发布该扩展。客户端通过请求中的 `metadata.iac_code.capabilities.resourceSelector` 声明支持，其值必须包含 `schemaVersion: 1`、`queryMode: "ros_api_json"`，以及选择器能力中发布的 `profileHash`。客户端必须从实际加载的选择器 bundle 读取该哈希，不能硬编码。
+
+模型请求选择后，服务器进入 `input-required` 并发送选择器契约。客户端负责查询并渲染选择器，再用结构化的确认或取消响应恢复任务。选择器事件载荷绝不包含凭证或 secret。Safe Mode 会保留选择器工具，但环境开关、客户端能力、匹配的 profile hash 和有效的阿里云凭证仍然缺一不可。
+
 ## 扩展
 
 Agent Card 会公布可选的 iac-code artifact 元数据扩展：

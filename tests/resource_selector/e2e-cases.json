@@ -1,0 +1,3350 @@
+{
+  "schemaVersion": 1,
+  "generatedFrom": {
+    "bundleSha256": "8e3452fbf0480beffe8ae3b6aff045a6ebd4f14f90146d5bc16e314074f82e6c",
+    "profileHash": "sha256:9a0b5ea612c96be97a62bd06167b0308f6e8066dde64533edc4d27664837f193"
+  },
+  "cases": [
+    {
+      "caseId": "ecs.instance.default",
+      "selectorId": "ecs.instance",
+      "associationProperty": "ALIYUN::ECS::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.instance.list",
+          "fixtureId": "ecs.instance.ecs.instance.list.success",
+          "parameters": {
+            "MaxResults": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "i-test0001",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "vpc.vswitch.default",
+      "selectorId": "vpc.vswitch",
+      "associationProperty": "ALIYUN::VPC::VSwitch::VSwitchId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "vpc.instance_type.available",
+          "fixtureId": "vpc.vswitch.vpc.instance_type.available.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "DestinationResource": "InstanceType"
+          }
+        },
+        {
+          "operationKey": "vpc.vswitch.dataapi.ecs.describesecuritygroups",
+          "fixtureId": "vpc.vswitch.vpc.vswitch.dataapi.ecs.describesecuritygroups.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "SecurityGroupId": "sg-test0001",
+            "PageNumber": 1,
+            "PageSize": 20
+          }
+        },
+        {
+          "operationKey": "vpc.vswitch.dataapi.serverless.describenamespaceresources",
+          "fixtureId": "vpc.vswitch.vpc.vswitch.dataapi.serverless.describenamespaceresources.success",
+          "parameters": {
+            "NamespaceId": "cn-hangzhou:test-namespace"
+          }
+        },
+        {
+          "operationKey": "vpc.vswitch.list",
+          "fixtureId": "vpc.vswitch.vpc.vswitch.list.success",
+          "parameters": {
+            "PageNumber": 1,
+            "PageSize": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "vsw-test0001",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "rds.instance.default",
+      "selectorId": "rds.instance",
+      "associationProperty": "ALIYUN::RDS::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "rds.instance.list",
+          "fixtureId": "rds.instance.rds.instance.list.success",
+          "parameters": {
+            "PageNumber": 1,
+            "PageSize": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "rm-test0001",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "oss.bucket.default",
+      "selectorId": "oss.bucket",
+      "associationProperty": "ALIYUN::OSS::Bucket::BucketName",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oss.bucket.list",
+          "fixtureId": "oss.bucket.oss.bucket.list.success",
+          "parameters": {}
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "iac-code-test-bucket",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oss.bucket_object.default",
+      "selectorId": "oss.bucket_object",
+      "associationProperty": "ALIYUN::OSS::Bucket::Object",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oss.bucket.list",
+          "fixtureId": "oss.bucket_object.oss.bucket.list.success",
+          "parameters": {}
+        },
+        {
+          "operationKey": "oss.object.list",
+          "fixtureId": "oss.bucket_object.oss.object.list.success",
+          "parameters": {
+            "BucketName": "iac-code-test-bucket",
+            "max-keys": 50
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "oss://iac-code-test-bucket/path/test.txt",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "redis.instance.default",
+      "selectorId": "redis.instance",
+      "associationProperty": "ALIYUN::Redis::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "redis.instance.list",
+          "fixtureId": "redis.instance.redis.instance.list.success",
+          "parameters": {
+            "PageNumber": 1,
+            "PageSize": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "r-test0001",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "redis.connection_url.default",
+      "selectorId": "redis.connection_url",
+      "associationProperty": "ALIYUN::Redis::Instance::ConnectionURL",
+      "metadata": {
+        "RegionId": "cn-hangzhou",
+        "InstanceId": "r-test0001"
+      },
+      "source": {
+        "selector_id": "redis.instance",
+        "value": "r-test0001",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "redis.connection.list",
+          "fixtureId": "redis.connection_url.redis.connection.list.success",
+          "parameters": {}
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "redis://r-test.redis:6379",
+        "outputKind": "endpoint"
+      }
+    },
+    {
+      "caseId": "ecs.managed_instance.default",
+      "selectorId": "ecs.managed_instance",
+      "associationProperty": "ALIYUN::ECS::ManagedInstance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.managed_instance.dataapi.ecs.describemanagedinstances",
+          "fixtureId": "ecs.managed_instance.ecs.managed_instance.dataapi.ecs.describemanagedinstances.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-managed-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.disk.default",
+      "selectorId": "ecs.disk",
+      "associationProperty": "ALIYUN::ECS::Disk::DiskId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.disk.dataapi.ecs.describedisks",
+          "fixtureId": "ecs.disk.ecs.disk.dataapi.ecs.describedisks.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "PageSize": 100,
+            "Tag": {
+              "prefix": "Tag",
+              "__type__": "__RepeatList__",
+              "list": [],
+              "formatOptions": {}
+            }
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-disk",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.image.default",
+      "selectorId": "ecs.image",
+      "associationProperty": "ALIYUN::ECS::Image::ImageId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.image.dataapi.ecs.describeimages",
+          "fixtureId": "ecs.image.ecs.image.dataapi.ecs.describeimages.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ImageOwnerAlias": "system",
+            "PageNumber": 1,
+            "PageSize": 100
+          },
+          "parameterVariants": [
+            {
+              "parameters": {
+                "RegionId": "cn-hangzhou",
+                "ImageOwnerAlias": "system",
+                "PageNumber": 1,
+                "ImageId": "value-ecs-image"
+              }
+            },
+            {
+              "parameters": {
+                "RegionId": "cn-hangzhou",
+                "ImageId": "value-ecs-image"
+              }
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-image",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.security_group.default",
+      "selectorId": "ecs.security_group",
+      "associationProperty": "ALIYUN::ECS::SecurityGroup::SecurityGroupId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.security_group.dataapi.ecs.describesecuritygroups",
+          "fixtureId": "ecs.security_group.ecs.security_group.dataapi.ecs.describesecuritygroups.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "PageSize": 50
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-security-group",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.snapshot.default",
+      "selectorId": "ecs.snapshot",
+      "associationProperty": "ALIYUN::ECS::Snapshot::SnapshotId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.snapshot.dataapi.ecs.describesnapshots",
+          "fixtureId": "ecs.snapshot.ecs.snapshot.dataapi.ecs.describesnapshots.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-snapshot",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.command.default",
+      "selectorId": "ecs.command",
+      "associationProperty": "ALIYUN::ECS::Command::CommandId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.command.dataapi.ecs.describecommands",
+          "fixtureId": "ecs.command.ecs.command.dataapi.ecs.describecommands.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          },
+          "parameterVariants": [
+            {
+              "parameters": {
+                "RegionId": "cn-hangzhou",
+                "CommandId": "value-ecs-command"
+              }
+            }
+          ]
+        },
+        {
+          "operationKey": "ecs.command.dataapi.ecs.describeimages",
+          "fixtureId": "ecs.command.ecs.command.dataapi.ecs.describeimages.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ImageId": "aliyun_3_x64_20G_alibase_20240528.vhd"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-command",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.key_pair.default",
+      "selectorId": "ecs.key_pair",
+      "associationProperty": "ALIYUN::ECS::KeyPair::KeyPairName",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.key_pair.dataapi.ecs.describekeypairs",
+          "fixtureId": "ecs.key_pair.ecs.key_pair.dataapi.ecs.describekeypairs.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-key-pair",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "ecs.auto_snapshot_policy.default",
+      "selectorId": "ecs.auto_snapshot_policy",
+      "associationProperty": "ALIYUN::ECS::Snapshot::AutoSnapshotPolicyId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.auto_snapshot_policy.dataapi.ecs.describeautosnapshotpolicyex",
+          "fixtureId": "ecs.auto_snapshot_policy.ecs.auto_snapshot_policy.dataapi.ecs.describeautosnapshotpolicyex.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-auto-snapshot-policy",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.resource_group.default",
+      "selectorId": "ecs.resource_group",
+      "associationProperty": "ALIYUN::ECS::ResourceGroup::ResourceGroupId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.resource_group.dataapi.resourcemanager.listresourcegroups",
+          "fixtureId": "ecs.resource_group.ecs.resource_group.dataapi.resourcemanager.listresourcegroups.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "PageSize": 50
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-resource-group",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.deployment_set.default",
+      "selectorId": "ecs.deployment_set",
+      "associationProperty": "ALIYUN::ECS::DeploymentSet::DeploymentSetId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.deployment_set.dataapi.ecs.describedeploymentsets",
+          "fixtureId": "ecs.deployment_set.ecs.deployment_set.dataapi.ecs.describedeploymentsets.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "PageSize": 50
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-deployment-set",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.launch_template.default",
+      "selectorId": "ecs.launch_template",
+      "associationProperty": "ALIYUN::ECS::LaunchTemplate::LaunchTemplateId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.launch_template.dataapi.ecs.describelaunchtemplates",
+          "fixtureId": "ecs.launch_template.ecs.launch_template.dataapi.ecs.describelaunchtemplates.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 10,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-launch-template",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ecs.vswitch.default",
+      "selectorId": "ecs.vswitch",
+      "associationProperty": "ALIYUN::ECS::VSwitch",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.vswitch.dataapi.ecs.describeavailableresource",
+          "fixtureId": "ecs.vswitch.ecs.vswitch.dataapi.ecs.describeavailableresource.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "DestinationResource": "InstanceType"
+          }
+        },
+        {
+          "operationKey": "ecs.vswitch.dataapi.ecs20160314.describeresources",
+          "fixtureId": "ecs.vswitch.ecs.vswitch.dataapi.ecs20160314.describeresources.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "RegionNo": "cn-hangzhou",
+            "Product": "Vpc",
+            "Global": "false",
+            "Keyword": "needle",
+            "MaxItems": 20,
+            "ResourceType": "VSwitch",
+            "Filter.1.AttributeValue": "value-ecs-vswitch",
+            "Filter.1.AttributeName": "VpcId",
+            "Filter.1.Operation": "equal"
+          }
+        },
+        {
+          "operationKey": "ecs.vswitch.dataapi.serverless.describenamespaceresources",
+          "fixtureId": "ecs.vswitch.ecs.vswitch.dataapi.serverless.describenamespaceresources.success",
+          "parameters": {
+            "NamespaceId": "cn-hangzhou:test-namespace"
+          }
+        },
+        {
+          "operationKey": "ecs.vswitch.dataapi.vpc.describevswitches",
+          "fixtureId": "ecs.vswitch.ecs.vswitch.dataapi.vpc.describevswitches.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-vswitch",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "vpc.vpc.default",
+      "selectorId": "vpc.vpc",
+      "associationProperty": "ALIYUN::ECS::VPC::VPCId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "vpc.vpc.dataapi.ecs20160314.describeresources",
+          "fixtureId": "vpc.vpc.vpc.vpc.dataapi.ecs20160314.describeresources.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "RegionNo": "cn-hangzhou",
+            "Product": "Vpc",
+            "Global": "false",
+            "Keyword": "needle",
+            "MaxItems": 20,
+            "ResourceType": "Instance"
+          }
+        },
+        {
+          "operationKey": "vpc.vpc.dataapi.vpc.describevpcs",
+          "fixtureId": "vpc.vpc.vpc.vpc.dataapi.vpc.describevpcs.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-vpc-vpc",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "vpc.route_table.default",
+      "selectorId": "vpc.route_table",
+      "associationProperty": "ALIYUN::VPC::VirtualBorderRouter::RouteTableId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "vpc.route_table.dataapi.vpc.describevirtualborderrouters",
+          "fixtureId": "vpc.route_table.vpc.route_table.dataapi.vpc.describevirtualborderrouters.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-vpc-route-table",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "vpc.nat_gateway.default",
+      "selectorId": "vpc.nat_gateway",
+      "associationProperty": "ALIYUN::VPC::NatGateway::NatGatewayId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "vpc.nat_gateway.dataapi.vpc.describenatgateways",
+          "fixtureId": "vpc.nat_gateway.vpc.nat_gateway.dataapi.vpc.describenatgateways.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-vpc-nat-gateway",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "vpc.eip.default",
+      "selectorId": "vpc.eip",
+      "associationProperty": "ALIYUN::VPC::EIP::AllocationId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "vpc.eip.dataapi.vpc.describeeipaddresses",
+          "fixtureId": "vpc.eip.vpc.eip.dataapi.vpc.describeeipaddresses.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "PageSize": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-vpc-eip",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "privatelink.endpoint_service.default",
+      "selectorId": "privatelink.endpoint_service",
+      "associationProperty": "ALIYUN::PrivateLink::VpcEndpointService::ServiceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "privatelink.endpoint_service.dataapi.privatelink20200415.listvpcendpointservices",
+          "fixtureId": "privatelink.endpoint_service.privatelink.endpoint_service.dataapi.privatelink20200415.listvpcendpointservices.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-privatelink-endpoint-service",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cen.instance.default",
+      "selectorId": "cen.instance",
+      "associationProperty": "ALIYUN::CEN::Instance::CenId",
+      "metadata": {},
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cen.instance.dataapi.cbn.describecens",
+          "fixtureId": "cen.instance.cen.instance.dataapi.cbn.describecens.success",
+          "parameters": {
+            "PageNumber": 1,
+            "PageSize": 30
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cen-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cen.transit_router.default",
+      "selectorId": "cen.transit_router",
+      "associationProperty": "ALIYUN::CEN::TransitRouter::TransitRouterId",
+      "metadata": {
+        "CenId": "context-cenid-cen-transit-router",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cen.transit_router.dataapi.cbn.listtransitrouters",
+          "fixtureId": "cen.transit_router.cen.transit_router.dataapi.cbn.listtransitrouters.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "PageSize": 30,
+            "CenId": "context-cenid-cen-transit-router"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cen-transit-router",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "slb.load_balancer.default",
+      "selectorId": "slb.load_balancer",
+      "associationProperty": "ALIYUN::SLB::LoadBalancer::LoadBalancerId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "slb.load_balancer.dataapi.slb.describeloadbalancers",
+          "fixtureId": "slb.load_balancer.slb.load_balancer.dataapi.slb.describeloadbalancers.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 10,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-slb-load-balancer",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "slb.acl.default",
+      "selectorId": "slb.acl",
+      "associationProperty": "ALIYUN::SLB::ACL::ACLId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "slb.acl.dataapi.slb.describeaccesscontrollists",
+          "fixtureId": "slb.acl.slb.acl.dataapi.slb.describeaccesscontrollists.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 10,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-slb-acl",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "slb.certificate.default",
+      "selectorId": "slb.certificate",
+      "associationProperty": "ALIYUN::SLB::Certificate::CertificateId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "slb.certificate.dataapi.slb.describecacertificates",
+          "fixtureId": "slb.certificate.slb.certificate.dataapi.slb.describecacertificates.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        },
+        {
+          "operationKey": "slb.certificate.dataapi.slb.describeservercertificates",
+          "fixtureId": "slb.certificate.slb.certificate.dataapi.slb.describeservercertificates.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-slb-certificate",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "nlb.load_balancer.default",
+      "selectorId": "nlb.load_balancer",
+      "associationProperty": "ALIYUN::NLB::LoadBalancer::LoadBalancerId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "nlb.load_balancer.dataapi.nlb.listloadbalancers",
+          "fixtureId": "nlb.load_balancer.nlb.load_balancer.dataapi.nlb.listloadbalancers.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxResults": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-nlb-load-balancer",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "nlb.server_group.default",
+      "selectorId": "nlb.server_group",
+      "associationProperty": "ALIYUN::NLB::ServerGroup::ServerGroupId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "nlb.server_group.dataapi.nlb.listservergroups",
+          "fixtureId": "nlb.server_group.nlb.server_group.dataapi.nlb.listservergroups.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-nlb-server-group",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "nlb.security_policy.default",
+      "selectorId": "nlb.security_policy",
+      "associationProperty": "ALIYUN::NLB::SecurityPolicy::SecurityPolicyId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "nlb.security_policy.dataapi.nlb.listsecuritypolicy",
+          "fixtureId": "nlb.security_policy.nlb.security_policy.dataapi.nlb.listsecuritypolicy.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-nlb-security-policy",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "alb.load_balancer.default",
+      "selectorId": "alb.load_balancer",
+      "associationProperty": "ALIYUN::ALB::LoadBalancer::LoadBalancerId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "alb.load_balancer.dataapi.alb.listloadbalancers",
+          "fixtureId": "alb.load_balancer.alb.load_balancer.dataapi.alb.listloadbalancers.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxResults": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-alb-load-balancer",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "alb.acl.default",
+      "selectorId": "alb.acl",
+      "associationProperty": "ALIYUN::ALB::ACL::ACLId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "alb.acl.dataapi.alb.listacls",
+          "fixtureId": "alb.acl.alb.acl.dataapi.alb.listacls.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxResults": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-alb-acl",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cas.certificate.default",
+      "selectorId": "cas.certificate",
+      "associationProperty": "ALIYUN::CAS::Certificate::CertificateId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cas.certificate.dataapi.cas20200407.listusercertificateorder",
+          "fixtureId": "cas.certificate.cas.certificate.dataapi.cas20200407.listusercertificateorder.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "OrderType": "CERT"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "1001",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ess.scaling_configuration.default",
+      "selectorId": "ess.scaling_configuration",
+      "associationProperty": "ALIYUN::ESS::ScalingConfiguration::ScalingConfigurationId",
+      "metadata": {
+        "ScalingGroupId": "context-scalinggroupid-ess-scaling-configuration",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ess.scaling_configuration.dataapi.ess.describescalingconfigurations",
+          "fixtureId": "ess.scaling_configuration.ess.scaling_configuration.dataapi.ess.describescalingconfigurations.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 10,
+            "PageNumber": 1,
+            "ScalingGroupId": "context-scalinggroupid-ess-scaling-configuration"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ess-scaling-configuration",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ess.scaling_group.default",
+      "selectorId": "ess.scaling_group",
+      "associationProperty": "ALIYUN::ESS::AutoScalingGroup::AutoScalingGroupId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ess.scaling_group.dataapi.ess.describescalinggroups",
+          "fixtureId": "ess.scaling_group.ess.scaling_group.dataapi.ess.describescalinggroups.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 10,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ess-scaling-group",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ess.eci_scaling_configuration.default",
+      "selectorId": "ess.eci_scaling_configuration",
+      "associationProperty": "ALIYUN::ESS::ECIScalingConfiguration::ScalingConfigurationId",
+      "metadata": {
+        "ScalingGroupId": "context-scalinggroupid-ess-eci-scaling-configuration",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ess.eci_scaling_configuration.dataapi.ess.describeeciscalingconfigurations",
+          "fixtureId": "ess.eci_scaling_configuration.ess.eci_scaling_configuration.dataapi.ess.describeeciscalingconfigurations.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ScalingGroupId": "context-scalinggroupid-ess-eci-scaling-configuration",
+            "PageNumber": 1,
+            "PageSize": 50
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ess-eci-scaling-configuration",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "eci.container_group.default",
+      "selectorId": "eci.container_group",
+      "associationProperty": "ALIYUN::ECI::ContainerGroup::ContainerGroupId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "eci.container_group.dataapi.eci.describecontainergroups",
+          "fixtureId": "eci.container_group.eci.container_group.dataapi.eci.describecontainergroups.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-eci-container-group",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cs.cluster.default",
+      "selectorId": "cs.cluster",
+      "associationProperty": "ALIYUN::CS::Cluster::ClusterId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cs.cluster.dataapi.cs.describeclustersv1",
+          "fixtureId": "cs.cluster.cs.cluster.dataapi.cs.describeclustersv1.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "region_id": "cn-hangzhou",
+            "page_size": 50,
+            "page_number": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cs-cluster",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cs.node_pool.default",
+      "selectorId": "cs.node_pool",
+      "associationProperty": "ALIYUN::CS::Cluster::ClusterNodePool",
+      "metadata": {
+        "ClusterId": "context-clusterid-cs-node-pool",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cs.node_pool.dataapi.cs.describeclusternodepools",
+          "fixtureId": "cs.node_pool.cs.node_pool.dataapi.cs.describeclusternodepools.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ClusterId": "context-clusterid-cs-node-pool"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cs-node-pool",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "sae.namespace.default",
+      "selectorId": "sae.namespace",
+      "associationProperty": "ALIYUN::SAE::Namespace::NamespaceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "sae.namespace.dataapi.serverless.listnamespacesv2",
+          "fixtureId": "sae.namespace.sae.namespace.dataapi.serverless.listnamespacesv2.success",
+          "parameters": {
+            "CurrentPage": 1,
+            "PageSize": 100,
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-sae-namespace",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "polardb.cluster.default",
+      "selectorId": "polardb.cluster",
+      "associationProperty": "ALIYUN::POLARDB::DBCluster::DBClusterId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "polardb.cluster.dataapi.polardb.describedbclusters",
+          "fixtureId": "polardb.cluster.polardb.cluster.dataapi.polardb.describedbclusters.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 30,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-polardb-cluster",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "gpdb.instance.default",
+      "selectorId": "gpdb.instance",
+      "associationProperty": "ALIYUN::GPDB::DBInstance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "gpdb.instance.dataapi.gpdb.describedbinstances",
+          "fixtureId": "gpdb.instance.gpdb.instance.dataapi.gpdb.describedbinstances.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 30,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-gpdb-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "kafka.instance.default",
+      "selectorId": "kafka.instance",
+      "associationProperty": "ALIYUN::Kafka::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "kafka.instance.dataapi.alikafka20190916.getinstancelist",
+          "fixtureId": "kafka.instance.kafka.instance.dataapi.alikafka20190916.getinstancelist.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-kafka-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "emr.cluster.default",
+      "selectorId": "emr.cluster",
+      "associationProperty": "ALIYUN::Emr::ECSCluster::ClusterId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "emr.cluster.dataapi.emr_new.listclusters",
+          "fixtureId": "emr.cluster.emr.cluster.dataapi.emr_new.listclusters.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ClusterStates": {
+              "prefix": "ClusterStates",
+              "__type__": "__RepeatList__",
+              "list": [
+                "BOOTSTRAPPING",
+                "RUNNING",
+                "STARTING",
+                "START_FAILED",
+                "TERMINATED_WITH_ERRORS",
+                "TERMINATE_FAILED",
+                "TERMINATING"
+              ],
+              "formatOptions": {}
+            }
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-emr-cluster",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "lindorm.instance.default",
+      "selectorId": "lindorm.instance",
+      "associationProperty": "ALIYUN::Lindorm::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "lindorm.instance.dataapi.hitsdb20200615.getlindorminstancelist",
+          "fixtureId": "lindorm.instance.lindorm.instance.dataapi.hitsdb20200615.getlindorminstancelist.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "PageSize": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-lindorm-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "hologres.instance.default",
+      "selectorId": "hologres.instance",
+      "associationProperty": "ALIYUN::Hologres::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "hologres.instance.dataapi.hologram_2022.listinstances",
+          "fixtureId": "hologres.instance.hologres.instance.dataapi.hologram_2022.listinstances.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-hologres-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "dashvector.cluster.default",
+      "selectorId": "dashvector.cluster",
+      "associationProperty": "ALIYUN::DashVector::Cluster::ClusterName",
+      "metadata": {},
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "dashvector.cluster.dataapi.centaur_console.listclusters",
+          "fixtureId": "dashvector.cluster.dashvector.cluster.dataapi.centaur_console.listclusters.success",
+          "parameters": {
+            "PageNumber": 1,
+            "PageSize": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-dashvector-cluster",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "eas.resource.default",
+      "selectorId": "eas.resource",
+      "associationProperty": "ALIYUN::EAS::Resource::ResourceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "eas.resource.dataapi.eas.listresources",
+          "fixtureId": "eas.resource.eas.resource.dataapi.eas.listresources.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-eas-resource",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "oss.object.default",
+      "selectorId": "oss.object",
+      "associationProperty": "ALIYUN::OSS::Object::ObjectName",
+      "metadata": {
+        "BucketName": "context-bucketname-oss-object",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oss.object.dataapi.oss.getbucket",
+          "fixtureId": "oss.object.oss.object.dataapi.oss.getbucket.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "BucketName": "context-bucketname-oss-object",
+            "max-keys": 1000,
+            "delimiter": "/"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oss-object",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "nas.file_system.default",
+      "selectorId": "nas.file_system",
+      "associationProperty": "ALIYUN::NAS::FileSystem::FileSystemId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "nas.file_system.dataapi.nas.describefilesystems",
+          "fixtureId": "nas.file_system.nas.file_system.dataapi.nas.describefilesystems.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-nas-file-system",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ehpc.file_system.default",
+      "selectorId": "ehpc.file_system",
+      "associationProperty": "ALIYUN::EHPC::FileSystem::FileSystemId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ehpc.file_system.dataapi.ehpc.listfilesystemwithmounttargets",
+          "fixtureId": "ehpc.file_system.ehpc.file_system.dataapi.ehpc.listfilesystemwithmounttargets.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 50,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ehpc-file-system",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ehpc.cluster.default",
+      "selectorId": "ehpc.cluster",
+      "associationProperty": "ALIYUN::EHPC::Cluster::ClusterId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ehpc.cluster.dataapi.ehpc.listclusters",
+          "fixtureId": "ehpc.cluster.ehpc.cluster.dataapi.ehpc.listclusters.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 50,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ehpc-cluster",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "ram.user.default",
+      "selectorId": "ram.user",
+      "associationProperty": "ALIYUN::RAM::User",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ram.user.dataapi.ram.listusers",
+          "fixtureId": "ram.user.ram.user.dataapi.ram.listusers.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxItems": 1000
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ram-user",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "ram.role.default",
+      "selectorId": "ram.role",
+      "associationProperty": "ALIYUN::RAM::Role",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ram.role.dataapi.ram.listroles",
+          "fixtureId": "ram.role.ram.role.dataapi.ram.listroles.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxItems": 1000
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ram-role",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "ram.service_role.default",
+      "selectorId": "ram.service_role",
+      "associationProperty": "ALIYUN::RAM::Service::Role",
+      "metadata": {
+        "Service": "context-service-ram-service-role",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ram.service_role.dataapi.ram.listrolesforservice",
+          "fixtureId": "ram.service_role.ram.service_role.dataapi.ram.listrolesforservice.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxItems": 100,
+            "Service": "context-service-ram-service-role"
+          }
+        },
+        {
+          "operationKey": "ram.service_role.dataapi.resourcegroup.listrolesforservice",
+          "fixtureId": "ram.service_role.ram.service_role.dataapi.resourcegroup.listrolesforservice.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "Service": "ecs.aliyuncs.com",
+            "MaxItems": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ram-service-role",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "ram.policy.default",
+      "selectorId": "ram.policy",
+      "associationProperty": "ALIYUN::RAM::Policy::PolicyName",
+      "metadata": {},
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ram.policy.dataapi.ram.listpolicies",
+          "fixtureId": "ram.policy.ram.policy.dataapi.ram.listpolicies.success",
+          "parameters": {
+            "MaxItems": 1000
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ram-policy",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "ecs.ram_role.default",
+      "selectorId": "ecs.ram_role",
+      "associationProperty": "ALIYUN::ECS::RAM::Role",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.ram_role.dataapi.ram.listrolesforservice",
+          "fixtureId": "ecs.ram_role.ecs.ram_role.dataapi.ram.listrolesforservice.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxItems": 100,
+            "Service": "ecs.aliyuncs.com"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ecs-ram-role",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "resource_manager.folder.default",
+      "selectorId": "resource_manager.folder",
+      "associationProperty": "ALIYUN::ResourceManager::Folder",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "resource_manager.folder.dataapi.resource_directory.listauthorizedfolders",
+          "fixtureId": "resource_manager.folder.resource_manager.folder.dataapi.resource_directory.listauthorizedfolders.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "PageSize": 100
+          }
+        },
+        {
+          "operationKey": "resource_manager.folder.dataapi.resourcemanager.getresourcedirectory",
+          "fixtureId": "resource_manager.folder.resource_manager.folder.dataapi.resourcemanager.getresourcedirectory.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        },
+        {
+          "operationKey": "resource_manager.folder.dataapi.resourcemanager.listaccountsforparent",
+          "fixtureId": "resource_manager.folder.resource_manager.folder.dataapi.resourcemanager.listaccountsforparent.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ParentFolderId": "fd-test0001",
+            "PageNumber": 1,
+            "PageSize": 100
+          }
+        },
+        {
+          "operationKey": "resource_manager.folder.dataapi.resourcemanager.listfoldersforparent",
+          "fixtureId": "resource_manager.folder.resource_manager.folder.dataapi.resourcemanager.listfoldersforparent.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ParentFolderId": "r-test-root",
+            "PageNumber": 1,
+            "PageSize": 20
+          },
+          "parameterVariants": [
+            {
+              "parameters": {
+                "RegionId": "cn-hangzhou",
+                "ParentFolderId": "fd-test0001",
+                "PageNumber": 1,
+                "PageSize": 100
+              }
+            },
+            {
+              "parameters": {
+                "RegionId": "cn-hangzhou",
+                "ParentFolderId": "value-resource-manager-folder",
+                "PageNumber": 1,
+                "PageSize": 20
+              }
+            }
+          ]
+        },
+        {
+          "operationKey": "resource_manager.folder.multiapi.resourcemanager.multiapi",
+          "fixtureId": "resource_manager.folder.resource_manager.folder.multiapi.resourcemanager.multiapi.success",
+          "parameters": {
+            "requests": [
+              {
+                "customRequestKey": "fd-parent",
+                "parameters": {
+                  "RegionId": "cn-hangzhou",
+                  "ParentFolderId": "fd-parent",
+                  "PageSize": 100
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-resource-manager-folder",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "resource_manager.account.default",
+      "selectorId": "resource_manager.account",
+      "associationProperty": "ALIYUN::ResourceManager::Account",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "resource_manager.account.dataapi.resourcemanager.getresourcedirectory",
+          "fixtureId": "resource_manager.account.resource_manager.account.dataapi.resourcemanager.getresourcedirectory.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        },
+        {
+          "operationKey": "resource_manager.account.dataapi.resourcemanager.listaccountsforparent",
+          "fixtureId": "resource_manager.account.resource_manager.account.dataapi.resourcemanager.listaccountsforparent.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ParentFolderId": "r-test-root",
+            "PageSize": 10,
+            "PageNumber": 1
+          }
+        },
+        {
+          "operationKey": "resource_manager.account.dataapi.resourcemanager.listfoldersforparent",
+          "fixtureId": "resource_manager.account.resource_manager.account.dataapi.resourcemanager.listfoldersforparent.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ParentFolderId": "r-test-root",
+            "PageSize": 10,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-resource-manager-account",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "kms.key.default",
+      "selectorId": "kms.key",
+      "associationProperty": "ALIYUN::KMS::Key::KeyId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "kms.key.dataapi.kms.describekey",
+          "fixtureId": "kms.key.kms.key.dataapi.kms.describekey.success",
+          "parameters": {
+            "KeyId": "key-test0001"
+          }
+        },
+        {
+          "operationKey": "kms.key.dataapi.kms.listkeys",
+          "fixtureId": "kms.key.kms.key.dataapi.kms.listkeys.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 100,
+            "PageNumber": 1
+          }
+        },
+        {
+          "operationKey": "kms.key.multiapi.kms.multiapi",
+          "fixtureId": "kms.key.kms.key.multiapi.kms.multiapi.success",
+          "parameters": {
+            "requests": [
+              {
+                "parameters": {
+                  "RegionId": "cn-hangzhou",
+                  "KeyId": "key-test0001"
+                }
+              }
+            ]
+          },
+          "parameterVariants": [
+            {
+              "parameters": {
+                "requests": [
+                  {
+                    "parameters": {
+                      "RegionId": "cn-hangzhou",
+                      "KeyId": "value-kms-key"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-kms-key",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "kms.instance.default",
+      "selectorId": "kms.instance",
+      "associationProperty": "ALIYUN::KMS::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "kms.instance.dataapi.kms.listkmsinstances",
+          "fixtureId": "kms.instance.kms.instance.dataapi.kms.listkmsinstances.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 100,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-kms-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cloudsso.directory.default",
+      "selectorId": "cloudsso.directory",
+      "associationProperty": "ALIYUN::CloudSSO::Directory::DirectoryId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cloudsso.directory.dataapi.cloudsso.listdirectories",
+          "fixtureId": "cloudsso.directory.cloudsso.directory.dataapi.cloudsso.listdirectories.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cloudsso-directory",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cloudsso.user.default",
+      "selectorId": "cloudsso.user",
+      "associationProperty": "ALIYUN::CloudSSO::User::UserId",
+      "metadata": {
+        "DirectoryId": "context-directoryid-cloudsso-user",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cloudsso.user.dataapi.cloudsso.listusers",
+          "fixtureId": "cloudsso.user.cloudsso.user.dataapi.cloudsso.listusers.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "DirectoryId": "context-directoryid-cloudsso-user",
+            "MaxResults": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cloudsso-user",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cloudsso.group.default",
+      "selectorId": "cloudsso.group",
+      "associationProperty": "ALIYUN::CloudSSO::Group::GroupId",
+      "metadata": {
+        "DirectoryId": "context-directoryid-cloudsso-group",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cloudsso.group.dataapi.cloudsso.listgroups",
+          "fixtureId": "cloudsso.group.cloudsso.group.dataapi.cloudsso.listgroups.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "DirectoryId": "context-directoryid-cloudsso-group",
+            "MaxResults": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cloudsso-group",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cloudsso.access_configuration.default",
+      "selectorId": "cloudsso.access_configuration",
+      "associationProperty": "ALIYUN::CloudSSO::AccessConfiguration::AccessConfigurationId",
+      "metadata": {
+        "DirectoryId": "context-directoryid-cloudsso-access-configuration",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cloudsso.access_configuration.dataapi.cloudsso.listaccessconfigurations",
+          "fixtureId": "cloudsso.access_configuration.cloudsso.access_configuration.dataapi.cloudsso.listaccessconfigurations.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "DirectoryId": "context-directoryid-cloudsso-access-configuration",
+            "MaxResults": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cloudsso-access-configuration",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cr.instance.default",
+      "selectorId": "cr.instance",
+      "associationProperty": "ALIYUN::CR::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou",
+        "Attribute": "InstanceId"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cr.instance.dataapi.cr.listinstance",
+          "fixtureId": "cr.instance.cr.instance.dataapi.cr.listinstance.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNo": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cr-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cr.namespace.default",
+      "selectorId": "cr.namespace",
+      "associationProperty": "ALIYUN::CR::NameSpace::Name",
+      "metadata": {
+        "InstanceId": "context-instanceid-cr-namespace",
+        "RegionId": "cn-hangzhou",
+        "Attribute": "NamespaceName"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cr.namespace.dataapi.cr.listnamespace",
+          "fixtureId": "cr.namespace.cr.namespace.dataapi.cr.listnamespace.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "InstanceId": "context-instanceid-cr-namespace",
+            "PageNo": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cr-namespace",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "cr.repository.default",
+      "selectorId": "cr.repository",
+      "associationProperty": "ALIYUN::CR::Repository::RepoName",
+      "metadata": {
+        "InstanceId": "context-instanceid-cr-repository",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cr.repository.dataapi.cr.listrepository",
+          "fixtureId": "cr.repository.cr.repository.dataapi.cr.listrepository.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "InstanceId": "context-instanceid-cr-repository",
+            "RepoStatus": "ALL",
+            "PageNo": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cr-repository",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "acr.repo_attribute.default",
+      "selectorId": "acr.repo_attribute",
+      "associationProperty": "ALIYUN::ACR::Repo::RepoAttribute",
+      "metadata": {
+        "RegionId": "cn-hangzhou",
+        "Attribute": "repoName"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "acr.repo_attribute.dataapi.acr.listrepo",
+          "fixtureId": "acr.repo_attribute.acr.repo_attribute.dataapi.acr.listrepo.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "Page": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-acr-repo-attribute",
+        "outputKind": "endpoint"
+      }
+    },
+    {
+      "caseId": "acr.namespace.default",
+      "selectorId": "acr.namespace",
+      "associationProperty": "ALIYUN::ACR::Namespace::Name",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "acr.namespace.dataapi.acr.listnamespace",
+          "fixtureId": "acr.namespace.acr.namespace.dataapi.acr.listnamespace.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "Page": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-acr-namespace",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "fc.service.default",
+      "selectorId": "fc.service",
+      "associationProperty": "ALIYUN::FC::Service::ServiceName",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "fc.service.dataapi.fc_api.listservices",
+          "fixtureId": "fc.service.fc.service.dataapi.fc_api.listservices.success",
+          "parameters": {
+            "regionId": "cn-hangzhou",
+            "limit": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-fc-service",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "fc.function.default",
+      "selectorId": "fc.function",
+      "associationProperty": "ALIYUN::FC::Function::FunctionName",
+      "metadata": {
+        "ServiceName": "context-servicename-fc-function",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "fc.function.dataapi.fc_api.listfunctions",
+          "fixtureId": "fc.function.fc.function.dataapi.fc_api.listfunctions.success",
+          "parameters": {
+            "regionId": "cn-hangzhou",
+            "serviceName": "context-servicename-fc-function",
+            "limit": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-fc-function",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "fc3.function.default",
+      "selectorId": "fc3.function",
+      "associationProperty": "ALIYUN::FC3::Function::FunctionName",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "fc3.function.dataapi.fc3_api.listfunctions",
+          "fixtureId": "fc3.function.fc3.function.dataapi.fc3_api.listfunctions.success",
+          "parameters": {
+            "regionId": "cn-hangzhou",
+            "limit": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-fc3-function",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "computenest.service_instance.default",
+      "selectorId": "computenest.service_instance",
+      "associationProperty": "ALIYUN::ComputeNest::ServiceInstance::ServiceInstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "computenest.service_instance.dataapi.computenest.listserviceinstances",
+          "fixtureId": "computenest.service_instance.computenest.service_instance.dataapi.computenest.listserviceinstances.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "Filter.1.Name": "DeployRegionId",
+            "Filter.1.Value.1": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-computenest-service-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "computenest.service.default",
+      "selectorId": "computenest.service",
+      "associationProperty": "ALIYUN::ComputeNest::Service::ServiceId",
+      "metadata": {},
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "computenest.service.dataapi.computenest.listservices",
+          "fixtureId": "computenest.service.computenest.service.dataapi.computenest.listservices.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "AllVersions": false,
+            "MaxResults": 20
+          }
+        },
+        {
+          "operationKey": "computenest.service.dataapi.computenest0521.listservices",
+          "fixtureId": "computenest.service.computenest.service.dataapi.computenest0521.listservices.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "AllVersions": false,
+            "MaxResults": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-computenest-service",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "computenest.artifact.default",
+      "selectorId": "computenest.artifact",
+      "associationProperty": "ALIYUN::ComputeNest::Artifact::ArtifactId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "computenest.artifact.dataapi.computenest0521.listartifacts",
+          "fixtureId": "computenest.artifact.computenest.artifact.dataapi.computenest0521.listartifacts.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-computenest-artifact",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "nest.service.default",
+      "selectorId": "nest.service",
+      "associationProperty": "ALIYUN::NEST::Service::ServiceId",
+      "metadata": {},
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "nest.service.dataapi.computenest.listservices",
+          "fixtureId": "nest.service.nest.service.dataapi.computenest.listservices.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "AllVersions": false,
+            "MaxResults": 20
+          }
+        },
+        {
+          "operationKey": "nest.service.dataapi.computenest0521.listservices",
+          "fixtureId": "nest.service.nest.service.dataapi.computenest0521.listservices.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "AllVersions": false,
+            "MaxResults": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-nest-service",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "service_catalog.portfolio.default",
+      "selectorId": "service_catalog.portfolio",
+      "associationProperty": "ALIYUN::ServiceCatalog::LaunchOption::PortfolioId",
+      "metadata": {
+        "ProductId": "context-productid-service-catalog-portfolio",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "service_catalog.portfolio.dataapi.servicecatalog.listlaunchoptions",
+          "fixtureId": "service_catalog.portfolio.service_catalog.portfolio.dataapi.servicecatalog.listlaunchoptions.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ProductId": "context-productid-service-catalog-portfolio"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-service-catalog-portfolio",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "service_catalog.product_version.default",
+      "selectorId": "service_catalog.product_version",
+      "associationProperty": "ALIYUN::ServiceCatalog::ProductVersion::ProductVersionId",
+      "metadata": {
+        "ProductId": "context-productid-service-catalog-product-version",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "service_catalog.product_version.dataapi.servicecatalog.listproductversions",
+          "fixtureId": "service_catalog.product_version.service_catalog.product_version.dataapi.servicecatalog.listproductversions.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ProductId": "context-productid-service-catalog-product-version",
+            "Active": true
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-service-catalog-product-version",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "flow.connection.default",
+      "selectorId": "flow.connection",
+      "associationProperty": "ALIYUN::Flow::Connection::ConnectionId",
+      "metadata": {
+        "organizationId": "context-organizationid-flow-connection",
+        "sericeConnectionType": "context-sericeconnectiontype-flow-connection",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "flow.connection.dataapi.devops2020.listserviceconnections",
+          "fixtureId": "flow.connection.flow.connection.dataapi.devops2020.listserviceconnections.success",
+          "parameters": {
+            "organizationId": "context-organizationid-flow-connection",
+            "sericeConnectionType": "context-sericeconnectiontype-flow-connection"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-flow-connection",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "flow.organization.default",
+      "selectorId": "flow.organization",
+      "associationProperty": "ALIYUN::Flow::Organization::OrganizationId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "flow.organization.dataapi.devops2020.listjoinedorganizations",
+          "fixtureId": "flow.organization.flow.organization.dataapi.devops2020.listjoinedorganizations.success",
+          "parameters": {}
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-flow-organization",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "eds.bundle.default",
+      "selectorId": "eds.bundle",
+      "associationProperty": "ALIYUN::EDS::Bundle::BundleId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "eds.bundle.dataapi.clouddesktopnew.describebundles",
+          "fixtureId": "eds.bundle.eds.bundle.dataapi.clouddesktopnew.describebundles.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxResults": 20,
+            "BundleType": "CUSTOM",
+            "ProtocolType": "",
+            "SupportMultiSession": true
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-eds-bundle",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "eds.office_site.default",
+      "selectorId": "eds.office_site",
+      "associationProperty": "ALIYUN::EDS::OfficeSite::OfficeSiteId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "eds.office_site.dataapi.clouddesktopnew.describeofficesites",
+          "fixtureId": "eds.office_site.eds.office_site.dataapi.clouddesktopnew.describeofficesites.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxResults": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-eds-office-site",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "eds.policy_group.default",
+      "selectorId": "eds.policy_group",
+      "associationProperty": "ALIYUN::EDS::PolicyGroup::PolicyGroupId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "eds.policy_group.dataapi.clouddesktopnew.describepolicygroups",
+          "fixtureId": "eds.policy_group.eds.policy_group.dataapi.clouddesktopnew.describepolicygroups.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "MaxResults": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-eds-policy-group",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "appflow.user_auth_config.default",
+      "selectorId": "appflow.user_auth_config",
+      "associationProperty": "ALIYUN::AppFlow::UserAuthConfig::ConfigId",
+      "metadata": {
+        "ConnectorId": "context-connectorid-appflow-user-auth-config",
+        "ConnectorVersion": 1,
+        "AuthType": "context-authtype-appflow-user-auth-config",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "appflow.user_auth_config.dataapi.appflow.listuserauthconfigs",
+          "fixtureId": "appflow.user_auth_config.appflow.user_auth_config.dataapi.appflow.listuserauthconfigs.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ConnectorId": "context-connectorid-appflow-user-auth-config",
+            "MaxResults": 20,
+            "ConnectorVersion": 1,
+            "AuthType": "context-authtype-appflow-user-auth-config"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-appflow-user-auth-config",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "apig.gateway.default",
+      "selectorId": "apig.gateway",
+      "associationProperty": "ALIYUN::APIG::Gateway::GatewayId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "apig.gateway.dataapi.apig.listgateways",
+          "fixtureId": "apig.gateway.apig.gateway.dataapi.apig.listgateways.success",
+          "parameters": {
+            "regionId": "cn-hangzhou",
+            "pageNumber": 1,
+            "pageSize": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-apig-gateway",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "swas.instance.default",
+      "selectorId": "swas.instance",
+      "associationProperty": "ALIYUN::SWAS::Instance::InstanceId",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "swas.instance.dataapi.swas_open.listinstances",
+          "fixtureId": "swas.instance.swas.instance.dataapi.swas_open.listinstances.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-swas-instance",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "cms.workspace.default",
+      "selectorId": "cms.workspace",
+      "associationProperty": "ALIYUN::CMS::Workspace",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "cms.workspace.dataapi.cms20240330.listworkspaces",
+          "fixtureId": "cms.workspace.cms.workspace.dataapi.cms20240330.listworkspaces.success",
+          "parameters": {
+            "region": "cn-hangzhou",
+            "RegionId": "cn-hongkong",
+            "nextToken": null,
+            "maxResults": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cms-workspace",
+        "outputKind": "resource_id"
+      }
+    },
+    {
+      "caseId": "domain.domain.default",
+      "selectorId": "domain.domain",
+      "associationProperty": "ALIYUN::Domain::DomainName",
+      "metadata": {
+        "ShowDomainPrefixInput": false
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "domain.domain.dataapi.cdn.checkcdndomainicp",
+          "fixtureId": "domain.domain.domain.domain.dataapi.cdn.checkcdndomainicp.success",
+          "parameters": {
+            "DomainName": "value-domain-domain"
+          }
+        },
+        {
+          "operationKey": "domain.domain.dataapi.domain.querydomainlist",
+          "fixtureId": "domain.domain.domain.domain.dataapi.domain.querydomainlist.success",
+          "parameters": {
+            "PageNum": 1,
+            "PageSize": 10
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-domain-domain",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.template.default",
+      "selectorId": "oos.template",
+      "associationProperty": "ALIYUN::OOS::Template::TemplateName",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.template.dataapi.oos.listtemplates",
+          "fixtureId": "oos.template.oos.template.dataapi.oos.listtemplates.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ShareType": "Public"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-template",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.parameter.default",
+      "selectorId": "oos.parameter",
+      "associationProperty": "ALIYUN::OOS::Parameter::Value",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.parameter.dataapi.oos.listparameters",
+          "fixtureId": "oos.parameter.oos.parameter.dataapi.oos.listparameters.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ShareType": "Private"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-parameter",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.secret_parameter.default",
+      "selectorId": "oos.secret_parameter",
+      "associationProperty": "ALIYUN::OOS::SecretParameter::Value",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.secret_parameter.dataapi.oos.listsecretparameters",
+          "fixtureId": "oos.secret_parameter.oos.secret_parameter.dataapi.oos.listsecretparameters.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-secret-parameter",
+        "outputKind": "secret_reference"
+      }
+    },
+    {
+      "caseId": "oos.package.default",
+      "selectorId": "oos.package",
+      "associationProperty": "ALIYUN::OOS::Package::PackageName",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.package.dataapi.ecs.describeimages",
+          "fixtureId": "oos.package.oos.package.dataapi.ecs.describeimages.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ImageId": "aliyun_3_x64_20G_alibase_20240528.vhd",
+            "PageNumber": 1,
+            "PageSize": 20
+          }
+        },
+        {
+          "operationKey": "oos.package.dataapi.ecs.describeinstances",
+          "fixtureId": "oos.package.oos.package.dataapi.ecs.describeinstances.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "InstanceIds": [
+              "i-test0001"
+            ],
+            "PageNumber": 1,
+            "PageSize": 20
+          }
+        },
+        {
+          "operationKey": "oos.package.dataapi.oos.listtemplates",
+          "fixtureId": "oos.package.oos.package.dataapi.oos.listtemplates.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "TemplateType": "Package",
+            "ShareType": "Public",
+            "MaxResults": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-package",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.application.default",
+      "selectorId": "oos.application",
+      "associationProperty": "ALIYUN::OOS::Application::ApplicationName",
+      "metadata": {},
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.application.dataapi.oos.listapplications",
+          "fixtureId": "oos.application.oos.application.dataapi.oos.listapplications.success",
+          "parameters": {}
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-application",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.application_group.default",
+      "selectorId": "oos.application_group",
+      "associationProperty": "ALIYUN::OOS::ApplicationGroup::ApplicationGroupName",
+      "metadata": {
+        "ApplicationName": "context-applicationname-oos-application-group"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.application_group.dataapi.oos.listapplicationgroups",
+          "fixtureId": "oos.application_group.oos.application_group.dataapi.oos.listapplicationgroups.success",
+          "parameters": {
+            "ApplicationName": "context-applicationname-oos-application-group",
+            "MaxResults": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-application-group",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.git_account.default",
+      "selectorId": "oos.git_account",
+      "associationProperty": "ALIYUN::OOS::GitAccount::Name",
+      "metadata": {
+        "Platform": "github"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.git_account.dataapi.oos.listgitaccounts",
+          "fixtureId": "oos.git_account.oos.git_account.dataapi.oos.listgitaccounts.success",
+          "parameters": {
+            "Platform": "github"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-git-account",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.git_organization.default",
+      "selectorId": "oos.git_organization",
+      "associationProperty": "ALIYUN::OOS::GitOrganization::Name",
+      "metadata": {
+        "Platform": "github",
+        "Owner": "iac-code-test"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.git_organization.dataapi.oos.listgitorganizations",
+          "fixtureId": "oos.git_organization.oos.git_organization.dataapi.oos.listgitorganizations.success",
+          "parameters": {
+            "Platform": "github",
+            "Owner": "iac-code-test"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-git-organization",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.git_repository.default",
+      "selectorId": "oos.git_repository",
+      "associationProperty": "ALIYUN::OOS::GitRepository::Name",
+      "metadata": {
+        "Platform": "github",
+        "Owner": "iac-code-test"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.git_repository.dataapi.oos.listgitrepositories",
+          "fixtureId": "oos.git_repository.oos.git_repository.dataapi.oos.listgitrepositories.success",
+          "parameters": {
+            "Platform": "github",
+            "Owner": "iac-code-test",
+            "PageNumber": 1,
+            "PageSize": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-git-repository",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.git_branch.default",
+      "selectorId": "oos.git_branch",
+      "associationProperty": "ALIYUN::OOS::GitBranch::Name",
+      "metadata": {
+        "Platform": "github",
+        "Owner": "iac-code-test",
+        "RepoFullName": "iac-code-test/repository"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.git_branch.dataapi.oos.listgitbranches",
+          "fixtureId": "oos.git_branch.oos.git_branch.dataapi.oos.listgitbranches.success",
+          "parameters": {
+            "Platform": "github",
+            "Owner": "iac-code-test",
+            "RepoFullName": "iac-code-test/repository",
+            "PageNumber": 1,
+            "PageSize": 20
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-git-branch",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "oos.patch_baseline.default",
+      "selectorId": "oos.patch_baseline",
+      "associationProperty": "ALIYUN::OOS::PatchBaseline::PatchBaselineName",
+      "metadata": {
+        "RegionId": "cn-hangzhou"
+      },
+      "source": null,
+      "expectedRequests": [
+        {
+          "operationKey": "oos.patch_baseline.dataapi.oos.listpatchbaselines",
+          "fixtureId": "oos.patch_baseline.oos.patch_baseline.dataapi.oos.listpatchbaselines.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-patch-baseline",
+        "outputKind": "resource_name"
+      }
+    },
+    {
+      "caseId": "ecs.launch_template_version.default",
+      "selectorId": "ecs.launch_template_version",
+      "associationProperty": "ALIYUN::ECS::LaunchTemplate::LaunchTemplateVersion",
+      "metadata": {
+        "LaunchTemplateId": "value-ecs-launch-template",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "ecs.launch_template",
+        "value": "value-ecs-launch-template",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "ecs.launch_template_version.dataapi.ecs.describelaunchtemplateversions",
+          "fixtureId": "ecs.launch_template_version.ecs.launch_template_version.dataapi.ecs.describelaunchtemplateversions.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 10,
+            "PageNumber": 1,
+            "LaunchTemplateId": "value-ecs-launch-template"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "1",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "ess.eci_container.default",
+      "selectorId": "ess.eci_container",
+      "associationProperty": "ALIYUN::ESS::ECIScalingConfiguration::ContainerName",
+      "metadata": {
+        "ScalingGroupId": "context-scalinggroupid-ess-eci-container",
+        "ScalingConfigurationId": [
+          "value-ess-eci-scaling-configuration"
+        ],
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "ess.eci_scaling_configuration",
+        "value": "value-ess-eci-scaling-configuration",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou",
+          "ScalingGroupId": "context-scalinggroupid-ess-eci-container"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "ess.eci_container.dataapi.ess.describeeciscalingconfigurations",
+          "fixtureId": "ess.eci_container.ess.eci_container.dataapi.ess.describeeciscalingconfigurations.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ScalingGroupId": "context-scalinggroupid-ess-eci-container",
+            "ScalingConfigurationId": {
+              "prefix": "ScalingConfigurationId",
+              "__type__": "__RepeatList__",
+              "list": [
+                "value-ess-eci-scaling-configuration"
+              ],
+              "formatOptions": {}
+            },
+            "PageNumber": 1,
+            "PageSize": 50
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ess-eci-container",
+        "outputKind": "derived_value"
+      }
+    },
+    {
+      "caseId": "oss.object_version.default",
+      "selectorId": "oss.object_version",
+      "associationProperty": "ALIYUN::OSS::Object::ObjectVersionId",
+      "metadata": {
+        "BucketName": "context-bucketname-oss-object-version",
+        "ObjectName": "value-oss-object",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "oss.object",
+        "value": "value-oss-object",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou",
+          "BucketName": "context-bucketname-oss-object-version",
+          "ValueType": "ObjectName"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "oss.object_version.dataapi.oss.listobjectversions",
+          "fixtureId": "oss.object_version.oss.object_version.dataapi.oss.listobjectversions.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "BucketName": "context-bucketname-oss-object-version",
+            "prefix": "value-oss-object"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oss-object-version",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "nas.mount_target.default",
+      "selectorId": "nas.mount_target",
+      "associationProperty": "ALIYUN::NAS::FileSystem::MountTargetDomain",
+      "metadata": {
+        "FileSystemId": "value-nas-file-system",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "nas.file_system",
+        "value": "value-nas-file-system",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "nas.mount_target.dataapi.nas.describemounttargets",
+          "fixtureId": "nas.mount_target.nas.mount_target.dataapi.nas.describemounttargets.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageNumber": 1,
+            "FileSystemId": "value-nas-file-system"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-nas-mount-target",
+        "outputKind": "endpoint"
+      }
+    },
+    {
+      "caseId": "ehpc.mount_target.default",
+      "selectorId": "ehpc.mount_target",
+      "associationProperty": "ALIYUN::EHPC::FileSystem::MountTargetDomain",
+      "metadata": {
+        "VolumeId": "value-ehpc-file-system",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "ehpc.file_system",
+        "value": "value-ehpc-file-system",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "ehpc.mount_target.dataapi.ehpc.listfilesystemwithmounttargets",
+          "fixtureId": "ehpc.mount_target.ehpc.mount_target.dataapi.ehpc.listfilesystemwithmounttargets.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "PageSize": 20,
+            "PageNumber": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-ehpc-mount-target",
+        "outputKind": "endpoint"
+      }
+    },
+    {
+      "caseId": "cr.repository_tag.default",
+      "selectorId": "cr.repository_tag",
+      "associationProperty": "ALIYUN::CR::Repository::Tag",
+      "metadata": {
+        "InstanceId": "context-instanceid-cr-repository-tag",
+        "RepoName": "value-cr-repository",
+        "RepoNamespaceName": "context-reponamespacename-cr-repository-tag",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "cr.repository",
+        "value": "value-cr-repository",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou",
+          "InstanceId": "context-instanceid-cr-repository-tag",
+          "RepoName": "value-cr-repository",
+          "RepoNamespaceName": "context-reponamespacename-cr-repository-tag"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "cr.repository_tag.dataapi.cr.getinstance",
+          "fixtureId": "cr.repository_tag.cr.repository_tag.dataapi.cr.getinstance.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "InstanceId": "context-instanceid-cr-repository-tag"
+          }
+        },
+        {
+          "operationKey": "cr.repository_tag.dataapi.cr.getrepository",
+          "fixtureId": "cr.repository_tag.cr.repository_tag.dataapi.cr.getrepository.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "InstanceId": "context-instanceid-cr-repository-tag",
+            "RepoName": "value-cr-repository",
+            "RepoNamespaceName": "context-reponamespacename-cr-repository-tag"
+          },
+          "parameterVariants": [
+            {
+              "parameters": {
+                "RegionId": "cn-hangzhou",
+                "InstanceId": "cri-test0001",
+                "RepoName": "value-cr-repository",
+                "RepoNamespaceName": "test-namespace"
+              }
+            }
+          ]
+        },
+        {
+          "operationKey": "cr.repository_tag.dataapi.cr.listrepotag",
+          "fixtureId": "cr.repository_tag.cr.repository_tag.dataapi.cr.listrepotag.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "InstanceId": "context-instanceid-cr-repository-tag",
+            "RepoId": "test-value",
+            "PageNo": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-cr-repository-tag",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "acr.repository_tag.default",
+      "selectorId": "acr.repository_tag",
+      "associationProperty": "ALIYUN::ACR::Repo::Tag",
+      "metadata": {
+        "RepoName": "value-acr-repo-attribute",
+        "RepoNamespace": "context-reponamespace-acr-repository-tag",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "acr.repo_attribute",
+        "value": "value-acr-repo-attribute",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "acr.repository_tag.dataapi.acr.listrepotag",
+          "fixtureId": "acr.repository_tag.acr.repository_tag.dataapi.acr.listrepotag.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "RepoName": "value-acr-repo-attribute",
+            "RepoNamespace": "context-reponamespace-acr-repository-tag",
+            "Page": 1
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-acr-repository-tag",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "computenest.artifact_version.default",
+      "selectorId": "computenest.artifact_version",
+      "associationProperty": "ALIYUN::ComputeNest::Artifact::ArtifactIdVersion",
+      "metadata": {
+        "ArtifactId": "value-computenest-artifact"
+      },
+      "source": {
+        "selector_id": "computenest.artifact",
+        "value": "value-computenest-artifact",
+        "association_property_metadata": {}
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "computenest.artifact_version.dataapi.computenest0521.listartifactversions",
+          "fixtureId": "computenest.artifact_version.computenest.artifact_version.dataapi.computenest0521.listartifactversions.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "ArtifactId": "value-computenest-artifact"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-computenest-artifact-version",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "computenest.service_version.default",
+      "selectorId": "computenest.service_version",
+      "associationProperty": "ALIYUN::ComputeNestSupplier::Service::ServiceVersion",
+      "metadata": {
+        "ServiceId": "value-computenest-service"
+      },
+      "source": {
+        "selector_id": "computenest.service",
+        "value": "value-computenest-service",
+        "association_property_metadata": {}
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "computenest.service_version.dataapi.computenest0521.listservices",
+          "fixtureId": "computenest.service_version.computenest.service_version.dataapi.computenest0521.listservices.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "AllVersions": true,
+            "MaxResults": 20,
+            "Filter.1.Name": "ServiceId",
+            "Filter.1.Value.1": "value-computenest-service"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-computenest-service-version",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "apig.domain.default",
+      "selectorId": "apig.domain",
+      "associationProperty": "ALIYUN::APIG::Gateway::ListDomains",
+      "metadata": {
+        "GatewayId": "value-apig-gateway",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "apig.gateway",
+        "value": "value-apig-gateway",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "apig.domain.dataapi.apig.listdomains",
+          "fixtureId": "apig.domain.apig.domain.dataapi.apig.listdomains.success",
+          "parameters": {
+            "regionId": "cn-hangzhou",
+            "pageNumber": 1,
+            "pageSize": 10,
+            "gatewayId": "value-apig-gateway"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-apig-domain",
+        "outputKind": "endpoint"
+      }
+    },
+    {
+      "caseId": "oos.template_version.default",
+      "selectorId": "oos.template_version",
+      "associationProperty": "ALIYUN::OOS::Template::TemplateVersion",
+      "metadata": {
+        "TemplateName": "value-oos-template",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "oos.template",
+        "value": "value-oos-template",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "oos.template_version.dataapi.oos.listtemplateversions",
+          "fixtureId": "oos.template_version.oos.template_version.dataapi.oos.listtemplateversions.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "TemplateName": "value-oos-template"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-template-version",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "oos.package_version.default",
+      "selectorId": "oos.package_version",
+      "associationProperty": "ALIYUN::OOS::Package::PackageVersion",
+      "metadata": {
+        "TemplateName": "value-oos-package",
+        "RegionId": "cn-hangzhou"
+      },
+      "source": {
+        "selector_id": "oos.package",
+        "value": "value-oos-package",
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "oos.package_version.dataapi.oos.listtemplateversions",
+          "fixtureId": "oos.package_version.oos.package_version.dataapi.oos.listtemplateversions.success",
+          "parameters": {
+            "RegionId": "cn-hangzhou",
+            "TemplateName": "value-oos-package",
+            "ShareType": "Private"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-package-version",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "oos.deploy_revision.default",
+      "selectorId": "oos.deploy_revision",
+      "associationProperty": "ALIYUN::OOS::Application::DeployRevisionId",
+      "metadata": {
+        "ApplicationName": "value-oos-application"
+      },
+      "source": {
+        "selector_id": "oos.application",
+        "value": "value-oos-application",
+        "association_property_metadata": {}
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "oos.deploy_revision.dataapi.oos.listdeployrevisions",
+          "fixtureId": "oos.deploy_revision.oos.deploy_revision.dataapi.oos.listdeployrevisions.success",
+          "parameters": {
+            "ApplicationName": "value-oos-application",
+            "MaxResults": 100
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-deploy-revision",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "oos.git_commit.default",
+      "selectorId": "oos.git_commit",
+      "associationProperty": "ALIYUN::OOS::GitBranch::CommitHash",
+      "metadata": {
+        "Platform": "github",
+        "Owner": "iac-code-test",
+        "RepoFullName": "iac-code-test/repository",
+        "Branch": "value-oos-git-branch",
+        "ReadOnly": true
+      },
+      "source": {
+        "selector_id": "oos.git_branch",
+        "value": "value-oos-git-branch",
+        "association_property_metadata": {
+          "Platform": "github",
+          "Owner": "iac-code-test",
+          "RepoFullName": "iac-code-test/repository"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "oos.git_commit.dataapi.oos.getgitbranch",
+          "fixtureId": "oos.git_commit.oos.git_commit.dataapi.oos.getgitbranch.success",
+          "parameters": {
+            "Platform": "github",
+            "Owner": "iac-code-test",
+            "RepoFullName": "iac-code-test/repository",
+            "Branch": "value-oos-git-branch"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-git-commit",
+        "outputKind": "version"
+      }
+    },
+    {
+      "caseId": "oos.git_latest_commit.default",
+      "selectorId": "oos.git_latest_commit",
+      "associationProperty": "ACS::OOS::GitBranch::LatestCommitId",
+      "metadata": {
+        "Platform": "github",
+        "Owner": "iac-code-test",
+        "RepoFullName": "iac-code-test/repository",
+        "Branch": "value-oos-git-branch",
+        "Selectable": true
+      },
+      "source": {
+        "selector_id": "oos.git_branch",
+        "value": "value-oos-git-branch",
+        "association_property_metadata": {
+          "Platform": "github",
+          "Owner": "iac-code-test",
+          "RepoFullName": "iac-code-test/repository"
+        }
+      },
+      "expectedRequests": [
+        {
+          "operationKey": "oos.git_latest_commit.dataapi.oos.getgitbranch",
+          "fixtureId": "oos.git_latest_commit.oos.git_latest_commit.dataapi.oos.getgitbranch.success",
+          "parameters": {
+            "Platform": "github",
+            "Owner": "iac-code-test",
+            "RepoFullName": "iac-code-test/repository",
+            "Branch": "value-oos-git-branch"
+          }
+        }
+      ],
+      "expected": {
+        "status": "selected",
+        "value": "value-oos-git-latest-commit",
+        "outputKind": "version"
+      }
+    }
+  ]
+}

@@ -532,3 +532,4 @@ iac-code a2a-client call \
 | `IACCODE_A2A_TEXT_MIME_TYPES` | Tipos MIME extra similares a texto separados por comas o punto y coma |
 | `IACCODE_A2A_MULTIMODAL_MIME_TYPES` | Tipos MIME multimodales extra separados por comas o punto y coma |
 | `IAC_CODE_A2A_PUSH_KEYRING` | Keyring de secretos push cifrados gestionado por el entorno |
+| `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` | Activa el anuncio y registro del selector de recursos A2A con `1`, `true`, `yes` u `on` (sin distinguir mayúsculas); sin definir, vacío u otros valores queda desactivado (predeterminado) |

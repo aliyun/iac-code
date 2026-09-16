@@ -107,7 +107,7 @@ class ToolExecutor:
         )
 
         timeout = tool.execution_timeout(call.input)
-        if timeout is None:
+        if timeout is None and not tool.has_unbounded_execution_wait(call.input):
             timeout = self._tool_timeout
 
         # Telemetry instrumentation
@@ -141,21 +141,25 @@ class ToolExecutor:
                 add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "success"})
                 return result
         except asyncio.TimeoutError:
+            timeout_seconds = timeout if timeout is not None else self._tool_timeout
             log_event(
                 Events.TOOL_USE_FAILED,
                 {
                     "tool_name": tool_name,
                     "error_type": "TimeoutError",
-                    "error_message": sanitize_error_message(f"Timeout after {timeout}s"),
+                    "error_message": sanitize_error_message(f"Timeout after {timeout_seconds}s"),
                 },
             )
             add_metric(Metrics.TOOL_USE_COUNT, 1, {"tool_name": tool_name, "outcome": "error"})
-            timeout_error = tool.timeout_error_result_with_context(call.input, timeout, context)
+            timeout_error = tool.timeout_error_result_with_context(call.input, timeout_seconds, context)
             if timeout_error is not None:
                 return self._attach_ros_preflight(timeout_error, context)
             return self._attach_ros_preflight(
                 ToolResult.error(
-                    _("Tool '{tool_name}' timed out after {timeout}s").format(tool_name=call.name, timeout=timeout)
+                    _("Tool '{tool_name}' timed out after {timeout}s").format(
+                        tool_name=call.name,
+                        timeout=timeout_seconds,
+                    )
                 ),
                 context,
             )

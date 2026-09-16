@@ -305,6 +305,12 @@ class Tool(ABC):
         """Per-call timeout in seconds. Defaults to the tool-level timeout."""
         return self.timeout
 
+    def has_unbounded_execution_wait(self, tool_input: dict[str, Any]) -> bool:
+        """Whether a user-driven blocking wait must not use the tool timeout."""
+
+        del tool_input
+        return False
+
     def is_read_only(self, input: dict | None = None) -> bool:
         """Whether the tool only reads and never modifies state."""
         return False

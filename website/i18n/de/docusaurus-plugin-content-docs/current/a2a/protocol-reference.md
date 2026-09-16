@@ -431,6 +431,12 @@ Im Pipeline-Modus werden Berechtigungsanfragen als `permission_requested`- und `
 
 Mit aktiviertem `auto-approve-permissions` oder konfigurierten expliziten Berechtigungsregeln werden Berechtigungsanfragen nicht zu interaktiver Eingabe; sie werden automatisch genehmigt (mit Audit) oder nach den Regeln entschieden. Geschuetzte Alibaba-Cloud-Schreib-APIs werden durch normale Allow-Regeln nicht freigegeben und erfordern weiterhin eine exakte Autorisierung pro API. Berechtigungsentscheidungen werden lokal auditiert; jede Allow-Entscheidung, die einen Auditdatensatz erfordert, schlaegt fail-closed fehl, wenn der Datensatz nicht persistiert werden kann.
 
+## Ressourcenselektor-Erweiterung
+
+`urn:iac-code:resource-selector:v1` ist eine optionale Erweiterung zur Auswahl einer einzelnen Cloud-Ressource oder eines daraus abgeleiteten Werts. Die Agent Card kuendigt sie nur an, wenn `IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` aktiviert ist. Der Client erklaert die Unterstuetzung pro Anfrage mit `metadata.iac_code.capabilities.resourceSelector`; der Wert muss `schemaVersion: 1`, `queryMode: "ros_api_json"` und den von der Selektorfunktion angekuendigten `profileHash` enthalten. Der Hash muss aus dem tatsaechlich geladenen Selektor-Bundle gelesen werden und darf nicht fest codiert sein.
+
+Fordert das Modell eine Auswahl an, wechselt der Server zu `input-required` und sendet den Selektorvertrag. Der Client fragt den Selektor ab und rendert ihn; anschliessend setzt er den Task mit einer strukturierten Bestaetigungs- oder Abbruchantwort fort. Anmeldedaten und Secrets erscheinen nie in Selektor-Ereignissen. Safe Mode behaelt die Tools bei, doch Server-Flag, Client-Funktion, passender profile hash und effektive Alibaba-Cloud-Anmeldedaten bleiben erforderlich.
+
 ## Extensions
 
 Die Agent Card bewirbt die optionale iac-code-Artifact-Metadaten-Extension:

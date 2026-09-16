@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from a2a.server.request_handlers.response_helpers import agent_card_to_dict
@@ -29,6 +30,11 @@ from iac_code.a2a.pipeline_outbound import (
 from iac_code.a2a.signing import sign_agent_card_dict
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode, get_run_mode
+from iac_code.resource_selector.capability import (
+    A2A_RESOURCE_SELECTOR_ENV,
+    RESOURCE_SELECTOR_EXTENSION_URI,
+    env_enabled,
+)
 
 IAC_CODE_ARTIFACT_METADATA_EXTENSION_URI = "urn:iac-code:a2a:artifact-metadata:v1"
 IAC_CODE_EXECUTION_CONTROL_EXTENSION_URI = "urn:iac-code:a2a:execution-control:v1"
@@ -169,6 +175,22 @@ def build_agent_card(
             required=False,
         )
     )
+    if env_enabled(os.environ.get(A2A_RESOURCE_SELECTOR_ENV)):
+        resource_selector_extension = AgentExtension(
+            uri=RESOURCE_SELECTOR_EXTENSION_URI,
+            description="Select one Alibaba Cloud resource or one derived value through a compatible ROS frontend.",
+            required=False,
+        )
+        ParseDict(
+            {
+                "schemaVersion": 1,
+                "singleSelection": True,
+                "derivedValue": True,
+                "queryMode": "ros_api_json",
+            },
+            resource_selector_extension.params,
+        )
+        card.capabilities.extensions.append(resource_selector_extension)
     has_http_extension_surface = any(
         interface.url.startswith(("http://", "https://"))
         and interface.protocol_binding.upper() in {"JSONRPC", "HTTP+JSON"}

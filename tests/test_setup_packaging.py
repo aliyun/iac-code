@@ -221,6 +221,7 @@ def test_web_static_assets_are_included_in_package_data():
     assert "**/*.LICENSE" in package_data
     assert "**/*.NOTICE" in package_data
     _assert_eraser_vendor_assets_are_packaged(package_data)
+    assert "**/*THIRD_PARTY_NOTICES" in package_data
 
 
 def test_web_static_assets_are_included_in_legacy_setup_package_data(monkeypatch):
@@ -236,6 +237,7 @@ def test_web_static_assets_are_included_in_legacy_setup_package_data(monkeypatch
         assert "**/*.LICENSE" in package_data
         assert "**/*.NOTICE" in package_data
         _assert_eraser_vendor_assets_are_packaged(package_data)
+        assert "**/*THIRD_PARTY_NOTICES" in package_data
 
 
 def test_http_extra_includes_pipeline_runtime_dependencies(monkeypatch):

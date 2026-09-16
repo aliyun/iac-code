@@ -722,6 +722,58 @@ class TestStepExecutor:
         assert results[-1].conclusion == {"status": "success"}
 
     @pytest.mark.asyncio
+    async def test_resource_selection_resume_preserves_empty_options_signal(self, tmp_path):
+        resume_messages = [
+            Message(
+                role="assistant",
+                content=[
+                    ToolUseBlock(
+                        id="select_1",
+                        name="select_cloud_resource",
+                        input={"question": "Select an instance", "selector_id": "ecs.instance"},
+                    )
+                ],
+            )
+        ]
+        captured: dict = {}
+
+        class FakeAgentLoop:
+            def __init__(self, **kwargs):
+                self.tool_registry = kwargs["tool_registry"]
+
+            async def resume_resource_selection_boundary(self, _frame, **kwargs):
+                captured.update(kwargs)
+                if False:
+                    yield None
+
+        executor = _make_executor(tmp_path)
+        checkpoint = {
+            "inputId": "resource-" + "a" * 32,
+            "toolUseId": "select_1",
+            "profileHash": "sha256:test",
+            "selector": {"id": "ecs.instance"},
+            "continuationFrame": {"orderedToolUseIds": ["select_1"]},
+            "response": {"status": "canceled", "optionsEmpty": True},
+        }
+
+        with patch("iac_code.agent.agent_loop.AgentLoop", FakeAgentLoop):
+            async for _event in executor.execute(
+                _make_step(),
+                PipelineContext(SIMPLE_DEPS),
+                "session",
+                resume_messages=resume_messages,
+                resource_selection_checkpoint=checkpoint,
+            ):
+                pass
+
+        assert captured["response"] == {
+            "status": "canceled",
+            "input_id": "resource-" + "a" * 32,
+            "selector_id": "ecs.instance",
+            "options_empty": True,
+        }
+
+    @pytest.mark.asyncio
     async def test_completion_guard_reads_externalized_tool_result_metadata(self, tmp_path):
         (tmp_path / "prompts").mkdir(exist_ok=True)
         (tmp_path / "prompts" / "reviewing.md").write_text("Review.", encoding="utf-8")

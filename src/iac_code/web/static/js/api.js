@@ -26,6 +26,8 @@ export const WEB_EVENT_TYPES = [
   "permission.resolved",
   "question.request",
   "question.resolved",
+  "resource-selector.request",
+  "resource-selector.resolved",
   "elicitation.request",
   "elicitation.resolved",
   "queued-input.accepted",
@@ -927,6 +929,27 @@ export function answerQuestion(requestId, answer) {
   return jsonFetch(`/api/questions/${encodeURIComponent(requestId)}/answer`, {
     method: "POST",
     body: JSON.stringify(answer || {}),
+  });
+}
+
+export function answerResourceSelection(requestId, answer) {
+  return jsonFetch(`/api/resource-selections/${encodeURIComponent(requestId)}/answer`, {
+    method: "POST",
+    body: JSON.stringify(answer || {}),
+  });
+}
+
+export function cancelResourceSelection(requestId, answer) {
+  return jsonFetch(`/api/resource-selections/${encodeURIComponent(requestId)}/cancel`, {
+    method: "POST",
+    body: JSON.stringify(answer || {}),
+  });
+}
+
+export function queryResourceSelector(query) {
+  return jsonFetch("/api/resource-selector/query", {
+    method: "POST",
+    body: JSON.stringify(query || {}),
   });
 }
 

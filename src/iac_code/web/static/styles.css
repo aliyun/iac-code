@@ -12218,3 +12218,206 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
   width: 1rem;
   height: 1rem;
 }
+
+.blocking-panel-resource-selector {
+  position: relative;
+  z-index: 2;
+  min-width: min(100%, 560px);
+  overflow: visible;
+}
+
+.resource-selector-control-row {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin: 10px 0;
+}
+
+.resource-selector-island {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 44px;
+}
+
+.resource-selector-island > *,
+.resource-selector-island [data-id="ResourceSelect"] {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.resource-selector-island .iac-ore-ant-select,
+.resource-selector-island .iac-ore-ant-space,
+.resource-selector-island .iac-ore-ant-form {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.resource-selector-island [data-id="ResourceSelect"] > .iac-ore-ant-select {
+  flex: 1 1 0;
+}
+
+.resource-selector-footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.resource-selector-footer .blocking-action.is-submitting {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.resource-selector-submit-error {
+  margin: 0;
+  color: var(--codex-danger, #c0392b);
+}
+
+.blocking-panel-resource-selector.is-submitting .resource-selector-island {
+  opacity: 0.68;
+}
+
+.resource-selector-refresh {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 2.2rem;
+  min-width: 2.2rem;
+  height: 2.2rem;
+  min-height: 2.2rem;
+  padding: 0;
+  color: var(--codex-icon);
+}
+
+.resource-selector-refresh:hover:not(:disabled) {
+  background: var(--codex-hover);
+  color: var(--codex-text);
+}
+
+.resource-selector-refresh-icon {
+  display: block;
+  width: 1.125rem;
+  height: 1.125rem;
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M23 4v6h-6'/%3E%3Cpath d='M1 20v-6h6'/%3E%3Cpath d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10'/%3E%3Cpath d='M20.49 15a9 9 0 0 1-14.85 3.36L1 14'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M23 4v6h-6'/%3E%3Cpath d='M1 20v-6h6'/%3E%3Cpath d='M3.51 9a9 9 0 0 1 14.85-3.36L23 10'/%3E%3Cpath d='M20.49 15a9 9 0 0 1-14.85 3.36L1 14'/%3E%3C/g%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.resource-selector-refresh.is-loading {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.resource-selector-refresh.is-error {
+  color: var(--codex-danger, #c0392b);
+}
+
+.resource-selector-confirm {
+  border-color: var(--codex-border-strong);
+  background: color-mix(in srgb, var(--codex-ink) 14%, transparent);
+  color: var(--codex-text);
+  font-weight: 650;
+}
+
+.resource-selector-confirm:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--codex-ink) 20%, transparent);
+}
+
+/* ORE bundles Ant Design's light defaults at runtime. Keep the selector and its
+   popup inside the active iac-code theme instead of showing a white island. */
+#iac-code-web-root .resource-selector-island .iac-ore-ant-form,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-form-item,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-form-item-label > label {
+  color: var(--codex-text);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-form-item-extra,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-form-item-explain {
+  color: var(--codex-muted);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select:not(.iac-ore-ant-select-customize-input)
+  .iac-ore-ant-select-selector,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-input,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-input-affix-wrapper {
+  border-color: var(--codex-border-strong);
+  background: color-mix(in srgb, var(--codex-ink) 7%, transparent);
+  color: var(--codex-text);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select:not(.iac-ore-ant-select-disabled):hover
+  .iac-ore-ant-select-selector,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-focused:not(.iac-ore-ant-select-disabled)
+  .iac-ore-ant-select-selector {
+  border-color: var(--codex-border-strong);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-focused:not(.iac-ore-ant-select-disabled)
+  .iac-ore-ant-select-selector {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--codex-ink) 8%, transparent);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-selection-item,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-selection-search-input,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-arrow {
+  color: var(--codex-text);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-selection-item {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-clear {
+  background: transparent;
+  color: var(--codex-muted);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-clear:hover {
+  background: transparent;
+  color: var(--codex-text);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-selection-placeholder {
+  color: var(--codex-muted);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-dropdown {
+  z-index: 40;
+  border: 1px solid var(--codex-border);
+  background: var(--codex-panel-raised);
+  color: var(--codex-text);
+  box-shadow: var(--codex-shadow);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-item {
+  color: var(--codex-text);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-item-option-active:not(.iac-ore-ant-select-item-option-disabled) {
+  background: var(--codex-hover);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-item-option-selected:not(.iac-ore-ant-select-item-option-disabled) {
+  background: var(--codex-active);
+  color: var(--codex-text);
+}
+
+#iac-code-web-root .resource-selector-island .iac-ore-ant-empty-description,
+#iac-code-web-root .resource-selector-island .iac-ore-ant-select-item-option-disabled {
+  color: var(--codex-muted);
+}

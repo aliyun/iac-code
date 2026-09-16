@@ -19,6 +19,7 @@ from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_ru
 from iac_code.services.telemetry import flush_telemetry, use_session_id
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
+    CloudResourceSelectionEvent,
     MessageEndEvent,
     PermissionRequestEvent,
     PermissionWaitOutcome,
@@ -251,6 +252,8 @@ def agent_factory_options_for_session(
         # provider 构造（providers.manager）会从该副本读取 thinkingEnabled。
         provider_config_override = dict(provider_config_override or {})
         provider_config_override["thinkingEnabled"] = session.thinking_enabled
+    from iac_code.resource_selector.capability import ResourceSelectorCapability
+
     return AgentFactoryOptions(
         model=selection.model,
         session_id=session.session_id,
@@ -265,6 +268,7 @@ def agent_factory_options_for_session(
         mcp_elicitation_handler=_make_web_mcp_elicitation_handler(session, manager),
         disable_external_services=disable_external_services,
         source="web-runtime",
+        resource_selector_enabled=ResourceSelectorCapability.for_surface("web").enabled,
     )
 
 
@@ -606,6 +610,14 @@ class WebSessionRuntime:
                             )
                             await self._await_question_request(request_id, inner_event)
                             continue
+                        if isinstance(inner_event, CloudResourceSelectionEvent):
+                            request_id = self.manager.add_resource_selection_request(
+                                self.session,
+                                _resource_selection_request_payload(inner_event, turn_id=turn_id),
+                                future=inner_event.response_future,
+                            )
+                            await self._await_resource_selection_request(request_id, inner_event)
+                            continue
                         if isinstance(inner_event, QueuedInputSubmittedEvent):
                             # agent 在本轮中消费了一条排队输入:它已被注入上下文并持久化,刷新后会作为
                             # 独立用户消息出现。这里必须同步补一条 user.message 用户气泡,否则实时视图只移除
@@ -787,6 +799,14 @@ class WebSessionRuntime:
                             )
                             await self._await_question_request(request_id, inner_event)
                             continue
+                        if isinstance(inner_event, CloudResourceSelectionEvent):
+                            request_id = self.manager.add_resource_selection_request(
+                                self.session,
+                                _resource_selection_request_payload(inner_event, turn_id=turn_id),
+                                future=inner_event.response_future,
+                            )
+                            await self._await_resource_selection_request(request_id, inner_event)
+                            continue
                         translated = translator.translate_stream_event(stream_event, turn_id=turn_id)
                         await self.session.events.publish(translated["type"], translated["payload"])
                     self.manager.resolve_permission_boundaries(
@@ -904,6 +924,21 @@ class WebSessionRuntime:
             self.manager.cancel_question_request(request_id, session_id=self.session.session_id)
             raise
         self.manager.discard_question_request(request_id, session_id=self.session.session_id)
+
+    async def _await_resource_selection_request(
+        self,
+        request_id: str,
+        event: CloudResourceSelectionEvent,
+    ) -> None:
+        if event.response_future is None:
+            self.manager.cancel_resource_selection_request(request_id, session_id=self.session.session_id)
+            return
+        try:
+            await asyncio.shield(event.response_future)
+        except asyncio.CancelledError:
+            self.manager.discard_resource_selection_request(request_id, session_id=self.session.session_id)
+            raise
+        self.manager.discard_resource_selection_request(request_id, session_id=self.session.session_id)
 
     def _build_user_input(self, request: WebTurnRequest) -> str | list[ContentBlock]:
         text = _append_file_references(request.text, request.file_refs, cwd=self.session.cwd)
@@ -1056,6 +1091,27 @@ def _question_request_payload(event: AskUserQuestionEvent, *, turn_id: str) -> d
         "options": event.options,
         "allowFreeText": event.allow_free_text,
         "freeTextPrompt": event.free_text_prompt,
+    }
+
+
+def _resource_selection_request_payload(
+    event: CloudResourceSelectionEvent,
+    *,
+    turn_id: str,
+) -> dict[str, Any]:
+    return {
+        "turnId": turn_id,
+        "toolUseId": event.tool_use_id,
+        "inputId": event.input_id,
+        "question": event.question,
+        "selector": {
+            "id": event.selector_id,
+            "associationProperty": event.association_property,
+            "outputKind": event.output_kind,
+            "associationPropertyMetadata": event.association_property_metadata,
+            "source": event.source,
+            "profileHash": event.profile_hash,
+        },
     }
 
 

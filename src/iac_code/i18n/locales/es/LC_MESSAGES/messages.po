@@ -736,6 +736,15 @@ msgstr ""
 msgid "Permission denied."
 msgstr "Permiso denegado."
 
+#: src/iac_code/agent/agent_loop.py
+msgid ""
+"select_cloud_resource must be called alone. Retry it as a standalone tool"
+" call; no tool in this batch was executed."
+msgstr ""
+"select_cloud_resource debe invocarse por separado. Vuelva a intentarlo "
+"como una llamada de herramienta independiente; no se ejecutó ninguna "
+"herramienta de este lote."
+
 #: src/iac_code/agent/agent_tool.py
 #, python-brace-format
 msgid "Unknown agent type: {agent_type}"

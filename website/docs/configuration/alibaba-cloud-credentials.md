@@ -7,6 +7,8 @@ description: Configure Alibaba Cloud credentials, including ECS RAM Role authent
 
 Alibaba Cloud credentials are required for operations that inspect or manage cloud resources.
 
+The `resolve_cloud_resource_selector` and `select_cloud_resource` tools use the same effective credential decision as `aliyun_api`. In A2A, request/session credentials take priority; when they are absent, the normal local, environment, and Alibaba Cloud CLI credential fallback applies. If no valid effective Alibaba Cloud credential is available, `aliyun_api` and both resource-selector tools are not registered.
+
 ## ECS RAM Role
 
 Use **ECS RAM Role** when IaC Code runs on an Alibaba Cloud ECS instance that has a RAM role attached. IaC Code obtains temporary STS credentials from the ECS instance metadata service (IMDS), refreshes them automatically, and does not store an AccessKey ID, AccessKey secret, or STS token in its configuration.

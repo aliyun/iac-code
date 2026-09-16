@@ -431,6 +431,12 @@ Pipeline モードでは、権限要求が `permission_requested` と `permissio
 
 `auto-approve-permissions` が有効な場合や明示的な権限ルールが構成されている場合、権限リクエストは対話的な入力待ちにならず、自動承認（監査付き）またはルールによる裁定で処理されます。保護された Alibaba Cloud 書き込み API は通常の allow ルールでは解放されず、引き続き API ごとの正確な承認が必要です。権限決定はローカルで監査され、監査レコードを必要とする allow 決定は、そのレコードを永続化できない場合に fail-closed になります。
 
+## リソースセレクター拡張
+
+`urn:iac-code:resource-selector:v1` は、単一のクラウドリソースまたはそこから派生する値を選択するための任意拡張です。Agent Card がこの拡張を公開するのは、`IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED` が有効な場合だけです。クライアントはリクエストごとに `metadata.iac_code.capabilities.resourceSelector` で対応を宣言し、その値には `schemaVersion: 1`、`queryMode: "ros_api_json"`、およびセレクター機能が公開する `profileHash` が必要です。このハッシュは実際に読み込んだセレクター bundle から取得し、ハードコードしてはいけません。
+
+モデルが選択を要求すると、サーバーは `input-required` に移行してセレクター契約を送信します。クライアントは照会と表示を行い、構造化された確認またはキャンセル応答でタスクを再開します。認証情報や secret がセレクターイベントに含まれることはありません。Safe Mode でもツールは保持されますが、サーバー設定、クライアント機能、一致する profile hash、有効な Alibaba Cloud 認証情報は引き続き必要です。
+
 ## 拡張
 
 Agent Card は任意の iac-code アーティファクトメタデータ拡張を広告します。

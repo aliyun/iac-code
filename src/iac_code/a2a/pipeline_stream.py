@@ -1393,6 +1393,8 @@ class PipelineA2AEventPublisher:
         input_projection = self._unified_input_projection(envelope)
         if input_projection is not None:
             iac_code_metadata["input"] = input_projection
+            if input_projection.get("kind") == "cloud_resource_selection":
+                iac_code_metadata["inputRequired"] = input_projection
         ParseDict({"iac_code": iac_code_metadata}, update.metadata)
         await self._enqueue_transport_event(update, wait_for_transport=wait_for_transport)
 
@@ -1415,7 +1417,14 @@ class PipelineA2AEventPublisher:
                 "iac_code": {
                     "pipelineBatch": _pipeline_batch_payload(envelopes),
                     **(
-                        {"input": input_projection}
+                        {
+                            "input": input_projection,
+                            **(
+                                {"inputRequired": input_projection}
+                                if input_projection.get("kind") == "cloud_resource_selection"
+                                else {}
+                            ),
+                        }
                         if (input_projection := self._unified_input_projection(final_envelope)) is not None
                         else {}
                     ),
@@ -1885,7 +1894,7 @@ def _unified_input_projection(
     if not isinstance(raw_input, dict):
         return None
     kind = raw_input.get("kind") or kind_hint
-    if kind not in {"ask_user_question", "candidate_selection"}:
+    if kind not in {"ask_user_question", "candidate_selection", "cloud_resource_selection"}:
         return None
     projected: dict[str, Any] = {
         "schemaVersion": 1,
@@ -1908,6 +1917,11 @@ def _unified_input_projection(
         free_text_prompt = raw_input.get("freeTextPrompt")
         if isinstance(free_text_prompt, str) and free_text_prompt:
             projected["freeTextPrompt"] = free_text_prompt[:500]
+    if kind == "cloud_resource_selection":
+        selector = raw_input.get("selector")
+        if not isinstance(selector, dict):
+            return None
+        projected["selector"] = to_json_safe(selector)
     raw_options = raw_input.get("options")
     options: list[dict[str, Any]] = []
     if isinstance(raw_options, list):

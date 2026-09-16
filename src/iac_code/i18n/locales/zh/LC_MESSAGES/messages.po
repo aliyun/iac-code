@@ -670,6 +670,12 @@ msgstr "用户明确拒绝了此次工具操作。这不是云 API 或 IAM 权�
 msgid "Permission denied."
 msgstr "权限被拒绝。"
 
+#: src/iac_code/agent/agent_loop.py
+msgid ""
+"select_cloud_resource must be called alone. Retry it as a standalone tool"
+" call; no tool in this batch was executed."
+msgstr "select_cloud_resource 必须单独调用。请将其作为独立的工具调用重试；本批次中的所有工具均未执行。"
+
 #: src/iac_code/agent/agent_tool.py
 #, python-brace-format
 msgid "Unknown agent type: {agent_type}"
