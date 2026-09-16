@@ -9,7 +9,8 @@ from iac_code.agui.errors import AguiError
 from iac_code.agui.inputs import latest_user_message, parse_forwarded_props, resolve_cwd
 
 
-def test_forwarded_props_require_request_workspace_and_identity(tmp_path) -> None:
+@pytest.mark.parametrize("llm_headers_field", ["llmHeaders", "llm_headers"])
+def test_forwarded_props_require_request_workspace_and_identity(tmp_path, llm_headers_field) -> None:
     props = parse_forwarded_props(
         {
             "iacCode": {
@@ -17,6 +18,7 @@ def test_forwarded_props_require_request_workspace_and_identity(tmp_path) -> Non
                 "rosInvocationId": "invocation-1",
                 "cwd": str(tmp_path),
                 "model": "qwen-test",
+                llm_headers_field: {"X-Caller-Session": "session-1"},
                 "runMode": "pipeline",
             }
         }
@@ -24,6 +26,7 @@ def test_forwarded_props_require_request_workspace_and_identity(tmp_path) -> Non
 
     assert props.iac_code.cwd == str(tmp_path)
     assert props.iac_code.model == "qwen-test"
+    assert props.iac_code.llm_headers == {"X-Caller-Session": "session-1"}
     assert props.iac_code.run_mode == "pipeline"
 
 

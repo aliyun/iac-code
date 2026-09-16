@@ -49,6 +49,7 @@ class IacCodeForwardedProps(StrictModel):
     cwd: str
     model: str | None = None
     llm_api_key: str | None = Field(default=None, alias="llmApiKey", repr=False)
+    llm_headers: dict[str, str] | None = Field(default=None, alias="llmHeaders", repr=False)
     thinking: ThinkingOptions | None = None
     user_id: str | None = Field(default=None, alias="userId")
     channel: str | None = None

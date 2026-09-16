@@ -83,6 +83,7 @@ This object uses a strict schema; unknown fields are rejected.
 | `cwd` | string | Yes | Absolute workspace path |
 | `model` | string | No | Per-request model override |
 | `llmApiKey` | string | No | Per-request LLM provider key |
+| `llmHeaders` / `llm_headers` | object | No | Additional string-to-string HTTP headers for LLM provider calls |
 | `thinking.enabled` | boolean | No | Request thinking output |
 | `thinking.effort` | string | No | Provider-specific thinking effort |
 | `thinking.budget` | positive integer | No | Provider-specific thinking budget |
@@ -97,6 +98,8 @@ This object uses a strict schema; unknown fields are rejected.
 | `alibabaCloud.accessKeySecret` | string | No | Request-local AccessKey secret |
 | `alibabaCloud.securityToken` | string | No | Request-local STS token |
 | `alibabaCloud.regionId` | string | No | Request-local default region |
+
+`llmHeaders` follows the A2A context-binding rules for `metadata.iac_code.llm_headers`: once supplied, later requests on the same AG-UI thread inherit the headers when the field is omitted. A new map replaces the complete binding, and `{}` clears it. Header values may contain credentials, so the adapter does not persist them; callers must supply them again after the local A2A process restarts.
 
 The initial run and its interrupt resumes must retain the same `rosInvocationId`. A later normal turn may use a new value. Cancellation must use the current execution's value.
 

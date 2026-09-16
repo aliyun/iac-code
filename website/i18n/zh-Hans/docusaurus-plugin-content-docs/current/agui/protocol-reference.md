@@ -93,6 +93,7 @@ Authorization: Bearer <token>
 | `cwd` | string | 是 | 本次执行的绝对工作区路径 |
 | `model` | string | 否 | 单次请求覆盖模型 |
 | `llmApiKey` | string | 否 | 单次请求覆盖 LLM provider key |
+| `llmHeaders` / `llm_headers` | object | 否 | 传给 LLM provider 调用的额外 string-to-string HTTP headers |
 | `thinking.enabled` | boolean | 否 | 是否请求 thinking |
 | `thinking.effort` | string | 否 | provider 支持时覆盖 thinking effort |
 | `thinking.budget` | positive integer | 否 | provider 支持时覆盖 thinking budget |
@@ -107,6 +108,8 @@ Authorization: Bearer <token>
 | `alibabaCloud.accessKeySecret` | string | 否 | 请求级 Alibaba Cloud AccessKey Secret |
 | `alibabaCloud.securityToken` | string | 否 | 请求级 STS token |
 | `alibabaCloud.regionId` | string | 否 | 请求级默认 region |
+
+`llmHeaders` 遵循 `metadata.iac_code.llm_headers` 的 A2A context 绑定规则：传入后，同一 AG-UI thread 的后续请求即使省略该字段也会继承这些 headers；传入新的 map 会整体替换绑定，传入 `{}` 会清空绑定。header 值可能包含凭据，因此 adapter 不会持久化它们；本地 A2A 进程重启后，调用方需要重新传入。
 
 `rosInvocationId` 的生命周期：
 

@@ -77,6 +77,7 @@ Authorization: Bearer <token>
 | `cwd` | string | はい | ワークスペース絶対パス |
 | `model` | string | いいえ | リクエスト単位のモデル上書き |
 | `llmApiKey` | string | いいえ | LLM provider key |
+| `llmHeaders` / `llm_headers` | object | いいえ | LLM provider 呼び出しに追加する string-to-string の HTTP header |
 | `thinking.enabled/effort/budget` | boolean/string/正整数 | いいえ | thinking 設定 |
 | `userId` | string | いいえ | telemetry と呼び出し元の識別 |
 | `channel` | string | いいえ | チャネルメタデータ |
@@ -89,6 +90,8 @@ Authorization: Bearer <token>
 | `alibabaCloud.accessKeySecret` | string | いいえ | 一時 AccessKey Secret |
 | `alibabaCloud.securityToken` | string | いいえ | 一時 STS token |
 | `alibabaCloud.regionId` | string | いいえ | 既定 region |
+
+`llmHeaders` は `metadata.iac_code.llm_headers` の A2A context binding 規則に従います。一度指定すると、同じ AG-UI thread の後続リクエストはこのフィールドを省略しても header を継承します。新しい map は binding 全体を置き換え、`{}` は binding を消去します。値には認証情報が含まれる可能性があるため adapter は永続化せず、local A2A process の再起動後は呼び出し元が再送する必要があります。
 
 initial run とその Resume は同じ `rosInvocationId` を使います。次の通常ターンでは新しい値を利用できます。Cancel も現在の値が必要です。
 

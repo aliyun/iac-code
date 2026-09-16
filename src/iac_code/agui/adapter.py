@@ -1391,6 +1391,8 @@ def _a2a_request_options(
         "cleanupOnly": props.cleanup_only,
         "rosInvocationId": props.ros_invocation_id,
     }
+    if props.llm_headers is not None:
+        metadata["llm_headers"] = props.llm_headers
     cloud = props.alibaba_cloud
     if cloud is not None:
         metadata.update(

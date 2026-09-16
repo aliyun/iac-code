@@ -1085,6 +1085,10 @@ async def test_request_runtime_overrides_are_forwarded_only_as_a2a_metadata(tmp_
         {
             "model": "qwen-test",
             "llmApiKey": "fake-provider-key",
+            "llmHeaders": {
+                "Authorization": "Bearer fake-caller-token",
+                "X-Caller-Session": "session-1",
+            },
             "thinking": {"enabled": True, "effort": "low", "budget": 1024},
             "alibabaCloud": {
                 "accessKeyId": "fake-access-key",
@@ -1109,11 +1113,31 @@ async def test_request_runtime_overrides_are_forwarded_only_as_a2a_metadata(tmp_
         "cleanupOnly": False,
         "rosInvocationId": "invocation-1",
         "preferredLanguage": "en",
+        "llm_headers": {
+            "Authorization": "Bearer fake-caller-token",
+            "X-Caller-Session": "session-1",
+        },
         "alibaba_cloud_access_key_id": "fake-access-key",
         "alibaba_cloud_access_key_secret": "fake-access-secret",
         "alibaba_cloud_security_token": "fake-sts-token",
         "alibaba_cloud_region_id": "cn-hangzhou",
     }
+
+
+@pytest.mark.asyncio
+async def test_empty_llm_headers_are_forwarded_to_clear_a2a_context_binding(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = FakeA2AClient()
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    app = create_app(adapter=adapter)
+    payload = _payload(tmp_path)
+    payload["forwardedProps"]["iacCode"]["llmHeaders"] = {}
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post("/", json=payload)
+
+    assert response.status_code == 200
+    assert fake.stream_options[0]["iac_code_metadata"]["llm_headers"] == {}
 
 
 @pytest.mark.asyncio

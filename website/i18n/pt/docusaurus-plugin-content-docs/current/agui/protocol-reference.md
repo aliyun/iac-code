@@ -83,6 +83,7 @@ O esquema é estrito; campos desconhecidos são rejeitados.
 | `cwd` | string | Sim | Caminho absoluto do workspace |
 | `model` | string | Não | Substituição do modelo para a solicitação |
 | `llmApiKey` | string | Não | Chave do provedor LLM para a solicitação |
+| `llmHeaders` / `llm_headers` | objeto | Não | Headers HTTP adicionais de string para string nas chamadas ao provedor LLM |
 | `thinking.enabled` | booleano | Não | Solicitar saída de raciocínio |
 | `thinking.effort` | string | Não | Esforço de raciocínio específico do provedor |
 | `thinking.budget` | inteiro positivo | Não | Orçamento de raciocínio específico do provedor |
@@ -97,6 +98,8 @@ O esquema é estrito; campos desconhecidos são rejeitados.
 | `alibabaCloud.accessKeySecret` | string | Não | Segredo AccessKey local à solicitação |
 | `alibabaCloud.securityToken` | string | Não | Token STS local à solicitação |
 | `alibabaCloud.regionId` | string | Não | Região padrão local à solicitação |
+
+`llmHeaders` segue as regras de vínculo ao contexto A2A de `metadata.iac_code.llm_headers`: depois de informado, as solicitações posteriores do mesmo thread AG-UI herdam os headers quando o campo é omitido. Um novo mapa substitui todo o vínculo, e `{}` o limpa. Como os valores podem conter credenciais, o adaptador não os persiste; o chamador deve enviá-los novamente após a reinicialização do processo A2A local.
 
 A execução inicial e suas retomadas devem manter o mesmo `rosInvocationId`. Um turno normal posterior pode usar um novo valor. O cancelamento deve usar o valor da execução atual.
 

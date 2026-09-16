@@ -68,6 +68,7 @@ El schema es estricto y rechaza campos desconocidos.
 | `rosInvocationId` | string | Sí | Identidad de la ejecución, máximo 256 caracteres |
 | `cwd` | string | Sí | Workspace absoluto |
 | `model` / `llmApiKey` | string | No | Modelo y clave LLM por solicitud |
+| `llmHeaders` / `llm_headers` | objeto | No | Headers HTTP adicionales de string a string para las llamadas al proveedor LLM |
 | `thinking.enabled/effort/budget` | boolean/string/entero positivo | No | Opciones de thinking |
 | `userId` / `channel` | string | No | Identidad y canal del llamante |
 | `preferredLanguage` | string | No | Idioma visible, por ejemplo `es` |
@@ -79,6 +80,8 @@ El schema es estricto y rechaza campos desconocidos.
 | `alibabaCloud.accessKeySecret` | string | No | AccessKey Secret temporal |
 | `alibabaCloud.securityToken` | string | No | Token STS temporal |
 | `alibabaCloud.regionId` | string | No | Región predeterminada |
+
+`llmHeaders` sigue las reglas de vinculación al contexto A2A de `metadata.iac_code.llm_headers`: una vez enviado, las solicitudes posteriores del mismo thread AG-UI heredan los headers cuando se omite el campo. Un nuevo mapa reemplaza toda la vinculación y `{}` la borra. Como los valores pueden contener credenciales, el adaptador no los persiste; el llamante debe volver a enviarlos tras reiniciar el proceso A2A local.
 
 El run inicial y sus Resume conservan el mismo `rosInvocationId`. Un turno normal posterior puede usar otro. El mismo `threadId` queda vinculado al primer `cwd` y `userId`.
 
