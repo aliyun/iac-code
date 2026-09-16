@@ -11,10 +11,11 @@ import {
 } from "./components/pipeline.js?v=pipeline-solution-confirm-v16";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v26";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v60";
-import { createOutputController } from "./components/output_panel.js?v=output-panel-v38";
+import { createOutputController, highlightTemplate } from "./components/output_panel.js?v=output-panel-v38";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-324";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
+import { renderMermaid } from "./mermaid_render.js?v=arch-diagram-v5";
 
 const root = document.getElementById("iac-code-web-root");
 const DESKTOP_RUNTIME =
@@ -621,7 +622,7 @@ export function messageText(message = {}) {
   return "";
 }
 
-export function renderMarkdownInto(target, source) {
+export function renderMarkdownInto(target, source, options = {}) {
   const content = text(source);
   if (!target) {
     return;
@@ -632,9 +633,258 @@ export function renderMarkdownInto(target, source) {
   }
   if (markdownRenderer) {
     target.innerHTML = markdownRenderer.render(content);
+    enhanceMarkdownCodeBlocks(target, options);
     return;
   }
   target.textContent = content;
+}
+
+const CODE_LANGUAGE_LABELS = {
+  bash: "Shell",
+  javascript: "JavaScript",
+  js: "JavaScript",
+  jsx: "JSX",
+  json: "JSON",
+  mermaid: "Mermaid",
+  mmd: "Mermaid",
+  py: "Python",
+  python: "Python",
+  sh: "Shell",
+  shell: "Shell",
+  ts: "TypeScript",
+  tsx: "TSX",
+  typescript: "TypeScript",
+  yaml: "YAML",
+  yml: "YAML",
+  zsh: "Shell",
+};
+const HASH_LANGUAGE_KEYWORDS = {
+  bash: "case do done elif else esac fi for function if in select then until while",
+  python:
+    "and as assert async await break class continue def del elif else except finally for from global if import in is lambda nonlocal not or pass raise return try while with yield",
+  shell: "case do done elif else esac fi for function if in select then until while",
+};
+const SLASH_LANGUAGE_KEYWORDS = {
+  c: "auto break case char const continue default do double else enum extern float for goto if inline int long register restrict return short signed sizeof static struct switch typedef union unsigned void volatile while",
+  cpp: "alignas alignof auto bool break case catch char class const constexpr continue default delete do double else enum explicit export extern false float for friend if inline int long namespace new nullptr operator private protected public return short signed sizeof static struct switch template this throw true try typedef typename union unsigned using virtual void volatile while",
+  css: "important inherit initial none revert unset",
+  go: "break case chan const continue default defer else fallthrough for func go goto if import interface map package range return select struct switch type var",
+  java: "abstract assert boolean break byte case catch char class const continue default do double else enum extends final finally float for goto if implements import instanceof int interface long native new package private protected public return short static strictfp super switch synchronized this throw throws transient try void volatile while",
+  javascript:
+    "as async await break case catch class const continue debugger default delete do else export extends finally for from function get if import in instanceof let new of return set static super switch throw try typeof var void while with yield",
+  rust: "as async await break const continue crate dyn else enum extern false fn for if impl in let loop match mod move mut pub ref return self Self static struct super trait true type unsafe use where while",
+  typescript:
+    "abstract any as async await boolean break case catch class const constructor continue debugger declare default delete do else enum export extends finally for from function get if implements import in infer instanceof interface keyof let module namespace never new number object of package private protected public readonly require return set static string super switch symbol this throw try type typeof undefined unique unknown var void while with yield",
+};
+const SQL_KEYWORDS = new Set(
+  "alter and as asc begin between by case create delete desc distinct drop else end exists from full group having in index inner insert into is join left like limit not null on or order outer primary references right select set table then union unique update values when where with".split(
+    " ",
+  ),
+);
+const BOOLEAN_WORDS = new Set(["false", "null", "none", "true"]);
+const MARKDOWN_CODE_COLLAPSE_LINE_THRESHOLD = 24;
+const markdownCodeExpandedOverrides = new Map();
+
+function escapeCodeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\u0022/g, "&quot;")
+    .replace(/\u0027/g, "&#39;");
+}
+
+function highlightCodeTokens(source, expression, keywords = new Set()) {
+  const value = String(source ?? "");
+  let cursor = 0;
+  let html = "";
+  for (const match of value.matchAll(expression)) {
+    html += escapeCodeHtml(value.slice(cursor, match.index));
+    const token = match[0];
+    const word = token.toLowerCase();
+    const kind = match.groups?.comment
+      ? "comment"
+      : match.groups?.string
+        ? "string"
+        : match.groups?.number
+          ? "number"
+          : BOOLEAN_WORDS.has(word)
+            ? "boolean"
+            : keywords.has(word)
+              ? "key"
+              : "";
+    html += kind ? `<span class="tok-${kind}">${escapeCodeHtml(token)}</span>` : escapeCodeHtml(token);
+    cursor = Number(match.index) + token.length;
+  }
+  return html + escapeCodeHtml(value.slice(cursor));
+}
+
+export function highlightMarkdownCode(source, language = "") {
+  const normalized = String(language || "").toLowerCase();
+  if (normalized === "json" || ["yaml", "yml", "terraform", "tf", "hcl"].includes(normalized)) {
+    return highlightTemplate(source, normalized === "json" ? "json" : "yaml");
+  }
+  const hashFamily = ["python", "py"].includes(normalized)
+    ? "python"
+    : ["bash", "sh", "shell", "zsh"].includes(normalized)
+      ? "shell"
+      : "";
+  if (hashFamily) {
+    const expression = /(?<string>"""[\s\S]*?"""|'''[\s\S]*?'''|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(?<comment>#[^\n]*)|(?<number>\b\d+(?:\.\d+)?\b)|(?<word>\b[A-Za-z_]\w*\b)/g;
+    return highlightCodeTokens(source, expression, new Set(HASH_LANGUAGE_KEYWORDS[hashFamily].split(" ")));
+  }
+  const slashFamily = {
+    c: "c",
+    cc: "cpp",
+    cpp: "cpp",
+    css: "css",
+    go: "go",
+    java: "java",
+    javascript: "javascript",
+    js: "javascript",
+    jsx: "javascript",
+    rust: "rust",
+    rs: "rust",
+    ts: "typescript",
+    tsx: "typescript",
+    typescript: "typescript",
+  }[normalized];
+  if (slashFamily) {
+    const expression = /(?<string>`(?:\\.|[^`\\])*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|(?<comment>\/\/[^\n]*|\/\*[\s\S]*?\*\/)|(?<number>\b\d+(?:\.\d+)?\b)|(?<word>\b[A-Za-z_$][\w$]*\b)/g;
+    return highlightCodeTokens(source, expression, new Set(SLASH_LANGUAGE_KEYWORDS[slashFamily].split(" ")));
+  }
+  if (["sql", "postgresql", "mysql"].includes(normalized)) {
+    const expression = /(?<string>'(?:''|[^'])*'|"(?:""|[^"])*")|(?<comment>--[^\n]*|\/\*[\s\S]*?\*\/)|(?<number>\b\d+(?:\.\d+)?\b)|(?<word>\b[A-Za-z_]\w*\b)/g;
+    return highlightCodeTokens(source, expression, SQL_KEYWORDS);
+  }
+  if (["html", "xml", "svg"].includes(normalized)) {
+    return highlightCodeTokens(source, /(?<comment><!--[\s\S]*?-->)|(?<string><\/?[A-Za-z][^>]*>)/g);
+  }
+  return "";
+}
+
+function markdownCodeLanguage(code) {
+  const match = String(code?.className || "").match(/(?:^|\s)language-([^\s]+)/i);
+  return match ? match[1].toLowerCase() : "";
+}
+
+function markdownCodeLanguageLabel(language) {
+  if (!language) {
+    return "TEXT";
+  }
+  return CODE_LANGUAGE_LABELS[language] || language.toUpperCase();
+}
+
+export function looksLikeMermaid(source) {
+  const withoutFrontmatter = String(source || "")
+    .trimStart()
+    .replace(/^---\s*\n[\s\S]*?\n---\s*\n/, "")
+    .trimStart();
+  return /^(?:graph|flowchart|sequenceDiagram|classDiagram|stateDiagram(?:-v2)?|erDiagram|journey|gantt|pie|gitGraph|mindmap|timeline|quadrantChart|xychart-beta|block-beta|packet-beta|architecture-beta|kanban|sankey-beta|requirementDiagram|C4(?:Context|Container|Component|Deployment))\b/i.test(
+    withoutFrontmatter,
+  );
+}
+
+function makeMarkdownCodeBlock(source, language) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "markdown-code-block";
+  const toolbar = document.createElement("div");
+  toolbar.className = "markdown-code-toolbar";
+  const label = document.createElement("span");
+  label.className = "markdown-code-language";
+  label.textContent = markdownCodeLanguageLabel(language);
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "markdown-code-copy";
+  copy.setAttribute("aria-label", t("Copy"));
+  copy.title = t("Copy");
+  const copyIcon = document.createElement("span");
+  copyIcon.className = "workspace-status-copy-icon markdown-code-copy-icon";
+  copyIcon.setAttribute("aria-hidden", "true");
+  copy.append(copyIcon);
+  let resetTimer = null;
+  copy.addEventListener("click", async () => {
+    const ok = await copyTextToClipboard(source);
+    const feedback = ok ? t("Copied") : t("Copy failed");
+    copy.dataset.copied = ok ? "yes" : "no";
+    copy.setAttribute("aria-label", feedback);
+    copy.title = feedback;
+    if (resetTimer !== null) {
+      clearTimeout(resetTimer);
+    }
+    resetTimer = setTimeout(() => {
+      delete copy.dataset.copied;
+      copy.setAttribute("aria-label", t("Copy"));
+      copy.title = t("Copy");
+      resetTimer = null;
+    }, 1600);
+  });
+  toolbar.append(label, copy);
+  wrapper.append(toolbar);
+  return wrapper;
+}
+
+function appendMarkdownCodeToggle(wrapper, source, stateKey) {
+  const lineCount = String(source || "").split(/\r?\n/).length;
+  if (lineCount <= MARKDOWN_CODE_COLLAPSE_LINE_THRESHOLD) {
+    return;
+  }
+  let expanded = markdownCodeExpandedOverrides.get(stateKey) === true;
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "markdown-code-toggle";
+  const sync = () => {
+    wrapper.className = `markdown-code-block is-collapsible ${expanded ? "is-expanded" : "is-collapsed"}`;
+    toggle.textContent = expanded ? t("Show less") : t("Show more");
+    toggle.setAttribute("aria-label", toggle.textContent);
+    toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+  };
+  toggle.addEventListener("click", () => {
+    expanded = !expanded;
+    if (expanded) {
+      markdownCodeExpandedOverrides.set(stateKey, true);
+    } else {
+      markdownCodeExpandedOverrides.delete(stateKey);
+    }
+    sync();
+  });
+  sync();
+  wrapper.append(toggle);
+}
+
+// 给普通代码围栏加语言、复制和轻量高亮；Mermaid 复用既有懒加载渲染器。显式 mermaid/mmd
+// 始终视为图，未标语言时仅对白名单首指令自动识别，避免误判其它语言的 graph 文本。
+export function enhanceMarkdownCodeBlocks(target, options = {}) {
+  const blocks = [...(target?.querySelectorAll?.("pre > code") || [])];
+  for (const [blockIndex, code] of blocks.entries()) {
+    const pre = code.parentElement;
+    if (!pre) {
+      continue;
+    }
+    const source = code.textContent || "";
+    const declaredLanguage = markdownCodeLanguage(code);
+    const mermaid = ["mermaid", "mmd"].includes(declaredLanguage) || (!declaredLanguage && looksLikeMermaid(source));
+    const language = mermaid ? "mermaid" : declaredLanguage;
+    const wrapper = makeMarkdownCodeBlock(source, language);
+    pre.replaceWith(wrapper);
+    if (mermaid && options.renderMermaid !== false) {
+      const container = document.createElement("div");
+      container.className = "markdown-mermaid";
+      wrapper.append(container);
+      void renderMermaid(container, source);
+      continue;
+    }
+    const highlighted = highlightMarkdownCode(source, language);
+    if (highlighted) {
+      code.innerHTML = highlighted;
+    }
+    wrapper.append(pre);
+    const statePrefix = text(options.codeBlockKeyPrefix || `source:${language}:${source}`);
+    // 流式生成期间保持完整展开，避免达到阈值后突然截断、看起来像停止输出；完成后再启用默认折叠。
+    if (!options.codeBlockStreaming) {
+      appendMarkdownCodeToggle(wrapper, source, `${statePrefix}:${blockIndex}`);
+    }
+  }
 }
 
 function normalizeStoredMessage(message, index) {
@@ -901,7 +1151,7 @@ export function statusPanelRows(status = {}, options = {}) {
 
 // 复制文本到剪贴板:优先异步 Clipboard API,不可用(非安全上下文/旧浏览器)时回退到
 // 临时 textarea + execCommand。返回是否成功,供调用方给出反馈。
-async function copyStatusTextToClipboard(value) {
+async function copyTextToClipboard(value) {
   const textValue = value == null ? "" : String(value);
   if (!textValue) {
     return false;
@@ -949,7 +1199,7 @@ function makeSessionStatusCopyButton(copyValue) {
     if (!copyValue) {
       return;
     }
-    const ok = await copyStatusTextToClipboard(copyValue);
+    const ok = await copyTextToClipboard(copyValue);
     button.dataset.copied = ok ? "yes" : "no";
     button.setAttribute("aria-label", ok ? t("Session ID copied") : t("Copy failed"));
     button.title = ok ? t("Session ID copied") : t("Copy failed");
@@ -3245,7 +3495,12 @@ function buildMessageBodyElement(message) {
   }
   const body = document.createElement("div");
   body.className = "message-body markdown-body";
-  renderMarkdownInto(body, content);
+  // Mermaid 解析留到消息完成后执行，避免每个流式 token 都对尚未闭合的图重复解析。
+  renderMarkdownInto(body, content, {
+    renderMermaid: message.stored === true || message.status !== "streaming",
+    codeBlockKeyPrefix: `message:${text(message.messageId || message.id || message.sequence || "")}`,
+    codeBlockStreaming: message.stored !== true && message.status === "streaming",
+  });
   return body;
 }
 
@@ -3828,6 +4083,149 @@ function syncMessageStackOverflow(stack) {
 const detailsOpenOverrides = new Map();
 const pipelineDetailsLifecycleStatuses = new Map();
 
+export function selectionTouchesMessageStack(stack, selection = null) {
+  const currentSelection =
+    selection ||
+    (typeof window !== "undefined" && typeof window.getSelection === "function" ? window.getSelection() : null);
+  if (!stack || !currentSelection || currentSelection.isCollapsed) {
+    return false;
+  }
+  const inside = (node) => Boolean(node && (node === stack || stack.contains?.(node)));
+  return inside(currentSelection.anchorNode) || inside(currentSelection.focusNode);
+}
+
+export function captureMessageStackSelection(stack, selection = null) {
+  const currentSelection =
+    selection ||
+    (typeof window !== "undefined" && typeof window.getSelection === "function" ? window.getSelection() : null);
+  if (!stack || !currentSelection || currentSelection.isCollapsed || currentSelection.rangeCount < 1) {
+    return null;
+  }
+  const range = currentSelection.getRangeAt(0);
+  const inside = (node) => Boolean(node && (node === stack || stack.contains?.(node)));
+  if (!inside(range.startContainer) || !inside(range.endContainer)) {
+    return null;
+  }
+  try {
+    const prefix = document.createRange();
+    prefix.selectNodeContents(stack);
+    prefix.setEnd(range.startContainer, range.startOffset);
+    const throughSelection = document.createRange();
+    throughSelection.selectNodeContents(stack);
+    throughSelection.setEnd(range.endContainer, range.endOffset);
+    const selectedText = String(range.toString());
+    if (!selectedText) {
+      return null;
+    }
+    return {
+      start: prefix.toString().length,
+      end: throughSelection.toString().length,
+      text: selectedText,
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function messageStackTextPoint(stack, offset) {
+  const showText = globalThis.NodeFilter?.SHOW_TEXT ?? 4;
+  const walker = document.createTreeWalker(stack, showText);
+  let remaining = Math.max(0, Number(offset) || 0);
+  let last = null;
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    last = node;
+    const length = String(node.nodeValue || "").length;
+    if (remaining <= length) {
+      return { node, offset: remaining };
+    }
+    remaining -= length;
+  }
+  if (last) {
+    return { node: last, offset: String(last.nodeValue || "").length };
+  }
+  return null;
+}
+
+export function restoreMessageStackSelection(stack, snapshot, selection = null) {
+  if (!stack || !snapshot?.text) {
+    return false;
+  }
+  const renderedText = String(stack.textContent || "");
+  let start = Number(snapshot.start);
+  let end = Number(snapshot.end);
+  if (renderedText.slice(start, end) !== snapshot.text) {
+    const fallbackStart = renderedText.indexOf(snapshot.text);
+    if (fallbackStart < 0 || fallbackStart !== renderedText.lastIndexOf(snapshot.text)) {
+      return false;
+    }
+    start = fallbackStart;
+    end = start + snapshot.text.length;
+  }
+  const startPoint = messageStackTextPoint(stack, start);
+  const endPoint = messageStackTextPoint(stack, end);
+  const currentSelection =
+    selection ||
+    (typeof window !== "undefined" && typeof window.getSelection === "function" ? window.getSelection() : null);
+  if (!startPoint || !endPoint || !currentSelection) {
+    return false;
+  }
+  try {
+    const range = document.createRange();
+    range.setStart(startPoint.node, startPoint.offset);
+    range.setEnd(endPoint.node, endPoint.offset);
+    currentSelection.removeAllRanges();
+    currentSelection.addRange(range);
+    return true;
+  } catch (_error) {
+    return false;
+  }
+}
+
+export function rememberMessageStackSelection(stack, selection = null, now = Date.now()) {
+  const currentSelection =
+    selection ||
+    (typeof window !== "undefined" && typeof window.getSelection === "function" ? window.getSelection() : null);
+  if (!selectionTouchesMessageStack(stack, currentSelection)) {
+    return false;
+  }
+  const selectedText = String(currentSelection?.toString?.() || "");
+  if (!selectedText) {
+    return false;
+  }
+  messageStackSelectionSnapshot = selectedText;
+  messageStackSelectionSnapshotAt = now;
+  return true;
+}
+
+export function copyRememberedMessageStackSelection(event, selection = null, now = Date.now()) {
+  const currentSelection =
+    selection ||
+    (typeof window !== "undefined" && typeof window.getSelection === "function" ? window.getSelection() : null);
+  if (String(currentSelection?.toString?.() || "")) {
+    return false;
+  }
+  if (event?.target?.closest?.("input, textarea, [contenteditable='true']")) {
+    return false;
+  }
+  if (
+    !messageStackSelectionSnapshot ||
+    now - messageStackSelectionSnapshotAt > MESSAGE_SELECTION_COPY_GRACE_MS ||
+    typeof event?.clipboardData?.setData !== "function"
+  ) {
+    return false;
+  }
+  event.clipboardData.setData("text/plain", messageStackSelectionSnapshot);
+  event.preventDefault?.();
+  messageStackSelectionSnapshot = "";
+  messageStackSelectionSnapshotAt = 0;
+  return true;
+}
+
+function clearRememberedMessageStackSelection() {
+  messageStackSelectionSnapshot = "";
+  messageStackSelectionSnapshotAt = 0;
+}
+
 // A lifecycle transition owns the initial open state exactly once: working/input
 // opens, terminal closes.  Subsequent renders at the same status keep the user's
 // manual choice instead of fighting it every frame.
@@ -3918,6 +4316,17 @@ function ensureMessageStackToggleSync(stack) {
     messageStackPointerInside = false;
     clearHoverThrottle();
     scheduleStreamRender();
+  });
+  document.addEventListener("selectionchange", () => {
+    rememberMessageStackSelection(stack);
+  });
+  document.addEventListener("copy", (event) => {
+    copyRememberedMessageStackSelection(event);
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!stack.contains?.(event.target)) {
+      clearRememberedMessageStackSelection();
+    }
   });
 }
 
@@ -4099,6 +4508,7 @@ function renderMessages(state) {
     return;
   }
   ensureMessageStackToggleSync(stack);
+  const selectionSnapshot = captureMessageStackSelection(stack);
   // 排序以转录序号(sequence)为主：种子(stored)与 live 事件都带单调序号，同进程 reload 里流水线
   // 步骤内容会被缓冲区回放的 assistant.message.start 翻成 stored=false——若以 stored 为主键排序，
   // 这些内容就会被甩到所有 stored 行之后(步骤体清空、内容错位到底部)。改以 sequence 为主键后，翻
@@ -4145,6 +4555,7 @@ function renderMessages(state) {
     loading.append(spinner, copy);
     stack.append(loading);
     setElementClassFlag(stack, "is-overflowing", false);
+    restoreMessageStackSelection(stack, selectionSnapshot);
     return;
   }
   if (messages.length === 0 && !state.lastError?.message) {
@@ -4157,6 +4568,7 @@ function renderMessages(state) {
     empty.append(title, copy);
     stack.append(empty);
     setElementClassFlag(stack, "is-overflowing", false);
+    restoreMessageStackSelection(stack, selectionSnapshot);
     return;
   }
   const pipelineStack = [{ depth: -1, body: stack }];
@@ -4409,6 +4821,8 @@ function renderMessages(state) {
   // 全量重建后回放用户展开态：把用户手动展开/收起过的卡片/分组恢复成他上次选择的样子，
   // 覆盖各自的程序化默认（Issue 3/5）。
   applyDetailsOpenOverrides(stack);
+  // 全量重建会销毁浏览器 Range；按重建前记录的文本偏移恢复选区，让流式输出和持续高亮并存。
+  restoreMessageStackSelection(stack, selectionSnapshot);
   scheduleMessageStackOverflowSync(stack);
 }
 
@@ -5371,6 +5785,10 @@ let pendingScrollToBottom = false;
 // 流式期间把一帧内的多个 SSE 事件合并成一次渲染：真实 LLM 每秒可推很多 token，逐事件全量重建
 // 整段正文会卡顿，rAF 合并后每帧至多渲染一次。
 let streamRenderScheduled = false;
+// 流式重绘会销毁浏览器 selection：记录最近一次转录区选中文本，重绘后 Ctrl/Cmd+C 仍可复制。
+let messageStackSelectionSnapshot = "";
+let messageStackSelectionSnapshotAt = 0;
+const MESSAGE_SELECTION_COPY_GRACE_MS = 30_000;
 // 指针悬停在转录区时，逐帧 replaceChildren 会销毁/重建光标下的节点，令 :hover 反复通断（"一闪闪"）
 // 并打断点击手势（工具卡/思考块"点不动"）。悬停期间把全量重建合并到一个低频定时器，指针移开即追平。
 let messageStackPointerInside = false;
