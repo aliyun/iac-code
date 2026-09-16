@@ -2732,8 +2732,8 @@ def test_managed_remote_bootstrap_is_committed_before_ack_and_recovers_lost_resu
         + "counter_path = Path({!r})\n".format(str(counter_path))
         + "calls_path = Path({!r})\n".format(str(calls_path))
         + "observation_path = Path({!r})\n".format(str(observation_path))
-        + "count = int(counter_path.read_text() or '0') + 1 if counter_path.exists() else 1\n"
-        + "counter_path.write_text(str(count))\n"
+        + "count = int(counter_path.read_text(encoding='utf-8') or '0') + 1 if counter_path.exists() else 1\n"
+        + "counter_path.write_text(str(count), encoding='utf-8')\n"
         + "with calls_path.open('a', encoding='utf-8') as handle:\n"
         + "    handle.write(json.dumps(sys.argv[1:]) + '\\n')\n"
         + "def status(state, text='', final=False):\n"
@@ -2757,12 +2757,12 @@ def test_managed_remote_bootstrap_is_committed_before_ack_and_recovers_lost_resu
         + "    state_root = Path(os.environ['ALICLOUD_ROS_AGENT_STATE_DIR'])\n"
         + "    job_path = next((state_root / 'jobs').glob('*/job.json'))\n"
         + "    spool_path = job_path.with_name('events.jsonl')\n"
-        + "    job = json.loads(job_path.read_text())\n"
-        + "    records = [json.loads(line) for line in spool_path.read_text().splitlines()]\n"
-        + "    ack = json.loads(ack_path.read_text()) if ack_path.exists() else {}\n"
+        + "    job = json.loads(job_path.read_text(encoding='utf-8'))\n"
+        + "    records = [json.loads(line) for line in spool_path.read_text(encoding='utf-8').splitlines()]\n"
+        + "    ack = json.loads(ack_path.read_text(encoding='utf-8')) if ack_path.exists() else {}\n"
         + "    observation_path.write_text(json.dumps({'ack': ack, 'sessionId': job.get('sessionId'), "
         + "'streamCursor': job.get('streamCursor'), 'spoolIds': "
-        + "[item.get('streamEventId') for item in records]}))\n"
+        + "[item.get('streamEventId') for item in records]}), encoding='utf-8')\n"
         + "    print(json.dumps({'code': 'ExecutorTimeout'}), file=sys.stderr)\n"
         + "    raise SystemExit(1)\n"
         + "completed = status('TASK_STATE_COMPLETED', 'done', True)\n"
@@ -2786,7 +2786,7 @@ def test_managed_remote_bootstrap_is_committed_before_ack_and_recovers_lost_resu
 
     assert result["state"] == "turn-completed"
     assert result["finalText"] == "done"
-    calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+    calls = [json.loads(line) for line in calls_path.read_text(encoding="utf-8").splitlines()]
     assert len(calls) == 2
     assert "--query" in calls[0]
     assert "--query" not in calls[1]
@@ -2795,7 +2795,7 @@ def test_managed_remote_bootstrap_is_committed_before_ack_and_recovers_lost_resu
         "StreamOptions.Action": "Reconnect",
         "StreamOptions.Cursor": "v1.remote-managed.1",
     }
-    observation = json.loads(observation_path.read_text())
+    observation = json.loads(observation_path.read_text(encoding="utf-8"))
     assert observation["ack"] == {
         "committed": True,
         "eventId": "v1.remote-managed.1",
