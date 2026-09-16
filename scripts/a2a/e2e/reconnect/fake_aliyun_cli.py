@@ -54,6 +54,12 @@ def _result_text(result: Any) -> str:
     return "".join(pieces)
 
 
+def _normalize_newlines(value: str) -> str:
+    """Avoid translating captured Windows CRLF a second time on output."""
+
+    return value.replace("\r\n", "\n").replace("\r", "\n")
+
+
 async def _call_mcp(argv: list[str]) -> dict[str, Any]:
     server_path = Path(os.environ["IAC_CODE_E2E_MCP_SERVER"]).expanduser().resolve()
     python = os.environ.get("IAC_CODE_E2E_PYTHON") or sys.executable
@@ -136,7 +142,7 @@ async def _main(argv: list[str]) -> int:
     stdout = result.get("stdout")
     if not isinstance(stdout, str):
         return _write_error("MCPCallFailed", "the E2E MCP result did not contain CLI stdout")
-    sys.stdout.write(stdout)
+    sys.stdout.write(_normalize_newlines(stdout))
     sys.stdout.flush()
     return int(result.get("returnCode") or 0)
 

@@ -35,6 +35,10 @@ def _mcp_server():
     return _load("qoder_mcp_reconnect_server", MCP_SERVER_PATH)
 
 
+def _fake_cli():
+    return _load("qoder_mcp_reconnect_fake_cli", FAKE_CLI_PATH)
+
+
 def test_runner_requires_explicit_real_cloud_opt_in(tmp_path) -> None:
     runner = _runner()
 
@@ -96,6 +100,10 @@ def test_installed_skill_is_temporarily_patched_to_remote_fake_cli(tmp_path) -> 
 
     assert (destination / "old.txt").read_text(encoding="utf-8") == "old"
     assert not (destination / "config.json").exists()
+
+
+def test_fake_cli_normalizes_captured_windows_newlines_before_writing() -> None:
+    assert _fake_cli()._normalize_newlines("first\r\nsecond\r\n") == "first\nsecond\n"
 
 
 @pytest.mark.skipif(
