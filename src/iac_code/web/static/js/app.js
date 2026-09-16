@@ -758,7 +758,7 @@ export function highlightMarkdownCode(source, language = "") {
     return highlightCodeTokens(source, expression, SQL_KEYWORDS);
   }
   if (["html", "xml", "svg"].includes(normalized)) {
-    return highlightCodeTokens(source, /(?<comment><!--[\s\S]*?-->)|(?<string><\/?[A-Za-z][^>]*>)/g);
+    return highlightCodeTokens(source, /(?<comment><!--[\s\S]*?--!?>)|(?<string><\/?[A-Za-z][^>]*>)/g);
   }
   return "";
 }
