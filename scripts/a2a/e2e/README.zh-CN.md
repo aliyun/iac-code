@@ -124,6 +124,62 @@ Normal 和 Pipeline 都要分别运行 grace、挂起后恢复和进程重启变
 不会替用户批准。最终断言要求：真实非只读权限、Normal/顶层 Pipeline 本地与共享 checkpoint、Sub Pipeline 无
 checkpoint、确实经过原生 StartChat、精确清理本次资源，以及全部原有 VPC 仍存在。
 
+## 真实 Qoder/MCP StartChat 断线重连矩阵
+
+`reconnect/run_qoder_mcp_reconnect.py` 驱动发布闸门对应的真实链路：
+
+```text
+Qoder Work -> 安装后的 Skill -> 假 aliyun CLI -> stdio MCP
+           -> 真 aliyun CLI（--profile test-guima）-> ros-pre.aliyuncs.com
+```
+
+Runner 会备份两个 Qoder Skill 目录，安装仓库内 Skill，在 `config.json` 中固定
+`aliyun_cli`/`remote` 与 ROS 预发 endpoint，并且只修改这两份临时安装副本，把默认 `aliyun` 路径指向
+假 CLI；`finally` 中完整恢复原安装。假 CLI 调用 MCP 工具 `alibabacloud___callcli`；MCP 服务只接受
+ROS StartChat/StopChat 命令，为真 CLI 强制使用 `test-guima` Profile，并对每次真 CLI 调用执行 120 秒超时。
+
+首个完整事件通过同一次 MCP CallTool 的 progress 通道传递。假 CLI 输出 invocation-scoped bootstrap
+envelope 后，必须等 bridge 在完成投影和 cursor 持久化后写入 ack，MCP 服务才继续。普通 MCP 结果超时后，
+假 CLI 把它统一映射成稳定的 `ExecutorTimeout`；bridge 只有已经提交 SessionId/full cursor 锚点时才重连，
+不会解析超时报错文本来猜恢复状态。
+
+每个场景必须使用新的目录：
+
+```bash
+uv run python scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-reconnect-normal \
+  --scenario normal
+
+uv run python scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-reconnect-first-timeout \
+  --scenario first-call-timeout
+
+uv run python scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-reconnect-later-timeout \
+  --scenario reconnect-call-timeout
+```
+
+`normal` 使用一个不调用工具的短回复。两个超时场景都要求 iac-code 依次执行 `echo xxx1`、sleep 75 秒、
+`echo xxx2`、sleep 75 秒、`echo xxx3`。`first-call-timeout` 让第 1 次调用真实到达 MCP 的 120 秒超时；
+`reconnect-call-timeout` 在第 1 次调用的 bootstrap ack 后立即断开，让第 2 次调用真实到达 120 秒超时，
+并要求第 3 次调用从最近提交的 cursor 继续。最终断言包括：Query 恰好一次、首次调用不预生成 SessionId、
+Reconnect 不带 Query、Session/stream identity 一致、完整 cursor 序号不回退，以及最终输出完整。
+
+预检是只读的：只有真 ROS CLI plugin 版本不低于 `0.9.1`、`test-guima` Profile 存在，并且仓库 Python
+环境已安装 MCP，Runner 才会启动 Qoder 和创建 `--run-dir`。Reconnect 允许不带 Query，并通过全局
+`--body` JSON 传递 StreamOptions，不再要求 plugin 暴露专用 `--stream-options` flag。旧版本 plugin 会
+明确报告 readiness blocker，不会跑出一条误导性的半链路。`mcp-scenario-state.json`、`qoder-turns.jsonl`
+和 `result.json` 保存有界证据；Query、SessionId 和完整 cursor 只保留 hash、布尔值和 cursor 序号。
+
+无真实云回归会用 fixture 代替真 CLI，但仍经过真实 stdio MCP client/server、progress、ack 和 timeout：
+
+```bash
+uv run pytest -q tests/a2a_e2e/test_qoder_mcp_reconnect.py
+```
+
 受控 Sub Pipeline fixture 使用真实 `PipelineRunner` 和两个真实 `AgentLoop` candidate：一个 candidate
 停在真实权限 Future，另一个自然完成；到达配置的硬超时后，父 Pipeline 聚合两个 conclusion、进入 candidate
 选择并自然完成。fixture 同时安装生产 A2A 备份 hook，证明 Sub 权限本身不会触发权限关键备份。验收运行使用

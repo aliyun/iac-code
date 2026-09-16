@@ -107,6 +107,78 @@ shared serial checkpoint evidence, no Sub Pipeline checkpoint, native
 StartChat usage, exact resource cleanup, and retention of the pre-existing VPC
 inventory.
 
+## Real Qoder/MCP StartChat reconnect matrix
+
+`reconnect/run_qoder_mcp_reconnect.py` drives the release-gated reconnect path:
+
+```text
+Qoder Work -> installed Skill -> fake aliyun CLI -> stdio MCP
+           -> real aliyun CLI (--profile test-guima) -> ros-pre.aliyuncs.com
+```
+
+The runner backs up both Qoder Skill locations, installs the repository Skill,
+sets `aliyun_cli`/`remote` and the pre-production endpoint in its `config.json`,
+and patches only those temporary installed copies so their default `aliyun`
+path is the fake CLI. It restores the complete previous installations in
+`finally`. The fake CLI calls the MCP tool `alibabacloud___callcli`; the MCP
+server validates the ROS-only command shape, forces the real CLI Profile, and
+applies a 120-second timeout to each real CLI invocation.
+
+The first complete event is carried in the same MCP CallTool progress channel.
+The fake CLI writes the invocation-scoped bootstrap envelope and does not let
+the MCP server continue until the bridge has acknowledged the event after
+projection and cursor persistence. A timed-out ordinary MCP result is mapped
+to stable `ExecutorTimeout`; the bridge therefore reconnects only when that
+committed SessionId/full-cursor anchor exists. The timeout message itself is
+not parsed as recovery state.
+
+Run every scenario in a fresh directory:
+
+```bash
+uv run python scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-reconnect-normal \
+  --scenario normal
+
+uv run python scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-reconnect-first-timeout \
+  --scenario first-call-timeout
+
+uv run python scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py \
+  --allow-real-cloud \
+  --run-dir /tmp/iac-reconnect-later-timeout \
+  --scenario reconnect-call-timeout
+```
+
+`normal` uses a short no-tool response. Both timeout scenarios ask iac-code to
+run `echo xxx1`, sleep 75 seconds, `echo xxx2`, sleep 75 seconds, then
+`echo xxx3`. `first-call-timeout` lets invocation 1 reach the real 120-second
+MCP timeout. `reconnect-call-timeout` closes invocation 1 immediately after
+its bootstrap ack, lets invocation 2 reach the 120-second timeout, and expects
+invocation 3 to continue from the newest committed cursor. The assertions
+require exactly one Query, no pre-generated SessionId, no Query on reconnect,
+one Session/stream identity, non-decreasing full-cursor sequence, and the
+expected final output.
+
+The preflight is read-only and refuses to start Qoder or create `--run-dir`
+unless ROS CLI plugin `0.9.1` or newer is installed, the `test-guima` Profile
+exists, and the repository Python environment provides MCP. Reconnect accepts
+no Query and carries StreamOptions in the global `--body` JSON rather than a
+plugin-specific `--stream-options` flag. An older plugin is reported as a
+readiness blocker instead of producing a misleading partial E2E run.
+`mcp-scenario-state.json`, `qoder-turns.jsonl`, and `result.json` contain bounded
+evidence; Query, SessionId, and full cursor values are represented only by
+hashes, booleans, and cursor sequence numbers.
+
+The no-cloud protocol regression uses a fixture in place of the real CLI while
+retaining the real stdio MCP client/server, progress notification, ack, and
+timeout behavior:
+
+```bash
+uv run pytest -q tests/a2a_e2e/test_qoder_mcp_reconnect.py
+```
+
 The controlled Sub-Pipeline fixture uses a real `PipelineRunner` with two real
 `AgentLoop` candidates. One candidate parks at an actual permission Future while
 the other completes naturally; after the configured hard timeout, the parent

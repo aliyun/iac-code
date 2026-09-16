@@ -35,6 +35,8 @@ START_CHAT_PARAMETERS = frozenset(
         "EnableThinking",
         "RegionId",
         "ClientContext",
+        "StreamOptions.Action",
+        "StreamOptions.Cursor",
     }
 )
 STOP_CHAT_PARAMETERS = frozenset({"SessionId", "AgentVersion"})
@@ -89,10 +91,39 @@ def _single_value_parameters(path: str, body: bytes) -> dict[str, str]:
     return {key: values[0] for key, values in combined.items()}
 
 
+def _stream_options_body_parameters(body: bytes) -> dict[str, str]:
+    try:
+        value = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise StartChatRequestError("InvalidParameter", "StartChat JSON body is invalid.") from exc
+    allowed = {"StreamOptions.Action", "StreamOptions.Cursor"}
+    if not isinstance(value, dict) or not value or set(value) - allowed:
+        raise StartChatRequestError("InvalidParameter.StreamOptions", "StreamOptions body is invalid.")
+    parameters: dict[str, str] = {}
+    for key in sorted(allowed):
+        item = value.get(key)
+        if item is not None:
+            if not isinstance(item, str):
+                raise StartChatRequestError(
+                    "InvalidParameter.{}".format(key),
+                    "{} must be a string.".format(key),
+                )
+            parameters[key] = item
+    return parameters
+
+
 def parse_start_chat_request(path: str, body: bytes, headers: Any) -> dict[str, str]:
     """Validate the exact OpenAPI request surface and return business parameters."""
 
-    parameters = _single_value_parameters(path, body)
+    if body.lstrip().startswith(b"{"):
+        parameters = _single_value_parameters(path, b"")
+        body_parameters = _stream_options_body_parameters(body)
+        repeated = sorted(set(parameters) & set(body_parameters))
+        if repeated:
+            raise StartChatRequestError("InvalidParameter", "Repeated parameter: {}".format(repeated[0]))
+        parameters.update(body_parameters)
+    else:
+        parameters = _single_value_parameters(path, body)
     action = parameters.get("Action") or headers.get("x-acs-action")
     if action != "StartChat":
         raise StartChatRequestError("InvalidAction", "Action must be StartChat.")
@@ -105,9 +136,29 @@ def parse_start_chat_request(path: str, body: bytes, headers: Any) -> dict[str, 
     )
     if unknown:
         raise StartChatRequestError("InvalidParameter", "Unknown StartChat parameter: {}".format(unknown[0]))
-    query = parameters.get("Query")
-    if query is None or not query.strip():
-        raise StartChatRequestError("InvalidParameter.Query", "Query is required.")
+    stream_action = parameters.get("StreamOptions.Action")
+    reconnecting = stream_action == "Reconnect"
+    if stream_action not in (None, "Reconnect"):
+        raise StartChatRequestError("InvalidParameter.StreamOptions.Action", "Stream action is not supported.")
+    if reconnecting:
+        allowed = {"AgentVersion", "SessionId", "StreamOptions.Action", "StreamOptions.Cursor"}
+        extra = sorted(key for key in parameters if key in START_CHAT_PARAMETERS and key not in allowed)
+        if extra:
+            raise StartChatRequestError(
+                "InvalidParameter.StreamOptions.Action",
+                "Reconnect includes a business parameter: {}".format(extra[0]),
+            )
+        if not parameters.get("SessionId"):
+            raise StartChatRequestError("InvalidParameter.SessionId", "SessionId is required for Reconnect.")
+        cursor = parameters.get("StreamOptions.Cursor")
+        if not isinstance(cursor, str) or re.fullmatch(r"v1\..+\.[1-9][0-9]*", cursor) is None:
+            raise StartChatRequestError(
+                "InvalidParameter.StreamOptions.Cursor", "A complete stream cursor is required."
+            )
+    else:
+        query = parameters.get("Query")
+        if query is None or not query.strip():
+            raise StartChatRequestError("InvalidParameter.Query", "Query is required.")
     mode = parameters.get("Mode", "IaCCodeNormal")
     if mode not in _MODES:
         raise StartChatRequestError("InvalidParameter.Mode", "Mode is not supported.")
@@ -288,6 +339,9 @@ class _UpstreamCall:
     acknowledged_input_ids: set[str] = field(default_factory=set)
     thread: threading.Thread | None = None
     last_task_state: str | None = None
+    stream_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    history: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    next_sequence: int = 1
 
 
 @dataclass
@@ -298,6 +352,7 @@ class _Session:
     active_call: _UpstreamCall | None = None
     pending_sideband: dict[str, dict[str, Any]] = field(default_factory=dict)
     normal_handoff_ready: bool = False
+    streams: dict[str, _UpstreamCall] = field(default_factory=dict)
     state_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
@@ -317,6 +372,8 @@ class StartChatRelay(ThreadingHTTPServer):
         upstream_timeout: float = 15.0,
         heartbeat_interval: float = 15.0,
         metrics_path: str | None = None,
+        disconnect_after_events: int | None = None,
+        replay_from_head_on_reconnects: int = 0,
     ) -> None:
         super().__init__(server_address, _StartChatHandler)
         self.a2a_url = a2a_url
@@ -331,21 +388,32 @@ class StartChatRelay(ThreadingHTTPServer):
         self.metrics_path = pathlib.Path(metrics_path) if metrics_path else None
         self.metrics_lock = threading.Lock()
         self.request_metrics: list[dict[str, Any]] = []
+        self.disconnect_after_events = disconnect_after_events
+        self.disconnects_remaining = 1 if disconnect_after_events is not None else 0
+        self.replay_from_head_on_reconnects = replay_from_head_on_reconnects
         ssl_context.minimum_version = ssl.TLSVersion.TLSv1_2
         self.socket = ssl_context.wrap_socket(self.socket, server_side=True)
 
     def begin_request_metric(self, session: _Session, parameters: dict[str, str]) -> dict[str, Any]:
+        reconnecting = parameters.get("StreamOptions.Action") == "Reconnect"
+        query = parameters.get("Query", "")
         metric: dict[str, Any] = {
             "action": "StartChat",
             "startedAtUnixMs": int(time.time() * 1000),
             "sessionId": session.session_id,
-            "mode": parameters.get("Mode", "IaCCodeNormal"),
-            "queryBytes": len(parameters["Query"].encode("utf-8")),
-            "queryKind": "permission" if _permission_query(parameters["Query"]) is not None else "conversation",
+            "mode": session.mode,
+            "queryBytes": len(query.encode("utf-8")),
+            "queryKind": "reconnect"
+            if reconnecting
+            else "permission"
+            if _permission_query(query) is not None
+            else "conversation",
             "returnedEventCount": 0,
             "returnedSseBytes": 0,
             "eventKinds": {},
         }
+        if reconnecting:
+            metric["streamCursor"] = parameters["StreamOptions.Cursor"]
         with self.metrics_lock:
             self.request_metrics.append(metric)
         return metric
@@ -386,7 +454,7 @@ class StartChatRelay(ThreadingHTTPServer):
                 session = self.sessions.get(requested)
                 if session is None:
                     raise StartChatRequestError("SessionNotFound", "The requested SessionId does not exist.")
-                if session.mode != mode:
+                if parameters.get("StreamOptions.Action") != "Reconnect" and session.mode != mode:
                     raise StartChatRequestError("InvalidParameter.Mode", "A session cannot change mode.")
                 return session, False
             session_id = str(uuid.uuid4())
@@ -430,6 +498,8 @@ class StartChatRelay(ThreadingHTTPServer):
             },
         }
         call = _UpstreamCall()
+        with session.state_lock:
+            session.streams[call.stream_id] = call
         upstream_url = self.pipeline_a2a_url if session.mode == "IaCCodePipeline" else self.a2a_url
         call.thread = threading.Thread(
             target=self._consume_a2a,
@@ -625,6 +695,17 @@ class _StartChatHandler(BaseHTTPRequestHandler):
         self.close_connection = True
 
         self._active_session = session
+        if parameters.get("StreamOptions.Action") == "Reconnect":
+            cursor = parameters["StreamOptions.Cursor"]
+            identity, _separator, raw_sequence = cursor.rpartition(".")
+            stream_id = identity[3:]
+            with session.state_lock:
+                call = session.streams.get(stream_id)
+            if call is None:
+                self._request_metric["errorCode"] = "InvalidParameter.StreamOptions.Cursor"
+                return
+            self._relay_reconnect(call, int(raw_sequence))
+            return
         permission_payload = _permission_query(parameters["Query"])
         if permission_payload is not None:
             input_id = permission_payload.get("inputId")
@@ -688,12 +769,36 @@ class _StartChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(response)
         self.close_connection = True
 
-    def _write_event(self, event: dict[str, Any]) -> bool:
+    def _write_event(
+        self,
+        event: dict[str, Any],
+        call: _UpstreamCall | None = None,
+        event_id: str | None = None,
+    ) -> bool:
         try:
             data = json.dumps(event, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            self.wfile.write(b"data: " + data + b"\n\n")
+            if str(event.get("object", "")).lower() in {"heartbeat", "keepalive"}:
+                prefix = b""
+            else:
+                if event_id is None:
+                    if call is None:
+                        raise ValueError("business events require a stream")
+                    event_id = "v1.{}.{}".format(call.stream_id, call.next_sequence)
+                    call.next_sequence += 1
+                    call.history.append((event_id, event))
+                prefix = "id: {}\n".format(event_id).encode("utf-8")
+            self.wfile.write(prefix + b"data: " + data + b"\n\n")
             self.wfile.flush()
-            self._observe_returned_event(event, len(data) + 8)
+            self._observe_returned_event(event, len(prefix) + len(data) + 8)
+            if (
+                self.server.disconnects_remaining > 0
+                and self.server.disconnect_after_events is not None
+                and self._request_metric is not None
+                and self._request_metric.get("queryKind") != "reconnect"
+                and self._request_metric["returnedEventCount"] >= self.server.disconnect_after_events
+            ):
+                self.server.disconnects_remaining -= 1
+                return False
             return True
         except (BrokenPipeError, ConnectionResetError):
             return False
@@ -703,13 +808,13 @@ class _StartChatHandler(BaseHTTPRequestHandler):
             try:
                 item = call.events.get(timeout=self.server.heartbeat_interval)
             except queue.Empty:
-                if not self._write_event({"object": "heartbeat"}):
+                if not self._write_event({"object": "heartbeat"}, call):
                     return False
                 continue
             if item is _END:
                 return True
             assert isinstance(item, dict)
-            if not self._write_event(item):
+            if not self._write_event(item, call):
                 return False
 
     def _relay_until_serial_boundary(self, call: _UpstreamCall) -> bool:
@@ -717,16 +822,28 @@ class _StartChatHandler(BaseHTTPRequestHandler):
             try:
                 item = call.events.get(timeout=self.server.heartbeat_interval)
             except queue.Empty:
-                if not self._write_event({"object": "heartbeat"}):
+                if not self._write_event({"object": "heartbeat"}, call):
                     return False
                 continue
             if item is _END:
                 return True
             assert isinstance(item, dict)
-            if not self._write_event(item):
+            if not self._write_event(item, call):
                 return False
             if _is_serial_input_boundary(item):
                 return False
+
+    def _relay_reconnect(self, call: _UpstreamCall, sequence: int) -> bool:
+        if self.server.replay_from_head_on_reconnects > 0:
+            self.server.replay_from_head_on_reconnects -= 1
+            sequence = 0
+        for event_id, event in list(call.history):
+            _identity, _separator, raw_sequence = event_id.rpartition(".")
+            if int(raw_sequence) <= sequence:
+                continue
+            if not self._write_event(event, call, event_id):
+                return False
+        return self._relay_until_end(call)
 
     def _observe_returned_event(self, event: dict[str, Any], wire_bytes: int) -> None:
         if self._request_metric is None:

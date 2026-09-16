@@ -44,6 +44,72 @@ relay = _load_module("start_chat_test_relay", RELAY_PATH)
 bridge = _load_module("start_chat_test_bridge", BRIDGE_PATH)
 
 
+def _write_relay_cli(tmp_path: Path) -> Path:
+    source = r'''import json
+import ssl
+import sys
+import urllib.parse
+import urllib.request
+
+arguments = sys.argv[1:]
+
+def option(name):
+    index = arguments.index(name)
+    return arguments[index + 1]
+
+parameters = {"AgentVersion": "V2"}
+mapping = {
+    "--query": "Query",
+    "--session-id": "SessionId",
+    "--enable-partial-message": "EnablePartialMessage",
+    "--enable-thinking": "EnableThinking",
+    "--biz-mode": "Mode",
+    "--biz-region-id": "RegionId",
+}
+for flag, parameter in mapping.items():
+    if flag in arguments:
+        parameters[parameter] = option(flag)
+endpoint = option("--endpoint")
+url = "https://{}/?{}".format(endpoint, urllib.parse.urlencode(parameters))
+body = option("--body").encode("utf-8") if "--body" in arguments else b""
+headers = {"x-acs-action": "StartChat"}
+if body:
+    headers["content-type"] = "application/json"
+request = urllib.request.Request(url, data=body, headers=headers, method="POST")
+context = ssl.create_default_context()
+context.check_hostname = False
+context.verify_mode = ssl.CERT_NONE
+with urllib.request.urlopen(request, context=context, timeout=15) as response:
+    event_id = None
+    data = []
+    for raw_line in response:
+        line = raw_line.decode("utf-8").rstrip("\r\n")
+        if not line:
+            if data:
+                payload = json.loads("\n".join(data))
+                print(json.dumps({"id": event_id, "data": payload}, separators=(",", ":")), flush=True)
+            event_id = None
+            data = []
+        elif line.startswith("id:"):
+            event_id = line[3:].lstrip()
+        elif line.startswith("data:"):
+            data.append(line[5:].lstrip())
+'''
+    script = tmp_path / "relay_cli.py"
+    script.write_text(source, encoding="utf-8")
+    if sys.platform == "win32":
+        launcher = tmp_path / "aliyun.cmd"
+        launcher.write_text(
+            "@echo off\r\n{} %*\r\n".format(subprocess.list2cmdline([sys.executable, str(script)])),
+            encoding="utf-8",
+        )
+        return launcher
+    launcher = tmp_path / "aliyun"
+    launcher.write_text("#!{}\n{}".format(sys.executable, source), encoding="utf-8")
+    launcher.chmod(0o755)
+    return launcher
+
+
 def _clear_code_credential_env(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "ALIBABA_CLOUD_ACCESS_KEY_ID",
@@ -94,6 +160,24 @@ def test_relay_accepts_only_published_start_chat_parameters() -> None:
             b"",
             {"x-acs-action": "StartChat"},
         )
+
+
+def test_relay_accepts_reconnect_stream_options_in_json_body() -> None:
+    parameters = relay.parse_start_chat_request(
+        "/?Action=StartChat&SessionId=session-1&AgentVersion=V2",
+        json.dumps(
+            {"StreamOptions.Action": "Reconnect", "StreamOptions.Cursor": "v1.stream.3"},
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        {"x-acs-action": "StartChat", "content-type": "application/json"},
+    )
+
+    assert parameters == {
+        "AgentVersion": "V2",
+        "SessionId": "session-1",
+        "StreamOptions.Action": "Reconnect",
+        "StreamOptions.Cursor": "v1.stream.3",
+    }
 
 
 def test_relay_accepts_only_published_stop_chat_parameters() -> None:
@@ -463,10 +547,11 @@ def _summarize_sse(
 ) -> dict:
     summary = bridge.StreamSummary(session_id, mode=mode)
     diagnostics = []
-    for payload, raw in bridge.iter_cli_plugin_payloads(stdout.splitlines(keepends=True)):
+    for event in bridge.iter_cli_plugin_payloads(stdout.splitlines(keepends=True)):
+        payload = event["payload"]
         if payload is None:
             summary.malformed_event_count += 1
-            diagnostics.append(raw)
+            diagnostics.append(event["raw"])
         else:
             summary.apply(payload)
     return summary.to_result(0, stderr or "\n".join(diagnostics))
@@ -502,6 +587,8 @@ def test_code_transport_streams_through_sdk_to_endpoint_hook(
         a2a_url="http://127.0.0.1:1/",
         workspace=str(tmp_path),
         ssl_context=_tls_context(tmp_path),
+        disconnect_after_events=1,
+        replay_from_head_on_reconnects=1,
     )
     captured = {}
     working_event = {
@@ -536,7 +623,11 @@ def test_code_transport_streams_through_sdk_to_endpoint_hook(
 
     def start_a2a_call(session, parameters):
         captured["parameters"] = parameters
+        for event in (working_event, completed_event):
+            event["result"]["statusUpdate"]["contextId"] = session.session_id
         call = relay._UpstreamCall()
+        with session.state_lock:
+            session.streams[call.stream_id] = call
         captured["call"] = call
         call.events.put(working_event)
         return call
@@ -594,7 +685,7 @@ def test_code_transport_streams_through_sdk_to_endpoint_hook(
                 "create a VPC",
                 None,
                 [],
-                on_payload=lambda _payload, _summary: first_payload.set(),
+                on_payload=lambda _event_id, _payload, _summary, _already_applied: first_payload.set(),
             )
         except BaseException as exc:  # pragma: no cover - asserted in the main test thread
             outcome["error"] = exc
@@ -617,14 +708,106 @@ def test_code_transport_streams_through_sdk_to_endpoint_hook(
 
         assert result["state"] == "turn-completed"
         assert result["finalText"] == "code transport done"
+        assert result["eventCount"] == 2
         assert captured["profile"] == "sdk-profile"
         assert captured["parameters"]["Query"] == "create a VPC"
         assert captured["parameters"]["Mode"] == "IaCCodeNormal"
+        assert len(relay_server.request_metrics) == 2
+        reconnect_metric = relay_server.request_metrics[1]
+        assert reconnect_metric["queryKind"] == "reconnect"
+        assert reconnect_metric["queryBytes"] == 0
+        assert reconnect_metric["streamCursor"].endswith(".1")
+        assert reconnect_metric["returnedEventCount"] == 2
     finally:
         if consumer_thread.is_alive() and "call" in captured:
             captured["call"].events.put(completed_event)
             captured["call"].events.put(relay._END)
             consumer_thread.join(timeout=5)
+        relay_server.shutdown()
+        relay_server.server_close()
+        relay_thread.join(timeout=5)
+
+
+def test_cli_local_reconnects_to_relay_without_resending_query(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    working_event = {
+        "result": {
+            "statusUpdate": {
+                "taskId": "task-cli-1",
+                "contextId": "placeholder",
+                "status": {"state": "TASK_STATE_WORKING"},
+                "metadata": {"iac_code": {}, "iacCodeSessionId": "iac-cli-1"},
+            }
+        }
+    }
+    completed_event = {
+        "result": {
+            "statusUpdate": {
+                "taskId": "task-cli-1",
+                "contextId": "placeholder",
+                "status": {
+                    "state": "TASK_STATE_COMPLETED",
+                    "message": {"role": "ROLE_AGENT", "parts": [{"text": "cli reconnect done"}]},
+                },
+                "metadata": {
+                    "iac_code": {"assistantFinal": {"complete": True}},
+                    "iacCodeSessionId": "iac-cli-1",
+                },
+            }
+        }
+    }
+    relay_server = relay.StartChatRelay(
+        ("127.0.0.1", 0),
+        a2a_url="http://127.0.0.1:1/",
+        workspace=str(tmp_path),
+        ssl_context=_tls_context(tmp_path),
+        disconnect_after_events=1,
+    )
+
+    def start_a2a_call(session, _parameters):
+        for event in (working_event, completed_event):
+            event["result"]["statusUpdate"]["contextId"] = session.session_id
+        call = relay._UpstreamCall()
+        with session.state_lock:
+            session.streams[call.stream_id] = call
+        call.events.put(working_event)
+        call.events.put(completed_event)
+        call.events.put(relay._END)
+        return call
+
+    relay_server.start_a2a_call = start_a2a_call
+    relay_thread = threading.Thread(target=relay_server.serve_forever, name="test-cli-reconnect-relay", daemon=True)
+    relay_thread.start()
+    endpoint = "127.0.0.1:{}".format(relay_server.server_address[1])
+    fake_cli = _write_relay_cli(tmp_path)
+    args = SimpleNamespace(
+        aliyun_path=str(fake_cli),
+        transport="aliyun_cli",
+        aliyun_cli_execution_mode="local",
+        endpoint=endpoint,
+        connect_timeout=3,
+        read_timeout=15,
+        profile=None,
+        region_id="cn-hangzhou",
+        no_thinking=True,
+        mode="normal",
+        session_id=None,
+    )
+    monkeypatch.setattr(bridge.time, "sleep", lambda _seconds: None)
+
+    try:
+        result = bridge._consume_start_chat(args, tmp_path, "create a VPC", None, [])
+
+        assert result["state"] == "turn-completed"
+        assert result["finalText"] == "cli reconnect done"
+        assert result["eventCount"] == 2
+        assert [metric["queryKind"] for metric in relay_server.request_metrics] == ["conversation", "reconnect"]
+        assert relay_server.request_metrics[0]["queryBytes"] > 0
+        assert relay_server.request_metrics[1]["queryBytes"] == 0
+        assert relay_server.request_metrics[1]["streamCursor"].endswith(".1")
+    finally:
         relay_server.shutdown()
         relay_server.server_close()
         relay_thread.join(timeout=5)

@@ -53,6 +53,25 @@ def _write_fake_aliyun(tmp_path: Path, source: str) -> Path:
     return launcher
 
 
+class _FakeCLIProcess:
+    def __init__(self, output: str, return_code: int = 0) -> None:
+        self.stdout = io.StringIO(output)
+        self.return_code = return_code
+
+    def wait(self, timeout=None):
+        del timeout
+        return self.return_code
+
+    def poll(self):
+        return self.return_code
+
+    def terminate(self):
+        return None
+
+    def kill(self):
+        return None
+
+
 def _clear_code_credential_env(monkeypatch) -> None:
     for name in (
         "ALIBABA_CLOUD_ACCESS_KEY_ID",
@@ -90,6 +109,10 @@ def _chat_args(**overrides):
     }
     values.update(overrides)
     return argparse.Namespace(**values)
+
+
+def _command_body(command):
+    return json.loads(command[command.index("--body") + 1])
 
 
 def _status_event(*, state="TASK_STATE_WORKING", text="", metadata=None):
@@ -547,7 +570,8 @@ def test_check_returns_safe_default_chain_and_effective_skill_policy(monkeypatch
         "managerIdleSeconds": bridge.MANAGER_IDLE_SECONDS,
         "enableThinking": True,
         "aliyunCLIProfile": "",
-        "currentProfile": {"configured": True, "mode": "DefaultCredentialChain", "regionId": "cn-hangzhou"},
+            "currentProfile": {"configured": True, "mode": "DefaultCredentialChain", "regionId": "cn-hangzhou"},
+            "startChatReconnectReady": True,
     }
     assert captured == {
         "sdk": {"sdk": True},
@@ -719,7 +743,7 @@ def test_aliyun_cli_check_does_not_load_optional_sdk_packages(monkeypatch) -> No
     monkeypatch.setattr(
         bridge,
         "_local_ros_plugin_status",
-        lambda: {"installed": True, "ready": True, "version": "0.7.2"},
+        lambda: {"installed": True, "ready": True, "reconnectReady": True, "version": "0.9.1"},
     )
     monkeypatch.setattr(bridge.subprocess, "run", fake_run)
     monkeypatch.setattr(bridge, "_load_code_sdk", lambda: pytest.fail("CLI transport must not load SDK packages"))
@@ -734,15 +758,16 @@ def test_aliyun_cli_check_does_not_load_optional_sdk_packages(monkeypatch) -> No
     assert result["rosPluginReady"] is True
     assert result["pluginInstallRequired"] is False
     assert result["pluginAutoInstallEnabled"] is False
-    assert result["rosPluginVersion"] == "0.7.2"
+    assert result["rosPluginVersion"] == "0.9.1"
 
 
 @pytest.mark.parametrize(
     ("plugin_status", "auto_install", "install_required"),
     [
         ({"installed": False, "ready": False}, False, True),
-        ({"installed": False, "ready": False}, True, False),
+        ({"installed": False, "ready": False}, True, True),
         ({"installed": True, "ready": False, "version": "0.7.1"}, True, True),
+        ({"installed": True, "ready": True, "reconnectReady": False}, False, True),
     ],
 )
 def test_local_cli_check_reports_when_skill_must_install_ros_plugin(
@@ -770,7 +795,7 @@ def test_local_cli_check_reports_when_skill_must_install_ros_plugin(
 
     result = bridge.run_check(args)
 
-    assert result["rosPluginReady"] is False
+    assert result["rosPluginReady"] is plugin_status["ready"]
     assert result["pluginAutoInstallEnabled"] is auto_install
     assert result["pluginInstallRequired"] is install_required
 
@@ -867,7 +892,12 @@ def test_local_ros_plugin_status_requires_binary_and_start_stop_commands(monkeyp
     )
     monkeypatch.setenv("ALIBABA_CLOUD_CLI_PLUGINS_DIR", str(tmp_path))
 
-    assert bridge._local_ros_plugin_status() == {"installed": True, "ready": True, "version": "0.7.2"}
+    assert bridge._local_ros_plugin_status() == {
+        "installed": True,
+        "ready": True,
+        "reconnectReady": False,
+        "version": "0.7.2",
+    }
 
     manifest.write_text(
         json.dumps(
@@ -883,7 +913,28 @@ def test_local_ros_plugin_status_requires_binary_and_start_stop_commands(monkeyp
         ),
         encoding="utf-8",
     )
-    assert bridge._local_ros_plugin_status() == {"installed": True, "ready": False, "version": "0.7.1"}
+    assert bridge._local_ros_plugin_status() == {
+        "installed": True,
+        "ready": False,
+        "reconnectReady": False,
+        "version": "0.7.1",
+    }
+
+    manifest.write_text(
+        json.dumps(
+            {
+                "plugins": {
+                    "aliyun-cli-ros": {
+                        "version": "0.9.1",
+                        "path": str(plugin_root),
+                        "cmdNames": ["start-chat", "stop-chat"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert bridge._local_ros_plugin_status()["reconnectReady"] is True
 
 
 def test_cli_transport_rejects_client_context_and_remote_profile() -> None:
@@ -1115,17 +1166,19 @@ def test_sse_parser_handles_heartbeats_multiline_data_and_raw_json() -> None:
         ": comment\n",
         'data: {"object":"heartbeat"}\n',
         "\n",
+        "id: v1.stream.with.dots.1\n",
         'data: {"value":\n',
         "data: 1}\n",
         "\n",
         '{"result":{"ok":true}}\n',
     ]
     events = list(bridge.iter_sse_payloads(lines))
-    assert [event[0] for event in events] == [
+    assert [event["payload"] for event in events] == [
         {"object": "heartbeat"},
         {"value": 1},
         {"result": {"ok": True}},
     ]
+    assert [event["id"] for event in events] == [None, "v1.stream.with.dots.1", None]
 
 
 def test_cli_plugin_parser_streams_and_unwraps_each_json_line() -> None:
@@ -1134,33 +1187,38 @@ def test_cli_plugin_parser_streams_and_unwraps_each_json_line() -> None:
 
     events = list(
         bridge.iter_cli_plugin_payloads(
-            [
-                json.dumps({"data": first}) + "\n",
-                json.dumps({"data": second}) + "\n",
+                [
+                    json.dumps({"id": "v1.stream.1", "data": first}) + "\n",
+                    json.dumps({"id": "v1.stream.2", "data": second}) + "\n",
             ]
         )
     )
 
-    assert events == [(first, json.dumps({"data": first})), (second, json.dumps({"data": second}))]
+    assert [(event["id"], event["payload"]) for event in events] == [
+        ("v1.stream.1", first),
+        ("v1.stream.2", second),
+    ]
 
 
 def test_cli_plugin_parser_accepts_pretty_printed_objects_and_arrays() -> None:
     first = {"result": {"statusUpdate": {"status": {"state": "TASK_STATE_WORKING"}}}}
     second = {"result": {"statusUpdate": {"status": {"state": "TASK_STATE_COMPLETED"}}}}
-    pretty_object = json.dumps({"data": first}, indent=2).splitlines(keepends=True)
-    pretty_array = json.dumps([{"data": first}, {"data": second}], indent=2).splitlines(keepends=True)
+    pretty_object = json.dumps({"id": "v1.stream.1", "data": first}, indent=2).splitlines(keepends=True)
+    pretty_array = json.dumps(
+        [{"id": "v1.stream.1", "data": first}, {"id": "v1.stream.2", "data": second}], indent=2
+    ).splitlines(keepends=True)
 
     object_events = list(bridge.iter_cli_plugin_payloads(pretty_object))
     array_events = list(bridge.iter_cli_plugin_payloads(pretty_array))
 
-    assert [value for value, _raw in object_events] == [first]
-    assert [value for value, _raw in array_events] == [first, second]
+    assert [event["payload"] for event in object_events] == [first]
+    assert [event["payload"] for event in array_events] == [first, second]
 
 
 def test_cli_plugin_parser_reports_an_unterminated_buffer_as_malformed() -> None:
     events = list(bridge.iter_cli_plugin_payloads(['{\n', '  "data": {\n']))
 
-    assert events == [(None, '{\n  "data": {')]
+    assert events == [{"id": None, "payload": None, "raw": '{\n  "data": {'}]
 
 
 def test_sse_parser_rejects_an_unterminated_event_as_soon_as_its_cumulative_limit_is_exceeded(
@@ -1958,6 +2016,7 @@ def test_run_chat_consumes_fake_cli_stream_without_network(monkeypatch, tmp_path
     prompt.write_text("hello", encoding="utf-8")
     output = json.dumps(
         {
+            "id": "v1.stream.1",
             "data": _status_event(
                 state="TASK_STATE_INPUT_REQUIRED",
                 text="done",
@@ -2033,7 +2092,13 @@ def test_code_transport_streams_sdk_signed_request_without_cli_response_bufferin
 
         def __init__(self):
             self.closed = False
-            self.lines = iter([("data: " + json.dumps(event, separators=(",", ":")) + "\n\n").encode()])
+            self.lines = iter(
+                [
+                    b"id: v1.stream.1\n",
+                    ("data: " + json.dumps(event, separators=(",", ":")) + "\n").encode(),
+                    b"\n",
+                ]
+            )
 
         def __iter__(self):
             return self
@@ -2365,9 +2430,7 @@ def test_run_respond_sends_json_as_the_only_start_chat_control_payload(monkeypat
         ),
         encoding="utf-8",
     )
-    output = json.dumps(
-        {
-            "data": {
+    acknowledgement = {
                 "result": {
                     "messageId": "permission-ack-1",
                     "taskId": "task-1",
@@ -2386,9 +2449,14 @@ def test_run_respond_sends_json_as_the_only_start_chat_control_payload(monkeypat
                             },
                         }
                     ],
-                },
+                }
             }
-        },
+    completed = _status_event(state="TASK_STATE_COMPLETED")
+    output = json.dumps(
+        [
+            {"id": "v1.response.1", "data": acknowledgement},
+            {"id": "v1.response.2", "data": completed},
+        ],
         separators=(",", ":"),
     )
     output += "\n"
@@ -2438,7 +2506,7 @@ def test_run_respond_sends_json_as_the_only_start_chat_control_payload(monkeypat
     assert query_text.startswith(bridge.PERMISSION_QUERY_PREFIX + " ")
     query = json.loads(query_text[len(bridge.PERMISSION_QUERY_PREFIX) :])
 
-    assert result["state"] == "permission-responded"
+    assert result["state"] == "completed"
     assert result["permissionResponse"]["decision"] == "deny"
     assert query["decision"] == "deny"
     assert command[command.index("--enable-thinking") + 1] == "false"
@@ -2527,7 +2595,7 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
         + "'status': {'state': 'TASK_STATE_INPUT_REQUIRED', 'message': {'role': 'ROLE_AGENT', "
         + "'parts': [{'text': 'done'}]}}, 'metadata': {'iac_code': {'assistantFinal': "
         + "{'complete': True}}, 'iacCodeSessionId': 'iac-1'}}}}\n"
-        + "print(json.dumps({'data': event}), flush=True)\n",
+        + "print(json.dumps({'id': 'v1.stream.1', 'data': event}), flush=True)\n",
         encoding="utf-8",
     )
 
@@ -2591,8 +2659,11 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
         tmp_path,
         "import json, time\n"
         + "from pathlib import Path\n"
+        + "counter = 0\n"
         + "def emit(value):\n"
-        + "    print(json.dumps({'data': value}), flush=True)\n"
+        + "    global counter\n"
+        + "    counter += 1\n"
+        + "    print(json.dumps({'id': 'v1.stream.{}'.format(counter), 'data': value}), flush=True)\n"
         + "def status(state, text='', metadata=None):\n"
         + "    body = {'state': state}\n"
         + "    if text:\n"
@@ -2642,6 +2713,98 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
     assert second["finalText"] == "done"
     _wait_for_pid_exit(started["workerPid"])
     assert not bridge._pid_alive(started["workerPid"])
+
+
+def test_managed_remote_bootstrap_is_committed_before_ack_and_recovers_lost_result(
+    monkeypatch, tmp_path: Path
+) -> None:
+    state_root = tmp_path / "state"
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(state_root))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    counter_path = tmp_path / "remote-count"
+    calls_path = tmp_path / "remote-calls.jsonl"
+    observation_path = tmp_path / "ack-observation.json"
+    fake_cli = _write_fake_aliyun(
+        tmp_path,
+        "import json, os, sys, time\n"
+        + "from pathlib import Path\n"
+        + "counter_path = Path({!r})\n".format(str(counter_path))
+        + "calls_path = Path({!r})\n".format(str(calls_path))
+        + "observation_path = Path({!r})\n".format(str(observation_path))
+        + "count = int(counter_path.read_text() or '0') + 1 if counter_path.exists() else 1\n"
+        + "counter_path.write_text(str(count))\n"
+        + "with calls_path.open('a', encoding='utf-8') as handle:\n"
+        + "    handle.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        + "def status(state, text='', final=False):\n"
+        + "    body = {'state': state}\n"
+        + "    if text:\n"
+        + "        body['message'] = {'role': 'ROLE_AGENT', 'parts': [{'text': text}]}\n"
+        + "    metadata = {'iac_code': {}, 'iacCodeSessionId': 'iac-remote-1'}\n"
+        + "    if final:\n"
+        + "        metadata['iac_code']['assistantFinal'] = {'complete': True}\n"
+        + "    return {'result': {'statusUpdate': {'taskId': 'task-remote-1', "
+        + "'contextId': 'session-remote-1', 'status': body, 'metadata': metadata}}}\n"
+        + "first = status('TASK_STATE_WORKING', 'first')\n"
+        + "if count == 1:\n"
+        + "    invocation = os.environ['ALICLOUD_ROS_AGENT_INVOCATION_ID']\n"
+        + "    ack_path = Path(os.environ['ALICLOUD_ROS_AGENT_BOOTSTRAP_ACK_FILE'])\n"
+        + "    print(json.dumps({'invocationId': invocation, 'event': "
+        + "{'id': 'v1.remote-managed.1', 'data': first}, 'sessionId': 'session-remote-1'}), flush=True)\n"
+        + "    deadline = time.monotonic() + 5\n"
+        + "    while not ack_path.exists() and time.monotonic() < deadline:\n"
+        + "        time.sleep(0.01)\n"
+        + "    state_root = Path(os.environ['ALICLOUD_ROS_AGENT_STATE_DIR'])\n"
+        + "    job_path = next((state_root / 'jobs').glob('*/job.json'))\n"
+        + "    spool_path = job_path.with_name('events.jsonl')\n"
+        + "    job = json.loads(job_path.read_text())\n"
+        + "    records = [json.loads(line) for line in spool_path.read_text().splitlines()]\n"
+        + "    ack = json.loads(ack_path.read_text()) if ack_path.exists() else {}\n"
+        + "    observation_path.write_text(json.dumps({'ack': ack, 'sessionId': job.get('sessionId'), "
+        + "'streamCursor': job.get('streamCursor'), 'spoolIds': "
+        + "[item.get('streamEventId') for item in records]}))\n"
+        + "    print(json.dumps({'code': 'ExecutorTimeout'}), file=sys.stderr)\n"
+        + "    raise SystemExit(1)\n"
+        + "completed = status('TASK_STATE_COMPLETED', 'done', True)\n"
+        + "print(json.dumps([{'id': 'v1.remote-managed.1', 'data': first}, "
+        + "{'id': 'v1.remote-managed.2', 'data': completed}]), flush=True)\n",
+    )
+
+    started = bridge._start_job_local(
+        {
+            "workspace": str(workspace),
+            "prompt": "safe remote reconnect test",
+            "mode": "normal",
+            "transport": "aliyun_cli",
+            "aliyunCLIExecutionMode": "remote",
+            "endpoint": "ros-pre.aliyuncs.com",
+            "regionId": "cn-hangzhou",
+            "aliyunPath": str(fake_cli),
+        }
+    )
+    result = bridge._follow_job_local(started["jobId"], 0, 10)
+
+    assert result["state"] == "turn-completed"
+    assert result["finalText"] == "done"
+    calls = [json.loads(line) for line in calls_path.read_text().splitlines()]
+    assert len(calls) == 2
+    assert "--query" in calls[0]
+    assert "--query" not in calls[1]
+    assert "--stream-options" not in calls[1]
+    assert _command_body(calls[1]) == {
+        "StreamOptions.Action": "Reconnect",
+        "StreamOptions.Cursor": "v1.remote-managed.1",
+    }
+    observation = json.loads(observation_path.read_text())
+    assert observation["ack"] == {
+        "committed": True,
+        "eventId": "v1.remote-managed.1",
+        "invocationId": observation["ack"]["invocationId"],
+    }
+    assert observation["sessionId"] == "session-remote-1"
+    assert observation["streamCursor"] == "v1.remote-managed.1"
+    assert observation["spoolIds"] == ["v1.remote-managed.1"]
+    _wait_for_pid_exit(started["workerPid"])
 
 
 def test_worker_failed_start_cleans_request_and_marks_job_failed(monkeypatch, tmp_path: Path) -> None:
@@ -3586,9 +3749,9 @@ def test_managed_continue_reuses_completed_pipeline_normal_handoff(monkeypatch, 
     ("stop_status", "result_state", "persisted_state", "ok"),
     [
         ("Stopped", "canceled", "canceled", True),
-        ("Stopping", "canceling", "working", True),
-        ("NoActiveStream", "not-active", "working", True),
-        ("Failed", "cancel-failed", "working", False),
+        ("Stopping", "canceling", "canceling", True),
+        ("NoActiveStream", "not-active", "not-active", True),
+        ("Failed", "cancel-failed", "failed", False),
     ],
 )
 def test_cancel_managed_job_calls_stop_chat_and_preserves_authoritative_state(
@@ -3646,7 +3809,7 @@ def test_cancel_managed_job_calls_stop_chat_and_preserves_authoritative_state(
     if stop_status == "Stopped":
         assert "inputRequired" not in job
     else:
-        assert job["inputRequired"]["kind"] == "permission"
+        assert "inputRequired" not in job or stop_status == "Failed"
 
 
 def test_parser_exposes_managed_commands_without_synchronous_chat() -> None:
@@ -3777,7 +3940,13 @@ if sys.argv[1:3] != ["ros", "start-chat"]:
     raise SystemExit(2)
 print(json.dumps(json.loads(%r), ensure_ascii=False, indent=2))
 """
-        % json.dumps([{"data": working}, {"data": completed}], ensure_ascii=False),
+        % json.dumps(
+            [
+                {"id": "v1.remote-stream.1", "data": working},
+                {"id": "v1.remote-stream.2", "data": completed},
+            ],
+            ensure_ascii=False,
+        ),
     )
     front_cli = _write_fake_aliyun(
         front_dir,
@@ -4614,3 +4783,833 @@ def test_follow_result_remains_bounded_with_large_final_text(monkeypatch, tmp_pa
     result = bridge._job_result(job_id, 0)
     assert len(bridge._json_bytes(result)) <= bridge.MAX_FOLLOW_BYTES
     assert result["finalTextComplete"] is False
+
+
+def test_reconnect_builders_send_only_the_stream_anchor(monkeypatch) -> None:
+    args = _chat_args(session_id="session-1")
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+
+    assert bridge.build_reconnect_start_chat_parameters("session-1", "v1.stream.9") == {
+        "AgentVersion": "V2",
+        "SessionId": "session-1",
+        "StreamOptions.Action": "Reconnect",
+        "StreamOptions.Cursor": "v1.stream.9",
+    }
+    command = bridge.build_reconnect_command(args, "session-1", "v1.stream.9")
+    assert command[command.index("--session-id") + 1] == "session-1"
+    assert command.count("--body") == 1
+    assert "--stream-options" not in command
+    assert _command_body(command) == {
+        "StreamOptions.Action": "Reconnect",
+        "StreamOptions.Cursor": "v1.stream.9",
+    }
+    for forbidden in ("--query", "--biz-mode", "--enable-thinking", "--attachments", "--biz-region-id"):
+        assert forbidden not in command
+
+
+@pytest.mark.parametrize(
+    ("event_id", "expected"),
+    [
+        ("v1.stream.1", ("v1.stream", 1)),
+        ("v1.stream.with.dots.42", ("v1.stream.with.dots", 42)),
+        ("v1.stream.0002", ("v1.stream", 2)),
+    ],
+)
+def test_stream_event_id_is_parsed_from_the_right_without_rebuilding(event_id, expected) -> None:
+    assert bridge.parse_stream_event_id(event_id) == expected
+
+
+@pytest.mark.parametrize("event_id", [None, "", "1", "v2.stream.1", "v1..1", "v1.stream.0", "v1.stream.x"])
+def test_invalid_stream_event_id_is_deterministic(event_id) -> None:
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge.parse_stream_event_id(event_id)
+    assert error.value.code == "invalid_stream_event_id"
+    assert error.value.retryable is False
+
+
+@pytest.mark.parametrize("execution_mode", ["local", "remote"])
+def test_cli_reconnect_keeps_cursor_monotonic_during_repeated_head_replay(
+    monkeypatch, tmp_path: Path, execution_mode: str
+) -> None:
+    first = _status_event(state="TASK_STATE_WORKING", text="one")
+    second = _status_event(state="TASK_STATE_WORKING", text="two")
+    completed = _status_event(
+        state="TASK_STATE_COMPLETED", text="done", metadata={"assistantFinal": {"complete": True}}
+    )
+    attempts = [
+        (
+            json.dumps(
+                [
+                    {"id": "v1.stream.with.dots.1", "data": first},
+                    {"id": "v1.stream.with.dots.2", "data": second},
+                ]
+            ),
+            1,
+        ),
+        (json.dumps({"id": "v1.stream.with.dots.1", "data": first}), 1),
+        (
+            json.dumps(
+                [
+                    {"id": "v1.stream.with.dots.1", "data": first},
+                    {"id": "v1.stream.with.dots.2", "data": second},
+                    {"id": "v1.stream.with.dots.3", "data": completed},
+                ]
+            ),
+            0,
+        ),
+    ]
+    commands = []
+    invocation_ids = []
+
+    def popen(command, **kwargs):
+        output, return_code = attempts.pop(0)
+        commands.append(command)
+        environment = kwargs.get("env")
+        if isinstance(environment, dict):
+            invocation_ids.append(environment[bridge.REMOTE_BOOTSTRAP_INVOCATION_ENV])
+        if return_code:
+            kwargs["stderr"].write(b'{"code":"ReadTimeout"}')
+        return _FakeCLIProcess(output, return_code)
+
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+    monkeypatch.setattr(bridge.time, "sleep", lambda _seconds: None)
+    args = _chat_args(
+        transport="aliyun_cli",
+        aliyun_cli_execution_mode=execution_mode,
+        session_id=None,
+    )
+
+    result = bridge._consume_start_chat(args, tmp_path, "hello", None, [])
+
+    assert result["state"] == "turn-completed"
+    assert result["finalText"] == "done"
+    assert result["eventCount"] == 3
+    assert len(commands) == 3
+    assert "--query" in commands[0]
+    for command in commands[1:]:
+        assert "--query" not in command
+        assert "--stream-options" not in command
+        assert _command_body(command) == {
+            "StreamOptions.Action": "Reconnect",
+            "StreamOptions.Cursor": "v1.stream.with.dots.2",
+        }
+    if execution_mode == "remote":
+        assert len(set(invocation_ids)) == 3
+
+
+def test_code_reconnect_recovers_terminal_tail_without_resending_query(monkeypatch, tmp_path: Path) -> None:
+    terminal = _status_event(state="TASK_STATE_COMPLETED", text="final")
+    artifact = {
+        "result": {
+                "artifactUpdate": {
+                    "contextId": "session-1",
+                    "artifact": {
+                        "artifactId": "template",
+                        "name": "template.yaml",
+                        "parts": [{"url": "file:///workspace/template.yaml"}],
+                    },
+            }
+        }
+    }
+    opened = []
+
+    class Response:
+        headers = {"Content-Type": "text/event-stream"}
+
+        def __init__(self, lines, failure=None):
+            self.lines = iter(lines)
+            self.failure = failure
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            try:
+                return next(self.lines)
+            except StopIteration:
+                if self.failure is not None:
+                    failure = self.failure
+                    self.failure = None
+                    raise failure
+                raise
+
+        def close(self):
+            return None
+
+    responses = [
+        Response(
+            [
+                b"id: v1.tail.1\n",
+                ("data: " + json.dumps(terminal) + "\n").encode(),
+                b"\n",
+            ],
+            ConnectionResetError("cut"),
+        ),
+        Response(
+            [
+                b"id: v1.tail.2\n",
+                ("data: " + json.dumps(artifact) + "\n").encode(),
+                b"\n",
+            ]
+        ),
+    ]
+
+    def open_request(_operation, parameters, *_args, **_kwargs):
+        opened.append(parameters)
+        return responses.pop(0)
+
+    monkeypatch.setattr(bridge, "_open_code_request", open_request)
+    monkeypatch.setattr(bridge.time, "sleep", lambda _seconds: None)
+    args = _chat_args(transport="code", session_id=None)
+
+    result = bridge._consume_start_chat(args, tmp_path, "hello", None, [])
+
+    assert result["state"] == "turn-completed"
+    assert result["artifacts"][0]["id"] == "template"
+    assert opened[0]["Query"] == "hello"
+    assert opened[1] == {
+        "AgentVersion": "V2",
+        "SessionId": "session-1",
+        "StreamOptions.Action": "Reconnect",
+        "StreamOptions.Cursor": "v1.tail.1",
+    }
+
+
+def test_remote_bootstrap_is_correlated_committed_and_replayed_idempotently(monkeypatch, tmp_path: Path) -> None:
+    first = _status_event(state="TASK_STATE_WORKING", text="first")
+    completed = _status_event(
+        state="TASK_STATE_COMPLETED", text="done", metadata={"assistantFinal": {"complete": True}}
+    )
+    calls = []
+
+    def popen(command, **kwargs):
+        environment = kwargs["env"]
+        invocation_id = environment[bridge.REMOTE_BOOTSTRAP_INVOCATION_ENV]
+        calls.append((command, invocation_id, environment[bridge.REMOTE_BOOTSTRAP_ACK_FILE_ENV]))
+        if len(calls) == 1:
+            wrong = {
+                "invocationId": "0" * 32,
+                "event": {"id": "v1.wrong.1", "data": first},
+                "sessionId": "wrong-session",
+            }
+            correct = {
+                "invocationId": invocation_id,
+                "event": {"id": "v1.bootstrap.1", "data": first},
+                "sessionId": "session-1",
+            }
+            kwargs["stderr"].write(b'{"code":"ExecutorTimeout"}')
+            return _FakeCLIProcess(json.dumps(wrong) + "\n" + json.dumps(correct), 1)
+        output = json.dumps(
+            [
+                {"id": "v1.bootstrap.1", "data": first},
+                {"id": "v1.bootstrap.2", "data": completed},
+            ]
+        )
+        return _FakeCLIProcess(output)
+
+    acknowledgements = []
+    original_atomic_json = bridge._atomic_json
+
+    def atomic_json(path, value, mode=0o600):
+        if Path(path).name == "bootstrap-ack.json":
+            acknowledgements.append(dict(value))
+        return original_atomic_json(path, value, mode)
+
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/remote/aliyun")
+    monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+    monkeypatch.setattr(bridge, "_atomic_json", atomic_json)
+    monkeypatch.setattr(bridge.time, "sleep", lambda _seconds: None)
+    args = _chat_args(transport="aliyun_cli", aliyun_cli_execution_mode="remote", session_id=None)
+
+    result = bridge._consume_start_chat(args, tmp_path, "hello", None, [])
+
+    assert result["state"] == "turn-completed"
+    assert result["eventCount"] == 2
+    assert result["sessionId"] == "session-1"
+    assert acknowledgements == [
+        {"invocationId": calls[0][1], "eventId": "v1.bootstrap.1", "committed": True}
+    ]
+    assert _command_body(calls[1][0]) == {
+        "StreamOptions.Action": "Reconnect",
+        "StreamOptions.Cursor": "v1.bootstrap.1",
+    }
+    assert calls[0][1] != calls[1][1]
+
+
+def test_checkpoint_spools_private_event_id_once_and_keeps_worker_cursors_separate(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "1" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    bridge._atomic_json(
+        job_path,
+        {
+            "schemaVersion": 1,
+            "jobId": job_id,
+            "state": "working",
+            "mode": "pipeline",
+            "activeRequestSeq": 1,
+            "sidebandWorkerToken": "sideband-1",
+            "artifacts": [],
+        },
+    )
+    primary = {"type": "milestone", "requestSeq": 1, "milestones": [{"eventType": "step_started"}]}
+    sideband = dict(primary, workerRole="sideband", workerToken="sideband-1")
+
+    assert bridge._append_projection(job_id, primary, "v1.primary.1") is True
+    assert bridge._append_projection(job_id, primary, "v1.primary.1") is True
+    assert bridge._append_projection(job_id, sideband, "v1.sideband.1") is True
+
+    records = bridge._read_spool(spool)
+    assert [record["streamEventId"] for record in records] == ["v1.primary.1", "v1.sideband.1"]
+    job = bridge._load_state_json(job_path)
+    assert job["streamCursor"] == "v1.primary.1"
+    assert job["sidebandStreamCursor"] == "v1.sideband.1"
+    assert "streamEventId" not in bridge._job_result(job_id, 0)
+
+
+def test_cancel_marks_intent_before_waiting_for_a_delayed_session(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    monkeypatch.setattr(bridge, "STOP_SESSION_WAIT_SECONDS", 0.0)
+    job_id = "2" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    bridge._atomic_json(
+        job_path,
+        {
+            "schemaVersion": 1,
+            "jobId": job_id,
+            "state": "working",
+            "mode": "normal",
+            "activeRequestSeq": 1,
+            "turn": 1,
+            "artifacts": [],
+        },
+    )
+
+    result = bridge._cancel_job_local({"jobId": job_id})
+
+    assert result["state"] == "canceling"
+    job = bridge._load_state_json(job_path)
+    assert isinstance(job["stopRequestedAt"], int)
+    assert job["state"] == "canceling"
+    assert "stopDispatchStartedAt" not in job
+
+
+def test_canceled_worker_only_records_delayed_session_and_stop_is_claimed_once(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "4" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    bridge._atomic_json(
+        job_path,
+        {
+            "schemaVersion": 1,
+            "jobId": job_id,
+            "state": "working",
+            "mode": "normal",
+            "activeRequestSeq": 1,
+            "stopRequestedAt": 1,
+            "artifacts": [],
+        },
+    )
+    projection = {
+        "type": "status",
+        "requestSeq": 1,
+        "sessionId": "session-delayed",
+        "latestText": "must not be published",
+    }
+
+    assert bridge._append_projection(job_id, projection, "v1.delayed.1") is False
+
+    job = bridge._load_state_json(job_path)
+    assert job["sessionId"] == "session-delayed"
+    assert "latestText" not in job
+    assert "streamCursor" not in job
+    assert bridge._read_spool(spool) == []
+    claimed = bridge._claim_stop_dispatch(job_id, "session-delayed")
+    assert claimed is not None
+    assert bridge._claim_stop_dispatch(job_id, "session-delayed") is None
+
+
+def test_canceled_worker_saves_session_and_stops_even_when_first_business_event_has_no_id(
+    monkeypatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "5" * 32
+    request_token = "6" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    bridge._atomic_json(
+        job_path,
+        {
+            "schemaVersion": 1,
+            "jobId": job_id,
+            "state": "canceling",
+            "mode": "normal",
+            "activeRequestSeq": 1,
+            "workerPid": os.getpid(),
+            "stopRequestedAt": 1,
+            "artifacts": [],
+        },
+    )
+    bridge._atomic_json(
+        root / ("request-{}.json".format(request_token)),
+        {
+            "requestSeq": 1,
+            "workspace": str(tmp_path),
+            "prompt": "hello",
+            "mode": "normal",
+            "summaryMode": "normal",
+            "endpoint": "ros.aliyuncs.com",
+            "transport": "aliyun_cli",
+            "aliyunCLIExecutionMode": "local",
+            "aliyunCLIForwardEnv": [],
+            "sessionId": None,
+            "regionId": "cn-hangzhou",
+            "profile": None,
+            "noThinking": False,
+            "connectTimeout": 10,
+            "readTimeout": 600,
+            "aliyunPath": "aliyun",
+            "clientContext": None,
+            "attachments": [],
+        },
+    )
+    payload = _status_event(state="TASK_STATE_WORKING", text="must not be projected")
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    monkeypatch.setattr(
+        bridge.subprocess,
+        "Popen",
+        lambda _command, **_kwargs: _FakeCLIProcess(json.dumps({"data": payload})),
+    )
+    stopped = []
+
+    def stop_chat(_job, session_id):
+        stopped.append(session_id)
+        return {"status": "Stopped", "sessionId": session_id}
+
+    monkeypatch.setattr(bridge, "_run_stop_chat", stop_chat)
+
+    assert bridge.run_worker(job_id, request_token) == 0
+
+    job = bridge._load_state_json(job_path)
+    assert stopped == ["session-1"]
+    assert job["sessionId"] == "session-1"
+    assert job["state"] == "canceled"
+    assert "streamCursor" not in job
+    assert bridge._read_spool(spool) == []
+
+
+def test_remote_bootstrap_session_mismatch_fails_before_projection_or_ack(monkeypatch, tmp_path: Path) -> None:
+    payload = _status_event(state="TASK_STATE_WORKING")
+    payload["result"]["statusUpdate"]["contextId"] = "session-from-payload"
+    ack_writes = []
+
+    def popen(_command, **kwargs):
+        invocation = kwargs["env"][bridge.REMOTE_BOOTSTRAP_INVOCATION_ENV]
+        output = json.dumps(
+            {
+                "invocationId": invocation,
+                "event": {"id": "v1.session-mismatch.1", "data": payload},
+                "sessionId": "session-from-bootstrap",
+            }
+        )
+        return _FakeCLIProcess(output)
+
+    original_atomic_json = bridge._atomic_json
+
+    def atomic_json(path, value, mode=0o600):
+        if Path(path).name == "bootstrap-ack.json":
+            ack_writes.append(dict(value))
+        return original_atomic_json(path, value, mode)
+
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/remote/aliyun")
+    monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+    monkeypatch.setattr(bridge, "_atomic_json", atomic_json)
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._consume_start_chat(
+            _chat_args(transport="aliyun_cli", aliyun_cli_execution_mode="remote"),
+            tmp_path,
+            "hello",
+            None,
+            [],
+        )
+
+    assert error.value.code == "stream_session_mismatch"
+    assert ack_writes == []
+
+
+@pytest.mark.parametrize("failure", ["exception", "failed"])
+def test_stop_chat_failure_is_persisted_as_failed(monkeypatch, tmp_path: Path, failure: str) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "3" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    bridge._atomic_json(
+        job_path,
+        {
+            "schemaVersion": 1,
+            "jobId": job_id,
+            "state": "working",
+            "mode": "normal",
+            "sessionId": "session-1",
+            "activeRequestSeq": 1,
+            "turn": 1,
+            "artifacts": [],
+        },
+    )
+
+    def stop_chat(_job, _session_id):
+        if failure == "exception":
+            raise bridge.BridgeError("stop_chat_failed", "timeout", True)
+        return {"status": "Failed", "sessionId": "session-1"}
+
+    monkeypatch.setattr(bridge, "_run_stop_chat", stop_chat)
+
+    result = bridge._cancel_job_local({"jobId": job_id})
+
+    assert result["state"] == "cancel-failed"
+    job = bridge._load_state_json(job_path)
+    assert job["state"] == "failed"
+    assert job["stopStatus"] == "Failed"
+    assert job["error"]["code"] == "stop_chat_failed"
+    assert job["error"]["retryable"] is True
+
+
+def test_remote_check_exposes_executor_reconnect_release_gate(monkeypatch) -> None:
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/remote/aliyun")
+    monkeypatch.setenv(bridge.REMOTE_EXECUTOR_VERSION_ENV, "executor-1.2.3")
+    monkeypatch.setenv(
+        bridge.REMOTE_EXECUTOR_CAPABILITIES_ENV,
+        "other",
+    )
+    args = argparse.Namespace(command="check", aliyun_path="aliyun")
+    bridge.apply_skill_config(
+        args,
+        {
+            "transport": "aliyun_cli",
+            "aliyunCLIExecutionMode": "remote",
+            "endpoint": "ros-pre.aliyuncs.com",
+        },
+    )
+
+    incomplete = bridge.run_check(args)
+
+    assert incomplete["startChatReconnectReady"] is False
+    assert "remote_bootstrap_capability_unavailable" in incomplete["startChatReconnectBlockers"]
+
+    monkeypatch.setenv(
+        bridge.REMOTE_EXECUTOR_CAPABILITIES_ENV,
+        bridge.REMOTE_BOOTSTRAP_CAPABILITY,
+    )
+    result = bridge.run_check(args)
+
+    assert result["startChatReconnectReady"] is True
+    assert result["remoteExecutorVersion"] == "executor-1.2.3"
+    assert bridge.REMOTE_BOOTSTRAP_CAPABILITY in result["remoteExecutorCapabilities"]
+    assert "startChatReconnectBlockers" not in result
+
+
+def test_cli_size_limits_are_distinct_and_enforced_after_wrapper_decode(monkeypatch) -> None:
+    assert bridge.MAX_CLI_BATCH_BYTES > bridge.MAX_SERVER_REPLAY_BYTES > bridge.MAX_SSE_EVENT_BYTES
+    monkeypatch.setattr(bridge, "MAX_SSE_EVENT_BYTES", 100)
+    monkeypatch.setattr(bridge, "MAX_SERVER_REPLAY_BYTES", 150)
+    monkeypatch.setattr(bridge, "MAX_CLI_BATCH_BYTES", 400)
+    first = {"contextId": "session-1", "value": "x" * 45}
+    second = {"contextId": "session-1", "value": "y" * 45}
+    wrapped = json.dumps(
+        [{"id": "v1.size.1", "data": first}, {"id": "v1.size.2", "data": second}]
+    )
+
+    with pytest.raises(bridge.BridgeError) as error:
+        list(bridge.iter_cli_plugin_payloads([wrapped]))
+    assert error.value.code == "server_replay_too_large"
+    assert error.value.retryable is False
+
+    monkeypatch.setattr(bridge, "MAX_CLI_BATCH_BYTES", 20)
+    with pytest.raises(bridge.BridgeError) as error:
+        list(bridge.iter_cli_plugin_payloads([wrapped]))
+    assert error.value.code == "cli_output_too_large"
+
+    monkeypatch.setattr(bridge, "MAX_CLI_BATCH_BYTES", 100)
+    small = json.dumps({"id": "v1.size.1", "data": {"value": "x" * 24}}) + "\n"
+    assert len(small.encode("utf-8")) < bridge.MAX_CLI_BATCH_BYTES
+    with pytest.raises(bridge.BridgeError) as error:
+        list(bridge.iter_cli_plugin_payloads([small, small]))
+    assert error.value.code == "cli_output_too_large"
+
+
+def test_bootstrap_copy_does_not_double_count_server_replay_budget(monkeypatch) -> None:
+    monkeypatch.setattr(bridge, "MAX_SSE_EVENT_BYTES", 1000)
+    monkeypatch.setattr(bridge, "MAX_SERVER_REPLAY_BYTES", 180)
+    monkeypatch.setattr(bridge, "MAX_CLI_BATCH_BYTES", 2000)
+    payload = {"contextId": "session-1", "value": "x" * 80}
+    bootstrap = {
+        "invocationId": "invocation-1",
+        "event": {"id": "v1.bootstrap-size.1", "data": payload},
+        "sessionId": "session-1",
+    }
+    normal = [
+        {"id": "v1.bootstrap-size.1", "data": payload},
+        {"id": "v1.bootstrap-size.2", "data": {"contextId": "session-1", "value": "tail"}},
+    ]
+
+    events = list(bridge.iter_cli_plugin_payloads([json.dumps(bootstrap) + "\n", json.dumps(normal)]))
+
+    assert [event["id"] for event in events] == [
+        "v1.bootstrap-size.1",
+        "v1.bootstrap-size.1",
+        "v1.bootstrap-size.2",
+    ]
+
+
+@pytest.mark.parametrize("transport", ["code", "aliyun_cli"])
+def test_business_event_without_id_fails_before_projection(monkeypatch, tmp_path: Path, transport: str) -> None:
+    payload = _status_event(state="TASK_STATE_WORKING")
+    projected = []
+    args = _chat_args(transport=transport, session_id=None)
+    if transport == "code":
+
+        class Response:
+            headers = {"Content-Type": "text/event-stream"}
+
+            def __iter__(self):
+                return iter([("data: " + json.dumps(payload) + "\n").encode(), b"\n"])
+
+            def close(self):
+                return None
+
+        monkeypatch.setattr(bridge, "_open_code_request", lambda *_args, **_kwargs: Response())
+    else:
+        monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+        monkeypatch.setattr(
+            bridge.subprocess,
+            "Popen",
+            lambda _command, **_kwargs: _FakeCLIProcess(json.dumps({"data": payload})),
+        )
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._consume_start_chat(
+            args,
+            tmp_path,
+            "hello",
+            None,
+            [],
+            on_payload=lambda *_args: projected.append(True),
+        )
+
+    assert error.value.code == "missing_stream_event_id"
+    assert projected == []
+
+
+def test_stream_identity_change_fails_without_reconnect(monkeypatch, tmp_path: Path) -> None:
+    payload = _status_event(state="TASK_STATE_WORKING")
+    output = json.dumps(
+        [
+            {"id": "v1.first.1", "data": payload},
+            {"id": "v1.second.2", "data": payload},
+        ]
+    )
+    calls = []
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    monkeypatch.setattr(
+        bridge.subprocess,
+        "Popen",
+        lambda command, **_kwargs: (calls.append(command) or _FakeCLIProcess(output)),
+    )
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._consume_start_chat(_chat_args(transport="aliyun_cli"), tmp_path, "hello", None, [])
+
+    assert error.value.code == "stream_event_identity_mismatch"
+    assert len(calls) == 1
+
+
+def test_primary_permission_ack_reconnects_but_sideband_ack_is_an_immediate_boundary(
+    monkeypatch, tmp_path: Path
+) -> None:
+    response = {"inputId": "input-1", "toolUseId": "tool-1", "decision": "allow_once"}
+    acknowledgement = {
+        "result": {
+            "message": {
+                "contextId": "session-1",
+                "parts": [
+                    {
+                        "mediaType": "application/json",
+                        "data": {
+                            "schemaVersion": 1,
+                            "kind": "permission_ack",
+                            "inputId": "input-1",
+                            "toolUseId": "tool-1",
+                            "decision": "allow_once",
+                            "accepted": True,
+                        },
+                    }
+                ],
+            }
+        }
+    }
+    completed = _status_event(state="TASK_STATE_COMPLETED")
+
+    def run(role):
+        attempts = [
+            json.dumps({"id": "v1.permission.1", "data": acknowledgement}),
+            json.dumps({"id": "v1.permission.2", "data": completed}),
+        ]
+        commands = []
+
+        def popen(command, **_kwargs):
+            commands.append(command)
+            return _FakeCLIProcess(attempts.pop(0))
+
+        monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+        result = bridge._consume_start_chat(
+            _chat_args(transport="aliyun_cli", session_id="session-1"),
+            tmp_path,
+            "permission",
+            None,
+            [],
+            worker_role=role,
+            permission_response=response,
+        )
+        return result, commands
+
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    monkeypatch.setattr(bridge.time, "sleep", lambda _seconds: None)
+    primary_result, primary_commands = run("primary")
+    sideband_result, sideband_commands = run("sideband")
+
+    assert primary_result["state"] == "turn-completed"
+    assert len(primary_commands) == 2
+    assert "--stream-options" not in primary_commands[1]
+    assert _command_body(primary_commands[1]) == {
+        "StreamOptions.Action": "Reconnect",
+        "StreamOptions.Cursor": "v1.permission.1",
+    }
+    assert sideband_result["state"] == "permission-responded"
+    assert len(sideband_commands) == 1
+
+
+def test_retryable_initial_failure_does_not_resend_the_business_query(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+
+    def open_request(_operation, parameters, *_args, **_kwargs):
+        calls.append(parameters)
+        raise bridge.BridgeError("start_chat_failed", "throttled", True)
+
+    monkeypatch.setattr(bridge, "_open_code_request", open_request)
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._consume_start_chat(_chat_args(transport="code"), tmp_path, "hello", None, [])
+
+    assert error.value.code == "missing_recovery_anchor"
+    assert len(calls) == 1
+    assert calls[0]["Query"] == "hello"
+
+
+def test_unknown_cli_nonzero_exit_is_not_retried(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+
+    def popen(command, **kwargs):
+        calls.append(command)
+        kwargs["stderr"].write(b"unknown local failure")
+        return _FakeCLIProcess("", 2)
+
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+
+    result = bridge._consume_start_chat(_chat_args(transport="aliyun_cli"), tmp_path, "hello", None, [])
+
+    assert result["state"] == "failed"
+    assert result["error"]["code"] == "aliyun_cli_failed"
+    assert len(calls) == 1
+
+
+def test_structured_retryable_cli_error_on_stdout_reconnects_from_anchor(monkeypatch, tmp_path: Path) -> None:
+    working = _status_event(state="TASK_STATE_WORKING", text="working")
+    completed = _status_event(
+        state="TASK_STATE_COMPLETED", text="done", metadata={"assistantFinal": {"complete": True}}
+    )
+    calls = []
+
+    def popen(command, **_kwargs):
+        calls.append(command)
+        if len(calls) == 1:
+            output = "\n".join(
+                [
+                    json.dumps({"id": "v1.stdout-error.1", "data": working}),
+                    json.dumps({"statusCode": 503, "code": "ServiceUnavailable"}),
+                ]
+            )
+            return _FakeCLIProcess(output, 1)
+        return _FakeCLIProcess(json.dumps({"id": "v1.stdout-error.2", "data": completed}))
+
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    monkeypatch.setattr(bridge.subprocess, "Popen", popen)
+    monkeypatch.setattr(bridge.time, "sleep", lambda _seconds: None)
+
+    result = bridge._consume_start_chat(_chat_args(transport="aliyun_cli"), tmp_path, "hello", None, [])
+
+    assert result["state"] == "turn-completed"
+    assert len(calls) == 2
+    assert _command_body(calls[1]) == {
+        "StreamOptions.Action": "Reconnect",
+        "StreamOptions.Cursor": "v1.stdout-error.1",
+    }
+
+
+def test_same_worker_apply_checkpoint_gap_does_not_duplicate_summary(monkeypatch, tmp_path: Path) -> None:
+    first = _status_event(state="TASK_STATE_WORKING", text="a")
+    second = _status_event(state="TASK_STATE_WORKING", text="b")
+    completed = _status_event(
+        state="TASK_STATE_COMPLETED", text="done", metadata={"assistantFinal": {"complete": True}}
+    )
+    attempts = [
+        json.dumps(
+            [
+                {"id": "v1.gap.1", "data": first},
+                {"id": "v1.gap.2", "data": second},
+            ]
+        ),
+        json.dumps(
+            [
+                {"id": "v1.gap.2", "data": second},
+                {"id": "v1.gap.3", "data": completed},
+            ]
+        ),
+    ]
+    callback_calls = []
+
+    def callback(event_id, _payload, _summary, already_applied):
+        callback_calls.append((event_id, already_applied))
+        if event_id == "v1.gap.2" and not already_applied:
+            raise bridge.BridgeError("stream_failed", "checkpoint write interrupted", True)
+        return True
+
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/usr/local/bin/aliyun")
+    monkeypatch.setattr(
+        bridge.subprocess,
+        "Popen",
+        lambda _command, **_kwargs: _FakeCLIProcess(attempts.pop(0)),
+    )
+    monkeypatch.setattr(bridge.time, "sleep", lambda _seconds: None)
+
+    result = bridge._consume_start_chat(
+        _chat_args(transport="aliyun_cli"), tmp_path, "hello", None, [], on_payload=callback
+    )
+
+    assert result["eventCount"] == 3
+    assert callback_calls == [
+        ("v1.gap.1", False),
+        ("v1.gap.2", False),
+        ("v1.gap.2", True),
+        ("v1.gap.3", False),
+    ]
