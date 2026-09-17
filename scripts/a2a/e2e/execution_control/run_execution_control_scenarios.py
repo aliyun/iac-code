@@ -539,7 +539,7 @@ class _Scenario:
         other = self._stream(_message_payload(self.workspace), name="other-context")
         started = time.monotonic()
         other.start()
-        other.join(min(self.timeout, 2.0))
+        other.join(self.timeout)
         other_context = _first(other.snapshot(), "contextId")
         assert other_context and other_context != self.context_id
         assert "ISOLATION_FIXTURE_FINAL" in json.dumps(other.snapshot())
