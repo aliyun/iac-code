@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from iac_code.a2a import execution_control as execution_control_module
 from iac_code.a2a.backup import run_sync_fenced, run_sync_fenced_with_cancel_completion
 from iac_code.a2a.execution_control import (
     ExecutionControlConflictError,
@@ -99,6 +100,499 @@ async def test_resume_during_long_tool_does_not_wait_for_tool(tmp_path: Path) ->
 
     release_tool.set()
     await worker_task
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_business_boundary_self_finalizes_without_terminate_request(
+    tmp_path: Path,
+) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    assert completion_generation is not None
+    observed = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+    assert observed["phase"] == "terminated"
+    assert observed["terminationReason"] == "natural_completion"
+    assert observed["releaseReady"] is True
+    snapshot = control.snapshot()
+    assert snapshot["phase"] == "terminated"
+    assert snapshot["executionStatus"] == "input-required"
+    assert snapshot["terminationReason"] == "natural_completion"
+    assert snapshot["backup"] == {"status": "disabled"}
+    assert snapshot["connectionEpoch"] == -1
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_new_execution_waits_for_natural_finalized_cleanup(tmp_path: Path) -> None:
+    service = ExecutionControlService(persistence_root=None, backup_service=None)
+    control = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="completed",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+
+    cleanup_entered = asyncio.Event()
+    release_cleanup = asyncio.Event()
+
+    async def finalized_cleanup() -> None:
+        cleanup_entered.set()
+        await release_cleanup.wait()
+
+    finalizing = asyncio.create_task(
+        service.finalize_natural_completion(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            completion_generation=completion_generation,
+            finalized_cleanup=finalized_cleanup,
+        )
+    )
+    await cleanup_entered.wait()
+    begin_attempted = asyncio.Event()
+
+    async def begin_next_execution() -> ExecutionController:
+        begin_attempted.set()
+        return await service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+        )
+
+    beginning = asyncio.create_task(begin_next_execution())
+    await begin_attempted.wait()
+    assert not beginning.done()
+
+    release_cleanup.set()
+    await finalizing
+    next_control = await beginning
+    assert next_control is not control
+    await next_control.detach_task(beginning, execution_status="completed")
+    await next_control.close()
+
+
+@pytest.mark.asyncio
+async def test_old_response_boundary_cannot_finalize_newer_same_task_turn(tmp_path: Path) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+
+    await control.attach_task(current)
+    first_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    await control.attach_task(current)
+    second_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    stale = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=first_generation,
+    )
+    observed = await control.observe_state()
+
+    assert first_generation != second_generation
+    assert stale["phase"] == "running"
+    assert observed["phase"] == "running"
+
+    settled = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=second_generation,
+    )
+    assert settled["phase"] == "terminated"
+    assert settled["terminationReason"] == "natural_completion"
+    assert settled["releaseReady"] is True
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_preempts_inflight_natural_cleanup(tmp_path: Path) -> None:
+    cleanup_started = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    reasons: list[str] = []
+
+    async def cleanup(_context_id: str, _task_id: str, reason: str) -> str:
+        reasons.append(reason)
+        if reason == "natural_completion":
+            cleanup_started.set()
+            await release_cleanup.wait()
+        return "input-required" if reason == "natural_completion" else "canceled"
+
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=None,
+        termination_cleanup=cleanup,
+        execution_id="exec-1",
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    natural = asyncio.create_task(
+        control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+    )
+    await asyncio.wait_for(cleanup_started.wait(), timeout=1)
+
+    claimed = await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop-during-natural",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+    release_cleanup.set()
+    await natural
+    await _wait_for_condition(lambda: control.release_ready)
+    retried = await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop-during-natural",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+
+    assert claimed["phase"] == "terminating"
+    assert control.termination_reason == "stop_chat"
+    assert control.execution_status == "canceled"
+    assert retried["terminationReason"] == "stop_chat"
+    assert reasons[0] == "natural_completion"
+    assert "stop_chat" in reasons
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_claim_wins_before_natural_finalization(tmp_path: Path) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    claimed = await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+    assert completion_generation is not None
+    observed = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+
+    assert claimed["terminationReason"] == "stop_chat"
+    assert observed["terminationReason"] == "stop_chat"
+    await _wait_for_condition(lambda: control.release_ready)
+    assert control.termination_reason == "stop_chat"
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_after_natural_release_publishes_fresh_backup(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[BackupReason, bool]] = []
+
+    class BackupService:
+        def backup_session(self, _cwd, _session_id, *, reason, critical) -> BackupResult:
+            calls.append((reason, critical))
+            generation = len(calls)
+            return BackupResult(
+                enabled=True,
+                generation=generation,
+                commit_id=f"commit-{generation}",
+                shared_committed=True,
+            )
+
+    control = _controller(tmp_path, backup_service=BackupService())
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+
+    claimed = await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop-after-natural",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+
+    assert claimed["phase"] == "terminating"
+    assert claimed["terminationReason"] == "stop_chat"
+    assert claimed["releaseReady"] is False
+    await _wait_for_condition(lambda: control.release_ready)
+    assert calls == [
+        (BackupReason.TERMINAL, True),
+        (BackupReason.TERMINAL, True),
+    ]
+    assert control.termination_reason == "stop_chat"
+    assert control.backup["generation"] == 2
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_fences_inflight_natural_backup(tmp_path: Path) -> None:
+    first_backup_started = threading.Event()
+    release_first_backup = threading.Event()
+    calls: list[str] = []
+
+    class BackupService:
+        def backup_session(self, _cwd, _session_id, *, reason, critical) -> BackupResult:
+            assert reason is BackupReason.TERMINAL
+            assert critical is True
+            calls.append(control.termination_reason or "none")
+            generation = len(calls)
+            if generation == 1:
+                first_backup_started.set()
+                assert release_first_backup.wait(timeout=2)
+            return BackupResult(
+                enabled=True,
+                generation=generation,
+                commit_id=f"commit-{generation}",
+                shared_committed=True,
+            )
+
+    control = _controller(tmp_path, backup_service=BackupService())
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    natural = asyncio.create_task(
+        control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+    )
+    assert await asyncio.to_thread(first_backup_started.wait, 1)
+
+    await control.terminate(
+        execution_id="exec-1",
+        request_id="request-stop-during-backup",
+        connection_epoch=1,
+        reason="stop_chat",
+    )
+    await asyncio.sleep(0.01)
+    assert calls == ["natural_completion"]
+
+    release_first_backup.set()
+    await natural
+    await _wait_for_condition(lambda: control.release_ready)
+
+    assert calls == ["natural_completion", "stop_chat"]
+    assert control.termination_reason == "stop_chat"
+    assert control.backup["generation"] == 2
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_initial_input_wait_exposes_only_local_continuation_readiness(tmp_path: Path) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    await control.detach_task(current, execution_status="input-required")
+
+    snapshot = control.snapshot()
+
+    assert snapshot["localInputContinuationReady"] is True
+    assert snapshot["inputHandoffReady"] is False
+    assert "localInputContinuationReady" not in control.protocol_snapshot(snapshot)
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_business_boundary_requires_critical_shared_backup(tmp_path: Path) -> None:
+    calls: list[tuple[BackupReason, bool]] = []
+
+    class BackupService:
+        def backup_session(self, _cwd, _session_id, *, reason, critical) -> BackupResult:
+            calls.append((reason, critical))
+            return BackupResult(
+                enabled=True,
+                generation=7,
+                commit_id="commit-7",
+                shared_committed=True,
+            )
+
+    control = _controller(tmp_path, backup_service=BackupService())
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    assert completion_generation is not None
+    await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+    await _wait_for_condition(lambda: control.release_ready)
+    assert calls == [(BackupReason.TERMINAL, True)]
+    assert control.release_ready is True
+    assert control.backup["status"] == "shared_committed"
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_business_boundary_waits_for_disconnect_pause_resume_without_cancel(
+    tmp_path: Path,
+) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    paused = await control.pause(
+        task_id="task-1",
+        expected_execution_id="exec-1",
+        request_id="request-pause",
+        connection_epoch=1,
+        reason="client_disconnected",
+        reconnect_timeout_seconds=10,
+    )
+    assert paused["phase"] == "pausing"
+
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    assert current.cancelled() is False
+    await _wait_for_condition(lambda: control.phase == "paused")
+    assert control.termination_reason is None
+    assert control.pause_id == paused["pauseId"]
+    assert control.release_ready is False
+    assert completion_generation is not None
+    await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+
+    resumed = await control.resume(
+        execution_id="exec-1",
+        pause_id=paused["pauseId"],
+        request_id="request-resume",
+        connection_epoch=2,
+    )
+
+    assert resumed["phase"] == "resuming"
+    await _wait_for_condition(lambda: control.phase == "running")
+    await control.observe_state()
+    await _wait_for_condition(lambda: control.release_ready)
+    assert control.phase == "terminated"
+    assert control.termination_reason == "natural_completion"
+    assert control.pause_id is None
+    assert control.release_ready is True
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_state_observation_retries_failed_cleanup(
+    tmp_path: Path,
+) -> None:
+    cleanup_attempts = 0
+
+    async def cleanup(_context_id: str, _task_id: str, _reason: str) -> str:
+        nonlocal cleanup_attempts
+        cleanup_attempts += 1
+        if cleanup_attempts == 1:
+            raise OSError("injected cleanup failure")
+        return "input-required"
+
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=None,
+        termination_cleanup=cleanup,
+        execution_id="exec-1",
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+    await _wait_for_condition(lambda: control.phase == "terminated" and control.backup["status"] == "blocked")
+
+    observed = await control.observe_state()
+
+    assert observed["phase"] == "terminated"
+    await _wait_for_condition(lambda: control.release_ready)
+    assert cleanup_attempts == 2
+    assert control.execution_status == "input-required"
     await control.close()
 
 
@@ -1069,6 +1563,701 @@ async def test_new_normal_turn_gets_new_execution_identity_but_pipeline_continua
     assert next_normal_turn.execution_id != first.execution_id
     assert all(task.done() for task in first._background_tasks)
     await next_normal_turn.detach_task(current, execution_status="input-required")
+
+    third_normal_turn = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    assert third_normal_turn is not next_normal_turn
+    assert third_normal_turn.execution_id != next_normal_turn.execution_id
+    await third_normal_turn.detach_task(current, execution_status="input-required")
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_pipeline_continuation_replaces_drained_terminated_control_when_backup_is_blocked(
+    tmp_path: Path,
+) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    first = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await first.detach_task(current, execution_status="input-required")
+    first.phase = "terminated"
+    first.execution_status = "canceled"
+    first.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    first.release_ready = False
+
+    with pytest.raises(ExecutionControlConflictError):
+        await service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+            continue_input_required=True,
+        )
+
+    admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert admission is not None
+    continuation = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        continue_input_required=True,
+        recoverable_input_admission=admission,
+    )
+
+    assert continuation is not first
+    assert continuation.execution_id != first.execution_id
+    assert all(task.done() for task in first._background_tasks)
+    await continuation.detach_task(current, execution_status="input-required")
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_recoverable_input_admission_rejects_mismatched_task_and_live_background_work(tmp_path: Path) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    control = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await control.detach_task(current, execution_status="input-required")
+    control.phase = "terminated"
+    control.execution_status = "canceled"
+    control.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    control.release_ready = False
+
+    assert (
+        await service.reserve_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-other",
+            owner="owner-1",
+        )
+        is None
+    )
+
+    background_release = asyncio.Event()
+    background = control._spawn(background_release.wait(), "test-recovery-admission")
+    assert (
+        await service.reserve_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+        )
+        is None
+    )
+    background_release.set()
+    await background
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_recoverable_input_wait_wakes_after_last_background_task_finishes(tmp_path: Path) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    control = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await control.detach_task(current, execution_status="input-required")
+    control.phase = "terminated"
+    control.execution_status = "canceled"
+    control.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    control.release_ready = False
+    background_release = asyncio.Event()
+    background = control._spawn(background_release.wait(), "test-recovery-wait")
+
+    waiter = asyncio.create_task(
+        service.wait_until_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            timeout=1,
+        )
+    )
+    await asyncio.sleep(0)
+    assert not waiter.done()
+
+    background_release.set()
+    await background
+    await asyncio.wait_for(waiter, timeout=1)
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_recoverable_input_admission_is_single_owner_across_service_instances(tmp_path: Path) -> None:
+    first_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    second_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+
+    admissions = await asyncio.gather(
+        first_service.reserve_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+        ),
+        second_service.reserve_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+        ),
+    )
+
+    assert sum(admission is not None for admission in admissions) == 1
+    winner = first_service if admissions[0] is not None else second_service
+    loser = second_service if winner is first_service else first_service
+    admission = admissions[0] or admissions[1]
+    assert admission is not None
+
+    with pytest.raises(ExecutionControlConflictError, match="active in another process"):
+        await loser.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+            continue_input_required=True,
+        )
+
+    control = await winner.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        continue_input_required=True,
+        recoverable_input_admission=admission,
+    )
+    assert (
+        await loser.reserve_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+        )
+        is None
+    )
+    with pytest.raises(ExecutionControlConflictError, match="active in another process"):
+        await loser.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+            continue_input_required=True,
+        )
+    current = asyncio.current_task()
+    assert current is not None
+    await control.detach_task(current, execution_status="input-required")
+    await first_service.close()
+    await second_service.close()
+
+
+@pytest.mark.asyncio
+async def test_stale_local_terminated_control_cannot_replace_new_shared_running_control(tmp_path: Path) -> None:
+    stale_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    recovering_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    stale_control = await stale_service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await stale_control.detach_task(current, execution_status="input-required")
+    stale_control.phase = "terminated"
+    stale_control.execution_status = "canceled"
+    stale_control.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    stale_control.release_ready = False
+    stale_control.revision += 1
+    await stale_control._persist_snapshot(stale_control.snapshot())
+
+    admission = await recovering_service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert admission is not None
+    recovered = await recovering_service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        continue_input_required=True,
+        recoverable_input_admission=admission,
+    )
+
+    assert (
+        await stale_service.reserve_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+        )
+        is None
+    )
+    persisted = json.loads((tmp_path / "execution-control" / "ctx-1.json").read_text(encoding="utf-8"))
+    assert persisted["phase"] == "running"
+    assert persisted["executionId"] == recovered.execution_id
+    assert stale_control.execution_id != recovered.execution_id
+
+    await recovered.detach_task(current, execution_status="input-required")
+    await stale_service.close()
+    await recovering_service.close()
+
+
+@pytest.mark.asyncio
+async def test_recovered_input_wait_can_handoff_to_another_service_instance(tmp_path: Path) -> None:
+    source_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    first_recovery_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    next_recovery_service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    source = await source_service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await source.detach_task(current, execution_status="input-required")
+    source.phase = "terminated"
+    source.execution_status = "canceled"
+    source.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    source.release_ready = False
+    source.revision += 1
+    await source._persist_snapshot(source.snapshot())
+
+    first_admission = await first_recovery_service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert first_admission is not None
+    first_recovery = await first_recovery_service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        continue_input_required=True,
+        recoverable_input_admission=first_admission,
+    )
+    await first_recovery.detach_task(current, execution_status="input-required")
+    handoff_snapshot = json.loads((tmp_path / "execution-control" / "ctx-1.json").read_text(encoding="utf-8"))
+    assert handoff_snapshot["inputHandoffReady"] is True
+    assert handoff_snapshot["executionStatus"] == "input-required"
+    assert handoff_snapshot["streamAvailable"] is False
+
+    next_admission = await next_recovery_service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert next_admission is not None
+    next_recovery = await next_recovery_service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        continue_input_required=True,
+        recoverable_input_admission=next_admission,
+    )
+    assert next_recovery.execution_id != first_recovery.execution_id
+    persisted = json.loads((tmp_path / "execution-control" / "ctx-1.json").read_text(encoding="utf-8"))
+    assert persisted["phase"] == "running"
+    assert persisted["executionId"] == next_recovery.execution_id
+    assert persisted["inputHandoffReady"] is False
+
+    await next_recovery.detach_task(current, execution_status="input-required")
+    await source_service.close()
+    await first_recovery_service.close()
+    await next_recovery_service.close()
+
+
+@pytest.mark.asyncio
+async def test_failed_input_handoff_commit_requires_admission_and_retries_on_reserve(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    source = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await source.detach_task(current, execution_status="input-required")
+    source.phase = "terminated"
+    source.execution_status = "canceled"
+    source.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    source.release_ready = False
+    source.revision += 1
+    await source._persist_snapshot(source.snapshot())
+    admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert admission is not None
+    recovered = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        continue_input_required=True,
+        recoverable_input_admission=admission,
+    )
+    original_atomic_write_json = execution_control_module.atomic_write_json
+
+    def fail_input_handoff(path: Path, value: dict) -> None:
+        if value.get("inputHandoffReady") is True:
+            raise OSError("input handoff write failed")
+        original_atomic_write_json(path, value)
+
+    monkeypatch.setattr(execution_control_module, "atomic_write_json", fail_input_handoff)
+    with pytest.raises(OSError, match="input handoff write failed"):
+        await recovered.detach_task(current, execution_status="input-required")
+    assert recovered.input_handoff_ready()
+    persisted_path = tmp_path / "execution-control" / "ctx-1.json"
+    assert json.loads(persisted_path.read_text(encoding="utf-8"))["inputHandoffReady"] is False
+
+    with pytest.raises(ExecutionControlConflictError, match="active in another process"):
+        await service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+            continue_input_required=True,
+        )
+
+    monkeypatch.setattr(execution_control_module, "atomic_write_json", original_atomic_write_json)
+    retry_admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert retry_admission is not None
+    assert json.loads(persisted_path.read_text(encoding="utf-8"))["inputHandoffReady"] is True
+    retried = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        continue_input_required=True,
+        recoverable_input_admission=retry_admission,
+    )
+    assert retried is not recovered
+
+    await retried.detach_task(current, execution_status="input-required")
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_in_memory_recovered_input_handoff_still_requires_admission() -> None:
+    service = ExecutionControlService(persistence_root=None, backup_service=None)
+    source = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd="/tmp",
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await source.detach_task(current, execution_status="input-required")
+    source.phase = "terminated"
+    source.execution_status = "canceled"
+    source.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    source.release_ready = False
+    admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert admission is not None
+    recovered = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd="/tmp",
+        continue_input_required=True,
+        recoverable_input_admission=admission,
+    )
+    await recovered.detach_task(current, execution_status="input-required")
+    assert recovered.input_handoff_ready()
+
+    with pytest.raises(ExecutionControlConflictError, match="active in another process"):
+        await service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd="/tmp",
+            continue_input_required=True,
+        )
+
+    retry_admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert retry_admission is not None
+    retried = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd="/tmp",
+        continue_input_required=True,
+        recoverable_input_admission=retry_admission,
+    )
+    assert retried is not recovered
+
+    await retried.detach_task(current, execution_status="input-required")
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_expired_recovery_admission_does_not_mutate_local_or_shared_control(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    original = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await original.detach_task(current, execution_status="input-required")
+    original.phase = "terminated"
+    original.execution_status = "canceled"
+    original.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    original.release_ready = False
+    original.revision += 1
+    await original._persist_snapshot(original.snapshot())
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
+    original_document = control_path.read_text(encoding="utf-8")
+
+    admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert admission is not None
+    admission_path = tmp_path / "execution-control" / ".ctx-1.recoverable-input.json"
+    expires_at = json.loads(admission_path.read_text(encoding="utf-8"))["expiresAt"]
+    monkeypatch.setattr("iac_code.a2a.execution_control.time.time", lambda: expires_at + 1)
+
+    with pytest.raises(ExecutionControlConflictError, match="admission is stale"):
+        await service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+            continue_input_required=True,
+            recoverable_input_admission=admission,
+        )
+
+    assert service.get_for_context("ctx-1") is original
+    assert not original.has_managed_work()
+    assert control_path.read_text(encoding="utf-8") == original_document
+    await service.release_recoverable_input_continuation(admission)
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_activation_persistence_failure_keeps_original_control(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    original = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await original.detach_task(current, execution_status="input-required")
+    original.phase = "terminated"
+    original.execution_status = "canceled"
+    original.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    original.release_ready = False
+    original.revision += 1
+    await original._persist_snapshot(original.snapshot())
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
+    original_document = control_path.read_text(encoding="utf-8")
+    admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert admission is not None
+    original_atomic_write_json = execution_control_module.atomic_write_json
+
+    def fail_running_snapshot(path: Path, value: dict) -> None:
+        if path == control_path and value.get("phase") == "running":
+            raise OSError("running snapshot write failed")
+        original_atomic_write_json(path, value)
+
+    monkeypatch.setattr(execution_control_module, "atomic_write_json", fail_running_snapshot)
+
+    with pytest.raises(OSError, match="running snapshot write failed"):
+        await service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+            continue_input_required=True,
+            recoverable_input_admission=admission,
+        )
+
+    assert service.get_for_context("ctx-1") is original
+    assert not original.has_managed_work()
+    assert control_path.read_text(encoding="utf-8") == original_document
+    admission_path = tmp_path / "execution-control" / ".ctx-1.recoverable-input.json"
+    assert admission_path.exists()
+    await service.release_recoverable_input_continuation(admission)
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_cancelled_recovery_activation_rolls_back_shared_and_local_control(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    original = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await original.detach_task(current, execution_status="input-required")
+    original.phase = "terminated"
+    original.execution_status = "canceled"
+    original.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    original.release_ready = False
+    original.revision += 1
+    await original._persist_snapshot(original.snapshot())
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
+    original_document = control_path.read_text(encoding="utf-8")
+    admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert admission is not None
+    activated = threading.Event()
+    allow_return = threading.Event()
+    original_activate = service._recoverable_input_admissions.activate
+
+    def activate_then_block(*args, **kwargs):
+        result = original_activate(*args, **kwargs)
+        activated.set()
+        assert allow_return.wait(timeout=5)
+        return result
+
+    monkeypatch.setattr(service._recoverable_input_admissions, "activate", activate_then_block)
+    begin_task = asyncio.create_task(
+        service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd=str(tmp_path),
+            continue_input_required=True,
+            recoverable_input_admission=admission,
+        )
+    )
+    assert await asyncio.to_thread(activated.wait, 5)
+    begin_task.cancel()
+    allow_return.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await begin_task
+
+    assert service.get_for_context("ctx-1") is original
+    assert control_path.read_text(encoding="utf-8") == original_document
+    admission_path = tmp_path / "execution-control" / ".ctx-1.recoverable-input.json"
+    assert admission_path.exists()
+    await service.release_recoverable_input_continuation(admission)
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_admission_unlink_failure_keeps_new_control_consistent_and_release_retries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    original = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    await original.detach_task(current, execution_status="input-required")
+    original.phase = "terminated"
+    original.execution_status = "canceled"
+    original.backup = {"status": "blocked", "error": "shared backup unavailable"}
+    original.release_ready = False
+    original.revision += 1
+    await original._persist_snapshot(original.snapshot())
+    admission = await service.reserve_recoverable_input_continuation(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+    )
+    assert admission is not None
+    admission_path = tmp_path / "execution-control" / ".ctx-1.recoverable-input.json"
+    original_unlink = Path.unlink
+    failed_once = False
+
+    def fail_admission_unlink_once(path: Path, *args, **kwargs) -> None:
+        nonlocal failed_once
+        if path == admission_path and not failed_once:
+            failed_once = True
+            raise OSError("admission unlink failed")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_admission_unlink_once)
+    recovered = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        continue_input_required=True,
+        recoverable_input_admission=admission,
+    )
+
+    persisted = json.loads((tmp_path / "execution-control" / "ctx-1.json").read_text(encoding="utf-8"))
+    assert service.get_for_context("ctx-1") is recovered
+    assert persisted["phase"] == "running"
+    assert persisted["executionId"] == recovered.execution_id
+    assert admission_path.exists()
+    await service.release_recoverable_input_continuation(admission)
+    assert not admission_path.exists()
+
+    await recovered.detach_task(current, execution_status="input-required")
     await service.close()
 
 

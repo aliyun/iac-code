@@ -47,6 +47,10 @@ from iac_code.a2a.pipeline_stream import (
     pending_backup_publication_envelope,
 )
 from iac_code.a2a.pipeline_transport_delivery import PipelineTransportDeliveryClosedError
+from iac_code.a2a.request_scoped_active_task import (
+    DirectPipelineRouteGate,
+    PipelineLifecycleEventQueueCarrier,
+)
 from iac_code.a2a.resource_selector import (
     PendingResourceSelection,
     ResourceSelectionCheckpointStore,
@@ -97,6 +101,7 @@ from iac_code.types.stream_events import (
     TextDeltaEvent,
 )
 from iac_code.utils.path_locks import PathLockRegistry
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 _CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS = 1
@@ -106,6 +111,9 @@ _TERMINAL_SNAPSHOT_STATUSES = {"completed", "failed", "canceled"}
 _TERMINAL_A2A_STATUSES = {"completed", "failed", "canceled"}
 _WAITING_A2A_STATUSES = {"waiting_input", "input_required"}
 _RUNNING_A2A_STATUSES = {"working"}
+_SANDBOX_RELEASE_RECOVERABLE_INPUT_KINDS = frozenset(
+    {"ask_user_question", "candidate_selection", "deployment_confirmation", "pipeline_pause_confirmation"}
+)
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
 _WAITING_INPUT_CANCEL_LOCKS = PathLockRegistry()
@@ -214,6 +222,12 @@ class A2APipelineRuntime:
     terminal_publication_started: bool = False
     restart_requested: asyncio.Event = field(default_factory=asyncio.Event)
     interrupt_settled: asyncio.Event = field(default_factory=_new_set_asyncio_event)
+
+    def bind_publisher_event_queue(self, event_queue: Any) -> None:
+        """Route resumed Pipeline publications through the current SDK lifecycle."""
+
+        if self.publisher is not None:
+            self.publisher.event_queue = event_queue
 
 
 @dataclass(frozen=True)
@@ -634,6 +648,7 @@ class IacCodeA2APipelineExecutor:
         pipeline_input: PipelineUserInput | str | None = None,
         prompt: str | None = None,
         active_followup_only: bool = False,
+        direct_route_gate: DirectPipelineRouteGate | None = None,
         permission_checkpoint: dict[str, Any] | None = None,
         resource_selection_checkpoint: dict[str, Any] | None = None,
     ) -> bool | None:
@@ -680,6 +695,20 @@ class IacCodeA2APipelineExecutor:
         except asyncio.CancelledError:
             # Context creation drains and closes an unfinished runtime before
             # cancellation reaches here, even if no Pipeline exists yet.
+            control = current_execution_control()
+            current_task = asyncio.current_task()
+            logger.warning(
+                "A2A Pipeline runtime setup canceled task_id=%s context_id=%s "
+                "asyncio_task=%s cancelling=%s control_execution_id=%s control_phase=%s "
+                "control_reason=%s",
+                sanitize_strict_text(task_id),
+                sanitize_strict_text(context_id),
+                sanitize_strict_text(current_task.get_name() if current_task is not None else "none"),
+                getattr(current_task, "cancelling", lambda: 0)() if current_task is not None else 0,
+                sanitize_strict_text(control.execution_id if control is not None else "none"),
+                sanitize_strict_text(control.phase if control is not None else "none"),
+                sanitize_strict_text(control.termination_reason if control is not None else "none"),
+            )
             task.active_task = None
             task.state = TASK_STATE_CANCELED
             self._task_store.mirror_task(task)
@@ -743,6 +772,8 @@ class IacCodeA2APipelineExecutor:
                             cwd=cwd,
                             pipeline_input=pipeline_input,
                             preserve_task_record=preserve_active_task,
+                            direct_route_gate=direct_route_gate,
+                            bind_publisher_event_queue=PipelineLifecycleEventQueueCarrier.read(context),
                         )
                     if routed:
                         return True
@@ -771,10 +802,33 @@ class IacCodeA2APipelineExecutor:
         try:
             await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
         except TimeoutError:
+            if direct_route_gate is not None:
+                direct_route_gate.require_recovery()
             await self._fail_already_active(event_queue, task=task, task_id=task_id, context_id=context_id)
             return
 
         try:
+            if direct_route_gate is not None:
+                # The SDK lifecycle can outlive the Pipeline's internal owner at
+                # an input boundary.  Fence the new continuation before it
+                # publishes into that still-active lifecycle.
+                await direct_route_gate.activate(event_queue)
+            elif (
+                task.state == TASK_STATE_INPUT_REQUIRED
+                and PipelineLifecycleEventQueueCarrier.read(context)
+                and not PipelineLifecycleEventQueueCarrier.is_bound(context)
+            ):
+                # A recovered SDK lifecycle reuses the existing Task projection,
+                # so the SDK does not emit another initial Task.  Publish a
+                # request-scoped frame before restoring the finite sidecar stream;
+                # otherwise a cold resume that has no public Pipeline event can
+                # complete as a successful but empty response.
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                )
             owner_task = asyncio.current_task()
             task_persistence_started = False
 
@@ -1127,8 +1181,20 @@ class IacCodeA2APipelineExecutor:
             except asyncio.CancelledError:
                 try:
                     task.state = TASK_STATE_CANCELED
+                    control = current_execution_control()
                     execution_termination_reason = current_execution_termination_reason()
                     cancel_source = "execution_control" if execution_termination_reason is not None else "executor"
+                    logger.warning(
+                        "A2A pipeline execution canceled task_id=%s context_id=%s "
+                        "cancel_source=%s execution_id=%s control_phase=%s "
+                        "termination_reason=%s",
+                        task_id,
+                        context_id,
+                        cancel_source,
+                        getattr(control, "execution_id", None),
+                        getattr(control, "phase", None),
+                        sanitize_strict_text(execution_termination_reason or ""),
+                    )
                     cancel_reason = execution_termination_reason or _("Task canceled.")
                     cancel_data = {"source": cancel_source, "reason": cancel_reason}
                     cancel_handoff_data = {"canceled": True, "reason": _("Task canceled.")}
@@ -1379,13 +1445,45 @@ class IacCodeA2APipelineExecutor:
         cwd: str,
         pipeline_input: PipelineUserInput,
         preserve_task_record: bool,
+        direct_route_gate: DirectPipelineRouteGate | None = None,
+        bind_publisher_event_queue: bool = False,
     ) -> bool:
         runtime = ctx.runtime
         if getattr(runtime, "pipeline", None) is None:
             return False
-        if not await _register_active_interrupt(runtime):
+        if not await _register_active_interrupt(
+            runtime,
+            event_queue=event_queue,
+            direct_route_gate=direct_route_gate,
+            bind_publisher_event_queue=bind_publisher_event_queue,
+        ):
             logger.info("Ignoring A2A pipeline interrupt after terminal publication started")
+            # Direct routing has a recovery gate that makes the dispatcher
+            # recreate the request lifecycle.  A base SDK lifecycle needs an
+            # explicit non-terminal frame so the caller does not mistake an
+            # empty stream (or a terminal retry) for this request's result.
+            if direct_route_gate is None and bind_publisher_event_queue:
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                    text=_retry_text(),
+                )
             return True
+
+        # The SDK lifecycle that recovered an input-required task may not
+        # replay its existing Task projection.  Publish a request-scoped
+        # non-terminal frame before routing so the upstream caller can bind
+        # execution control even when the accepted interrupt itself completes
+        # without producing another public event.
+        if direct_route_gate is None and bind_publisher_event_queue:
+            await self._publish_status(
+                event_queue,
+                task_id=task_id,
+                context_id=context_id,
+                state=TaskState.TASK_STATE_WORKING,
+            )
 
         interrupt_registered = True
 
@@ -4598,6 +4696,37 @@ def waiting_input_task_id_from_sidecar(*, cwd: str, session_id: str, context_id:
     )
 
 
+def sandbox_release_recoverable_task_id_from_sidecar(*, cwd: str, session_id: str, context_id: str) -> str | None:
+    task_id = waiting_input_task_id_from_sidecar(cwd=cwd, session_id=session_id, context_id=context_id)
+    if task_id is None:
+        return None
+    pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    journal = A2APipelineJournal(pipeline_dir)
+    pending_input = _pending_input_from_snapshot(
+        _authoritative_snapshot_for_task(
+            snapshot_store=snapshot_store,
+            journal=journal,
+            task_id=task_id,
+            context_id=context_id,
+        ),
+        task_id=task_id,
+        context_id=context_id,
+    )
+    if pending_input is None:
+        return None
+    kind = pending_input.get("kind")
+    if kind not in _SANDBOX_RELEASE_RECOVERABLE_INPUT_KINDS:
+        return None
+    if kind == "ask_user_question" and not _string_value(
+        pending_input.get("toolUseId") or pending_input.get("tool_use_id")
+    ):
+        return None
+    if kind == "pipeline_pause_confirmation" and pending_input.get("paused") is not True:
+        return None
+    return task_id
+
+
 def cancel_waiting_input_task_from_sidecar(
     *,
     cwd: str,
@@ -5368,6 +5497,13 @@ async def _drive_stream_events(
             try:
                 event = await anext(stream)
             except asyncio.CancelledError:
+                control = current_execution_control()
+                logger.warning(
+                    "A2A pipeline source canceled execution_id=%s control_phase=%s termination_reason=%s",
+                    getattr(control, "execution_id", None),
+                    getattr(control, "phase", None),
+                    sanitize_strict_text(current_execution_termination_reason() or ""),
+                )
                 completion.cancel()
                 raise
             except BaseException as exc:
@@ -5434,12 +5570,32 @@ async def _settle_active_interrupt_safely(runtime: Any) -> None:
         raise cancellation
 
 
-async def _register_active_interrupt(runtime: Any) -> bool:
+async def _register_active_interrupt(
+    runtime: Any,
+    *,
+    event_queue: Any | None = None,
+    direct_route_gate: DirectPipelineRouteGate | None = None,
+    bind_publisher_event_queue: bool = False,
+) -> bool:
     async with _outbound_lock(runtime):
         if bool(getattr(runtime, "terminal_publication_started", False)):
+            if direct_route_gate is not None:
+                direct_route_gate.require_recovery()
             return False
         runtime.active_interrupt_count = _active_interrupt_count(runtime) + 1
         _interrupt_settled_event(runtime).clear()
+        try:
+            if direct_route_gate is not None:
+                if event_queue is None:
+                    raise RuntimeError("Direct Pipeline route gate requires an event queue")
+                await direct_route_gate.activate(event_queue)
+            if event_queue is not None and (direct_route_gate is not None or bind_publisher_event_queue):
+                runtime.bind_publisher_event_queue(event_queue)
+        except BaseException:
+            runtime.active_interrupt_count = max(0, _active_interrupt_count(runtime) - 1)
+            if runtime.active_interrupt_count == 0:
+                _interrupt_settled_event(runtime).set()
+            raise
         return True
 
 

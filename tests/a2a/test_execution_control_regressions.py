@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import shutil
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
@@ -10,10 +11,12 @@ from unittest.mock import AsyncMock
 
 import pytest
 from a2a.types import Task, TaskState, TaskStatus
+from a2a.utils.errors import InvalidParamsError
 from starlette.testclient import TestClient
 
 from iac_code.a2a.app import create_app
 from iac_code.a2a.execution_control import (
+    NATURAL_COMPLETION_FINALIZED_GENERATION,
     ExecutionController,
     ExecutionControlService,
     bind_execution_control,
@@ -21,6 +24,7 @@ from iac_code.a2a.execution_control import (
     reset_execution_control,
 )
 from iac_code.a2a.executor import IacCodeA2AExecutor
+from iac_code.a2a.input_required import PermissionInputRegistry
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_executor import _cancel_task_safely, _drive_stream_events
 from iac_code.a2a.task_store import A2ATaskStore
@@ -31,9 +35,9 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import ToolContext, ToolRegistry
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
 from iac_code.tools.cloud.aliyun.ros_stack_instances import RosStackInstances
-from iac_code.types.stream_events import MessageEndEvent, TextDeltaEvent, Usage
+from iac_code.types.stream_events import MessageEndEvent, PermissionRequestEvent, TextDeltaEvent, Usage
 
-from .fakes import FakeAgentLoop, FakeEventQueue, FakeRequestContext, FakeRuntime
+from .fakes import FakeAgentLoop, FakeEventQueue, FakeRequestContext, FakeRuntime, pending_future
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +52,306 @@ async def wait_until(predicate, timeout=10):
             await asyncio.sleep(0.005)
 
     await asyncio.wait_for(wait(), timeout)
+
+
+class _ObservedBackupGate:
+    def __init__(self, backup_session, loop):
+        self._backup_session = backup_session
+        self._loop = loop
+        self.started = asyncio.Event()
+        self.release = threading.Event()
+        self.terminal_finished = asyncio.Event()
+        self.calls = []
+
+    def backup_session(self, *args, **kwargs):
+        reason = kwargs.get("reason")
+        critical = kwargs.get("critical")
+        self.calls.append((reason, critical))
+        if reason == BackupReason.NORMAL_TURN_END:
+            self._loop.call_soon_threadsafe(self.started.set)
+            assert self.release.wait(5)
+        result = self._backup_session(*args, **kwargs)
+        if reason == BackupReason.TERMINAL:
+            self._loop.call_soon_threadsafe(self.terminal_finished.set)
+        return result
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_releases_permission_cancel_latch_for_next_turn() -> None:
+    registry = PermissionInputRegistry()
+    await registry.cancel_task("task-1", reversible=True)
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def finalize_natural_completion(self, **kwargs):
+            await kwargs["finalized_cleanup"]()
+            return {
+                "terminationReason": "natural_completion",
+                NATURAL_COMPLETION_FINALIZED_GENERATION: 1,
+            }
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(),
+        model="test",
+        permission_input_registry=registry,
+        execution_control_service=ExecutionControlService(),
+    )
+
+    await executor.finalize_natural_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        completion_generation=1,
+    )
+    future = pending_future()
+    pending = await registry.register(
+        PermissionRequestEvent(
+            tool_name="bash",
+            tool_input={"cmd": "pwd"},
+            tool_use_id="tool-1",
+            response_future=future,
+        ),
+        task_id="task-1",
+        context_id="ctx-1",
+        resolution_owner=object(),
+    )
+
+    assert pending.task_id == "task-1"
+    assert future.done() is False
+
+
+@pytest.mark.asyncio
+async def test_explicit_termination_winning_natural_finalize_keeps_permission_cancel_latch() -> None:
+    registry = PermissionInputRegistry()
+    await registry.cancel_task("task-1", reversible=True)
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def finalize_natural_completion(self, **_kwargs):
+            return {
+                "terminationReason": "explicit_terminate",
+                NATURAL_COMPLETION_FINALIZED_GENERATION: 1,
+            }
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(),
+        model="test",
+        permission_input_registry=registry,
+        execution_control_service=ExecutionControlService(),
+    )
+
+    await executor.finalize_natural_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        completion_generation=1,
+    )
+    future = pending_future()
+    with pytest.raises(InvalidParamsError, match="cancellation is already in progress"):
+        await registry.register(
+            PermissionRequestEvent(
+                tool_name="bash",
+                tool_input={"cmd": "pwd"},
+                tool_use_id="tool-1",
+                response_future=future,
+            ),
+            task_id="task-1",
+            context_id="ctx-1",
+            resolution_owner=object(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_concurrent_explicit_cancel_survives_older_natural_finalize() -> None:
+    registry = PermissionInputRegistry()
+    await registry.cancel_task("task-1", reversible=True)
+    finalize_entered = asyncio.Event()
+    allow_finalize = asyncio.Event()
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def finalize_natural_completion(self, **kwargs):
+            finalize_entered.set()
+            await allow_finalize.wait()
+            await kwargs["finalized_cleanup"]()
+            return {
+                "terminationReason": "natural_completion",
+                NATURAL_COMPLETION_FINALIZED_GENERATION: 1,
+            }
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(),
+        model="test",
+        permission_input_registry=registry,
+        execution_control_service=ExecutionControlService(),
+    )
+    finalizing = asyncio.create_task(
+        executor.finalize_natural_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            completion_generation=1,
+        )
+    )
+    await finalize_entered.wait()
+    await registry.cancel_task("task-1")
+    allow_finalize.set()
+    await finalizing
+
+    with pytest.raises(InvalidParamsError, match="cancellation is already in progress"):
+        await registry.register(
+            PermissionRequestEvent(
+                tool_name="bash",
+                tool_input={"cmd": "pwd"},
+                tool_use_id="tool-1",
+                response_future=pending_future(),
+            ),
+            task_id="task-1",
+            context_id="ctx-1",
+            resolution_owner=object(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_natural_finalize_releases_reversible_close_created_while_control_settles() -> None:
+    registry = PermissionInputRegistry()
+    finalize_entered = asyncio.Event()
+    allow_finalize = asyncio.Event()
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def finalize_natural_completion(self, **kwargs):
+            finalize_entered.set()
+            await allow_finalize.wait()
+            await kwargs["finalized_cleanup"]()
+            return {
+                "terminationReason": "natural_completion",
+                NATURAL_COMPLETION_FINALIZED_GENERATION: 1,
+            }
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(),
+        model="test",
+        permission_input_registry=registry,
+        execution_control_service=ExecutionControlService(),
+    )
+    finalizing = asyncio.create_task(
+        executor.finalize_natural_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            completion_generation=1,
+        )
+    )
+    await finalize_entered.wait()
+    await registry.cancel_task("task-1", reversible=True)
+    allow_finalize.set()
+    await finalizing
+
+    pending = await registry.register(
+        PermissionRequestEvent(
+            tool_name="bash",
+            tool_input={"cmd": "pwd"},
+            tool_use_id="tool-1",
+            response_future=pending_future(),
+        ),
+        task_id="task-1",
+        context_id="ctx-1",
+        resolution_owner=object(),
+    )
+    assert pending.task_id == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_stale_generation_cannot_release_newer_natural_turn_permission_latch(tmp_path) -> None:
+    control = controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    first_generation = await control.detach_task(
+        current,
+        execution_status="completed",
+        natural_completion=True,
+    )
+    await control.attach_task(current)
+    second_generation = await control.detach_task(
+        current,
+        execution_status="completed",
+        natural_completion=True,
+    )
+    assert first_generation is not None
+    assert second_generation is not None
+    settled = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=second_generation,
+    )
+    assert settled[NATURAL_COMPLETION_FINALIZED_GENERATION] == second_generation
+
+    registry = PermissionInputRegistry()
+    await registry.cancel_task("task-1", reversible=True)
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def finalize_natural_completion(self, **kwargs):
+            state = await control.finalize_natural_completion(
+                task_id=kwargs["task_id"],
+                completion_generation=kwargs["completion_generation"],
+            )
+            if state.get(NATURAL_COMPLETION_FINALIZED_GENERATION) == kwargs["completion_generation"]:
+                await kwargs["finalized_cleanup"]()
+            return state
+
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(),
+        model="test",
+        permission_input_registry=registry,
+        execution_control_service=ExecutionControlService(),
+    )
+    await executor.finalize_natural_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        completion_generation=first_generation,
+    )
+
+    with pytest.raises(InvalidParamsError, match="cancellation is already in progress"):
+        await registry.register(
+            PermissionRequestEvent(
+                tool_name="bash",
+                tool_input={"cmd": "pwd"},
+                tool_use_id="tool-1",
+                response_future=pending_future(),
+            ),
+            task_id="task-1",
+            context_id="ctx-1",
+            resolution_owner=object(),
+        )
+    await control.close()
 
 
 def controller(tmp_path, backup=None):
@@ -94,6 +398,189 @@ async def test_slow_termination_commit_keeps_event_loop_and_other_contexts_avail
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fail_first_task_commit", "runtime_close_mode"),
+    [(False, "ok"), (True, "ok"), (False, "raises"), (False, "hangs")],
+)
+async def test_disconnect_timeout_backup_preserves_candidate_selection_for_sandbox_restore(
+    tmp_path,
+    monkeypatch,
+    fail_first_task_commit,
+    runtime_close_mode,
+):
+    from iac_code.a2a.pipeline_journal import A2APipelineJournal
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    shared = tmp_path / "shared"
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(shared))
+    backup = SessionBackupService()
+    service = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=backup)
+    store = A2ATaskStore(persistence=A2APersistenceStore(tmp_path / "a2a"), backup_service=backup)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="test",
+        backup_service=backup,
+        execution_control_service=service,
+    )
+    runtime_close_started = asyncio.Event()
+    runtime_close_cancelled = asyncio.Event()
+    lifecycle_order = []
+
+    async def close_runtime():
+        lifecycle_order.append("runtime_close_started")
+        runtime_close_started.set()
+        if runtime_close_mode == "raises":
+            raise RuntimeError("injected runtime close failure")
+        if runtime_close_mode == "hangs":
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                runtime_close_cancelled.set()
+                raise
+
+    if runtime_close_mode == "hangs":
+        monkeypatch.setattr(
+            "iac_code.a2a.task_store._RUNTIME_CLOSE_TIMEOUT_SECONDS",
+            0.01,
+            raising=False,
+        )
+
+    original_persist_snapshots = store._persist_terminated_task_snapshots_strict
+
+    def record_persist_snapshots(*args):
+        original_persist_snapshots(*args)
+        lifecycle_order.append("task_committed")
+
+    monkeypatch.setattr(store, "_persist_terminated_task_snapshots_strict", record_persist_snapshots)
+    original_backup_session = backup.backup_session
+
+    def record_backup_session(*args, **kwargs):
+        lifecycle_order.append("backup_started")
+        return original_backup_session(*args, **kwargs)
+
+    monkeypatch.setattr(backup, "backup_session", record_backup_session)
+
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: SimpleNamespace(aclose=close_runtime),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(tmp_path), session_id=context.session_id)
+    pending_selection = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-09-15T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {
+            "inputId": "selection-1",
+            "kind": "candidate_selection",
+            "prompt": "请选择方案",
+            "options": [{"name": "方案A", "candidate_index": 0}],
+        },
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pending_selection)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_selection]))
+    control = controller(tmp_path, backup)
+    control.bind_session(context.session_id)
+    control._termination_cleanup = executor._terminate_detached_execution
+    service._controls["ctx-1"] = control
+    store.set_execution_control_provider(service.snapshot_for_context, service.has_active_work)
+
+    try:
+        await control.pause(
+            task_id="task-1",
+            expected_execution_id=control.execution_id,
+            request_id="pause",
+            connection_epoch=1,
+            reason="transport_disconnected",
+            reconnect_timeout_seconds=60,
+        )
+        await wait_until(lambda: control.phase == "paused")
+        pause_id = control.pause_id
+        assert pause_id is not None
+        original_save_task = store._persistence.save_task
+        if fail_first_task_commit:
+
+            def fail_task_commit(_snapshot):
+                raise OSError("injected task commit failure")
+
+            monkeypatch.setattr(store._persistence, "save_task", fail_task_commit)
+        await control.terminate(
+            execution_id=control.execution_id,
+            request_id="disconnect-timeout",
+            connection_epoch=2,
+            reason="disconnect_timeout",
+            pause_id=pause_id,
+        )
+        if fail_first_task_commit:
+            await wait_until(lambda: control.phase == "terminated" and control.backup["status"] == "blocked")
+            assert not control.release_ready
+            assert A2APipelineSnapshotStore(pipeline_dir).load()["status"] == "waiting_input"
+            monkeypatch.setattr(store._persistence, "save_task", original_save_task)
+            await control.terminate(
+                execution_id=control.execution_id,
+                request_id="disconnect-timeout",
+                connection_epoch=2,
+                reason="disconnect_timeout",
+                pause_id=pause_id,
+            )
+        if runtime_close_mode == "hangs":
+            # Observe the close timeout itself separately from real snapshot and
+            # shared-backup I/O; release readiness is not a one-second SLA.
+            await asyncio.wait_for(runtime_close_started.wait(), 10)
+            await asyncio.wait_for(runtime_close_cancelled.wait(), 10)
+        await wait_until(lambda: control.release_ready)
+
+        assert control.phase == "terminated"
+        assert control.execution_status == "input-required"
+        assert control.backup["status"] == "shared_committed"
+        assert runtime_close_started.is_set()
+        assert lifecycle_order.index("task_committed") < lifecycle_order.index("runtime_close_started")
+        assert lifecycle_order.index("runtime_close_started") < lifecycle_order.index("backup_started")
+        assert json.loads(next(shared.rglob("a2a/task.json")).read_text(encoding="utf-8"))["state"] == (
+            "input-required"
+        )
+        shared_pipeline_snapshot = json.loads(
+            next(shared.rglob("a2a/pipeline/a2a-snapshot.json")).read_text(encoding="utf-8")
+        )
+        assert shared_pipeline_snapshot["status"] == "waiting_input"
+
+        session_dir = SessionStorage().session_dir(str(tmp_path), context.session_id)
+        shutil.rmtree(session_dir)
+        restored = backup.restore_session(str(tmp_path), context.session_id)
+        assert restored.restored
+        restored_pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(tmp_path), session_id=context.session_id)
+        restored_task = json.loads((session_dir / "a2a" / "task.json").read_text(encoding="utf-8"))
+        restored_context = json.loads((session_dir / "a2a" / "context.json").read_text(encoding="utf-8"))
+        assert restored_task["state"] == "input-required"
+        assert restored_context["active_task_id"] is None
+        assert A2APipelineSnapshotStore(restored_pipeline_dir).load()["status"] == "waiting_input"
+        assert all(
+            event["eventType"] != "pipeline_canceled" for event in A2APipelineJournal(restored_pipeline_dir).read_all()
+        )
+    finally:
+        await service.close()
+        await store.stop_cleanup_loop()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("staged", [False, True])
 @pytest.mark.parametrize("mode", ["normal", "pipeline"])
 async def test_terminate_waits_for_bootstrap_and_cleanup_then_backs_up(tmp_path, monkeypatch, staged, mode):
@@ -107,7 +594,8 @@ async def test_terminate_waits_for_bootstrap_and_cleanup_then_backs_up(tmp_path,
     executor = IacCodeA2AExecutor(
         task_store=store, model="test", backup_service=backup, execution_control_service=service
     )
-    started, release = threading.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    started, release = asyncio.Event(), threading.Event()
     closing, close_release, closed = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
     async def close():
@@ -116,8 +604,9 @@ async def test_terminate_waits_for_bootstrap_and_cleanup_then_backs_up(tmp_path,
         closed.set()
 
     def factory(options):
-        started.set()
-        assert release.wait(5)
+        loop.call_soon_threadsafe(started.set)
+        # Safety bound only; the test releases this gate in finally as well.
+        assert release.wait(20)
         return FakeRuntime(agent_loop=FakeAgentLoop([]), session_id=options.session_id, aclose=close)
 
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", factory)
@@ -134,7 +623,9 @@ async def test_terminate_waits_for_bootstrap_and_cleanup_then_backs_up(tmp_path,
         executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
     )
     try:
-        assert await asyncio.to_thread(started.wait, 2)
+        # Bootstrap performs real persistence before entering the factory.
+        # Wait for its notification without occupying another executor thread.
+        await asyncio.wait_for(started.wait(), 10)
         control = service.get_for_context("ctx-1")
         assert control.session_id is not None
         await control.terminate(
@@ -145,7 +636,7 @@ async def test_terminate_waits_for_bootstrap_and_cleanup_then_backs_up(tmp_path,
         assert not control.release_ready
         assert not execution.done()
         release.set()
-        await asyncio.wait_for(closing.wait(), 2)
+        await asyncio.wait_for(closing.wait(), 10)
         assert not control.release_ready
         execution.cancel()  # Repeated cancellation must not abandon runtime cleanup.
         await asyncio.sleep(0.01)
@@ -670,16 +1161,8 @@ async def test_finished_normal_turn_keeps_result_during_slow_backup(tmp_path, mo
             agent_loop=FakeAgentLoop([TextDeltaEvent(text="finished result")]), session_id=options.session_id
         ),
     )
-    started, release = threading.Event(), threading.Event()
-    original_backup = backup.backup_session
-
-    def gated_backup(*args, **kwargs):
-        if kwargs.get("reason") == BackupReason.NORMAL_TURN_END:
-            started.set()
-            assert release.wait(5)
-        return original_backup(*args, **kwargs)
-
-    monkeypatch.setattr(backup, "backup_session", gated_backup)
+    backup_gate = _ObservedBackupGate(backup.backup_session, asyncio.get_running_loop())
+    monkeypatch.setattr(backup, "backup_session", backup_gate.backup_session)
     publisher = (
         asyncio.create_task(publish_staged_backups(SessionBackupStagingWorker(tmp_path / "staging", shared)))
         if staged
@@ -690,7 +1173,7 @@ async def test_finished_normal_turn_keeps_result_during_slow_backup(tmp_path, mo
         executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
     )
     try:
-        assert await asyncio.to_thread(started.wait, 2)
+        await backup_gate.started.wait()
         record = await store.get_task_record("task-1")
         assert record.state == "input-required"
         control = service.get_for_context("ctx-1")
@@ -714,8 +1197,8 @@ async def test_finished_normal_turn_keeps_result_during_slow_backup(tmp_path, mo
             )
             await wait_until(lambda: control.phase == "terminating")
         assert not control.release_ready
-        release.set()
-        await asyncio.wait_for(execution, 3)
+        backup_gate.release.set()
+        await execution
         expected = "canceled" if termination == "legacy" else "input-required"
         if termination != "legacy":
             await wait_until(lambda: control.release_ready)
@@ -723,8 +1206,14 @@ async def test_finished_normal_turn_keeps_result_during_slow_backup(tmp_path, mo
         record = await store.get_task_record("task-1")
         assert record.state == expected
         assert record.output_text == ["finished result"]
-        # Legacy cancel only stages its noncritical backup; it has no
-        # execution-control releaseReady barrier for shared publication.
+        if termination == "legacy":
+            assert backup_gate.terminal_finished.is_set()
+            assert backup_gate.calls == [
+                (BackupReason.NORMAL_TURN_END, False),
+                (BackupReason.TERMINAL, True),
+            ]
+        # Legacy cancel stages both backups without an execution-control
+        # releaseReady barrier for shared publication.
         await wait_until(
             lambda: any(
                 json.loads(snapshot.read_text(encoding="utf-8"))["state"] == expected
@@ -732,7 +1221,7 @@ async def test_finished_normal_turn_keeps_result_during_slow_backup(tmp_path, mo
             )
         )
     finally:
-        release.set()
+        backup_gate.release.set()
         execution.cancel()
         await asyncio.gather(execution, return_exceptions=True)
         await service.close()

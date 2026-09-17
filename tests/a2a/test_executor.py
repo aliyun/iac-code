@@ -7,11 +7,17 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from a2a.types import Task, TaskState, TaskStatusUpdateEvent
+from a2a.server.context import ServerCallContext
+from a2a.types import Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.backup import backup_session_async
+from iac_code.a2a.execution_control import (
+    NaturalCompletionGenerationCarrier,
+    RecoverableInputAdmissionCarrier,
+    bind_execution_control,
+)
 from iac_code.a2a.executor import IacCodeA2AExecutor, _normal_handoff_has_backup_ack
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.input_required import PermissionIdentityValidationError, PermissionResponse
@@ -21,6 +27,7 @@ from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
+from iac_code.a2a.request_scoped_active_task import PipelineLifecycleEventQueueCarrier
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import ImageBlock, Message, TextBlock
 from iac_code.commands.registry import CommandRegistry, PromptCommand
@@ -49,6 +56,7 @@ from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, Bac
 from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
+from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
 from iac_code.types.skill_source import SkillSource
 from iac_code.types.stream_events import (
     MessageEndEvent,
@@ -2661,6 +2669,153 @@ async def test_executor_delegates_pipeline_mode_after_validation(
 
 
 @pytest.mark.asyncio
+async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    observed: dict[str, object] = {}
+
+    class Control:
+        task_id = "task-1"
+
+        async def checkpoint(self) -> None:
+            observed["checkpointed"] = True
+
+        async def mark_execution_started(self) -> None:
+            observed["started"] = True
+
+        async def detach_task(
+            self,
+            _task,
+            *,
+            execution_status: str,
+            natural_completion: bool = False,
+        ) -> None:
+            observed["detached_as"] = execution_status
+            observed["natural_completion"] = natural_completion
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def begin_execution(self, **kwargs):
+            observed["begin"] = kwargs
+            return Control()
+
+    class SpyPipelineExecutor:
+        def __init__(self, **_kwargs) -> None:
+            return None
+
+        async def execute(self, *, event_queue, **_kwargs):
+            observed["events_at_delegation"] = list(event_queue.events)
+            return True
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", SpyPipelineExecutor)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.state = "input-required"
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        execution_control_service=ExecutionControlService(),
+    )
+    context = FakeRequestContext(
+        task_id="task-1",
+        context_id="ctx-1",
+        text="确认方案并继续",
+        metadata={"iac_code": {"cwd": str(tmp_path), "run_mode": "pipeline"}},
+    )
+    context.current_task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+    )
+    RecoverableInputAdmissionCarrier.attach(context, "recovery-1")
+    PipelineLifecycleEventQueueCarrier.attach(context)
+    queue = FakeEventQueue()
+
+    await executor.execute(context, queue)
+
+    assert observed["checkpointed"] is True
+    assert observed["started"] is True
+    assert observed["begin"]["recoverable_input_admission"] == "recovery-1"
+    assert observed["natural_completion"] is True
+    assert PipelineLifecycleEventQueueCarrier.is_bound(context)
+    events_at_delegation = observed["events_at_delegation"]
+    assert isinstance(events_at_delegation, list)
+    assert len(events_at_delegation) == 1
+    dumped = dump(events_at_delegation[0])
+    assert dumped["taskId"] == "task-1"
+    assert dumped["contextId"] == "ctx-1"
+    assert dumped["status"]["state"] == "TASK_STATE_WORKING"
+
+
+@pytest.mark.asyncio
+async def test_executor_marks_failed_response_as_natural_completion(monkeypatch, tmp_path: Path) -> None:
+    observed: dict[str, object] = {}
+
+    class Control:
+        task_id = "task-1"
+
+        async def detach_task(
+            self,
+            _task,
+            *,
+            execution_status: str,
+            natural_completion: bool = False,
+        ) -> int:
+            observed["execution_status"] = execution_status
+            observed["natural_completion"] = natural_completion
+            return 17
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        async def finalize_natural_completion(self, **kwargs) -> None:
+            observed["finalized_generation"] = kwargs["completion_generation"]
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    control_service = ExecutionControlService()
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        execution_control_service=control_service,
+    )
+
+    async def fail_execution(*_args, **_kwargs) -> None:
+        record.state = "failed"
+        bind_execution_control(Control())
+
+    monkeypatch.setattr(executor, "_execute", fail_execution)
+    context = FakeRequestContext(
+        task_id="task-1",
+        context_id="ctx-1",
+        metadata={"iac_code": {"cwd": str(tmp_path)}},
+    )
+    context.call_context = ServerCallContext()
+    NaturalCompletionGenerationCarrier.prepare(context)
+    assert NaturalCompletionGenerationCarrier.mark_delivered(context.call_context) is None
+
+    await executor.execute(context, FakeEventQueue())
+
+    assert observed == {
+        "execution_status": "failed",
+        "natural_completion": True,
+        "finalized_generation": 17,
+    }
+    assert NaturalCompletionGenerationCarrier.read(context) == 17
+
+
+@pytest.mark.asyncio
 async def test_executor_hydrates_running_pipeline_task_id_from_sidecar(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -2899,9 +3054,7 @@ async def test_executor_runs_normal_mode_when_iac_code_mode_is_normal(
 
 
 @pytest.mark.asyncio
-async def test_normal_mode_ignores_stale_pipeline_name(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+async def test_normal_mode_ignores_stale_pipeline_name(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     loop = FakeAgentLoop([TextDeltaEvent(text="normal")])
     runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
@@ -4309,9 +4462,7 @@ class TestResolveAliyunCredential:
         )
         executor = self._make_executor()
 
-        result = executor._resolve_aliyun_credential(
-            {"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}}
-        )
+        result = executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}})
 
         assert result is not None
         assert result is not configured
@@ -4327,9 +4478,7 @@ class TestResolveAliyunCredential:
         monkeypatch.setattr("iac_code.a2a.executor.AliyunCredentials.load", lambda: None)
         executor = self._make_executor()
 
-        result = executor._resolve_aliyun_credential(
-            {"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}}
-        )
+        result = executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "cn-beijing"}})
 
         assert result is None
 
@@ -4337,9 +4486,7 @@ class TestResolveAliyunCredential:
         executor = self._make_executor()
 
         with pytest.raises(InvalidParamsError, match="Unsupported Alibaba Cloud region ID"):
-            executor._resolve_aliyun_credential(
-                {"iac_code": {"alibaba_cloud_region_id": "https://example.com"}}
-            )
+            executor._resolve_aliyun_credential({"iac_code": {"alibaba_cloud_region_id": "https://example.com"}})
 
 
 @pytest.mark.asyncio
@@ -5101,7 +5248,9 @@ async def test_suspending_permission_answer_waits_for_owner_then_resumes_once(
     async def pending_for_response(_response):
         return pending
 
-    async def answer(_response, *, before_delivery=None):
+    async def answer(_response, *, aliyun_credential=None, before_delivery=None):
+        assert aliyun_credential.access_key_id == "fresh-sts-id"
+        assert aliyun_credential.sts_token == "fresh-sts-token"
         if before_delivery is not None:
             await before_delivery()
         return True
@@ -5133,7 +5282,18 @@ async def test_suspending_permission_answer_waits_for_owner_then_resumes_once(
     monkeypatch.setattr(executor, "_publish_status", publish)
 
     await executor._execute(
-        FakeRequestContext(task_id="task-1", context_id="ctx-1"),
+        FakeRequestContext(
+            task_id="task-1",
+            context_id="ctx-1",
+            metadata={
+                "iac_code": {
+                    "alibaba_cloud_access_key_id": "fresh-sts-id",
+                    "alibaba_cloud_access_key_secret": "fresh-sts-secret",
+                    "alibaba_cloud_security_token": "fresh-sts-token",
+                    "alibaba_cloud_region_id": "cn-beijing",
+                }
+            },
+        ),
         FakeEventQueue(),
         context_id="ctx-1",
     )
@@ -5166,7 +5326,7 @@ async def test_failed_live_permission_answer_releases_stale_pending_before_recov
         calls.append("lookup")
         return pending
 
-    async def answer(_response, *, before_delivery=None):
+    async def answer(_response, *, aliyun_credential=None, before_delivery=None):
         del before_delivery
         calls.append("answer")
         raise InvalidParamsError("permission boundary has no live owner")
@@ -5276,9 +5436,7 @@ async def test_persisted_permission_restores_backup_before_checkpoint_lookup(
     )
     assert activations == ["activated"]
     assert restored_storage.exists(cwd, session_id)
-    assert (
-        restored_storage.session_dir(cwd, session_id) / "permission-waits" / f"{boundary_id}.json"
-    ).is_file()
+    assert (restored_storage.session_dir(cwd, session_id) / "permission-waits" / f"{boundary_id}.json").is_file()
 
 
 @pytest.mark.asyncio
@@ -5445,7 +5603,7 @@ async def test_identity_lookup_failure_keeps_live_permission_pending(monkeypatch
     async def pending_for_response(_response):
         return pending
 
-    async def answer(_response, *, before_delivery=None):
+    async def answer(_response, *, aliyun_credential=None, before_delivery=None):
         del before_delivery
         raise PermissionIdentityValidationError("InternalError", retryable=True)
 
@@ -5498,7 +5656,7 @@ async def test_rejected_live_permission_does_not_replace_context_llm_headers(
     async def pending_for_response(_response):
         return SimpleNamespace()
 
-    async def answer(_response, *, before_delivery=None):
+    async def answer(_response, *, aliyun_credential=None, before_delivery=None):
         assert before_delivery is not None
         raise PermissionIdentityValidationError("cloud_execution_identity_changed", retryable=False)
 
@@ -5515,9 +5673,7 @@ async def test_rejected_live_permission_does_not_replace_context_llm_headers(
         FakeEventQueue(),
     )
 
-    assert await store.resolve_context_llm_headers("ctx-1", None) == {
-        "Authorization": "Bearer accepted"
-    }
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {"Authorization": "Bearer accepted"}
 
 
 @pytest.mark.asyncio
@@ -5540,7 +5696,7 @@ async def test_duplicate_live_permission_keeps_first_committed_llm_headers(
     async def pending_for_response(_response):
         return pending
 
-    async def answer(_response, *, before_delivery=None):
+    async def answer(_response, *, aliyun_credential=None, before_delivery=None):
         nonlocal answer_count
         answer_count += 1
         if answer_count == 1:
@@ -5574,9 +5730,7 @@ async def test_duplicate_live_permission_keeps_first_committed_llm_headers(
     )
 
     assert answer_count == 2
-    assert await store.resolve_context_llm_headers("ctx-1", None) == {
-        "Authorization": "Bearer first"
-    }
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {"Authorization": "Bearer first"}
 
 
 @pytest.mark.asyncio
@@ -5598,7 +5752,7 @@ async def test_rejected_sideband_permission_does_not_replace_context_llm_headers
     async def is_sideband_response(_response):
         return True
 
-    async def answer(_response, *, before_delivery=None):
+    async def answer(_response, *, aliyun_credential=None, before_delivery=None):
         assert before_delivery is not None
         raise InvalidParamsError("permission_resume_invalid: pending permission is not active")
 
@@ -5611,9 +5765,7 @@ async def test_rejected_sideband_permission_does_not_replace_context_llm_headers
             metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer rejected"}}},
         )
 
-    assert await store.resolve_context_llm_headers("ctx-1", None) == {
-        "Authorization": "Bearer accepted"
-    }
+    assert await store.resolve_context_llm_headers("ctx-1", None) == {"Authorization": "Bearer accepted"}
 
 
 @pytest.mark.asyncio
@@ -5686,9 +5838,17 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
     )
     seen_access_key_ids: list[str | None] = []
 
+    class CapturedRosClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+    monkeypatch.setattr("iac_code.tools.cloud.aliyun.ros_client.RosClient", CapturedRosClient)
+
     def register_cloud_tools(_registry, credentials, _services):
         credential = credentials.get_provider("aliyun")
-        seen_access_key_ids.append(credential.access_key_id if credential else None)
+        client = RosClientFactory.create(credential, region_id="cn-beijing")
+        seen_access_key_ids.append(client.config.access_key_id)
+        assert client.config.security_token == "resume-sts-token"
 
     monkeypatch.setattr("iac_code.a2a.executor.PermissionWaitCheckpointStore", lambda *_args: CheckpointStore())
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
@@ -5738,8 +5898,7 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         index
         for index, event in enumerate(queue.events)
         if isinstance(event, TaskStatusUpdateEvent)
-        and dump(event).get("metadata", {}).get("iac_code", {}).get("inputReceived", {}).get("decision")
-        == "allow_once"
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("inputReceived", {}).get("decision") == "allow_once"
     ]
     final_indices = [
         index

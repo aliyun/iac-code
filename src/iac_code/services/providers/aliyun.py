@@ -111,6 +111,12 @@ class AliyunCredential:
     credential_source: str = field(default="", repr=False, compare=False)
     credential_source_path: str = field(default="", repr=False, compare=False)
 
+    def refresh_from(self, credential: "AliyunCredential") -> None:
+        """Replace this request-scoped credential without changing its object identity."""
+
+        for credential_field in fields(self):
+            setattr(self, credential_field.name, getattr(credential, credential_field.name))
+
 
 _aliyun_credential_override: contextvars.ContextVar[AliyunCredential | None] = contextvars.ContextVar(
     "iac_code_aliyun_credential_override", default=None
@@ -174,6 +180,12 @@ def use_aliyun_credential(credential: AliyunCredential) -> Iterator[None]:
         yield
     finally:
         _aliyun_credential_override.reset(token)
+
+
+def current_aliyun_credential_override() -> AliyunCredential | None:
+    """Return only the request-scoped override, without consulting global credential sources."""
+
+    return _aliyun_credential_override.get()
 
 
 def mask_sensitive(value: str) -> str:

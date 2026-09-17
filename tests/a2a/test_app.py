@@ -43,7 +43,7 @@ from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2
 from iac_code.a2a.pipeline_executor import recoverable_task_id_from_sidecar
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
-from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.a2a.task_store import A2ATaskStore, _task_updated_at_from_sdk_task
 from iac_code.a2a.transports.dispatcher import create_runtime_components
 from iac_code.mcp.errors import MCPNeedsAuthError
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
@@ -62,6 +62,7 @@ from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, Bac
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import TextDeltaEvent, ToolResultEvent
+from iac_code.utils.state_io import atomic_write_json
 
 from .fakes import FakeAgentLoop, FakeRuntime
 
@@ -440,9 +441,7 @@ def test_pipeline_state_endpoint_can_return_delta_without_snapshot(tmp_path) -> 
     )
 
     with TestClient(app) as client:
-        response = client.get(
-            "/iac-code/pipeline/state?contextId=ctx-1&afterSequence=1&includeSnapshot=false"
-        )
+        response = client.get("/iac-code/pipeline/state?contextId=ctx-1&afterSequence=1&includeSnapshot=false")
 
     assert response.status_code == 200
     data = response.json()
@@ -2871,37 +2870,220 @@ async def test_subscribe_to_active_task_yields_initial_task_then_updates(monkeyp
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
     components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
     call_context = ServerCallContext()
+    stream = None
+    collector = None
 
-    result = await components.handler.on_message_send(
-        SendMessageRequest(
-            message=Message(
-                message_id="msg-1",
-                role=Role.ROLE_USER,
-                parts=[Part(text="hello")],
-                metadata={"iac_code": {"cwd": str(tmp_path)}},
+    try:
+        result = await components.handler.on_message_send(
+            SendMessageRequest(
+                message=Message(
+                    message_id="msg-1",
+                    role=Role.ROLE_USER,
+                    parts=[Part(text="hello")],
+                    metadata={"iac_code": {"cwd": str(tmp_path)}},
+                ),
+                configuration=SendMessageConfiguration(accepted_output_modes=["text/plain"], return_immediately=True),
             ),
-            configuration=SendMessageConfiguration(accepted_output_modes=["text/plain"], return_immediately=True),
-        ),
-        call_context,
-    )
-    assert isinstance(result, Task)
+            call_context,
+        )
+        assert isinstance(result, Task)
 
-    stream = components.handler.on_subscribe_to_task(SubscribeToTaskRequest(id=result.id), call_context)
-    first_event = await asyncio.wait_for(anext(stream), timeout=1)
-    release.set()
-    remaining_events = []
+        stream = components.handler.on_subscribe_to_task(SubscribeToTaskRequest(id=result.id), call_context)
+        first_event_ready = asyncio.get_running_loop().create_future()
+        remaining_events = []
 
-    async def collect_remaining_events() -> None:
+        async def collect_events() -> None:
+            try:
+                async for event in stream:
+                    if not first_event_ready.done():
+                        first_event_ready.set_result(event)
+                    else:
+                        remaining_events.append(event)
+            except BaseException as exc:
+                if not first_event_ready.done():
+                    first_event_ready.set_exception(exc)
+                raise
+            finally:
+                if not first_event_ready.done():
+                    first_event_ready.set_exception(AssertionError("subscription ended before the initial task"))
+
+        collector = asyncio.create_task(collect_events(), name="collect-active-task-subscription")
+        first_event = await asyncio.shield(first_event_ready)
+        release.set()
+        await asyncio.shield(collector)
+
+        execution_state = await components.execution_control_service.observe(
+            context_id=result.context_id,
+            owner='',
+        )
+        assert isinstance(first_event, Task)
+        assert first_event.id == result.id
+        assert "second" in json.dumps([event.__class__.__name__ + str(event) for event in remaining_events])
+        assert prompts == ["hello"]
+        assert execution_state["phase"] == "terminated"
+        assert execution_state["terminationReason"] == "natural_completion"
+        assert execution_state["releaseReady"] is True
+    finally:
+        release.set()
+        try:
+            if collector is not None and not collector.done():
+                await asyncio.shield(collector)
+        finally:
+            try:
+                if stream is not None:
+                    await stream.aclose()
+            finally:
+                await components.aclose()
+
+
+class NaturalCompletionProjectionGate:
+    """Hold one newer SDK working projection across the executor cleanup boundary."""
+
+    def __init__(self, store: A2ATaskStore) -> None:
+        loop = asyncio.get_running_loop()
+        self._store = store
+        self._save = store.save
+        self._get_task_record = store.get_task_record
+        self._projection_release = loop.create_future()
+        self._record_read = loop.create_future()
+        self._task_id: str | None = None
+        self._projection_intercepted = False
+        self._projection_overwrote = False
+        self.projection_waiting = asyncio.Event()
+        self.projection_saved = asyncio.Event()
+        self.final_record_read_waiting = asyncio.Event()
+        self.agent_release = asyncio.Event()
+        self.agent_completed = asyncio.Event()
+        self.remaining_events = []
+
+    def install(self, monkeypatch) -> None:
+        monkeypatch.setattr(self._store, "save", self.save)
+        monkeypatch.setattr(self._store, "get_task_record", self.get_task_record)
+
+    def target(self, task_id: str) -> None:
+        self._task_id = task_id
+
+    async def run_streaming(self, _prompt: str):
+        yield TextDeltaEvent(text="first")
+        await self.agent_release.wait()
+        yield TextDeltaEvent(text="second")
+        self.agent_completed.set()
+
+    async def save(self, task, context=None) -> None:
+        record = self._store._tasks.get(task.id)
+        should_delay = bool(
+            not self._projection_intercepted
+            and task.id == self._task_id
+            and task.status.state == TaskState.TASK_STATE_WORKING
+            and record is not None
+            and record.state == "input-required"
+            and _task_updated_at_from_sdk_task(task) > record.updated_at
+        )
+        if not should_delay:
+            await self._save(task, context)
+            return
+
+        self._projection_intercepted = True
+        self.projection_waiting.set()
+        await self._projection_release
+        await self._save(task, context)
+        record = self._store._tasks[task.id]
+        if record.state == "working":
+            self._projection_overwrote = True
+        self.projection_saved.set()
+        if self._projection_overwrote:
+            await self._record_read
+
+    async def get_task_record(self, task_id: str):
+        current = self._store._tasks.get(task_id)
+        if (
+            task_id == self._task_id
+            and self.agent_completed.is_set()
+            and current is not None
+            and current.state == "input-required"
+            and current.active_task is None
+            and not self.final_record_read_waiting.is_set()
+        ):
+            self.final_record_read_waiting.set()
+            await self.projection_waiting.wait()
+            await self.projection_saved.wait()
+        record = await self._get_task_record(task_id)
+        if self._projection_overwrote and task_id == self._task_id and not self._record_read.done():
+            self._record_read.set_result(None)
+        return record
+
+    async def collect(self, stream) -> None:
         async for event in stream:
-            remaining_events.append(event)
+            self.remaining_events.append(event)
 
-    await asyncio.wait_for(collect_remaining_events(), timeout=1)
+    def release_projection(self) -> None:
+        if not self._projection_release.done():
+            self._projection_release.set_result(None)
 
-    assert isinstance(first_event, Task)
-    assert first_event.id == result.id
-    assert "second" in json.dumps([event.__class__.__name__ + str(event) for event in remaining_events])
-    assert prompts == ["hello"]
-    await components.aclose()
+    def release_waiters(self) -> None:
+        self.agent_release.set()
+        self.release_projection()
+        self.projection_waiting.set()
+        self.projection_saved.set()
+        if not self._record_read.done():
+            self._record_read.set_result(None)
+
+
+@pytest.mark.asyncio
+async def test_subscribe_finalizes_when_newer_working_projection_arrives_after_executor_cleanup(
+    monkeypatch, tmp_path
+) -> None:
+    runtime = FakeRuntime(agent_loop=None, session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+    components = create_runtime_components(model="qwen3.6-plus", host="127.0.0.1", port=41242)
+    gate = NaturalCompletionProjectionGate(components.task_store)
+    gate.install(monkeypatch)
+    runtime.agent_loop = gate
+    send_context = ServerCallContext()
+    subscribe_context = ServerCallContext()
+    collector = None
+
+    try:
+        result = await components.handler.on_message_send(
+            SendMessageRequest(
+                message=Message(
+                    message_id="msg-1",
+                    role=Role.ROLE_USER,
+                    parts=[Part(text="hello")],
+                    metadata={"iac_code": {"cwd": str(tmp_path)}},
+                ),
+                configuration=SendMessageConfiguration(accepted_output_modes=["text/plain"], return_immediately=True),
+            ),
+            send_context,
+        )
+        assert isinstance(result, Task)
+        gate.target(result.id)
+
+        stream = components.handler.on_subscribe_to_task(SubscribeToTaskRequest(id=result.id), subscribe_context)
+        first_event = await asyncio.wait_for(anext(stream), timeout=1)
+        collector = asyncio.create_task(gate.collect(stream))
+        gate.agent_release.set()
+        await asyncio.wait_for(gate.projection_waiting.wait(), timeout=1)
+        await asyncio.wait_for(gate.final_record_read_waiting.wait(), timeout=1)
+        gate.release_projection()
+        await asyncio.wait_for(gate.projection_saved.wait(), timeout=1)
+        await asyncio.wait_for(collector, timeout=1)
+
+        execution_state = await components.execution_control_service.observe(
+            context_id=result.context_id,
+            owner="",
+        )
+        assert isinstance(first_event, Task)
+        assert "second" in json.dumps([event.__class__.__name__ + str(event) for event in gate.remaining_events])
+        assert execution_state["phase"] == "terminated"
+        assert execution_state["terminationReason"] == "natural_completion"
+        assert execution_state["releaseReady"] is True
+    finally:
+        gate.release_waiters()
+        if collector is not None and not collector.done():
+            collector.cancel()
+            await asyncio.gather(collector, return_exceptions=True)
+        await components.aclose()
 
 
 @pytest.mark.asyncio
@@ -2932,6 +3114,8 @@ async def test_active_task_push_enqueue_failure_does_not_fail_task(monkeypatch, 
         enqueue_attempted.set()
         raise OSError("queue unavailable")
 
+    stream = None
+    collector = None
     try:
         result = await components.handler.on_message_send(
             SendMessageRequest(
@@ -2957,23 +3141,47 @@ async def test_active_task_push_enqueue_failure_does_not_fail_task(monkeypatch, 
         components.push_queue.enqueue = fail_enqueue  # type: ignore[union-attr, method-assign]
 
         stream = components.handler.on_subscribe_to_task(SubscribeToTaskRequest(id=result.id), call_context)
-        await asyncio.wait_for(anext(stream), timeout=1)
+        first_event_ready = asyncio.get_running_loop().create_future()
+
+        async def collect_events() -> None:
+            try:
+                async for event in stream:
+                    if not first_event_ready.done():
+                        first_event_ready.set_result(event)
+            except BaseException as exc:
+                if not first_event_ready.done():
+                    first_event_ready.set_exception(exc)
+                raise
+            finally:
+                if not first_event_ready.done():
+                    first_event_ready.set_exception(AssertionError("subscription ended before the initial task"))
+
+        collector = asyncio.create_task(collect_events(), name="collect-push-failure-subscription")
+        first_event = await asyncio.shield(first_event_ready)
+        assert isinstance(first_event, Task)
         with caplog.at_level("WARNING", logger="iac_code.a2a.push"):
             release.set()
+            await asyncio.shield(collector)
 
-            async def collect_remaining_events() -> None:
-                async for _event in stream:
-                    pass
-
-            await asyncio.wait_for(collect_remaining_events(), timeout=1)
-            await asyncio.wait_for(loop_completed.wait(), timeout=1)
-            await asyncio.wait_for(enqueue_attempted.wait(), timeout=1)
-
+        assert loop_completed.is_set()
+        assert enqueue_attempted.is_set()
         final_task = await components.handler.on_get_task(GetTaskRequest(id=result.id), call_context)
         assert final_task.status.state != TaskState.TASK_STATE_FAILED
         assert "Failed to enqueue A2A push notification for task" in caplog.text
     finally:
-        await components.aclose()
+        release.set()
+        try:
+            if collector is not None:
+                if collector.done():
+                    await asyncio.gather(collector, return_exceptions=True)
+                else:
+                    await asyncio.shield(collector)
+        finally:
+            try:
+                if stream is not None:
+                    await stream.aclose()
+            finally:
+                await components.aclose()
 
 
 def test_create_app_wires_stateful_server_primitives(monkeypatch, tmp_path) -> None:
@@ -3322,10 +3530,12 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
     with TestClient(app) as client:
         pause = client.post("/iac-code/execution/pause", json=pause_payload)
         assert pause.status_code == 202
+        assert "inputHandoffReady" not in pause.json()
         pause_id = pause.json()["pauseId"]
 
         state = client.get("/iac-code/execution/state?contextId=ctx-1&executionId=exec-1")
         assert state.status_code == 200
+        assert "inputHandoffReady" not in state.json()
         assert state.json()["phase"] in {"pause_committing", "paused"}
         assert state.json()["executionStatus"] == "input-required"
         assert state.json()["streamAvailable"] is False
@@ -3334,6 +3544,7 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
         assert recovery.status_code == 200
         assert recovery.json()["outputText"] == ["finished turn"]
         assert recovery.json()["task"]["id"] == "task-1"
+        assert "inputHandoffReady" not in recovery.json()["executionControl"]
 
         resumed = client.post(
             "/iac-code/execution/resume",
@@ -3346,6 +3557,7 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
             },
         )
         assert resumed.status_code == 202
+        assert "inputHandoffReady" not in resumed.json()
         assert resumed.json()["phase"] == "resuming"
 
         stale = client.post(
@@ -3378,7 +3590,6 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
             },
         )
         assert late_timeout.status_code == 409
-
         terminated = client.post(
             "/iac-code/execution/terminate",
             json={
@@ -3390,4 +3601,96 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
             },
         )
         assert terminated.status_code == 202
+        assert "inputHandoffReady" not in terminated.json()
         assert terminated.json()["phase"] == "terminating"
+
+
+def test_execution_state_reads_persisted_terminal_snapshot_after_cold_restart(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="",
+        cwd=str(tmp_path),
+        server_instance_id="instance-before-restart",
+        persistence_path=persistence_dir / "execution-control" / "ctx-1.json",
+        backup_service=None,
+        execution_id="exec-1",
+    )
+    control.phase = "terminated"
+    control.execution_status = "input-required"
+    control.stream_available = False
+    control.termination_reason = "natural_completion"
+    control.backup = {"status": "shared_committed", "generation": 3, "commitId": "commit-3"}
+    control.release_ready = True
+    persisted = control.snapshot()
+    persisted["owner"] = ""
+    atomic_write_json(persistence_dir / "execution-control" / "ctx-1.json", persisted)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        state = client.get("/iac-code/execution/state?contextId=ctx-1&executionId=exec-1")
+        mutation = client.post(
+            "/iac-code/execution/terminate",
+            json={
+                "contextId": "ctx-1",
+                "expectedExecutionId": "exec-1",
+                "requestId": "cold-mutation",
+                "connectionEpoch": 1,
+                "reason": "stop_chat",
+            },
+        )
+
+    assert state.status_code == 200
+    assert state.json()["phase"] == "terminated"
+    assert state.json()["terminationReason"] == "natural_completion"
+    assert state.json()["releaseReady"] is True
+    assert "owner" not in state.json()
+    assert mutation.status_code == 404
+
+
+def test_execution_state_hides_persisted_terminal_snapshot_from_wrong_owner(tmp_path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="bearer",
+        cwd=str(tmp_path),
+        server_instance_id="instance-before-restart",
+        persistence_path=persistence_dir / "execution-control" / "ctx-1.json",
+        backup_service=None,
+        execution_id="exec-1",
+    )
+    control.phase = "terminated"
+    control.execution_status = "completed"
+    control.stream_available = False
+    control.termination_reason = "natural_completion"
+    control.release_ready = True
+    persisted = control.snapshot()
+    persisted["owner"] = "bearer"
+    atomic_write_json(persistence_dir / "execution-control" / "ctx-1.json", persisted)
+
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        basic_username="alice",
+        basic_password="pass",
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    with TestClient(app) as client:
+        state = client.get(
+            "/iac-code/execution/state?contextId=ctx-1&executionId=exec-1",
+            headers={"Authorization": "Basic " + b64encode(b"alice:pass").decode("ascii")},
+        )
+
+    assert state.status_code == 404

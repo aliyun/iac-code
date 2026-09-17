@@ -2584,13 +2584,26 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    # Invoke the current interpreter as the fake CLI and let it execute the
-    # positional ``ros`` script from the worker cwd. This avoids depending on
-    # Windows batch-file launch behavior in a manager lifecycle test.
-    fake_cli = Path(sys.executable)
+    # This stdlib-only process test needs Popen.pid to identify the interpreter
+    # itself. Windows venv python.exe is a redirector with a different PID from
+    # the worker it launches; use the base interpreter for the whole process tree.
+    python_executable = getattr(sys, "_base_executable", None) or sys.executable
+    monkeypatch.setattr(bridge, "sys", SimpleNamespace(executable=python_executable))
+    monkeypatch.delenv("__PYVENV_LAUNCHER__", raising=False)
+    fake_cli = Path(python_executable)
+    worker_pid_path = workspace / "worker-pid"
+    release_worker = workspace / "release-worker"
     (workspace / "ros").write_text(
-        "import json, time\n"
-        + "time.sleep(0.6)\n"
+        "import json, os, time\n"
+        + "from pathlib import Path\n"
+        + "pid_path = Path({!r})\n".format(str(worker_pid_path))
+        + "pid_path.with_suffix('.tmp').write_text(str(os.getppid()), encoding='utf-8')\n"
+        + "pid_path.with_suffix('.tmp').replace(pid_path)\n"
+        + "release = Path({!r})\n".format(str(release_worker))
+        + "deadline = time.monotonic() + 25\n"
+        + "while not release.exists():\n"
+        + "    assert time.monotonic() < deadline, 'test did not release worker'\n"
+        + "    time.sleep(0.05)\n"
         + "event = {'result': {'statusUpdate': {'taskId': 'task-1', 'contextId': 'session-1', "
         + "'status': {'state': 'TASK_STATE_INPUT_REQUIRED', 'message': {'role': 'ROLE_AGENT', "
         + "'parts': [{'text': 'done'}]}}, 'metadata': {'iac_code': {'assistantFinal': "
@@ -2601,36 +2614,64 @@ def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_p
 
     # Leave enough scheduling headroom for a loaded Windows xdist runner; this
     # test is about when the idle countdown starts, not sub-second timing.
-    manager = bridge.ensure_manager(5.0)
-    started = bridge._manager_request(
-        manager,
-        "/start",
-        {
-            "workspace": str(workspace),
-            "prompt": "explain VPC",
-            "mode": "normal",
-            "transport": "aliyun_cli",
-            "endpoint": "ros.aliyuncs.com",
-            "regionId": "cn-hangzhou",
-            "aliyunPath": str(fake_cli),
-        },
-    )
-    time.sleep(0.35)
-    assert bridge._pid_alive(manager["pid"])
+    idle_seconds = 5.0
+    manager = bridge.ensure_manager(idle_seconds)
+    try:
+        started = bridge._manager_request(
+            manager,
+            "/start",
+            {
+                "workspace": str(workspace),
+                "prompt": "explain VPC",
+                "mode": "normal",
+                "transport": "aliyun_cli",
+                "endpoint": "ros.aliyuncs.com",
+                "regionId": "cn-hangzhou",
+                "aliyunPath": str(fake_cli),
+            },
+        )
+        # /start returns only after workerPid has been committed. A fixed fake-CLI
+        # sleep can finish before that commit on Windows and leave a stale PID.
+        # Hold the registered worker beyond the idle threshold to test the actual
+        # contract: active work prevents manager idle shutdown.
+        root, job_path, _spool = bridge._job_paths(started["jobId"])
+        with bridge.StateLock(root / ".job.lock"):
+            assert bridge._load_state_json(job_path)["workerPid"] == started["workerPid"]
+        deadline = time.monotonic() + 10
+        while not worker_pid_path.exists():
+            assert time.monotonic() < deadline, "Fake CLI did not start"
+            time.sleep(0.05)
+        assert int(worker_pid_path.read_text(encoding="utf-8")) == started["workerPid"]
+        time.sleep(idle_seconds + 0.5)
+        assert bridge._pid_alive(started["workerPid"])
+        assert bridge._pid_alive(manager["pid"])
+        release_worker.touch()
 
-    _root, job_path, _spool = bridge._job_paths(started["jobId"])
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        if not isinstance(bridge._load_state_json(job_path).get("workerPid"), int):
-            break
-        time.sleep(0.02)
-    assert bridge._load_state_json(job_path)["state"] == "turn-completed"
-    assert bridge._pid_alive(manager["pid"])
-    time.sleep(0.08)
-    assert bridge._pid_alive(manager["pid"])
+        deadline = time.monotonic() + 10
+        while True:
+            # Use the worker's cross-process lock: an unlocked read can race
+            # atomic replacement of job.json and fail with PermissionError on Windows.
+            with bridge.StateLock(root / ".job.lock"):
+                job = bridge._load_state_json(job_path)
+            if not isinstance(job.get("workerPid"), int):
+                break
+            assert time.monotonic() < deadline, {
+                "state": job.get("state"),
+                "workerPid": job.get("workerPid"),
+                "workerStartedAt": job.get("workerStartedAt"),
+                "workerExitedAt": job.get("workerExitedAt"),
+            }
+            time.sleep(0.02)
+        assert job["state"] == "turn-completed"
+        assert bridge._pid_alive(manager["pid"])
+        time.sleep(0.08)
+        assert bridge._pid_alive(manager["pid"])
 
-    _wait_for_pid_exit(manager["pid"], timeout=8.0)
-    assert not bridge._pid_alive(manager["pid"])
+        _wait_for_pid_exit(manager["pid"], timeout=8.0)
+        assert not bridge._pid_alive(manager["pid"])
+    finally:
+        release_worker.touch()
+        _wait_for_pid_exit(manager["pid"], timeout=8.0)
 
 
 def test_manager_failed_start_removes_record_and_terminates_spawn(monkeypatch, tmp_path: Path) -> None:

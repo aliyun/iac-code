@@ -1641,10 +1641,10 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "a2a-sdk", extras = ["http-server", "signing"], marker = "extra == 'a2a'", specifier = ">=1.0.2,<2" },
-    { name = "a2a-sdk", extras = ["http-server", "signing"], marker = "extra == 'agui'", specifier = ">=1.0.2,<2" },
-    { name = "a2a-sdk", extras = ["http-server", "signing"], marker = "extra == 'http'", specifier = ">=1.0.2,<2" },
-    { name = "a2a-sdk", extras = ["signing"], marker = "extra == 'a2a-signing'", specifier = ">=1.0.2,<2" },
+    { name = "a2a-sdk", extras = ["http-server", "signing"], marker = "extra == 'a2a'", specifier = "==1.1.0" },
+    { name = "a2a-sdk", extras = ["http-server", "signing"], marker = "extra == 'agui'", specifier = "==1.1.0" },
+    { name = "a2a-sdk", extras = ["http-server", "signing"], marker = "extra == 'http'", specifier = "==1.1.0" },
+    { name = "a2a-sdk", extras = ["signing"], marker = "extra == 'a2a-signing'", specifier = "==1.1.0" },
     { name = "ag-ui-protocol", marker = "extra == 'agui'", specifier = "==0.1.20" },
     { name = "agent-client-protocol", specifier = ">=0.9.0" },
     { name = "aiohttp", specifier = ">=3.10,<4" },
@@ -1697,7 +1697,7 @@ provides-extras = ["http", "a2a", "a2a-signing", "a2a-grpc", "a2a-redis", "agui"
 
 [package.metadata.requires-dev]
 desktop = [
-    { name = "a2a-sdk", extras = ["http-server", "signing"], specifier = ">=1.0.2,<2" },
+    { name = "a2a-sdk", extras = ["http-server", "signing"], specifier = "==1.1.0" },
     { name = "pyinstaller", specifier = "==6.21.0" },
     { name = "termaid", marker = "python_full_version >= '3.11'", specifier = ">=0.1" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30.0" },

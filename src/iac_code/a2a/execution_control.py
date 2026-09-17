@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import math
 import time
 import uuid
@@ -20,10 +21,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, TypeVar, cast
 
-from iac_code.a2a.backup import await_fenced, run_sync_fenced
+from iac_code.a2a.backup import await_fenced, run_sync_fenced, run_sync_fenced_with_cancel_completion
 from iac_code.services.session_backup import BackupReason, BackupResult
 from iac_code.services.session_storage import SessionStorage
-from iac_code.utils.state_io import atomic_write_json
+from iac_code.utils.public_errors import sanitize_strict_text
+from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
+
+logger = logging.getLogger(__name__)
 
 ExecutionPhase = Literal[
     "running",
@@ -37,6 +41,8 @@ ExecutionPhase = Literal[
 
 _PAUSE_PHASES = frozenset({"pausing", "pause_committing", "paused"})
 _TERMINAL_TASK_STATES = frozenset({"completed", "failed", "canceled", "input-required", "normal-turn-ended"})
+_RECOVERABLE_INPUT_ADMISSION_TTL_SECONDS = 60.0
+NATURAL_COMPLETION_FINALIZED_GENERATION = "_naturalCompletionFinalizedGeneration"
 _CURRENT_CONTROL: ContextVar[Any] = ContextVar("a2a_execution_control", default=None)
 _CURRENT_ACTIVITY_IDS: ContextVar[tuple[str, ...]] = ContextVar("a2a_execution_activity_ids", default=())
 _CURRENT_PARTICIPANT_IDS: ContextVar[tuple[str, ...]] = ContextVar("a2a_execution_participant_ids", default=())
@@ -81,6 +87,369 @@ class _Activity:
     budget_changed: asyncio.Event = field(default_factory=asyncio.Event)
 
 
+@dataclass(frozen=True)
+class _RecoverableInputAdmission:
+    token: str
+    context_id: str
+    task_id: str
+    owner: str
+    expires_at: float
+
+    def as_document(self) -> dict[str, Any]:
+        return {
+            "token": self.token,
+            "contextId": self.context_id,
+            "taskId": self.task_id,
+            "owner": self.owner,
+            "expiresAt": self.expires_at,
+        }
+
+
+@dataclass(frozen=True)
+class _RecoverableInputActivation:
+    previous_control: dict[str, Any] | None
+    execution_id: str
+
+
+class _RecoverableInputAdmissionStore:
+    """One-request reservation store with a cross-process file fence when persistence is enabled."""
+
+    def __init__(self, persistence_root: Path | None) -> None:
+        self._root = persistence_root / "execution-control" if persistence_root is not None else None
+        self._by_token: dict[str, _RecoverableInputAdmission] = {}
+        self._token_by_context: dict[str, str] = {}
+
+    def reserve(self, admission: _RecoverableInputAdmission) -> bool:
+        if self._root is None:
+            if admission.context_id in self._token_by_context:
+                return False
+            self._remember(admission)
+            return True
+        path = self._admission_path(admission.context_id)
+        with cross_process_file_lock(self._lock_path(admission.context_id)):
+            existing = self._load_document(path)
+            if existing is not None and not self._expired(existing):
+                return False
+            if not self._persisted_control_allows_recovery(admission):
+                return False
+            if existing is not None:
+                path.unlink(missing_ok=True)
+            atomic_write_json(path, admission.as_document())
+        self._remember(admission)
+        return True
+
+    def activate(
+        self,
+        admission: _RecoverableInputAdmission,
+        control_snapshot: dict[str, Any],
+    ) -> _RecoverableInputActivation | None:
+        """Fence one admission while publishing its running control."""
+        if self._root is None:
+            if self._by_token.get(admission.token) != admission or self._expired(admission.as_document()):
+                return None
+            return _RecoverableInputActivation(
+                previous_control=None,
+                execution_id=str(control_snapshot["executionId"]),
+            )
+        admission_path = self._admission_path(admission.context_id)
+        with cross_process_file_lock(self._lock_path(admission.context_id)):
+            document = self._load_document(admission_path)
+            if document is None or self._expired(document) or not self._matches(document, admission):
+                return None
+            # A different worker may have advanced the shared control after this
+            # process inspected its stale local controller. Re-check while holding
+            # the same fence used by every recovery reservation and activation.
+            if not self._persisted_control_allows_recovery(admission):
+                return None
+            revision = int(control_snapshot["revision"])
+            persisted_snapshot = dict(control_snapshot)
+            persisted_snapshot["persistedRevision"] = revision
+            control_path = self._root / f"{admission.context_id}.json"
+            previous_control = self._load_document(control_path)
+            atomic_write_json(control_path, persisted_snapshot)
+        return _RecoverableInputActivation(
+            previous_control=previous_control,
+            execution_id=str(control_snapshot["executionId"]),
+        )
+
+    def finish_activation(self, admission: _RecoverableInputAdmission) -> bool:
+        if self._root is not None:
+            path = self._admission_path(admission.context_id)
+            with cross_process_file_lock(self._lock_path(admission.context_id)):
+                document = self._load_document(path)
+                if document is not None and self._matches(document, admission):
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError:
+                        return False
+        self._forget(admission)
+        return True
+
+    def rollback_activation(
+        self,
+        admission: _RecoverableInputAdmission,
+        activation: _RecoverableInputActivation,
+    ) -> bool:
+        if self._root is None:
+            return True
+        with cross_process_file_lock(self._lock_path(admission.context_id)):
+            control_path = self._root / f"{admission.context_id}.json"
+            current = self._load_document(control_path)
+            if current is None or current.get("executionId") != activation.execution_id:
+                return False
+            if activation.previous_control is None:
+                control_path.unlink(missing_ok=True)
+            else:
+                atomic_write_json(control_path, activation.previous_control)
+        return True
+
+    def can_begin_without_admission(
+        self,
+        context_id: str,
+        local_execution_id: str | None,
+        local_server_instance_id: str,
+        local_input_handoff_ready: bool,
+    ) -> bool:
+        """Reject a new local controller when another process owns shared execution state."""
+        if local_input_handoff_ready:
+            return False
+        if self._root is None:
+            return True
+        with cross_process_file_lock(self._lock_path(context_id)):
+            ticket = self._load_document(self._admission_path(context_id))
+            if ticket is not None and not self._expired(ticket):
+                return False
+            control = self._load_document(self._root / f"{context_id}.json")
+            if control is None:
+                return not local_input_handoff_ready
+            if control.get("inputHandoffReady") is True:
+                return False
+            if local_execution_id is not None and (
+                control.get("executionId") == local_execution_id
+                or control.get("serverInstanceId") == local_server_instance_id
+            ):
+                return True
+            return bool(control.get("phase") == "terminated" and control.get("releaseReady", False))
+
+    def has_active(self, context_id: str) -> bool:
+        if self._root is None:
+            return context_id in self._token_by_context
+        path = self._admission_path(context_id)
+        with cross_process_file_lock(self._lock_path(context_id)):
+            document = self._load_document(path)
+            if document is None:
+                return False
+            if self._expired(document):
+                path.unlink(missing_ok=True)
+                return False
+            return True
+
+    def release(self, token: str) -> None:
+        admission = self._by_token.get(token)
+        if admission is None:
+            return
+        if self._root is not None:
+            path = self._admission_path(admission.context_id)
+            with cross_process_file_lock(self._lock_path(admission.context_id)):
+                document = self._load_document(path)
+                if document is not None and self._matches(document, admission):
+                    path.unlink(missing_ok=True)
+        self._forget(admission)
+
+    def get(self, token: str | None) -> _RecoverableInputAdmission | None:
+        return self._by_token.get(token or "")
+
+    def close(self) -> None:
+        for token in tuple(self._by_token):
+            self.release(token)
+
+    def _persisted_control_allows_recovery(self, admission: _RecoverableInputAdmission) -> bool:
+        assert self._root is not None
+        path = self._root / f"{admission.context_id}.json"
+        if not path.exists():
+            return True
+        document = self._load_document(path)
+        if document is None or document.get("taskId") != admission.task_id:
+            return False
+        if document.get("inputHandoffReady") is True:
+            return True
+        if document.get("phase") != "terminated":
+            return False
+        backup = document.get("backup")
+        backup_status = backup.get("status") if isinstance(backup, dict) else None
+        return bool(document.get("releaseReady", False) or backup_status == "blocked")
+
+    def _remember(self, admission: _RecoverableInputAdmission) -> None:
+        self._by_token[admission.token] = admission
+        self._token_by_context[admission.context_id] = admission.token
+
+    def _forget(self, admission: _RecoverableInputAdmission) -> None:
+        self._by_token.pop(admission.token, None)
+        if self._token_by_context.get(admission.context_id) == admission.token:
+            self._token_by_context.pop(admission.context_id, None)
+
+    def _admission_path(self, context_id: str) -> Path:
+        assert self._root is not None
+        return self._root / f".{context_id}.recoverable-input.json"
+
+    def _lock_path(self, context_id: str) -> Path:
+        assert self._root is not None
+        return self._root / f".{context_id}.recoverable-input.lock"
+
+    @staticmethod
+    def _load_document(path: Path) -> dict[str, Any] | None:
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError):
+            return {"expiresAt": math.inf}
+        return value if isinstance(value, dict) else {"expiresAt": math.inf}
+
+    @staticmethod
+    def _expired(document: dict[str, Any]) -> bool:
+        expires_at = document.get("expiresAt")
+        return isinstance(expires_at, (int, float)) and not isinstance(expires_at, bool) and expires_at <= time.time()
+
+    @staticmethod
+    def _matches(document: dict[str, Any], admission: _RecoverableInputAdmission) -> bool:
+        return bool(
+            document.get("token") == admission.token
+            and document.get("contextId") == admission.context_id
+            and document.get("taskId") == admission.task_id
+            and document.get("owner") == admission.owner
+        )
+
+
+class RecoverableInputAdmissionLease:
+    """Transfer one recovery admission from the transport to the SDK producer."""
+
+    def __init__(
+        self,
+        token: str,
+        *,
+        acknowledge_enqueue: Callable[[str], bool],
+        release: Callable[[str], Awaitable[None]],
+    ) -> None:
+        self.token = token
+        self._acknowledge_enqueue = acknowledge_enqueue
+        self._release = release
+        self._enqueued = False
+        self._released = False
+        self._release_lock = asyncio.Lock()
+        self._producer_task: asyncio.Task[Any] | None = None
+        self._producer_done_callback: Callable[[asyncio.Task[Any]], None] | None = None
+        self._producer_cleanup: asyncio.Task[None] | None = None
+
+    def acknowledge_enqueued(self, producer_task: asyncio.Task[Any] | None) -> None:
+        """Commit ownership only after the request queue accepted the context."""
+
+        if self._enqueued or not self._acknowledge_enqueue(self.token):
+            return
+        self._enqueued = True
+        if producer_task is None or producer_task.done():
+            self._schedule_release()
+            return
+        self._producer_task = producer_task
+        self._producer_done_callback = lambda _task: self._schedule_release()
+        producer_task.add_done_callback(self._producer_done_callback)
+
+    async def release(self) -> None:
+        """Release once after execution or an early producer failure."""
+
+        async with self._release_lock:
+            if self._released:
+                return
+            await self._release(self.token)
+            self._released = True
+            if self._producer_task is not None and self._producer_done_callback is not None:
+                self._producer_task.remove_done_callback(self._producer_done_callback)
+            self._producer_task = None
+            self._producer_done_callback = None
+
+    def _schedule_release(self) -> None:
+        if self._released or (self._producer_cleanup is not None and not self._producer_cleanup.done()):
+            return
+        self._producer_cleanup = asyncio.create_task(self.release())
+
+
+class RecoverableInputAdmissionCarrier:
+    """Attach a server-issued admission lease to one queued SDK RequestContext."""
+
+    _ATTRIBUTE = "_iac_code_recoverable_input_admission"
+
+    @classmethod
+    def attach(cls, request_context: Any, admission: str | RecoverableInputAdmissionLease | None) -> None:
+        setattr(request_context, cls._ATTRIBUTE, admission)
+
+    @classmethod
+    def read(cls, request_context: Any) -> str | None:
+        admission = getattr(request_context, cls._ATTRIBUTE, None)
+        if isinstance(admission, RecoverableInputAdmissionLease):
+            return admission.token
+        return admission if isinstance(admission, str) and admission else None
+
+    @classmethod
+    def acknowledge_enqueued(cls, request_context: Any, producer_task: asyncio.Task[Any] | None) -> None:
+        admission = getattr(request_context, cls._ATTRIBUTE, None)
+        if isinstance(admission, RecoverableInputAdmissionLease):
+            admission.acknowledge_enqueued(producer_task)
+
+    @classmethod
+    async def release(cls, request_context: Any) -> None:
+        admission = getattr(request_context, cls._ATTRIBUTE, None)
+        if isinstance(admission, RecoverableInputAdmissionLease):
+            await admission.release()
+
+
+class NaturalCompletionGenerationCarrier:
+    """Carry one executor turn generation to its response-stream boundary."""
+
+    _ATTRIBUTE = "_iac_code_natural_completion_generation"
+    _DELIVERED_ATTRIBUTE = "_iac_code_natural_completion_delivered"
+    _STATE_KEY = "iac_code_natural_completion_generation"
+    _DELIVERED_STATE_KEY = "iac_code_natural_completion_delivered"
+
+    @classmethod
+    def prepare(cls, request_context: Any) -> None:
+        setattr(request_context, cls._ATTRIBUTE, None)
+        setattr(request_context, cls._DELIVERED_ATTRIBUTE, False)
+        call_context = getattr(request_context, "call_context", None)
+        state = getattr(call_context, "state", None)
+        if isinstance(state, dict):
+            state.pop(cls._STATE_KEY, None)
+            state.pop(cls._DELIVERED_STATE_KEY, None)
+
+    @classmethod
+    def attach(cls, request_context: Any, generation: int | None) -> bool:
+        setattr(request_context, cls._ATTRIBUTE, generation)
+        call_context = getattr(request_context, "call_context", None)
+        state = getattr(call_context, "state", None)
+        if isinstance(state, dict):
+            state.pop(cls._STATE_KEY, None)
+            if generation is not None:
+                state[cls._STATE_KEY] = generation
+            return state.get(cls._DELIVERED_STATE_KEY) is True
+        return getattr(request_context, cls._DELIVERED_ATTRIBUTE, False) is True
+
+    @classmethod
+    def mark_delivered(cls, context: Any) -> int | None:
+        setattr(context, cls._DELIVERED_ATTRIBUTE, True)
+        state = getattr(context, "state", None)
+        if isinstance(state, dict):
+            state[cls._DELIVERED_STATE_KEY] = True
+        return cls.read(context)
+
+    @classmethod
+    def read(cls, context: Any) -> int | None:
+        generation = getattr(context, cls._ATTRIBUTE, None)
+        if isinstance(generation, int):
+            return generation
+        state = getattr(context, "state", None)
+        generation = state.get(cls._STATE_KEY) if isinstance(state, dict) else None
+        return generation if isinstance(generation, int) else None
+
+
 @dataclass
 class _Participant:
     participant_id: str
@@ -123,14 +492,19 @@ class ExecutionController:
         backup_service: Any | None,
         termination_cleanup: Callable[[str, str, str], Awaitable[str | None]] | None = None,
         on_resume: Callable[[str], None] | None = None,
+        input_handoff_commit: Callable[[ExecutionController, dict[str, Any]], Awaitable[None]] | None = None,
         execution_id: str | None = None,
+        execution_mode: str = "normal",
     ) -> None:
+        if execution_mode not in {"normal", "pipeline"}:
+            raise ValueError("execution_mode must be normal or pipeline")
         self.context_id = context_id
         self.task_id = task_id
         self.owner = owner
         self.cwd = cwd
         self.session_id: str | None = None
         self.execution_id = execution_id or "exec-" + uuid.uuid4().hex
+        self.execution_mode = execution_mode
         self.server_instance_id = server_instance_id
         self.phase: ExecutionPhase = "running"
         self.execution_status = "working"
@@ -151,6 +525,7 @@ class ExecutionController:
         self._condition = asyncio.Condition(self._lock)
         self._commit_lock = asyncio.Lock()
         self._operation_commit_lock = asyncio.Lock()
+        self._backup_lock = asyncio.Lock()
         self._activities: dict[str, _Activity] = {}
         self._participants: dict[str, _Participant] = {}
         self._participant_ids_by_task: dict[asyncio.Task[Any], str] = {}
@@ -169,11 +544,47 @@ class ExecutionController:
         self._backup_service = backup_service
         self._termination_cleanup = termination_cleanup
         self._on_resume = on_resume
+        self._input_handoff_commit = input_handoff_commit
+        self._durable_input_handoff_enabled = False
         self._termination_cleanup_complete = termination_cleanup is None
         self._termination_cleanup_inflight = False
+        self._turn_generation = 0
+        self._turn_generation_by_task: dict[asyncio.Task[Any], int] = {}
+        self._natural_completion_generation: int | None = None
+        self._natural_completion_delivered_generation: int | None = None
+        self._pending_explicit_termination_reason: str | None = None
+        self._termination_generation = 0
 
     def bind_session(self, session_id: str) -> None:
         self.session_id = session_id
+
+    def enable_durable_input_handoff(self) -> None:
+        self._durable_input_handoff_enabled = True
+
+    def disable_durable_input_handoff(self) -> None:
+        self._durable_input_handoff_enabled = False
+
+    def input_handoff_ready(self) -> bool:
+        return bool(
+            self._durable_input_handoff_enabled
+            and self.phase == "running"
+            and self.execution_status == "input-required"
+            and not self.stream_available
+            and not self.has_managed_work()
+            and not any(not task.done() for task in self._background_tasks)
+        )
+
+    def local_input_continuation_ready(self) -> bool:
+        """Return whether this process can continue its own drained input wait."""
+
+        return bool(
+            not self._durable_input_handoff_enabled
+            and self.phase == "running"
+            and self.execution_status == "input-required"
+            and not self.stream_available
+            and not self.has_managed_work()
+            and not any(not task.done() for task in self._background_tasks)
+        )
 
     def permission_suspension_allowed(self) -> bool:
         return self.phase == "running" and not self._connection_hold and self._resume_barrier_revision is None
@@ -203,10 +614,17 @@ class ExecutionController:
         finally:
             await self.end_activity(activity_id)
 
-    async def attach_task(self, task: asyncio.Task[Any], *, mark_working: bool = True) -> None:
+    async def attach_task(self, task: asyncio.Task[Any], *, mark_working: bool = True) -> int:
         async with self._condition:
             if self.phase in {"terminating", "terminated"}:
                 raise ExecutionControlConflictError("Execution is terminating")
+            generation = self._turn_generation_by_task.get(task)
+            if generation is None:
+                self._turn_generation += 1
+                generation = self._turn_generation
+                self._turn_generation_by_task[task] = generation
+                self._natural_completion_generation = None
+                self._natural_completion_delivered_generation = None
             self._execution_tasks.add(task)
             participant_id = self._ensure_participant_locked(task, "execution")
             participant_ids = _CURRENT_PARTICIPANT_IDS.get()
@@ -217,6 +635,7 @@ class ExecutionController:
                 self.execution_status = "working"
             self._invalidate_pause_commit_locked()
             self._condition.notify_all()
+            return generation
 
     def register_spawned_task(self, task: asyncio.Task[Any], *, kind: str) -> None:
         """Synchronously reserve a newly-created Task before it can be scheduled."""
@@ -265,21 +684,108 @@ class ExecutionController:
             self._pending_staged_backup = None
             self._termination_cleanup_complete = self._termination_cleanup is None
             self._termination_cleanup_inflight = False
+            self._natural_completion_generation = None
+            self._natural_completion_delivered_generation = None
+            self._pending_explicit_termination_reason = None
             self.revision += 1
             snapshot = self.snapshot()
         await self._persist_snapshot(snapshot)
 
-    async def detach_task(self, task: asyncio.Task[Any], *, execution_status: str) -> None:
+    async def detach_task(
+        self,
+        task: asyncio.Task[Any],
+        *,
+        execution_status: str,
+        natural_completion: bool = False,
+    ) -> int | None:
+        handoff_snapshot: dict[str, Any] | None = None
+        handoff_commit = self._input_handoff_commit
         async with self._condition:
+            generation = self._turn_generation_by_task.pop(task, None)
             self._execution_tasks.discard(task)
             self._remove_participant_locked(task)
             if not self._execution_tasks:
                 self.stream_available = False
                 if execution_status != "working" or self.execution_status == "working":
                     self.execution_status = execution_status
+            if (
+                natural_completion
+                and execution_status in _TERMINAL_TASK_STATES
+                and generation is not None
+                and generation == self._turn_generation
+            ):
+                self._natural_completion_generation = generation
+                self._natural_completion_delivered_generation = None
             self._condition.notify_all()
             self._schedule_pause_commit_locked()
             self._maybe_mark_release_ready_locked()
+            if self.input_handoff_ready() and handoff_commit is not None:
+                self.revision += 1
+                handoff_snapshot = self.snapshot()
+        if handoff_snapshot is not None and handoff_commit is not None:
+            await handoff_commit(self, handoff_snapshot)
+        return generation if natural_completion else None
+
+    async def observe_state(self) -> dict[str, Any]:
+        """Observe state and retry a durable finalization that previously stopped short."""
+
+        claimed_snapshot: dict[str, Any] | None = None
+        termination_generation: int | None = None
+        async with self._condition:
+            if self._can_claim_natural_completion_locked():
+                termination_generation = self._claim_natural_completion_locked()
+                claimed_snapshot = self.snapshot()
+            snapshot = self.snapshot()
+            self._retry_termination_if_needed_locked()
+        if claimed_snapshot is not None:
+            await self._persist_natural_completion_claim(claimed_snapshot)
+            assert termination_generation is not None
+            self._spawn(
+                self._finish_natural_completion(termination_generation),
+                "natural-completion",
+            )
+        return snapshot
+
+    async def finalize_natural_completion(
+        self,
+        *,
+        task_id: str,
+        completion_generation: int,
+    ) -> dict[str, Any]:
+        """Finalize a drained business turn after its response stream has been delivered."""
+
+        claimed_snapshot: dict[str, Any] | None = None
+        termination_generation: int | None = None
+        async with self._condition:
+            if task_id != self.task_id:
+                raise ExecutionControlConflictError("Execution identity does not match the current execution")
+            if completion_generation != self._natural_completion_generation:
+                snapshot = self.snapshot()
+                snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
+                return snapshot
+            self._natural_completion_delivered_generation = completion_generation
+            if self._can_claim_natural_completion_locked():
+                termination_generation = self._claim_natural_completion_locked()
+                claimed_snapshot = self.snapshot()
+            elif self.phase != "terminating" or self.termination_reason != "natural_completion":
+                snapshot = self.snapshot()
+                snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
+                return snapshot
+        if claimed_snapshot is not None:
+            await self._persist_natural_completion_claim(claimed_snapshot)
+            assert termination_generation is not None
+            await await_fenced(self._finish_natural_completion(termination_generation))
+        async with self._condition:
+            snapshot = self.snapshot()
+            snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = completion_generation
+            return snapshot
+
+    async def _persist_natural_completion_claim(self, snapshot: dict[str, Any]) -> None:
+        try:
+            await self._persist_snapshot(snapshot)
+        except Exception:
+            async with self._condition:
+                self._commit_error = "state_commit_failed"
 
     async def pause(
         self,
@@ -365,6 +871,7 @@ class ExecutionController:
         }
         fingerprint = _fingerprint("resume", payload)
         should_terminate = False
+        termination_generation: int | None = None
         async with self._condition:
             self._validate_target_locked(task_id=self.task_id, execution_id=execution_id)
             duplicate = self._idempotent_locked(request_id, "resume", fingerprint)
@@ -390,7 +897,7 @@ class ExecutionController:
                 raise ExecutionControlConflictError("pauseId does not identify the active pause")
             loop = asyncio.get_running_loop()
             if self._expires_monotonic is not None and loop.time() >= self._expires_monotonic:
-                self._claim_termination_locked("disconnect_timeout")
+                termination_generation = self._claim_termination_locked("disconnect_timeout")
                 should_terminate = True
                 snapshot = self.snapshot()
             else:
@@ -409,7 +916,8 @@ class ExecutionController:
                 )
                 self._condition.notify_all()
         if should_terminate:
-            self._spawn(self._finish_termination(), "deadline-termination")
+            assert termination_generation is not None
+            self._spawn(self._finish_termination(termination_generation), "deadline-termination")
             raise ExecutionControlConflictError("Reconnect deadline has expired; termination was claimed")
         return snapshot
 
@@ -453,13 +961,30 @@ class ExecutionController:
             self._request_ids[request_id] = ("terminate", fingerprint, pause_id)
             self.connection_epoch = connection_epoch
             if self.phase == "terminated":
+                if self.termination_reason == "natural_completion":
+                    # Natural release ends a response boundary, not the Task.
+                    # A later explicit StopChat is a new terminal mutation and
+                    # must publish a fresh canceled backup before release.
+                    termination_generation = self._claim_termination_locked(reason)
+                    snapshot = self.snapshot()
+                    self._spawn(
+                        self._finish_termination(termination_generation),
+                        "post-natural-explicit-termination",
+                    )
+                    return snapshot
                 self._retry_termination_if_needed_locked()
                 return self.snapshot()
             if self.phase == "terminating":
+                if self.termination_reason == "natural_completion":
+                    # Serialize an explicit terminal mutation behind the
+                    # in-flight non-canceling cleanup. The natural finalizer
+                    # hands ownership over before publishing its backup.
+                    if self._pending_explicit_termination_reason is None:
+                        self._pending_explicit_termination_reason = reason
                 return self.snapshot()
-            self._claim_termination_locked(reason)
+            termination_generation = self._claim_termination_locked(reason)
             snapshot = self.snapshot()
-            self._spawn(self._finish_termination(), "explicit-termination")
+            self._spawn(self._finish_termination(termination_generation), "explicit-termination")
             return snapshot
 
     async def checkpoint(self) -> None:
@@ -625,6 +1150,7 @@ class ExecutionController:
             "contextId": self.context_id,
             "taskId": self.task_id,
             "executionId": self.execution_id,
+            "owner": self.owner,
             "serverInstanceId": self.server_instance_id,
             "pauseId": self.pause_id,
             "pauseReason": self.pause_reason,
@@ -642,7 +1168,19 @@ class ExecutionController:
             "backup": dict(self.backup),
             "externalOperations": [dict(operation) for operation in self.external_operations],
             "releaseReady": self.release_ready,
+            "inputHandoffReady": self.input_handoff_ready(),
+            "localInputContinuationReady": self.local_input_continuation_ready(),
         }
+
+    @staticmethod
+    def protocol_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Return the stable execution-control wire shape without coordination-only fields."""
+
+        public_snapshot = dict(snapshot)
+        public_snapshot.pop("owner", None)
+        public_snapshot.pop("inputHandoffReady", None)
+        public_snapshot.pop("localInputContinuationReady", None)
+        return public_snapshot
 
     def has_managed_work(self) -> bool:
         return bool(
@@ -650,6 +1188,43 @@ class ExecutionController:
             or self._activities
             or any(not participant.task.done() for participant in self._participants.values())
         )
+
+    def can_admit_recoverable_input_continuation(self, task_id: str) -> bool:
+        """Return whether a sidecar-proven continuation can safely claim this control."""
+        return bool(
+            self.task_id == task_id
+            and not self.has_managed_work()
+            and not any(not task.done() for task in self._background_tasks)
+            and (
+                (self.phase == "terminated" and (self.release_ready or self.backup.get("status") == "blocked"))
+                or self.input_handoff_ready()
+            )
+        )
+
+    def can_replace_with_recoverable_input_continuation(self, task_id: str) -> bool:
+        """Allow an admitted continuation to supersede a blocked terminal backup."""
+        return bool(
+            self.can_admit_recoverable_input_continuation(task_id)
+            and (self.input_handoff_ready() or (not self.release_ready and self.backup.get("status") == "blocked"))
+        )
+
+    async def wait_until_recoverable_input_continuation(
+        self,
+        task_id: str,
+        *,
+        timeout: float,
+    ) -> None:
+        """Wait for the current execution's durable handoff or terminal release."""
+
+        async def wait() -> None:
+            async with self._condition:
+                await self._condition.wait_for(
+                    lambda: self.task_id != task_id or self.can_admit_recoverable_input_continuation(task_id)
+                )
+                if self.task_id != task_id:
+                    raise ExecutionControlConflictError("Execution task changed before recovery")
+
+        await asyncio.wait_for(wait(), timeout=timeout)
 
     async def close(self) -> None:
         current = asyncio.current_task()
@@ -664,6 +1239,14 @@ class ExecutionController:
                 if task is not current and not task.done()
             )
         )
+        if managed_tasks:
+            logger.warning(
+                "A2A execution control close canceling tasks context_id=%s execution_id=%s phase=%s task_names=%s",
+                sanitize_strict_text(self.context_id),
+                sanitize_strict_text(self.execution_id),
+                sanitize_strict_text(self.phase),
+                ",".join(sanitize_strict_text(task.get_name()) for task in managed_tasks),
+            )
         for task in managed_tasks:
             task.cancel()
         if managed_tasks:
@@ -906,10 +1489,14 @@ class ExecutionController:
                 or not self._connection_hold
             ):
                 return
-            self._claim_termination_locked("disconnect_timeout")
-        await self._finish_termination()
+            termination_generation = self._claim_termination_locked("disconnect_timeout")
+        await self._finish_termination(termination_generation)
 
-    def _claim_termination_locked(self, reason: str) -> None:
+    def _claim_termination_locked(self, reason: str) -> int:
+        self._natural_completion_generation = None
+        self._natural_completion_delivered_generation = None
+        self._pending_explicit_termination_reason = None
+        self._termination_generation += 1
         self._termination_pause_id = self.pause_id if reason == "disconnect_timeout" else None
         self._pause_generation += 1
         self._connection_hold = False
@@ -921,8 +1508,57 @@ class ExecutionController:
         self._backup_state_committed = False
         self._termination_cleanup_complete = self._termination_cleanup is None
         self._termination_cleanup_inflight = False
+        self._pending_staged_backup = None
         self.release_ready = False
         self._condition.notify_all()
+        return self._termination_generation
+
+    def _can_claim_natural_completion_locked(self) -> bool:
+        return bool(
+            self._natural_completion_generation is not None
+            and self._natural_completion_delivered_generation == self._natural_completion_generation
+            and self.phase == "running"
+            and self._resume_barrier_revision is None
+            and self.execution_status in _TERMINAL_TASK_STATES
+            and not self.has_managed_work()
+        )
+
+    def _claim_natural_completion_locked(self) -> int:
+        """Atomically claim non-canceling finalization for a drained business turn."""
+
+        self._natural_completion_generation = None
+        self._natural_completion_delivered_generation = None
+        self._pending_explicit_termination_reason = None
+        self._termination_generation += 1
+        self._termination_pause_id = None
+        self._pause_generation += 1
+        self._connection_hold = False
+        self._resume_barrier_revision = None
+        self.pause_id = None
+        self.pause_reason = None
+        self.expires_at = None
+        self._expires_monotonic = None
+        self.phase = "terminating"
+        self.revision += 1
+        self.termination_reason = "natural_completion"
+        self.backup = {"status": "pending"}
+        self._backup_state_committed = False
+        self._termination_cleanup_complete = self._termination_cleanup is None
+        self._termination_cleanup_inflight = False
+        self._pending_staged_backup = None
+        self.release_ready = False
+        logger.info(
+            "A2A execution natural completion claimed context_id=%s task_id=%s execution_id=%s status=%s",
+            sanitize_strict_text(self.context_id),
+            sanitize_strict_text(self.task_id),
+            sanitize_strict_text(self.execution_id),
+            sanitize_strict_text(self.execution_status),
+        )
+        self._condition.notify_all()
+        return self._termination_generation
+
+    def _owns_termination_locked(self, generation: int) -> bool:
+        return self._termination_generation == generation and self.phase in {"terminating", "terminated"}
 
     def _retry_termination_if_needed_locked(self) -> None:
         if self.phase != "terminated" or self.release_ready:
@@ -932,22 +1568,31 @@ class ExecutionController:
                 self._termination_cleanup_inflight = True
                 self.backup = {"status": "pending"}
                 self._backup_state_committed = False
-                self._spawn(self._retry_termination_cleanup(), "retry-termination-cleanup")
+                self._spawn(
+                    self._retry_termination_cleanup(self._termination_generation),
+                    "retry-termination-cleanup",
+                )
             return
         if self.backup.get("status") == "blocked":
             self.backup = {"status": "pending"}
             self._backup_state_committed = False
-            self._spawn(self._retry_backup(), "retry-termination-backup")
+            self._spawn(self._retry_backup(self._termination_generation), "retry-termination-backup")
         elif self._commit_error is not None:
             self._commit_error = None
             if self._backup_state_committed:
                 self._maybe_mark_release_ready_locked()
             else:
-                self._spawn(self._retry_backup_state_commit(), "retry-backup-state-commit")
+                self._spawn(
+                    self._retry_backup_state_commit(self._termination_generation),
+                    "retry-backup-state-commit",
+                )
 
-    async def _finish_termination(self) -> None:
+    async def _finish_termination(self, generation: int) -> None:
         current = asyncio.current_task()
         async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
+            termination_reason = self.termination_reason or "terminated"
             cleanup = None
             if not self._termination_cleanup_complete and not self._termination_cleanup_inflight:
                 self._termination_cleanup_inflight = True
@@ -963,8 +1608,24 @@ class ExecutionController:
                 for participant in self._participants.values()
                 if participant.task is not current and not participant.task.done()
             )
-        cleanup_error = await self._run_termination_cleanup(cleanup, mark_complete=False)
+        cleanup_error = await self._run_termination_cleanup(
+            cleanup,
+            generation=generation,
+            termination_reason=termination_reason,
+            mark_complete=False,
+        )
+        async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
         tasks = tuple(dict.fromkeys((*execution_tasks, *activity_tasks, *participant_tasks)))
+        if tasks:
+            logger.warning(
+                "A2A execution termination canceling tasks context_id=%s execution_id=%s reason=%s task_names=%s",
+                sanitize_strict_text(self.context_id),
+                sanitize_strict_text(self.execution_id),
+                sanitize_strict_text(self.termination_reason or "none"),
+                ",".join(sanitize_strict_text(task.get_name()) for task in tasks),
+            )
         for task in tasks:
             task.cancel()
         # A transport may reuse its producer Task after execute() returns (the
@@ -978,8 +1639,15 @@ class ExecutionController:
         if owned_tasks:
             await asyncio.gather(*owned_tasks, return_exceptions=True)
         if cleanup_error is None:
-            cleanup_error = await self._run_termination_cleanup(cleanup, mark_complete=True)
+            cleanup_error = await self._run_termination_cleanup(
+                cleanup,
+                generation=generation,
+                termination_reason=termination_reason,
+                mark_complete=True,
+            )
         async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
             for task in tuple(self._participant_ids_by_task):
                 if task.done():
                     self._remove_participant_locked(task)
@@ -998,24 +1666,100 @@ class ExecutionController:
             await self._commit_blocked_backup_state(
                 "execution termination cleanup failed",
                 cleanup_error,
+                generation=generation,
                 clear_cleanup_inflight=True,
             )
             return
-        await self._perform_backup()
+        await self._perform_backup(generation)
+
+    async def _finish_natural_completion(self, generation: int) -> None:
+        """Finalize a drained execution without canceling any business task."""
+
+        async with self._condition:
+            if (
+                not self._owns_termination_locked(generation)
+                or self.phase != "terminating"
+                or self.termination_reason != "natural_completion"
+            ):
+                return
+            cleanup = None
+            if not self._termination_cleanup_complete and not self._termination_cleanup_inflight:
+                self._termination_cleanup_inflight = True
+                cleanup = self._termination_cleanup
+        cleanup_error = await self._run_termination_cleanup(
+            cleanup,
+            generation=generation,
+            termination_reason="natural_completion",
+            mark_complete=True,
+        )
+        async with self._condition:
+            if (
+                not self._owns_termination_locked(generation)
+                or self.phase != "terminating"
+                or self.termination_reason != "natural_completion"
+            ):
+                return
+            pending_explicit_reason = self._pending_explicit_termination_reason
+            if pending_explicit_reason is not None:
+                explicit_generation = self._claim_termination_locked(pending_explicit_reason)
+                self._spawn(
+                    self._finish_termination(explicit_generation),
+                    "post-natural-explicit-termination",
+                )
+                return
+            if self.has_managed_work():
+                cleanup_error = cleanup_error or RuntimeError("Natural completion acquired new managed work")
+            self.stream_available = False
+            self.phase = "terminated"
+            self.revision += 1
+            terminated = self.snapshot()
+        try:
+            await self._persist_snapshot(terminated)
+        except Exception:
+            async with self._condition:
+                self._commit_error = "state_commit_failed"
+        if cleanup_error is not None:
+            await self._commit_blocked_backup_state(
+                "execution natural completion cleanup failed",
+                cleanup_error,
+                generation=generation,
+                clear_cleanup_inflight=True,
+            )
+            return
+        await self._perform_backup(generation)
+        async with self._condition:
+            await self._condition.wait_for(
+                lambda: self.release_ready or self.backup.get("status") == "blocked" or self._commit_error is not None
+            )
+            logger.info(
+                "A2A execution natural completion settled context_id=%s task_id=%s execution_id=%s "
+                "status=%s backup_status=%s release_ready=%s commit_error=%s",
+                sanitize_strict_text(self.context_id),
+                sanitize_strict_text(self.task_id),
+                sanitize_strict_text(self.execution_id),
+                sanitize_strict_text(self.execution_status),
+                sanitize_strict_text(str(self.backup.get("status") or "none")),
+                self.release_ready,
+                sanitize_strict_text(self._commit_error or "none"),
+            )
 
     async def _run_termination_cleanup(
         self,
         cleanup: Callable[[str, str, str], Awaitable[str | None]] | None,
         *,
+        generation: int,
+        termination_reason: str,
         mark_complete: bool = True,
     ) -> BaseException | None:
         if cleanup is None:
             return None
         try:
-            execution_status = await cleanup(self.context_id, self.task_id, self.termination_reason or "terminated")
+            execution_status = await cleanup(self.context_id, self.task_id, termination_reason)
         except Exception as exc:
             return exc
         async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return None
             if execution_status is not None:
                 self.execution_status = execution_status
             if mark_complete:
@@ -1023,28 +1767,54 @@ class ExecutionController:
                 self._termination_cleanup_inflight = False
         return None
 
-    async def _retry_termination_cleanup(self) -> None:
-        error = await self._run_termination_cleanup(self._termination_cleanup)
+    async def _retry_termination_cleanup(self, generation: int) -> None:
+        async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
+            termination_reason = self.termination_reason or "terminated"
+        error = await self._run_termination_cleanup(
+            self._termination_cleanup,
+            generation=generation,
+            termination_reason=termination_reason,
+        )
         if error is not None:
             await self._commit_blocked_backup_state(
                 "execution termination cleanup failed",
                 error,
+                generation=generation,
                 clear_cleanup_inflight=True,
             )
             return
-        await self._perform_backup()
+        await self._perform_backup(generation)
 
-    async def _retry_backup(self) -> None:
-        await self._perform_backup()
+    async def _retry_backup(self, generation: int) -> None:
+        await self._perform_backup(generation)
 
-    async def _perform_backup(self) -> None:
+    async def _perform_backup(self, generation: int) -> None:
+        async with self._backup_lock:
+            async with self._condition:
+                if not self._owns_termination_locked(generation):
+                    return
+            await self._perform_backup_serialized(generation)
+
+    async def _perform_backup_serialized(self, generation: int) -> None:
         try:
             await self._persist_external_operations()
         except Exception as exc:
-            await self._commit_blocked_backup_state("external operation state could not be persisted", exc)
+            await self._commit_blocked_backup_state(
+                "external operation state could not be persisted",
+                exc,
+                generation=generation,
+            )
             return
+        async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
+            termination_reason = self.termination_reason
         if self._backup_service is None or self.session_id is None:
             async with self._condition:
+                if not self._owns_termination_locked(generation):
+                    return
                 self.backup = {"status": "disabled"}
                 self._backup_state_committed = False
                 self.release_ready = False
@@ -1055,13 +1825,17 @@ class ExecutionController:
                 await self._persist_snapshot(snapshot)
             except Exception:
                 async with self._condition:
-                    self._commit_error = "state_commit_failed"
+                    if self._owns_termination_locked(generation):
+                        self._commit_error = "state_commit_failed"
                 return
             async with self._condition:
+                if not self._owns_termination_locked(generation):
+                    return
                 self._commit_error = None
                 self._backup_state_committed = True
                 self._maybe_mark_release_ready_locked()
             return
+        result: BackupResult | None = None
         try:
             result = self._pending_staged_backup
             if result is None:
@@ -1071,7 +1845,7 @@ class ExecutionController:
                     self.session_id,
                     reason=(
                         BackupReason.DISCONNECT_TIMEOUT
-                        if self.termination_reason == "disconnect_timeout"
+                        if termination_reason == "disconnect_timeout"
                         else BackupReason.TERMINAL
                     ),
                     critical=True,
@@ -1091,7 +1865,6 @@ class ExecutionController:
                     ),
                 )
             succeeded = (not result.enabled) or (result.succeeded and result.shared_committed)
-            self._pending_staged_backup = None if succeeded else result if result.staged_committed else None
             backup = {
                 "status": "disabled" if not result.enabled else "shared_committed" if succeeded else "blocked",
                 "generation": result.generation,
@@ -1102,6 +1875,11 @@ class ExecutionController:
             succeeded = False
             backup = {"status": "blocked", "error": str(exc)}
         async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
+            self._pending_staged_backup = (
+                None if succeeded or result is None else result if result.staged_committed else None
+            )
             self.backup = backup
             self._backup_state_committed = False
             self.release_ready = False
@@ -1112,15 +1890,20 @@ class ExecutionController:
             await self._persist_snapshot(snapshot)
         except Exception:
             async with self._condition:
-                self._commit_error = "state_commit_failed"
+                if self._owns_termination_locked(generation):
+                    self._commit_error = "state_commit_failed"
             return
         if succeeded:
             async with self._condition:
+                if not self._owns_termination_locked(generation):
+                    return
                 self._commit_error = None
                 self._backup_state_committed = True
                 self._maybe_mark_release_ready_locked()
         else:
             async with self._condition:
+                if not self._owns_termination_locked(generation):
+                    return
                 self._commit_error = None
                 self._backup_state_committed = True
 
@@ -1129,9 +1912,12 @@ class ExecutionController:
         message: str,
         exc: BaseException,
         *,
+        generation: int,
         clear_cleanup_inflight: bool = False,
     ) -> None:
         async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
             self.backup = {"status": "blocked", "error": f"{message}: {type(exc).__name__}"}
             if clear_cleanup_inflight:
                 # A retry that observes the blocked state must also be able to
@@ -1148,11 +1934,19 @@ class ExecutionController:
             await self._persist_snapshot(snapshot)
         except Exception:
             async with self._condition:
-                if self.revision == revision and self.backup.get("status") == "blocked":
+                if (
+                    self._owns_termination_locked(generation)
+                    and self.revision == revision
+                    and self.backup.get("status") == "blocked"
+                ):
                     self._commit_error = "state_commit_failed"
             return
         async with self._condition:
-            if self.revision == revision and self.backup.get("status") == "blocked":
+            if (
+                self._owns_termination_locked(generation)
+                and self.revision == revision
+                and self.backup.get("status") == "blocked"
+            ):
                 self._commit_error = None
                 self._backup_state_committed = True
 
@@ -1170,8 +1964,10 @@ class ExecutionController:
             path = SessionStorage().session_dir(self.cwd, self.session_id) / "a2a" / "external-operations.json"
             await run_sync_fenced(atomic_write_json, path, document)
 
-    async def _retry_backup_state_commit(self) -> None:
+    async def _retry_backup_state_commit(self, generation: int) -> None:
         async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
             snapshot = self.snapshot()
             snapshot["commitError"] = None
             backup_complete = self.backup.get("status") in {"disabled", "shared_committed"}
@@ -1179,9 +1975,12 @@ class ExecutionController:
             await self._persist_snapshot(snapshot)
         except Exception:
             async with self._condition:
-                self._commit_error = "state_commit_failed"
+                if self._owns_termination_locked(generation):
+                    self._commit_error = "state_commit_failed"
             return
         async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
             self._commit_error = None
             self._backup_state_committed = True
             if backup_complete:
@@ -1227,9 +2026,17 @@ class ExecutionController:
             if not done.cancelled():
                 with suppress(BaseException):
                     done.exception()
+            try:
+                done.get_loop().create_task(self._notify_recovery_waiters())
+            except RuntimeError:
+                pass
 
         task.add_done_callback(completed)
         return task
+
+    async def _notify_recovery_waiters(self) -> None:
+        async with self._condition:
+            self._condition.notify_all()
 
 
 class ExecutionControlService:
@@ -1239,6 +2046,7 @@ class ExecutionControlService:
         self._backup_service = backup_service
         self._controls: dict[str, ExecutionController] = {}
         self._context_start_locks: dict[str, asyncio.Lock] = {}
+        self._recoverable_input_admissions = _RecoverableInputAdmissionStore(persistence_root)
         self._termination_cleanup: Callable[[str, str, str], Awaitable[str | None]] | None = None
         self._on_resume: Callable[[str], None] | None = None
 
@@ -1255,6 +2063,21 @@ class ExecutionControlService:
         for control in self._controls.values():
             control._termination_cleanup = cleanup
 
+    async def _commit_input_handoff(
+        self,
+        control: ExecutionController,
+        snapshot: dict[str, Any],
+    ) -> None:
+        """Publish a drained recovered input wait before another request can start locally."""
+        async with self._context_start_locks.setdefault(control.context_id, asyncio.Lock()):
+            if (
+                self._controls.get(control.context_id) is not control
+                or control.revision != snapshot.get("revision")
+                or not control.input_handoff_ready()
+            ):
+                return
+            await control._persist_snapshot(snapshot)
+
     async def begin_execution(
         self,
         *,
@@ -1262,7 +2085,9 @@ class ExecutionControlService:
         task_id: str,
         owner: str,
         cwd: str,
+        execution_mode: str = "normal",
         continue_input_required: bool = False,
+        recoverable_input_admission: str | None = None,
     ) -> ExecutionController:
         task = asyncio.current_task()
         if task is None:
@@ -1272,18 +2097,37 @@ class ExecutionControlService:
             control = self._controls.get(context_id)
             if control is not None and control.owner != owner:
                 raise ExecutionControlNotFoundError("Execution was not found")
+            admission = self._recoverable_input_admissions.get(recoverable_input_admission)
+            admitted_recovery = bool(
+                admission is not None
+                and admission.context_id == context_id
+                and admission.task_id == task_id
+                and admission.owner == owner
+            )
+            if recoverable_input_admission is not None and not admitted_recovery:
+                raise ExecutionControlConflictError("Recoverable input continuation admission is stale")
+            replace_blocked_input_wait = bool(
+                control is not None
+                and admitted_recovery
+                and control.can_replace_with_recoverable_input_continuation(task_id)
+            )
             if control is not None and (
                 (
                     control.task_id != task_id
                     and control.phase in {"pausing", "pause_committing", "paused", "resuming", "terminating"}
                 )
-                or (control.phase in {"terminating", "terminated"} and not control.release_ready)
+                or (
+                    control.phase in {"terminating", "terminated"}
+                    and not control.release_ready
+                    and not replace_blocked_input_wait
+                )
             ):
                 raise ExecutionControlConflictError("Current execution must finish recovery before a new task starts")
             reuse = bool(
                 control is not None
                 and control.task_id == task_id
                 and control.phase not in {"terminating", "terminated"}
+                and not control.input_handoff_ready()
                 and (
                     control.stream_available
                     or (continue_input_required and control.execution_status == "input-required")
@@ -1299,6 +2143,16 @@ class ExecutionControlService:
             ):
                 await control.rollover_normal_execution(task_id=task_id, cwd=cwd)
                 reuse = True
+            if not reuse and admission is None:
+                shared_start_allowed = await run_sync_fenced(
+                    self._recoverable_input_admissions.can_begin_without_admission,
+                    context_id,
+                    control.execution_id if control is not None else None,
+                    self.server_instance_id,
+                    control.input_handoff_ready() if control is not None else False,
+                )
+                if not shared_start_allowed:
+                    raise ExecutionControlConflictError("Current execution is active in another process")
             if not reuse:
                 retired_control = control
                 path = None
@@ -1314,13 +2168,162 @@ class ExecutionControlService:
                     backup_service=self._backup_service,
                     termination_cleanup=self._termination_cleanup,
                     on_resume=self._on_resume,
+                    input_handoff_commit=self._commit_input_handoff,
+                    execution_mode=execution_mode,
                 )
-                self._controls[context_id] = control
             assert control is not None
+            if admission is not None and not reuse:
+                control.enable_durable_input_handoff()
+                control.revision += 1
+                activation: _RecoverableInputActivation | None = None
+
+                async def cleanup_cancelled_activation(
+                    result: _RecoverableInputActivation | None,
+                    error: BaseException | None,
+                ) -> None:
+                    if result is not None and error is None:
+                        await run_sync_fenced(
+                            self._recoverable_input_admissions.rollback_activation,
+                            admission,
+                            result,
+                        )
+                    control.disable_durable_input_handoff()
+                    await control.detach_task(task, execution_status="input-required")
+                    await control.close()
+
+                await control.attach_task(task, mark_working=False)
+                try:
+                    activation = await run_sync_fenced_with_cancel_completion(
+                        self._recoverable_input_admissions.activate,
+                        cleanup_cancelled_activation,
+                        admission,
+                        control.snapshot(),
+                    )
+                    if activation is None:
+                        raise ExecutionControlConflictError("Recoverable input continuation admission is stale")
+                    control.persisted_revision = control.revision
+                    self._controls[context_id] = control
+                    await run_sync_fenced(self._recoverable_input_admissions.finish_activation, admission)
+                except asyncio.CancelledError:
+                    if activation is not None:
+                        await run_sync_fenced(
+                            self._recoverable_input_admissions.rollback_activation,
+                            admission,
+                            activation,
+                        )
+                        if retired_control is None:
+                            self._controls.pop(context_id, None)
+                        else:
+                            self._controls[context_id] = retired_control
+                        control.disable_durable_input_handoff()
+                        await control.detach_task(task, execution_status="input-required")
+                        await control.close()
+                    raise
+                except BaseException:
+                    if activation is not None:
+                        await run_sync_fenced(
+                            self._recoverable_input_admissions.rollback_activation,
+                            admission,
+                            activation,
+                        )
+                        if retired_control is None:
+                            self._controls.pop(context_id, None)
+                        else:
+                            self._controls[context_id] = retired_control
+                    control.disable_durable_input_handoff()
+                    await control.detach_task(task, execution_status="input-required")
+                    await control.close()
+                    raise
+            self._controls[context_id] = control
             if retired_control is not None:
                 await retired_control.close()
-            await control.attach_task(task, mark_working=False)
+            if admission is None or reuse:
+                await control.attach_task(task, mark_working=False)
         return control
+
+    async def reserve_recoverable_input_continuation(
+        self,
+        *,
+        context_id: str,
+        task_id: str,
+        owner: str,
+    ) -> str | None:
+        """Reserve one request-scoped continuation after the caller proves the sidecar wait."""
+        async with self._context_start_locks.setdefault(context_id, asyncio.Lock()):
+            control = self._controls.get(context_id)
+            if control is not None and (
+                control.owner != owner or not control.can_admit_recoverable_input_continuation(task_id)
+            ):
+                return None
+            if control is not None and control.input_handoff_ready():
+                # A previous detach may have completed locally while its durable
+                # handoff write failed. Re-publish the same revision before a
+                # request can reserve and replace this controller.
+                await control._persist_snapshot(control.snapshot())
+            token = "recovery-" + uuid.uuid4().hex
+            admission = _RecoverableInputAdmission(
+                token=token,
+                context_id=context_id,
+                task_id=task_id,
+                owner=owner,
+                expires_at=time.time() + _RECOVERABLE_INPUT_ADMISSION_TTL_SECONDS,
+            )
+            reserved = await run_sync_fenced(
+                self._recoverable_input_admissions.reserve,
+                admission,
+            )
+            return token if reserved else None
+
+    async def wait_until_recoverable_input_continuation(
+        self,
+        *,
+        context_id: str,
+        task_id: str,
+        timeout: float,
+    ) -> None:
+        """Wait until the local controller can safely yield to one recovery request."""
+
+        control = self._controls.get(context_id)
+        if control is None:
+            return
+        await control.wait_until_recoverable_input_continuation(task_id, timeout=timeout)
+
+    async def finalize_natural_completion(
+        self,
+        *,
+        context_id: str,
+        task_id: str,
+        owner: str,
+        completion_generation: int,
+        finalized_cleanup: Callable[[], Awaitable[None]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Settle a naturally exhausted response without invoking termination."""
+
+        async with self._context_start_locks.setdefault(context_id, asyncio.Lock()):
+            control = self._controls.get(context_id)
+            if control is None:
+                return None
+            if control.owner != owner:
+                raise ExecutionControlNotFoundError("Execution was not found")
+            state = await control.finalize_natural_completion(
+                task_id=task_id,
+                completion_generation=completion_generation,
+            )
+            if (
+                finalized_cleanup is not None
+                and state.get("terminationReason") == "natural_completion"
+                and state.get(NATURAL_COMPLETION_FINALIZED_GENERATION) == completion_generation
+            ):
+                await finalized_cleanup()
+            return state
+
+    async def release_recoverable_input_continuation(self, token: str) -> None:
+        """Release an unused recovery reservation; consumed reservations are a no-op."""
+        admission = self._recoverable_input_admissions.get(token)
+        if admission is None:
+            return
+        async with self._context_start_locks.setdefault(admission.context_id, asyncio.Lock()):
+            await run_sync_fenced(self._recoverable_input_admissions.release, token)
 
     def get_for_context(self, context_id: str) -> ExecutionController | None:
         return self._controls.get(context_id)
@@ -1331,9 +2334,34 @@ class ExecutionControlService:
             raise ExecutionControlNotFoundError("Execution was not found")
         return control
 
+    async def observe(self, *, context_id: str, owner: str) -> dict[str, Any]:
+        """Observe an active controller or its read-only persisted terminal state."""
+
+        control = self._controls.get(context_id)
+        if control is not None:
+            if control.owner != owner:
+                raise ExecutionControlNotFoundError("Execution was not found")
+            return control.protocol_snapshot(await control.observe_state())
+        snapshot = await run_sync_fenced(self._load_persisted_terminal_snapshot, context_id)
+        if snapshot is None or snapshot.get("owner") != owner:
+            raise ExecutionControlNotFoundError("Execution was not found")
+        return ExecutionController.protocol_snapshot(snapshot)
+
     def snapshot_for_context(self, context_id: str) -> dict[str, Any] | None:
         control = self._controls.get(context_id)
-        return control.snapshot() if control is not None else None
+        return control.snapshot() if control is not None else self._load_persisted_terminal_snapshot(context_id)
+
+    def _load_persisted_terminal_snapshot(self, context_id: str) -> dict[str, Any] | None:
+        if self._persistence_root is None:
+            return None
+        path = self._persistence_root / "execution-control" / f"{context_id}.json"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, OSError, ValueError):
+            return None
+        if not isinstance(value, dict) or value.get("contextId") != context_id or value.get("phase") != "terminated":
+            return None
+        return value
 
     def has_active_work(self) -> bool:
         active_phases = {"pausing", "pause_committing", "paused", "resuming", "terminating"}
@@ -1346,6 +2374,7 @@ class ExecutionControlService:
 
     async def close(self) -> None:
         await asyncio.gather(*(control.close() for control in tuple(self._controls.values())), return_exceptions=True)
+        await run_sync_fenced(self._recoverable_input_admissions.close)
 
 
 def bind_execution_control(control: ExecutionController | None) -> Token[ExecutionController | None]:

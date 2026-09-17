@@ -987,16 +987,74 @@ async def test_late_sdk_working_event_does_not_overwrite_active_executor_finaliz
 
 
 @pytest.mark.asyncio
+async def test_late_sdk_working_event_does_not_overwrite_running_execution_terminal_boundary(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    store.set_execution_control_provider(
+        lambda _context_id: {
+            "phase": "running",
+            "taskId": "task-1",
+            "executionStatus": "input-required",
+        },
+        None,
+    )
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.state = "input-required"
+    record.updated_at = 20
+    record.active_task = None
+    store._mirror_task(record)
+
+    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=30))
+
+    assert record.state == "input-required"
+    assert persistence.load_task("task-1").state == "input-required"
+
+
+@pytest.mark.asyncio
+async def test_sdk_working_event_starts_new_execution_after_terminal_boundary(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    store.set_execution_control_provider(
+        lambda _context_id: {
+            "phase": "running",
+            "taskId": "task-1",
+            "executionStatus": "working",
+        },
+        None,
+    )
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.state = "input-required"
+    record.updated_at = 20
+    record.active_task = None
+    store._mirror_task(record)
+
+    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=30))
+
+    assert record.state == "working"
+    assert persistence.load_task("task-1").state == "working"
+
+
+@pytest.mark.asyncio
 async def test_stale_sdk_state_does_not_replace_newer_sdk_visible_state() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=10))
     await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_INPUT_REQUIRED, updated_at=20))
 
-    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=15))
+    delayed = sdk_task("task-1", state=TaskState.TASK_STATE_WORKING, updated_at=15)
+    delayed.status.message.CopyFrom(
+        Message(
+            message_id="delayed-output",
+            role=Role.ROLE_AGENT,
+            parts=[Part(text="preserve me for history")],
+        )
+    )
+    await store.save(delayed)
 
     task = await store.get("task-1")
     assert task is not None
     assert task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert delayed.status.state == TaskState.TASK_STATE_WORKING
+    assert delayed.status.message.parts[0].text == "preserve me for history"
 
 
 @pytest.mark.asyncio
@@ -1448,6 +1506,7 @@ async def test_save_attaches_current_execution_control_metadata() -> None:
             "executionId": "exec-1",
             "phase": "pausing",
             "revision": 2,
+            "inputHandoffReady": True,
         },
         lambda: True,
     )
@@ -1601,6 +1660,33 @@ async def test_cancel_inactive_input_required_task_updates_internal_and_sdk_stat
     assert persistence.load_task("task-1").state == "canceled"
 
     assert await store.cancel_inactive_input_required_task(task_id="task-1", context_id="ctx-1") is True
+
+
+@pytest.mark.asyncio
+async def test_commit_inactive_execution_task_expected_state_mismatch_preserves_snapshots(tmp_path) -> None:
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    await store.save(sdk_task("task-1", state=TaskState.TASK_STATE_INPUT_REQUIRED))
+
+    committed = await store.commit_inactive_execution_task(
+        task_id="task-1",
+        context_id="ctx-1",
+        expected_state="canceled",
+    )
+
+    assert committed is False
+    assert (await store.get_task_record("task-1")).state == "input-required"
+    assert (await store.get_context_record("ctx-1")).active_task_id == "task-1"
+    assert persistence.load_task("task-1").state == "input-required"
+    assert persistence.load_context("ctx-1").active_task_id == "task-1"
 
 
 @pytest.mark.asyncio

@@ -30,6 +30,7 @@ from iac_code.services.permissions.audit import (
     emit_permission_boundary_audit,
     sanitize_prompt_text,
 )
+from iac_code.services.providers.aliyun import AliyunCredential, current_aliyun_credential_override
 from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityUnavailableError
 from iac_code.types.stream_events import PermissionRequestEvent
 
@@ -116,6 +117,7 @@ class PendingPermission:
     context_id: str
     input_id: str
     request: PermissionRequestEvent
+    aliyun_credential: AliyunCredential | None = field(default=None, repr=False)
     language: str = field(default_factory=lambda: get_a2a_preferred_language() or "en")
     resolution_owner: PermissionResolutionOwner | None = None
     scope: str = "pipeline"
@@ -1158,6 +1160,7 @@ class PermissionInputRegistry:
                 context_id=context_id,
                 input_id=input_id,
                 request=request,
+                aliyun_credential=current_aliyun_credential_override(),
                 resolution_owner=resolution_owner,
                 scope=scope,
                 coordinates=dict(coordinates) if coordinates is not None else None,
@@ -1171,16 +1174,22 @@ class PermissionInputRegistry:
         self,
         response: PermissionResponse,
         *,
+        aliyun_credential: AliyunCredential | None = None,
         before_delivery: Callable[[], Awaitable[None]] | None = None,
     ) -> bool:
         pending = await self._lookup(response)
+
+        async def prepare_delivery() -> None:
+            if aliyun_credential is not None and pending.aliyun_credential is not None:
+                pending.aliyun_credential.refresh_from(aliyun_credential)
+            if before_delivery is not None:
+                await before_delivery()
+
         if pending.resolution_owner is not None:
-            if before_delivery is None:
-                return await pending.resolution_owner.resolve_permission(pending, response)
             return await pending.resolution_owner.resolve_permission(
                 pending,
                 response,
-                before_delivery=before_delivery,
+                before_delivery=prepare_delivery,
             )
 
         coordinator = self._permission_wait_coordinator
@@ -1205,7 +1214,7 @@ class PermissionInputRegistry:
                     source="user",
                     on_new_claim=audit_new_claim,
                     before_delivery=lambda record: self._backup_claim_before_delivery(pending, record),
-                    before_release=before_delivery,
+                    before_release=prepare_delivery,
                 )
             except (LookupError, ValueError) as exc:
                 raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
@@ -1231,8 +1240,7 @@ class PermissionInputRegistry:
             )
             if approved and not audit_ok:
                 approved = False
-            if before_delivery is not None:
-                await before_delivery()
+            await prepare_delivery()
             future.set_result(approved)
             return approved
 
@@ -1392,6 +1400,18 @@ class PermissionInputRegistry:
             if not closing.reversible_tokens:
                 self._closing_tasks.pop(token.task_id, None)
                 self._condition.notify_all()
+
+    async def reversible_closing_tokens(self, task_id: str) -> tuple[PermissionTaskClosingToken, ...]:
+        """Snapshot reversible closes that belong to the current task generation."""
+
+        async with self._condition:
+            closing = self._closing_tasks.get(task_id)
+            if closing is None or closing.permanent:
+                return ()
+            return tuple(
+                PermissionTaskClosingToken(task_id=task_id, token_id=token_id)
+                for token_id in closing.reversible_tokens
+            )
 
     async def fail(self, pending: PendingPermission) -> None:
         if pending.resolution_owner is not None:
