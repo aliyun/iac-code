@@ -27,7 +27,12 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionRequestEvent, PermissionWaitOutcome, TextDeltaEvent
 
 from .fakes import FakeEventQueue, FakeRequestContext, FakeRuntime
-from .test_execution_control_regressions import publish_staged_backups, wait_until
+from .test_execution_control_regressions import (
+    publish_staged_backups,
+    wait_for_published_json,
+    wait_for_published_task_state,
+    wait_until,
+)
 from .test_execution_control_review_regressions import make_executor
 
 
@@ -204,13 +209,14 @@ async def test_persisted_recovery_termination_seals_checkpoint_and_backup(
             TaskState.TASK_STATE_INPUT_REQUIRED if finished else TaskState.TASK_STATE_CANCELED
         )
         assert store._persistence.load_task("task-1").state == expected
+        # Release commits off the staged snapshot; the publisher mirrors it afterwards.
+        await wait_for_published_task_state(shared, expected)
         shared_task = json.loads(next(shared.rglob("a2a/task.json")).read_text(encoding="utf-8"))
         assert shared_task["state"] == expected
         final_checkpoint = checkpoints.load(boundary_id)
         assert final_checkpoint["phase"] == ("RESOLVED" if finished else "CANCELED")
         assert final_checkpoint["decision"]["claimId"] == claim_id
-        shared_checkpoint = next(shared.rglob(boundary_id + ".json"))
-        assert json.loads(shared_checkpoint.read_text(encoding="utf-8"))["phase"] == final_checkpoint["phase"]
+        await wait_for_published_json(shared, boundary_id + ".json", "phase", final_checkpoint["phase"])
     finally:
         release_backup.set()
         release_close.set()

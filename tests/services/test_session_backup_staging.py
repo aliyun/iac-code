@@ -586,7 +586,7 @@ def test_a2a_runtime_requires_final_root_and_rejects_overlapping_roots(
         create_a2a_session_backup_runtime()
 
 
-def test_staging_process_cleans_copying_before_start_and_stops_child(tmp_path: Path) -> None:
+def test_staging_process_retains_copying_before_start_and_stops_child(tmp_path: Path) -> None:
     staging_root = tmp_path / "staging"
     copying = staging_root / "projects" / "project" / "s1_v1.copying"
     copying.mkdir(parents=True)
@@ -638,7 +638,8 @@ def test_staging_process_cleans_copying_before_start_and_stops_child(tmp_path: P
     process = SessionBackupStagingProcess(staging_root, backup_root, process_context=context)
 
     process.start()
-    assert not copying.exists()
+    # Only the owning session writer may remove an in-progress copy.
+    assert copying.is_dir()
     assert context.process is not None and context.process.started is True
     assert context.created_events[1].wait_timeout == 5.0
     process.close()

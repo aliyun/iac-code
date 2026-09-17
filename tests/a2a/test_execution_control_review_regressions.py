@@ -30,7 +30,7 @@ from iac_code.types.stream_events import MessageEndEvent, PermissionRequestEvent
 from tests.agent.test_agent_loop_permissions import WriteTool
 
 from .fakes import FakeEventQueue, FakeRequestContext, FakeRuntime
-from .test_execution_control_regressions import publish_staged_backups, wait_until
+from .test_execution_control_regressions import publish_staged_backups, wait_for_published_task_state, wait_until
 
 
 @pytest.fixture(autouse=True)
@@ -139,7 +139,8 @@ async def test_permission_continuation_termination_commits_actual_result(tmp_pat
         assert control.execution_status == expected
         assert (await store.get_task_record("task-1")).state == expected
         assert store._persistence.load_task("task-1").state == expected
-        assert json.loads(next(shared.rglob("a2a/task.json")).read_text(encoding="utf-8"))["state"] == expected
+        # Release no longer waits for BACKUP_DIR; the publisher still mirrors the snapshot.
+        await wait_for_published_task_state(shared, expected)
         assert store._persistence.load_context("ctx-1").active_task_id is None
         assert queue.events[-1].status.state == (
             TaskState.TASK_STATE_INPUT_REQUIRED if finished else TaskState.TASK_STATE_CANCELED
@@ -307,13 +308,12 @@ async def test_active_termination_commits_off_loop_and_blocks_release_on_failure
                 execution_id=control.execution_id, request_id="retry", connection_epoch=2, reason="explicit_terminate"
             )
         await wait_until(lambda: control.release_ready)
+        assert control.backup["status"] == "staged_committed"
         assert all(write == (False, False) for write in writes)
         assert store._persistence.load_task("task-1").state == "canceled"
         assert (await store.get("task-1")).status.state == TaskState.TASK_STATE_CANCELED
-        assert (
-            json.loads(next((tmp_path / "shared").rglob("a2a/task.json")).read_text(encoding="utf-8"))["state"]
-            == "canceled"
-        )
+        # Release commits off a staged snapshot; the publisher mirrors it afterwards.
+        await wait_for_published_task_state(tmp_path / "shared", "canceled")
     finally:
         release.set()
         task.cancel()

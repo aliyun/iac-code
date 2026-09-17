@@ -8,7 +8,14 @@ from pathlib import Path
 import pytest
 
 from iac_code.a2a import execution_control as execution_control_module
-from iac_code.a2a.backup import run_sync_fenced, run_sync_fenced_with_cancel_completion
+from iac_code.a2a.backup import (
+    NATURAL_HANDOFF_VERSION,
+    SessionBackupCoordinator,
+    SessionBackupHandoff,
+    SessionBackupHandoffError,
+    run_sync_fenced,
+    run_sync_fenced_with_cancel_completion,
+)
 from iac_code.a2a.execution_control import (
     ExecutionControlConflictError,
     ExecutionController,
@@ -125,7 +132,15 @@ async def test_natural_business_boundary_self_finalizes_without_terminate_reques
     )
     assert observed["phase"] == "terminated"
     assert observed["terminationReason"] == "natural_completion"
-    assert observed["releaseReady"] is True
+    # The business handoff is published without waiting for the release commit.
+    handoff = observed["naturalHandoff"]
+    assert handoff["version"] == NATURAL_HANDOFF_VERSION
+    assert handoff["executionId"] == "exec-1"
+    assert handoff["completionGeneration"] == completion_generation
+    assert handoff["businessDrained"] is True
+    assert handoff["backupDisabled"] is True
+    assert handoff["pendingJobId"] is None
+    await _wait_for_condition(lambda: control.release_ready)
     snapshot = control.snapshot()
     assert snapshot["phase"] == "terminated"
     assert snapshot["executionStatus"] == "input-required"
@@ -228,7 +243,8 @@ async def test_old_response_boundary_cannot_finalize_newer_same_task_turn(tmp_pa
     )
     assert settled["phase"] == "terminated"
     assert settled["terminationReason"] == "natural_completion"
-    assert settled["releaseReady"] is True
+    assert settled["naturalHandoff"]["completionGeneration"] == second_generation
+    await _wait_for_condition(lambda: control.release_ready)
     await control.close()
 
 
@@ -1304,7 +1320,7 @@ async def test_terminate_cancels_registered_background_participant_in_passive_wa
 
 
 @pytest.mark.asyncio
-async def test_staged_backup_does_not_release_until_shared_retry_succeeds(tmp_path: Path) -> None:
+async def test_staged_backup_releases_without_waiting_for_shared_publication(tmp_path: Path) -> None:
     class StagedBackupService:
         def __init__(self) -> None:
             self.wait_calls = 0
@@ -1320,14 +1336,45 @@ async def test_staged_backup_does_not_release_until_shared_retry_succeeds(tmp_pa
 
         def wait_until_shared_committed(self, cwd, session_id, *, generation, commit_id) -> BackupResult:
             self.wait_calls += 1
+            raise AssertionError("release must not depend on shared publication")
+
+    backup = StagedBackupService()
+    control = _controller(tmp_path, backup_service=backup)
+    control.bind_session("session-1")
+    request = {
+        "execution_id": "exec-1",
+        "request_id": "request-terminate",
+        "connection_epoch": 1,
+        "reason": "explicit_terminate",
+    }
+
+    await control.terminate(**request)
+    await _wait_for_condition(lambda: control.release_ready)
+    assert control.phase == "terminated"
+    assert control.backup["status"] == "staged_committed"
+    assert control.backup["generation"] == 7
+    assert control.backup["commitId"] == "commit-7"
+    assert backup.wait_calls == 0
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_staged_backup_failure_still_blocks_release_until_a_snapshot_lands(tmp_path: Path) -> None:
+    class StagedBackupService:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def backup_session(self, cwd, session_id, *, reason, critical) -> BackupResult:
+            self.calls += 1
+            staged = self.calls > 1
             return BackupResult(
                 enabled=True,
-                generation=generation,
-                commit_id=commit_id,
-                succeeded=self.wait_calls > 1,
-                staged_committed=True,
-                shared_committed=self.wait_calls > 1,
-                error=None if self.wait_calls > 1 else "shared unavailable",
+                generation=7 if staged else None,
+                commit_id="commit-7" if staged else None,
+                succeeded=staged,
+                staged_committed=staged,
+                shared_committed=False,
+                error=None if staged else "staging unavailable",
             )
 
     backup = StagedBackupService()
@@ -1347,8 +1394,8 @@ async def test_staged_backup_does_not_release_until_shared_retry_succeeds(tmp_pa
 
     await control.terminate(**request)
     await _wait_for_condition(lambda: control.release_ready)
-    assert control.backup["status"] == "shared_committed"
-    assert backup.wait_calls == 2
+    assert control.backup["status"] == "staged_committed"
+    assert backup.calls == 2
     await control.close()
 
 
@@ -2565,3 +2612,290 @@ async def test_termination_cleanup_rechecks_state_after_active_worker_drains(tmp
     assert observed_states == ["working", "canceled"]
     assert control.execution_status == "canceled"
     await control.close()
+
+
+class _BlockingCoordinatorBackupService:
+    """A staged backup service whose directory copy blocks until it is released."""
+
+    def __init__(self, staging_root: Path) -> None:
+        self.staging_root = staging_root
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.copies = 0
+
+    def _source_for_backup(self, cwd: str, session_id: str) -> Path:
+        return Path(cwd) / "projects" / "project" / session_id
+
+    def backup_session(self, _cwd, _session_id, *, reason, critical, publication_proofs=None) -> BackupResult:
+        del reason, critical, publication_proofs
+        self.started.set()
+        assert self.release.wait(5)
+        self.copies += 1
+        return BackupResult(
+            enabled=True,
+            generation=1,
+            commit_id="commit-1",
+            staged_committed=True,
+            shared_committed=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_hands_off_before_the_directory_copy_finishes(tmp_path: Path) -> None:
+    backup_service = _BlockingCoordinatorBackupService(tmp_path / "staging")
+    coordinator = SessionBackupCoordinator(backup_service, state_root=tmp_path / "state", retry_delays=())
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=backup_service,
+        execution_id="exec-1",
+        backup_coordinator=coordinator,
+    )
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    try:
+        observed = await control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+
+        assert observed["phase"] == "terminated"
+        assert observed["terminationReason"] == "natural_completion"
+        handoff = observed["naturalHandoff"]
+        assert handoff["version"] == NATURAL_HANDOFF_VERSION
+        assert handoff["contextId"] == "ctx-1"
+        assert handoff["taskId"] == "task-1"
+        assert handoff["executionId"] == "exec-1"
+        assert handoff["completionGeneration"] == completion_generation
+        assert handoff["ownerGeneration"] == 1
+        assert handoff["businessDrained"] is True
+        assert handoff["backupDisabled"] is False
+        assert handoff["businessRevision"] == 1
+        assert handoff["pendingJobId"] is not None
+        assert observed["backup"] == {
+            "status": "delegated",
+            "jobId": handoff["pendingJobId"],
+            "businessRevision": 1,
+        }
+        # The handoff returned while the copy is still blocked inside the coordinator.
+        assert backup_service.copies == 0
+        marker = tmp_path / "staging" / ".pending" / "{}.json".format(handoff["pendingJobId"])
+        assert marker.is_file()
+        assert control.natural_handoff_admits_replacement() is True
+        await _wait_for_condition(lambda: control.release_ready)
+
+        backup_service.release.set()
+        await _wait_for_condition(lambda: backup_service.copies == 1)
+        await _wait_for_condition(lambda: not marker.exists())
+    finally:
+        backup_service.release.set()
+        await coordinator.aclose()
+        await control.close()
+
+
+@pytest.mark.asyncio
+async def test_local_job_persistence_failure_blocks_release_instead_of_faking_a_handoff(tmp_path: Path) -> None:
+    class FailingCoordinator:
+        enabled = True
+
+        async def register_boundary(self, **_kwargs) -> None:
+            raise SessionBackupHandoffError("session backup job could not be persisted: OSError")
+
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=None,
+        execution_id="exec-1",
+        backup_coordinator=FailingCoordinator(),
+    )
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+
+    observed = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+
+    assert observed["backup"]["status"] == "blocked"
+    assert observed["naturalHandoff"] is None
+    assert observed["releaseReady"] is False
+    assert control.natural_handoff_admits_replacement() is False
+    await _wait_for_condition(lambda: control.backup["status"] == "blocked")
+    assert control.release_ready is False
+    await control.close()
+
+
+class _RecordingCoordinator:
+    enabled = True
+
+    def __init__(self) -> None:
+        self.registrations: list[dict] = []
+        self.quiescence_waits: list[str | None] = []
+
+    async def register_boundary(self, **kwargs):
+        self.registrations.append(kwargs)
+        return SessionBackupHandoff(
+            business_revision=len(self.registrations), job_id="job-{}".format(len(self.registrations))
+        )
+
+    async def wait_for_local_snapshot_quiescence(self, *, cwd, session_id, timeout=None) -> None:
+        del cwd, timeout
+        self.quiescence_waits.append(session_id)
+
+
+async def _natural_handoff_turn(
+    service: ExecutionControlService,
+    *,
+    task_id: str,
+    session_id: str | None = "session-1",
+) -> ExecutionController:
+    control = await service.begin_execution(
+        context_id="ctx-1",
+        task_id=task_id,
+        owner="owner-1",
+        cwd="/repo",
+    )
+    if session_id is not None:
+        control.bind_session(session_id)
+    current = asyncio.current_task()
+    assert current is not None
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    await control.finalize_natural_completion(task_id=task_id, completion_generation=completion_generation)
+    return control
+
+
+@pytest.mark.asyncio
+async def test_ordinary_next_turn_starts_against_a_retired_natural_handoff_without_release_ready(
+    tmp_path: Path,
+) -> None:
+    coordinator = _RecordingCoordinator()
+    service = ExecutionControlService(
+        persistence_root=None,
+        backup_service=None,
+        backup_coordinator=coordinator,
+    )
+    first = await _natural_handoff_turn(service, task_id="task-1")
+    # Keep the release commit pending so admission cannot depend on it.
+    first.release_ready = False
+    first._release_commit_inflight = True
+
+    assert first.natural_handoff_admits_replacement() is True
+    next_turn = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-2",
+        owner="owner-1",
+        cwd="/repo",
+    )
+
+    assert next_turn is not first
+    assert next_turn.owner_generation > first.owner_generation
+    assert first.release_ready is False
+    assert coordinator.quiescence_waits == ["session-1"]
+    await next_turn.detach_task(asyncio.current_task(), execution_status="input-required")
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_paused_or_explicitly_terminating_control_still_rejects_an_ordinary_next_turn(tmp_path: Path) -> None:
+    service = ExecutionControlService(persistence_root=None, backup_service=None)
+    paused_control = await service.begin_execution(
+        context_id="ctx-paused",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    current = asyncio.current_task()
+    assert current is not None
+    paused = await paused_control.pause(
+        task_id="task-1",
+        expected_execution_id=paused_control.execution_id,
+        request_id="pause",
+        connection_epoch=1,
+        reason="client_disconnected",
+        reconnect_timeout_seconds=30,
+    )
+    assert paused["phase"] in {"pausing", "pause_committing", "paused"}
+
+    with pytest.raises(ExecutionControlConflictError):
+        await service.begin_execution(
+            context_id="ctx-paused",
+            task_id="task-2",
+            owner="owner-1",
+            cwd=str(tmp_path),
+        )
+
+    terminating_control = await service.begin_execution(
+        context_id="ctx-terminating",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+    )
+    await terminating_control.detach_task(current, execution_status="input-required")
+    terminating_control.phase = "terminated"
+    terminating_control.termination_reason = "explicit_terminate"
+    terminating_control.backup = {"status": "blocked", "error": "staging unavailable"}
+    terminating_control.release_ready = False
+
+    assert terminating_control.natural_handoff_admits_replacement() is False
+    with pytest.raises(ExecutionControlConflictError):
+        await service.begin_execution(
+            context_id="ctx-terminating",
+            task_id="task-2",
+            owner="owner-1",
+            cwd=str(tmp_path),
+        )
+    await paused_control.detach_task(current, execution_status="canceled")
+    await service.close()
+
+
+@pytest.mark.asyncio
+async def test_retired_natural_handoff_receipt_is_never_answered_with_a_newer_execution(tmp_path: Path) -> None:
+    coordinator = _RecordingCoordinator()
+    service = ExecutionControlService(
+        persistence_root=None,
+        backup_service=None,
+        backup_coordinator=coordinator,
+    )
+    first = await _natural_handoff_turn(service, task_id="task-1")
+    first_receipt = first.natural_handoff_receipt()
+    assert first_receipt is not None
+    second = await _natural_handoff_turn(service, task_id="task-2")
+    second_receipt = second.natural_handoff_receipt()
+
+    assert second is not first
+    assert second_receipt is not None
+    assert service.natural_handoff_receipt(first.execution_id) == first_receipt
+    assert service.natural_handoff_receipt(second.execution_id) == second_receipt
+    assert first_receipt["pendingJobId"] != second_receipt["pendingJobId"]
+    assert first_receipt["ownerGeneration"] < second_receipt["ownerGeneration"]
+    assert service.natural_handoff_receipt("exec-unknown") is None
+    await service.close()
