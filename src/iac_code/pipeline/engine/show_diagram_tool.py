@@ -155,11 +155,7 @@ class ShowArchitectureDiagramTool(Tool):
                 )
             except asyncio.CancelledError:
                 if context.event_queue is not None:
-                    # Cancellation may be requested more than once while the tool executor
-                    # is draining this task.  The queue is intentionally unbounded, so use
-                    # the synchronous API to guarantee the fallback event is visible before
-                    # propagating cancellation.
-                    context.event_queue.put_nowait(
+                    await context.event_queue.put(
                         _diagram_event_from_render_result(
                             candidate_name=candidate_name,
                             template_content=template_content,
