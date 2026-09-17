@@ -1242,6 +1242,41 @@ async def test_subscribe_to_task_stops_after_input_required_status(monkeypatch) 
 
 
 @pytest.mark.asyncio
+async def test_subscribe_to_task_stops_after_terminal_status(monkeypatch) -> None:
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    store = A2ATaskStore()
+    call_context = ServerCallContext()
+    await store.save(task, call_context)
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = asyncio.current_task()
+
+    async def hanging_sdk_subscription(self, params, context):
+        yield TaskStatusUpdateEvent(
+            task_id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+        )
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_subscribe_to_task", hanging_sdk_subscription)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._validate_extensions = lambda context: None
+
+    events = await asyncio.wait_for(
+        _collect_async(handler.on_subscribe_to_task(SubscribeToTaskRequest(id="task-1"), call_context)),
+        timeout=0.5,
+    )
+
+    assert len(events) == 1
+    assert events[0].status.state == TaskState.TASK_STATE_COMPLETED
+
+
+@pytest.mark.asyncio
 async def test_subscribe_to_task_recovers_terminal_snapshot_when_sdk_stream_ends_early(monkeypatch) -> None:
     task = Task(
         id="task-1",

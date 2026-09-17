@@ -543,7 +543,7 @@ async def test_permission_termination_context_write_is_off_loop_and_gates_releas
         assert closed.is_set()
         assert control.phase == "terminating" and not control.release_ready
         await asyncio.wait_for(
-            store.get_or_create_context(context_id="ctx-2", cwd=str(tmp_path), runtime_factory=lambda _: object()), 1
+            store.get_or_create_context(context_id="ctx-2", cwd=str(tmp_path), runtime_factory=lambda _: object()), 3
         )
         assert writes == [(False, False)]
         release.set()

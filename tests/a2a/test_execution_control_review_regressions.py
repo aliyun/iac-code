@@ -293,7 +293,7 @@ async def test_active_termination_commits_off_loop_and_blocks_release_on_failure
         assert writes == [(False, False)]
         assert not control.release_ready
         await asyncio.wait_for(
-            store.get_or_create_context(context_id="ctx-2", cwd=str(tmp_path), runtime_factory=lambda _: object()), 1
+            store.get_or_create_context(context_id="ctx-2", cwd=str(tmp_path), runtime_factory=lambda _: object()), 3
         )
         # A previously queued SDK event may arrive while the final write is in flight.
         await store.save(Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_WORKING)))

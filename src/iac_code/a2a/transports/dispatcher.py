@@ -1043,15 +1043,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             raise TaskNotFoundError(f"Task {params.id} is not active")
         active_task_registry = getattr(self, "_active_task_registry", None)
         active_task = await active_task_registry.get(params.id) if active_task_registry is not None else None
-        terminal_state_seen = False
         async for event in super().on_subscribe_to_task(params, context):
             event_state = _task_event_state(event)
-            terminal_state_seen = terminal_state_seen or event_state in TERMINAL_TASK_STATES
             yield event
-            if event_state in INTERRUPTED_TASK_STATES:
+            if event_state in TERMINAL_TASK_STATES or event_state in INTERRUPTED_TASK_STATES:
                 return
-        if terminal_state_seen:
-            return
 
         # a2a-sdk 1.1 can close its subscriber queue after the producer finishes but
         # before the consumer publishes the last update. Recover the persisted terminal
