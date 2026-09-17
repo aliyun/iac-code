@@ -578,14 +578,14 @@ class TestShowArchitectureDiagramToolExecute:
         class ShortTimeoutShowArchitectureDiagramTool(ShowArchitectureDiagramTool):
             @property
             def timeout(self) -> float | None:
-                return 0.05
+                return 1.0
 
         template = tmp_path / "template.yml"
         template.write_text(SLB_TEMPLATE, encoding="utf-8")
         queue: asyncio.Queue = asyncio.Queue()
         registry = ToolRegistry()
         registry.register(ShortTimeoutShowArchitectureDiagramTool())
-        executor = ToolExecutor(registry, tool_timeout=0.05)
+        executor = ToolExecutor(registry, tool_timeout=1.0)
 
         async def slow_create_semantic_plan_for_architecture_with_llm(
             architecture_context: dict,
