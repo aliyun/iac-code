@@ -220,6 +220,7 @@ def build_agent_card(
                     "terminated",
                 ],
                 "toolBatchDrainOnPause": True,
+                "naturalHandoffVersion": "natural-handoff-v1",
                 "transportScope": "http",
             },
             execution_control_extension.params,

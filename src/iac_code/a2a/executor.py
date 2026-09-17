@@ -1289,6 +1289,8 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._metadata_echo_redactor = A2AMetadataEchoRedactor()
         self._backup_service = backup_service or SessionBackupService()
         self._execution_control_service = execution_control_service
+        self._backup_coordinator = getattr(execution_control_service, "backup_coordinator", None)
+        self._permission_input_registry.set_backup_coordinator(self._backup_coordinator)
         if execution_control_service is not None:
             execution_control_service.set_termination_cleanup(self._terminate_detached_execution)
             execution_control_service.set_resume_callback(self._task_store.touch_context)
@@ -1499,9 +1501,8 @@ class IacCodeA2AExecutor(AgentExecutor):
             return
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
-            if (
-                PipelineLifecycleEventQueueCarrier.read(context)
-                and not PipelineLifecycleEventQueueCarrier.is_bound(context)
+            if PipelineLifecycleEventQueueCarrier.read(context) and not PipelineLifecycleEventQueueCarrier.is_bound(
+                context
             ):
                 await self._publish_status(
                     event_queue,
@@ -1663,9 +1664,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             metadata = getattr(context, "metadata", None) or getattr(
                 getattr(context, "message", None), "metadata", None
             )
-            resource_selector_enabled = ResourceSelectorCapability.for_surface(
-                "a2a", request_metadata=metadata
-            ).enabled
+            resource_selector_enabled = ResourceSelectorCapability.for_surface("a2a", request_metadata=metadata).enabled
             cwd = self._resolve_cwd(metadata)
             public_path_roots = build_public_path_roots(cwd=cwd)
             pipeline_mode = resolve_request_run_mode(metadata) == RunMode.PIPELINE

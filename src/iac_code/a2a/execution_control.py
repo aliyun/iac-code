@@ -19,9 +19,15 @@ from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Literal, TypeVar, cast
+from typing import Any, AsyncIterator, Literal, TypeVar
 
-from iac_code.a2a.backup import await_fenced, run_sync_fenced, run_sync_fenced_with_cancel_completion
+from iac_code.a2a.backup import (
+    NATURAL_HANDOFF_VERSION,
+    SessionBackupHandoffError,
+    await_fenced,
+    run_sync_fenced,
+    run_sync_fenced_with_cancel_completion,
+)
 from iac_code.services.session_backup import BackupReason, BackupResult
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -41,6 +47,7 @@ ExecutionPhase = Literal[
 
 _PAUSE_PHASES = frozenset({"pausing", "pause_committing", "paused"})
 _TERMINAL_TASK_STATES = frozenset({"completed", "failed", "canceled", "input-required", "normal-turn-ended"})
+_BACKUP_RELEASE_STATUSES = frozenset({"disabled", "shared_committed", "staged_committed", "delegated"})
 _RECOVERABLE_INPUT_ADMISSION_TTL_SECONDS = 60.0
 NATURAL_COMPLETION_FINALIZED_GENERATION = "_naturalCompletionFinalizedGeneration"
 _CURRENT_CONTROL: ContextVar[Any] = ContextVar("a2a_execution_control", default=None)
@@ -495,6 +502,8 @@ class ExecutionController:
         input_handoff_commit: Callable[[ExecutionController, dict[str, Any]], Awaitable[None]] | None = None,
         execution_id: str | None = None,
         execution_mode: str = "normal",
+        owner_generation: int = 1,
+        backup_coordinator: Any | None = None,
     ) -> None:
         if execution_mode not in {"normal", "pipeline"}:
             raise ValueError("execution_mode must be normal or pipeline")
@@ -505,6 +514,7 @@ class ExecutionController:
         self.session_id: str | None = None
         self.execution_id = execution_id or "exec-" + uuid.uuid4().hex
         self.execution_mode = execution_mode
+        self.owner_generation = owner_generation
         self.server_instance_id = server_instance_id
         self.phase: ExecutionPhase = "running"
         self.execution_status = "working"
@@ -542,6 +552,8 @@ class ExecutionController:
         self._pending_staged_backup: BackupResult | None = None
         self._persistence_path = persistence_path
         self._backup_service = backup_service
+        self._backup_coordinator = backup_coordinator
+        self._natural_handoff: dict[str, Any] | None = None
         self._termination_cleanup = termination_cleanup
         self._on_resume = on_resume
         self._input_handoff_commit = input_handoff_commit
@@ -552,6 +564,7 @@ class ExecutionController:
         self._turn_generation_by_task: dict[asyncio.Task[Any], int] = {}
         self._natural_completion_generation: int | None = None
         self._natural_completion_delivered_generation: int | None = None
+        self._claimed_natural_completion_generation: int | None = None
         self._pending_explicit_termination_reason: str | None = None
         self._termination_generation = 0
 
@@ -686,6 +699,8 @@ class ExecutionController:
             self._termination_cleanup_inflight = False
             self._natural_completion_generation = None
             self._natural_completion_delivered_generation = None
+            self._claimed_natural_completion_generation = None
+            self._natural_handoff = None
             self._pending_explicit_termination_reason = None
             self.revision += 1
             snapshot = self.snapshot()
@@ -1168,6 +1183,7 @@ class ExecutionController:
             "backup": dict(self.backup),
             "externalOperations": [dict(operation) for operation in self.external_operations],
             "releaseReady": self.release_ready,
+            "naturalHandoff": None if self._natural_handoff is None else dict(self._natural_handoff),
             "inputHandoffReady": self.input_handoff_ready(),
             "localInputContinuationReady": self.local_input_continuation_ready(),
         }
@@ -1187,6 +1203,27 @@ class ExecutionController:
             any(not task.done() for task in self._execution_tasks)
             or self._activities
             or any(not participant.task.done() for participant in self._participants.values())
+        )
+
+    def natural_handoff_receipt(self) -> dict[str, Any] | None:
+        return None if self._natural_handoff is None else dict(self._natural_handoff)
+
+    def natural_handoff_admits_replacement(self) -> bool:
+        """Return whether a committed business handoff lets an ordinary next turn start."""
+
+        receipt = self._natural_handoff
+        return bool(
+            receipt is not None
+            and receipt.get("version") == NATURAL_HANDOFF_VERSION
+            and receipt.get("executionId") == self.execution_id
+            and receipt.get("businessDrained") is True
+            and (receipt.get("pendingJobId") is not None or receipt.get("backupDisabled") is True)
+            and self.termination_reason == "natural_completion"
+            and self.phase in {"terminating", "terminated"}
+            and self._pending_explicit_termination_reason is None
+            and self._resume_barrier_revision is None
+            and not self._connection_hold
+            and not self.has_managed_work()
         )
 
     def can_admit_recoverable_input_continuation(self, task_id: str) -> bool:
@@ -1350,7 +1387,7 @@ class ExecutionController:
     def _maybe_mark_release_ready_locked(self) -> None:
         if (
             self.phase == "terminated"
-            and self.backup.get("status") in {"disabled", "shared_committed"}
+            and self.backup.get("status") in _BACKUP_RELEASE_STATUSES
             and not self._execution_tasks
             and not self._activities
             and not self._participants
@@ -1365,7 +1402,7 @@ class ExecutionController:
         async with self._condition:
             if (
                 self.phase != "terminated"
-                or self.backup.get("status") not in {"disabled", "shared_committed"}
+                or self.backup.get("status") not in _BACKUP_RELEASE_STATUSES
                 or self._execution_tasks
                 or self._activities
                 or self._participants
@@ -1495,6 +1532,8 @@ class ExecutionController:
     def _claim_termination_locked(self, reason: str) -> int:
         self._natural_completion_generation = None
         self._natural_completion_delivered_generation = None
+        self._claimed_natural_completion_generation = None
+        self._natural_handoff = None
         self._pending_explicit_termination_reason = None
         self._termination_generation += 1
         self._termination_pause_id = self.pause_id if reason == "disconnect_timeout" else None
@@ -1526,8 +1565,10 @@ class ExecutionController:
     def _claim_natural_completion_locked(self) -> int:
         """Atomically claim non-canceling finalization for a drained business turn."""
 
+        self._claimed_natural_completion_generation = self._natural_completion_delivered_generation
         self._natural_completion_generation = None
         self._natural_completion_delivered_generation = None
+        self._natural_handoff = None
         self._pending_explicit_termination_reason = None
         self._termination_generation += 1
         self._termination_pause_id = None
@@ -1673,7 +1714,7 @@ class ExecutionController:
         await self._perform_backup(generation)
 
     async def _finish_natural_completion(self, generation: int) -> None:
-        """Finalize a drained execution without canceling any business task."""
+        """Hand a drained execution over to the backup coordinator without canceling business work."""
 
         async with self._condition:
             if (
@@ -1713,6 +1754,7 @@ class ExecutionController:
             self.phase = "terminated"
             self.revision += 1
             terminated = self.snapshot()
+            completion_generation = self._claimed_natural_completion_generation
         try:
             await self._persist_snapshot(terminated)
         except Exception:
@@ -1726,22 +1768,107 @@ class ExecutionController:
                 clear_cleanup_inflight=True,
             )
             return
-        await self._perform_backup(generation)
-        async with self._condition:
-            await self._condition.wait_for(
-                lambda: self.release_ready or self.backup.get("status") == "blocked" or self._commit_error is not None
+        await self._commit_natural_handoff(generation, completion_generation)
+
+    async def _commit_natural_handoff(self, generation: int, completion_generation: int | None) -> None:
+        """Delegate the directory copy, then publish the business handoff receipt."""
+
+        coordinator = self._backup_coordinator
+        if coordinator is None or not getattr(coordinator, "enabled", False) or self.session_id is None:
+            async with self._condition:
+                if not self._owns_termination_locked(generation):
+                    return
+                self._publish_natural_handoff_locked(
+                    completion_generation=completion_generation,
+                    business_revision=0,
+                    job_id=None,
+                    backup_disabled=True,
+                )
+                snapshot = self.snapshot()
+            with suppress(Exception):
+                await self._persist_snapshot(snapshot)
+            await self._perform_backup(generation)
+            return
+        try:
+            handoff = await coordinator.register_boundary(
+                cwd=self.cwd,
+                session_id=self.session_id,
+                context_id=self.context_id,
+                execution_id=self.execution_id,
+                boundary="natural_completion",
+                reason=BackupReason.TERMINAL,
+                completion_generation=completion_generation,
             )
+        except SessionBackupHandoffError as exc:
+            await self._commit_blocked_backup_state(
+                "session backup job could not be persisted",
+                exc,
+                generation=generation,
+            )
+            return
+        async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
+            self.backup = {
+                "status": "disabled" if handoff.backup_disabled else "delegated",
+                "jobId": handoff.job_id,
+                "businessRevision": handoff.business_revision,
+            }
+            self._backup_state_committed = False
+            self.release_ready = False
+            self._publish_natural_handoff_locked(
+                completion_generation=completion_generation,
+                business_revision=handoff.business_revision,
+                job_id=handoff.job_id,
+                backup_disabled=handoff.backup_disabled,
+            )
+            snapshot = self.snapshot()
+            snapshot["commitError"] = None
+        try:
+            await self._persist_snapshot(snapshot)
+        except Exception:
+            async with self._condition:
+                if self._owns_termination_locked(generation):
+                    self._commit_error = "state_commit_failed"
+            return
+        async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
+            self._commit_error = None
+            self._backup_state_committed = True
+            self._maybe_mark_release_ready_locked()
             logger.info(
-                "A2A execution natural completion settled context_id=%s task_id=%s execution_id=%s "
-                "status=%s backup_status=%s release_ready=%s commit_error=%s",
+                "A2A execution natural handoff committed context_id=%s task_id=%s execution_id=%s "
+                "business_revision=%s job_id=%s",
                 sanitize_strict_text(self.context_id),
                 sanitize_strict_text(self.task_id),
                 sanitize_strict_text(self.execution_id),
-                sanitize_strict_text(self.execution_status),
-                sanitize_strict_text(str(self.backup.get("status") or "none")),
-                self.release_ready,
-                sanitize_strict_text(self._commit_error or "none"),
+                handoff.business_revision,
+                sanitize_strict_text(handoff.job_id or "none"),
             )
+
+    def _publish_natural_handoff_locked(
+        self,
+        *,
+        completion_generation: int | None,
+        business_revision: int,
+        job_id: str | None,
+        backup_disabled: bool,
+    ) -> None:
+        self._natural_handoff = {
+            "version": NATURAL_HANDOFF_VERSION,
+            "contextId": self.context_id,
+            "taskId": self.task_id,
+            "executionId": self.execution_id,
+            "completionGeneration": completion_generation,
+            "ownerGeneration": self.owner_generation,
+            "businessRevision": business_revision,
+            "pendingJobId": job_id,
+            "backupDisabled": backup_disabled,
+            "businessDrained": True,
+        }
+        self.revision += 1
+        self._condition.notify_all()
 
     async def _run_termination_cleanup(
         self,
@@ -1851,22 +1978,21 @@ class ExecutionController:
                     critical=True,
                 )
             if result.enabled and result.staged_committed and not result.shared_committed:
-                wait_for_shared = getattr(self._backup_service, "wait_until_shared_committed", None)
-                if not callable(wait_for_shared) or result.generation is None or result.commit_id is None:
-                    raise RuntimeError("Staged backup cannot prove shared publication")
-                result = cast(
-                    BackupResult,
-                    await run_sync_fenced(
-                        wait_for_shared,
-                        self.cwd,
-                        self.session_id,
-                        generation=result.generation,
-                        commit_id=result.commit_id,
-                    ),
-                )
-            succeeded = (not result.enabled) or (result.succeeded and result.shared_committed)
+                if result.generation is None or result.commit_id is None:
+                    raise RuntimeError("Staged backup cannot prove a durable local snapshot")
+            succeeded = (not result.enabled) or (
+                result.succeeded and (result.shared_committed or result.staged_committed)
+            )
             backup = {
-                "status": "disabled" if not result.enabled else "shared_committed" if succeeded else "blocked",
+                "status": (
+                    "disabled"
+                    if not result.enabled
+                    else (
+                        ("shared_committed" if result.shared_committed else "staged_committed")
+                        if succeeded
+                        else "blocked"
+                    )
+                ),
                 "generation": result.generation,
                 "commitId": result.commit_id,
                 "error": result.error,
@@ -1970,7 +2096,7 @@ class ExecutionController:
                 return
             snapshot = self.snapshot()
             snapshot["commitError"] = None
-            backup_complete = self.backup.get("status") in {"disabled", "shared_committed"}
+            backup_complete = self.backup.get("status") in _BACKUP_RELEASE_STATUSES
         try:
             await self._persist_snapshot(snapshot)
         except Exception:
@@ -2040,15 +2166,37 @@ class ExecutionController:
 
 
 class ExecutionControlService:
-    def __init__(self, *, persistence_root: Path | None, backup_service: Any | None) -> None:
+    def __init__(
+        self,
+        *,
+        persistence_root: Path | None,
+        backup_service: Any | None,
+        backup_coordinator: Any | None = None,
+    ) -> None:
         self.server_instance_id = "instance-" + uuid.uuid4().hex
         self._persistence_root = persistence_root
         self._backup_service = backup_service
+        self._backup_coordinator = backup_coordinator
         self._controls: dict[str, ExecutionController] = {}
         self._context_start_locks: dict[str, asyncio.Lock] = {}
         self._recoverable_input_admissions = _RecoverableInputAdmissionStore(persistence_root)
         self._termination_cleanup: Callable[[str, str, str], Awaitable[str | None]] | None = None
         self._on_resume: Callable[[str], None] | None = None
+        self._owner_generation = 0
+        self._retired_natural_handoffs: dict[str, dict[str, Any]] = {}
+
+    @property
+    def backup_coordinator(self) -> Any | None:
+        return self._backup_coordinator
+
+    def natural_handoff_receipt(self, execution_id: str) -> dict[str, Any] | None:
+        """Return the immutable receipt of a retired execution, never a newer one."""
+
+        for control in self._controls.values():
+            if control.execution_id == execution_id:
+                return control.natural_handoff_receipt()
+        receipt = self._retired_natural_handoffs.get(execution_id)
+        return None if receipt is None else dict(receipt)
 
     def set_resume_callback(self, callback: Callable[[str], None]) -> None:
         self._on_resume = callback
@@ -2092,6 +2240,7 @@ class ExecutionControlService:
         task = asyncio.current_task()
         if task is None:
             raise RuntimeError("A2A execution requires an asyncio Task")
+        await self._await_local_snapshot_quiescence(context_id)
         retired_control: ExecutionController | None = None
         async with self._context_start_locks.setdefault(context_id, asyncio.Lock()):
             control = self._controls.get(context_id)
@@ -2111,15 +2260,20 @@ class ExecutionControlService:
                 and admitted_recovery
                 and control.can_replace_with_recoverable_input_continuation(task_id)
             )
-            if control is not None and (
-                (
-                    control.task_id != task_id
-                    and control.phase in {"pausing", "pause_committing", "paused", "resuming", "terminating"}
-                )
-                or (
-                    control.phase in {"terminating", "terminated"}
-                    and not control.release_ready
-                    and not replace_blocked_input_wait
+            natural_handoff_admits = control is not None and control.natural_handoff_admits_replacement()
+            if (
+                control is not None
+                and not natural_handoff_admits
+                and (
+                    (
+                        control.task_id != task_id
+                        and control.phase in {"pausing", "pause_committing", "paused", "resuming", "terminating"}
+                    )
+                    or (
+                        control.phase in {"terminating", "terminated"}
+                        and not control.release_ready
+                        and not replace_blocked_input_wait
+                    )
                 )
             ):
                 raise ExecutionControlConflictError("Current execution must finish recovery before a new task starts")
@@ -2158,6 +2312,7 @@ class ExecutionControlService:
                 path = None
                 if self._persistence_root is not None:
                     path = self._persistence_root / "execution-control" / f"{context_id}.json"
+                self._owner_generation += 1
                 control = ExecutionController(
                     context_id=context_id,
                     task_id=task_id,
@@ -2170,6 +2325,8 @@ class ExecutionControlService:
                     on_resume=self._on_resume,
                     input_handoff_commit=self._commit_input_handoff,
                     execution_mode=execution_mode,
+                    owner_generation=self._owner_generation,
+                    backup_coordinator=self._backup_coordinator,
                 )
             assert control is not None
             if admission is not None and not reuse:
@@ -2236,10 +2393,25 @@ class ExecutionControlService:
                     raise
             self._controls[context_id] = control
             if retired_control is not None:
+                self._retain_natural_handoff(retired_control)
                 await retired_control.close()
             if admission is None or reuse:
                 await control.attach_task(task, mark_working=False)
         return control
+
+    def _retain_natural_handoff(self, control: ExecutionController) -> None:
+        receipt = control.natural_handoff_receipt()
+        if receipt is not None:
+            self._retired_natural_handoffs[control.execution_id] = receipt
+
+    async def _await_local_snapshot_quiescence(self, context_id: str) -> None:
+        """Let an earlier boundary's snapshot attempt finish before the next turn writes."""
+
+        coordinator = self._backup_coordinator
+        control = self._controls.get(context_id)
+        if coordinator is None or control is None or control.session_id is None:
+            return
+        await coordinator.wait_for_local_snapshot_quiescence(cwd=control.cwd, session_id=control.session_id)
 
     async def reserve_recoverable_input_continuation(
         self,

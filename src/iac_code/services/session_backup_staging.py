@@ -31,6 +31,7 @@ from iac_code.services.session_backup_state import BackupPublicationProof, Sessi
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.file_security import ensure_private_dir
+from iac_code.utils.state_io import cross_process_file_lock
 
 BACKUP_TMP_ENV_VAR = "IAC_CODE_CONFIG_BACKUP_TMP_DIR"
 _COPYING_SUFFIX = ".copying"
@@ -149,8 +150,7 @@ class StagedSessionBackupService(SessionBackupService):
                         existing = self._read_existing_snapshot_state(destination, session_id)
                         if existing is not None:
                             completed_next = (
-                                base_state.status == "succeeded"
-                                and existing.parent_generation == base_state.generation
+                                base_state.status == "succeeded" and existing.parent_generation == base_state.generation
                             )
                             if not completed_next and not existing.same_lineage(committed_state):
                                 raise SessionBackupConflict(
@@ -293,9 +293,7 @@ class StagedSessionBackupService(SessionBackupService):
         minimum_generation: int | None = None,
     ) -> SessionReconcileResult:
         if minimum_generation is not None and (
-            isinstance(minimum_generation, bool)
-            or not isinstance(minimum_generation, int)
-            or minimum_generation <= 0
+            isinstance(minimum_generation, bool) or not isinstance(minimum_generation, int) or minimum_generation <= 0
         ):
             raise ValueError("minimum_generation must be a positive integer")
         if not self._backup_enabled():
@@ -471,17 +469,18 @@ class SessionBackupStagingWorker:
         return service
 
     def cleanup_incomplete_snapshots(self) -> int:
-        removed = 0
+        """Retain in-progress copies; only their owning session writer may remove them."""
+
+        retained = 0
         projects_root = self.staging_root / "projects"
-        if not projects_root.is_dir():
-            return removed
-        for path in sorted(projects_root.glob("*/*{}".format(_COPYING_SUFFIX))):
-            if not path.name.endswith(_COPYING_SUFFIX):
-                continue
-            self._remove_snapshot(path)
-            removed += 1
+        if projects_root.is_dir():
+            for path in sorted(projects_root.glob("*/*{}".format(_COPYING_SUFFIX))):
+                if path.name.endswith(_COPYING_SUFFIX):
+                    retained += 1
+            if retained:
+                logger.info("Retaining incomplete staged session snapshots count={}", retained)
         self._prune_empty_staging_dirs()
-        return removed
+        return 0
 
     def run_once(self) -> int:
         sessions: dict[tuple[str, str], list[StagedSessionSnapshot]] = {}
@@ -538,6 +537,13 @@ class SessionBackupStagingWorker:
         return sorted(snapshots, key=lambda item: (item.project, item.session_id, item.generation))
 
     def publish_snapshot(self, snapshot: StagedSessionSnapshot) -> None:
+        with cross_process_file_lock(self._publisher_lock_path(snapshot)):
+            self._publish_snapshot_locked(snapshot)
+
+    def _publisher_lock_path(self, snapshot: StagedSessionSnapshot) -> Path:
+        return self.backup_root / ".locks" / snapshot.project / "{}.lock".format(snapshot.session_id)
+
+    def _publish_snapshot_locked(self, snapshot: StagedSessionSnapshot) -> None:
         state = self._service._read_state(snapshot.path, session_id=snapshot.session_id, shared=True)
         if state is None or state.generation != snapshot.generation:
             raise SessionBackupError("staged session backup generation does not match its directory")

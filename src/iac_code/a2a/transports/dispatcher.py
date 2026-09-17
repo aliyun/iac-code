@@ -48,6 +48,7 @@ from starlette.routing import Route
 from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
 from iac_code.a2a.app import normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
+from iac_code.a2a.backup import SessionBackupCoordinator
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.execution_control import (
     NaturalCompletionGenerationCarrier,
@@ -308,10 +309,13 @@ class A2ARuntimeComponents:
     runtime_registration: A2ARuntimeRegistration | None = None
     backup_staging_process: SessionBackupStagingProcess | None = None
     execution_control_service: Any | None = None
+    backup_coordinator: SessionBackupCoordinator | None = None
 
     def start_background_services(self) -> None:
         if self.backup_staging_process is not None:
             self.backup_staging_process.start()
+        if self.backup_coordinator is not None:
+            asyncio.ensure_future(self.backup_coordinator.recover())
 
     async def aclose(self) -> None:
         if self.runtime_registration is not None:
@@ -348,6 +352,8 @@ class A2ARuntimeComponents:
                 if inspect.isawaitable(result):
                     await result
         await self._exit_stack.aclose()
+        if self.backup_coordinator is not None:
+            await self.backup_coordinator.aclose()
         if self.backup_staging_process is not None:
             self.backup_staging_process.close()
 
@@ -406,9 +412,15 @@ def create_runtime_components(
     task_store = A2ATaskStore(metrics=metrics, persistence=persistence, backup_service=backup_service)
     from iac_code.a2a.execution_control import ExecutionControlService
 
+    backup_coordinator = SessionBackupCoordinator(
+        backup_service,
+        state_root=Path(persistence.root) if persistence is not None else None,
+        metrics=metrics,
+    )
     execution_control_service = ExecutionControlService(
         persistence_root=Path(persistence.root) if persistence is not None else None,
         backup_service=backup_service,
+        backup_coordinator=backup_coordinator,
     )
     set_execution_control_provider = getattr(task_store, "set_execution_control_provider", None)
     if callable(set_execution_control_provider):
@@ -511,6 +523,7 @@ def create_runtime_components(
         runtime_registration=runtime_registration,
         backup_staging_process=backup_staging_process,
         execution_control_service=execution_control_service,
+        backup_coordinator=backup_coordinator,
     )
 
 

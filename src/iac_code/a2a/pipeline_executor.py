@@ -19,7 +19,7 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import ParseDict
 
 from iac_code.a2a.artifacts import artifact_store_for_session
-from iac_code.a2a.backup import backup_session_async
+from iac_code.a2a.backup import SessionBackupHandoffError, backup_session_async
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
 from iac_code.a2a.execution_control import (
     current_execution_control,
@@ -2946,6 +2946,15 @@ class IacCodeA2APipelineExecutor:
         # generation after publication.
         return
 
+    @staticmethod
+    async def _delegate_or_backup(awaitable: Awaitable[Any]) -> Any:
+        """Report a local job/checkpoint persistence failure as a blocked backup."""
+
+        try:
+            return await awaitable
+        except SessionBackupHandoffError as exc:
+            raise SessionBackupBlocked(str(exc)) from exc
+
     async def _backup_pipeline_publication(
         self,
         envelope: dict[str, Any],
@@ -2965,13 +2974,44 @@ class IacCodeA2APipelineExecutor:
             }
         try:
             pending = publisher.pending_durable_permission if reason == BackupReason.INPUT_REQUIRED else None
+            coordinator = (
+                self._permission_input_registry.backup_coordinator
+                if self._permission_input_registry is not None
+                else None
+            )
+            delegated = coordinator is not None and getattr(coordinator, "enabled", False)
             if pending is not None and self._permission_input_registry is not None:
-                backup_result = await self._permission_input_registry.backup_durable_boundary(
-                    pending,
-                    cwd,
-                    session_id,
-                    backup_service=self._backup_service,
-                    metrics=self._metrics,
+
+                async def record_staged_generation(generation: int | None, _commit_id: str | None) -> None:
+                    if generation is not None:
+                        await self._task_store.record_expected_permission_backup_generation(task.task_id, generation)
+
+                backup_result = await self._delegate_or_backup(
+                    self._permission_input_registry.backup_durable_boundary(
+                        pending,
+                        cwd,
+                        session_id,
+                        backup_service=self._backup_service,
+                        metrics=self._metrics,
+                        on_staged=record_staged_generation,
+                    )
+                )
+                if not delegated:
+                    generation = staged_permission_backup_generation(backup_result)
+                    if generation is not None:
+                        await self._task_store.record_expected_permission_backup_generation(task.task_id, generation)
+            elif delegated:
+                assert coordinator is not None
+                backup_result = await self._delegate_or_backup(
+                    coordinator.register_boundary(
+                        cwd=cwd,
+                        session_id=session_id,
+                        context_id=getattr(task, "context_id", "") or "",
+                        execution_id=task.task_id,
+                        boundary="pipeline_publication",
+                        reason=reason,
+                        publication_proofs=publication_proofs,
+                    )
                 )
             else:
                 backup_result = await backup_session_async(
@@ -2983,10 +3023,6 @@ class IacCodeA2APipelineExecutor:
                     metrics=self._metrics,
                     publication_proofs=publication_proofs,
                 )
-            if pending is not None:
-                generation = staged_permission_backup_generation(backup_result)
-                if generation is not None:
-                    await self._task_store.record_expected_permission_backup_generation(task.task_id, generation)
         except SessionBackupBlocked as exc:
             sidecar_synced = await _sync_pipeline_backup_blocked_sidecar(
                 pipeline,
