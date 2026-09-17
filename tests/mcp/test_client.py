@@ -532,9 +532,11 @@ import sys
 import time
 
 pid_file = sys.argv[1]
-with open(pid_file, "w", encoding="utf-8") as handle:
+temporary_pid_file = f"{pid_file}.tmp"
+with open(temporary_pid_file, "w", encoding="utf-8") as handle:
     handle.write(str(os.getpid()))
     handle.flush()
+os.replace(temporary_pid_file, pid_file)
 time.sleep(10)
 """,
     )

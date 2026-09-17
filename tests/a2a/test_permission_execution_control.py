@@ -226,6 +226,24 @@ async def test_persisted_recovery_termination_seals_checkpoint_and_backup(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("action", ["resume", "terminate", "approve_resume"])
 async def test_normal_permission_resident_timer_keeps_paused_runtime(tmp_path, monkeypatch, action):
+    timer_started = asyncio.Event()
+    release_timer = asyncio.Event()
+    suspend_attempted = asyncio.Event()
+
+    class GatedPermissionWaitCoordinator(PermissionWaitCoordinator):
+        async def _run_resident_timer(self, owner) -> None:
+            timer_started.set()
+            await release_timer.wait()
+            await super()._run_resident_timer(owner)
+
+        async def suspend_now(self, boundary_id: str) -> bool:
+            suspend_attempted.set()
+            return await super().suspend_now(boundary_id)
+
+    monkeypatch.setattr(
+        "iac_code.services.permission_wait.PermissionWaitCoordinator",
+        GatedPermissionWaitCoordinator,
+    )
     backup = SessionBackupService()
     _, store, service = make_executor(tmp_path, backup)
     executor = IacCodeA2AExecutor(
@@ -267,6 +285,7 @@ async def test_normal_permission_resident_timer_keeps_paused_runtime(tmp_path, m
     response_task = None
     try:
         await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue())
+        await timer_started.wait()
         pending = next(iter(executor._permission_input_registry._pending.values()))
         control = service.get_for_context("ctx-1")
         paused = await control.pause(
@@ -278,7 +297,16 @@ async def test_normal_permission_resident_timer_keeps_paused_runtime(tmp_path, m
             reconnect_timeout_seconds=60,
         )
         await wait_until(lambda: control.phase == "paused")
-        await asyncio.sleep(1.1)
+        assert pending.checkpoint_store is not None and pending.boundary_id is not None
+        pending.checkpoint_store.transaction(
+            pending.boundary_id,
+            lambda value: {
+                **value,
+                "residentDeadlineAt": format_utc(utc_now() - timedelta(seconds=1)),
+            },
+        )
+        release_timer.set()
+        await suspend_attempted.wait()
         assert not closed and not future.done() and pending.continuation is not None
         assert control.phase == "paused"
         if action == "terminate":
@@ -314,6 +342,7 @@ async def test_normal_permission_resident_timer_keeps_paused_runtime(tmp_path, m
             await wait_until(lambda: bool(closed))
             assert closed == [True] and not ran.is_set()
     finally:
+        release_timer.set()
         if response_task is not None:
             response_task.cancel()
             await asyncio.gather(response_task, return_exceptions=True)

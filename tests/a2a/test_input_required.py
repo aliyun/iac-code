@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 
 import pytest
 from a2a.types import Message, Part, Role, Task, TaskState, TaskStatus
@@ -14,6 +15,7 @@ from iac_code.a2a.events import publish_stream_event
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.input_required import (
     PERMISSION_QUERY_PREFIX,
+    PermissionIdentityValidationError,
     PermissionInputRegistry,
     PermissionResponse,
     parse_permission_response,
@@ -35,12 +37,24 @@ from iac_code.services.permission_wait import (
     PermissionWaitPolicy,
     build_permission_checkpoint,
 )
+from iac_code.services.providers.aliyun import AliyunCredential, AliyunCredentials
 from iac_code.services.session_backup import BackupResult
 from iac_code.services.session_storage import SessionStorage
+from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent
 
 from .fakes import FakeEventQueue, pending_future
+
+
+def _sts_credential(access_key_id: str, token: str) -> AliyunCredential:
+    return AliyunCredential(
+        mode="StsToken",
+        access_key_id=access_key_id,
+        access_key_secret=f"{access_key_id}-secret",
+        sts_token=token,
+        region_id="cn-beijing",
+    )
 
 
 @pytest.mark.asyncio
@@ -81,6 +95,162 @@ async def test_cancel_durable_detached_permission_runs_suspend_callback() -> Non
     assert pending.continuation is None
     assert pending.state == "completed"
     assert await registry.has_pending_task("task-1") is False
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_preserves_normal_input_wait(tmp_path) -> None:
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    class Control:
+        execution_mode = "normal"
+
+        def has_managed_work(self) -> bool:
+            return False
+
+    class ExecutionControlService:
+        def set_termination_cleanup(self, _callback) -> None:
+            return None
+
+        def set_resume_callback(self, _callback) -> None:
+            return None
+
+        def get_for_context(self, context_id: str):
+            assert context_id == "ctx-1"
+            return Control()
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = None
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        backup_service=DisabledBackup(),
+        execution_control_service=ExecutionControlService(),
+    )
+
+    result = await executor._terminate_detached_execution(
+        "ctx-1",
+        "task-1",
+        "natural_completion",
+    )
+
+    assert result == "input-required"
+    assert (await store.get_task_record("task-1")).state == "input-required"
+    assert (await store.get_context_record("ctx-1")).runtime is None
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_closes_completed_runtime_before_release(tmp_path) -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    runtime = Runtime()
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: runtime,
+    )
+    context.active_task_id = None
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "completed"
+    store.mirror_task(task)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        backup_service=DisabledBackup(),
+    )
+
+    result = await executor._terminate_detached_execution(
+        "ctx-1",
+        "task-1",
+        "natural_completion",
+    )
+
+    assert result == "completed"
+    assert runtime.closed is True
+    assert (await store.get_context_record("ctx-1")).runtime is None
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_fails_closed_for_active_permission(tmp_path) -> None:
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    registry = PermissionInputRegistry()
+    pending = await registry.register(
+        PermissionRequestEvent(
+            tool_name="bash",
+            tool_input={"cmd": "true"},
+            tool_use_id="tool-1",
+            response_future=pending_future(),
+        ),
+        task_id="task-1",
+        context_id="ctx-1",
+        scope="normal",
+    )
+    pending.continuation = object()
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        permission_input_registry=registry,
+        backup_service=DisabledBackup(),
+    )
+
+    with pytest.raises(RuntimeError, match="active permission wait"):
+        await executor._terminate_detached_execution(
+            "ctx-1",
+            "task-1",
+            "natural_completion",
+        )
+
+    assert await registry.has_pending_task("task-1") is True
+    assert (await store.get_task_record("task-1")).state == "input-required"
+    assert context.runtime is not None
 
 
 @pytest.mark.asyncio
@@ -162,6 +332,180 @@ async def test_terminate_detached_pipeline_permission_cancels_sidecar_without_ha
     event_types = [event["eventType"] for event in journal.read_all()]
     assert "pipeline_canceled" in event_types
     assert "pipeline_handoff_ready" not in event_types
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    (
+        "reason",
+        "input_kind",
+        "input_overrides",
+        "race_cancel",
+        "expected_state",
+        "expected_snapshot_status",
+        "expected_canceled_events",
+    ),
+    [
+        ("disconnect_timeout", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
+        ("client_disconnect_control_timeout", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
+        ("natural_completion", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
+        ("disconnect_timeout", "deployment_confirmation", {}, False, "input-required", "waiting_input", 0),
+        (
+            "disconnect_timeout",
+            "ask_user_question",
+            {"toolUseId": "ask-1"},
+            False,
+            "input-required",
+            "waiting_input",
+            0,
+        ),
+        (
+            "disconnect_timeout",
+            "pipeline_pause_confirmation",
+            {"paused": True},
+            False,
+            "input-required",
+            "waiting_input",
+            0,
+        ),
+        ("disconnect_timeout", "ask_user_question", {}, False, "canceled", "canceled", 1),
+        ("disconnect_timeout", "pipeline_pause_confirmation", {}, False, "canceled", "canceled", 1),
+        (
+            "disconnect_timeout",
+            "pipeline_pause_confirmation",
+            {"paused": False},
+            False,
+            "canceled",
+            "canceled",
+            1,
+        ),
+        ("disconnect_timeout", "unknown_input", {}, False, "canceled", "canceled", 1),
+        ("explicit_terminate", "candidate_selection", {}, False, "canceled", "canceled", 1),
+        ("disconnect_timeout", "permission", {}, False, "canceled", "canceled", 1),
+        ("disconnect_timeout", "candidate_selection", {}, True, "canceled", "canceled", 1),
+    ],
+)
+async def test_terminate_detached_waiting_input_distinguishes_sandbox_release_from_cancel(
+    tmp_path,
+    monkeypatch,
+    reason,
+    input_kind,
+    input_overrides,
+    race_cancel,
+    expected_state,
+    expected_snapshot_status,
+    expected_canceled_events,
+) -> None:
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = "task-1"
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=context.session_id)
+    pending_selection = {
+        "schemaVersion": "1.0",
+        "extensionUri": "urn:iac-code:a2a:pipeline-events:v1",
+        "eventId": "evt-selection",
+        "sequence": 1,
+        "createdAt": "2026-09-15T10:00:00Z",
+        "eventType": "input_required",
+        "scope": "step",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-1",
+        "contextId": "ctx-1",
+        "pipelineName": "selling",
+        "status": "input_required",
+        "step": {"runId": "step-1", "id": "confirm_and_select", "attempt": 1},
+        "input": {
+            "inputId": "selection-1",
+            "kind": input_kind,
+            "prompt": "请选择方案",
+            "options": [{"name": "方案A", "candidate_index": 0}],
+            **input_overrides,
+        },
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(pending_selection)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([pending_selection]))
+    backup = DisabledBackup()
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        permission_input_registry=PermissionInputRegistry(),
+        backup_service=backup,
+    )
+
+    if race_cancel:
+        from iac_code.a2a import executor as executor_module
+        from iac_code.a2a.pipeline_executor import WaitingInputCancelResult, cancel_waiting_input_task_from_sidecar
+
+        entered = threading.Event()
+        release = threading.Event()
+        original_check = executor_module.sandbox_release_recoverable_task_id_from_sidecar
+
+        def gated_sidecar_check(**kwargs):
+            result = original_check(**kwargs)
+            entered.set()
+            assert release.wait(3)
+            return result
+
+        monkeypatch.setattr(
+            executor_module,
+            "sandbox_release_recoverable_task_id_from_sidecar",
+            gated_sidecar_check,
+        )
+        termination = asyncio.create_task(executor._terminate_detached_execution("ctx-1", "task-1", reason))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            task_record = await store.get_task_record("task-1")
+            context_record = await store.get_context_record("ctx-1")
+            canceled = await asyncio.to_thread(
+                cancel_waiting_input_task_from_sidecar,
+                cwd=str(cwd),
+                session_id=context.session_id,
+                context_id="ctx-1",
+                task_id="task-1",
+                backup_service=backup,
+                task_store=store,
+                task_record=task_record,
+                context_record=context_record,
+                allow_normal_handoff=False,
+            )
+            assert canceled == WaitingInputCancelResult.CANCELED
+            assert await store.cancel_inactive_input_required_task(task_id="task-1", context_id="ctx-1")
+        finally:
+            release.set()
+        result = await termination
+    else:
+        result = await executor._terminate_detached_execution("ctx-1", "task-1", reason)
+
+    assert result == expected_state
+    assert (await store.get_task_record("task-1")).state == expected_state
+    snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+    assert snapshot is not None and snapshot["status"] == expected_snapshot_status
+    committed_canceled_events = [
+        event
+        for event in journal.read_all()
+        if event["eventType"] == "pipeline_canceled" and event.get("visibility") == "committed"
+    ]
+    assert len(committed_canceled_events) == expected_canceled_events
 
 
 @pytest.fixture(autouse=True)
@@ -368,27 +712,253 @@ async def test_normal_permission_publishes_input_required_and_resumes_live_futur
 
 
 @pytest.mark.asyncio
+async def test_permission_answer_refreshes_credential_in_waiting_pipeline_task(monkeypatch) -> None:
+    registry = PermissionInputRegistry()
+    old_credential = _sts_credential("old-id", "old-token")
+    fresh_credential = _sts_credential("fresh-id", "fresh-token")
+    registered = asyncio.Event()
+    observed: list[tuple[AliyunCredential | None, object]] = []
+
+    class CapturedRosClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+    monkeypatch.setattr("iac_code.tools.cloud.aliyun.ros_client.RosClient", CapturedRosClient)
+
+    async def run_pipeline() -> None:
+        with a2a_request_context(aliyun_credential=old_credential):
+            future = pending_future()
+            request = PermissionRequestEvent(
+                tool_name="ros_stack",
+                tool_input={"action": "CreateStack"},
+                tool_use_id="tool-1",
+                response_future=future,
+            )
+            pending = await registry.register(request, task_id="task-1", context_id="ctx-1")
+            registered.pending = pending  # type: ignore[attr-defined]
+            registered.set()
+            assert await future is True
+            credential = AliyunCredentials.load()
+            client = RosClientFactory.create(credential, region_id="cn-beijing")
+            observed.append((credential, client.config))
+
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_a, **_k: True)
+    pipeline_task = asyncio.create_task(run_pipeline())
+    await registered.wait()
+    pending = registered.pending  # type: ignore[attr-defined]
+    await registry.answer(
+        PermissionResponse(
+            task_id="task-1",
+            context_id="ctx-1",
+            request_task_id="task-1",
+            input_id=pending.input_id,
+            tool_use_id="tool-1",
+            decision="allow_once",
+        ),
+        aliyun_credential=fresh_credential,
+    )
+    await pipeline_task
+
+    assert observed[0][0] is old_credential
+    assert observed[0][1].access_key_id == "fresh-id"
+    assert observed[0][1].security_token == "fresh-token"
+
+
+@pytest.mark.asyncio
+async def test_permission_answer_refreshes_detached_credential_without_cross_session_leak(monkeypatch) -> None:
+    registry = PermissionInputRegistry()
+    first_old = _sts_credential("first-old-id", "first-old-token")
+    second_old = _sts_credential("second-old-id", "second-old-token")
+    fresh = _sts_credential("first-fresh-id", "first-fresh-token")
+
+    continue_second = asyncio.Event()
+    second_registered = asyncio.Event()
+    second_observed: list[object] = []
+
+    class CapturedRosClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+    monkeypatch.setattr("iac_code.tools.cloud.aliyun.ros_client.RosClient", CapturedRosClient)
+
+    async def register(credential: AliyunCredential, task_id: str, context_id: str, *, wait: bool = False):
+        with a2a_request_context(aliyun_credential=credential):
+            pending = await registry.register(
+                PermissionRequestEvent(
+                    tool_name="ros_stack",
+                    tool_input={"action": "CreateStack"},
+                    tool_use_id=f"tool-{task_id}",
+                    response_future=pending_future(),
+                ),
+                task_id=task_id,
+                context_id=context_id,
+                scope="normal",
+            )
+            if wait:
+                second_registered.set()
+                await continue_second.wait()
+                second_observed.append(RosClientFactory.create(AliyunCredentials.load(), "cn-beijing").config)
+            return pending
+
+    first = await asyncio.create_task(register(first_old, "task-1", "ctx-1"))
+    second_task = asyncio.create_task(register(second_old, "task-2", "ctx-2", wait=True))
+    await second_registered.wait()
+    observed: list[tuple[AliyunCredential | None, object]] = []
+
+    async def detached_continuation() -> None:
+        with a2a_request_context(aliyun_credential=first_old):
+            credential = AliyunCredentials.load()
+            observed.append((credential, RosClientFactory.create(credential, "cn-beijing").config))
+
+    first.continuation = detached_continuation
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_a, **_k: True)
+    assert await registry.answer(
+        PermissionResponse(
+            task_id="task-1",
+            context_id="ctx-1",
+            request_task_id="task-1",
+            input_id=first.input_id,
+            tool_use_id="tool-task-1",
+            decision="allow_once",
+        ),
+        aliyun_credential=fresh,
+    )
+    continuation = await registry.claim_continuation(first)
+    assert continuation is not None
+    await continuation()
+    continue_second.set()
+    await second_task
+
+    assert observed[0][0] is first_old
+    assert observed[0][1].access_key_id == "first-fresh-id"
+    assert observed[0][1].security_token == "first-fresh-token"
+    assert second_observed[0].access_key_id == "second-old-id"
+    assert second_observed[0].security_token == "second-old-token"
+    assert second_old.access_key_id == "second-old-id"
+    assert second_old.sts_token == "second-old-token"
+
+
+@pytest.mark.asyncio
 async def test_permission_mismatch_and_duplicate_reply_fail_closed(monkeypatch) -> None:
     registry = PermissionInputRegistry()
+    old_credential = _sts_credential("old-id", "old-token")
+    fresh_credential = _sts_credential("fresh-id", "fresh-token")
+
+    class CapturedRosClient:
+        def __init__(self, config) -> None:
+            self.config = config
+
+    monkeypatch.setattr("iac_code.tools.cloud.aliyun.ros_client.RosClient", CapturedRosClient)
     request = PermissionRequestEvent(
         tool_name="bash",
         tool_input={"cmd": "pwd"},
         tool_use_id="tool-1",
         response_future=pending_future(),
     )
-    pending = await registry.register(request, task_id="task-1", context_id="ctx-1")
+    with a2a_request_context(aliyun_credential=old_credential):
+        pending = await registry.register(request, task_id="task-1", context_id="ctx-1")
     monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
     wrong = parse_permission_response(_permission_message(input_id=pending.input_id))
     assert wrong is not None
     wrong = type(wrong)(**{**wrong.__dict__, "context_id": "ctx-other"})
     with pytest.raises(InvalidParamsError, match="input_response_mismatch"):
-        await registry.answer(wrong)
+        await registry.answer(wrong, aliyun_credential=fresh_credential)
+    assert old_credential.access_key_id == "old-id"
     parsed = parse_permission_response(_permission_message(decision="deny", input_id=pending.input_id))
     assert parsed is not None
-    assert await registry.answer(parsed) is False
+    assert await registry.answer(parsed, aliyun_credential=fresh_credential) is False
+    assert old_credential.access_key_id == "fresh-id"
+    denied_client = RosClientFactory.create(old_credential, "cn-beijing")
+    assert denied_client.config.access_key_id == "fresh-id"
+    assert denied_client.config.security_token == "fresh-token"
     await registry.complete(pending)
     with pytest.raises(InvalidParamsError, match="pending permission"):
-        await registry.answer(parsed)
+        await registry.answer(parsed, aliyun_credential=_sts_credential("duplicate-id", "duplicate-token"))
+    assert old_credential.access_key_id == "fresh-id"
+
+
+@pytest.mark.asyncio
+async def test_changed_execution_identity_does_not_refresh_waiting_credential(monkeypatch, tmp_path) -> None:
+    registry = PermissionInputRegistry()
+    registry.set_permission_wait_coordinator(PermissionWaitCoordinator(PermissionWaitPolicy()))
+    old_credential = _sts_credential("old-id", "old-token")
+    request = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"cmd": "pwd"},
+        tool_use_id="tool-1",
+        response_future=pending_future(),
+    )
+    with a2a_request_context(aliyun_credential=old_credential):
+        pending = await registry.register(request, task_id="task-1", context_id="ctx-1", scope="normal")
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), "session-1")
+    store = PermissionWaitCheckpointStore(str(tmp_path), "session-1")
+    record = store.create(
+        build_permission_checkpoint(
+            session_id="session-1",
+            task_id="task-1",
+            context_id="ctx-1",
+            input_id=pending.input_id,
+            tool_use_id="tool-1",
+            tool_name="bash",
+            tool_input=request.tool_input,
+            permission_class="normal",
+            continuation_frame={
+                "assistantMessageRef": "session.jsonl:0",
+                "assistantMessageDigest": "a" * 64,
+                "orderedToolUseIds": ["tool-1"],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None}],
+            },
+            policy=PermissionWaitPolicy(),
+            principal_ref="different-principal",
+        )
+    )
+    pending.boundary_id = record["boundaryId"]
+    pending.checkpoint_store = store
+    registry.activate_durable_boundary(pending, record)
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_a, **_k: True)
+
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id=pending.input_id,
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    with pytest.raises(PermissionIdentityValidationError, match="cloud_execution_identity_changed"):
+        await registry.answer(response, aliyun_credential=_sts_credential("fresh-id", "fresh-token"))
+
+    assert old_credential.access_key_id == "old-id"
+    assert request.response_future is not None and not request.response_future.done()
+
+
+@pytest.mark.asyncio
+async def test_terminated_permission_does_not_refresh_waiting_credential(monkeypatch) -> None:
+    registry = PermissionInputRegistry()
+    old_credential = _sts_credential("old-id", "old-token")
+    request = PermissionRequestEvent(
+        tool_name="bash",
+        tool_input={"cmd": "pwd"},
+        tool_use_id="tool-1",
+        response_future=pending_future(),
+    )
+    with a2a_request_context(aliyun_credential=old_credential):
+        pending = await registry.register(request, task_id="task-1", context_id="ctx-1")
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_a, **_k: True)
+    await registry.cancel_task("task-1")
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id=pending.input_id,
+        tool_use_id="tool-1",
+        decision="allow_once",
+    )
+    with pytest.raises(InvalidParamsError, match="pending permission"):
+        await registry.answer(response, aliyun_credential=_sts_credential("fresh-id", "fresh-token"))
+
+    assert old_credential.access_key_id == "old-id"
 
 
 @pytest.mark.asyncio
@@ -1327,6 +1897,32 @@ async def test_reversible_terminal_token_cannot_reopen_later_permanent_cancel(mo
             resolution_owner=object(),
         )
     assert future.result() is False
+
+
+@pytest.mark.asyncio
+async def test_naturally_finished_task_can_register_permission_in_next_turn(monkeypatch) -> None:
+    registry = PermissionInputRegistry()
+    await registry.cancel_task("task-1", reversible=True)
+    closing_tokens = await registry.reversible_closing_tokens("task-1")
+    assert len(closing_tokens) == 1
+    await registry.reopen_task(closing_tokens[0])
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
+    future = pending_future()
+
+    pending = await registry.register(
+        PermissionRequestEvent(
+            tool_name="bash",
+            tool_input={"cmd": "pwd"},
+            tool_use_id="tool-1",
+            response_future=future,
+        ),
+        task_id="task-1",
+        context_id="ctx-1",
+        resolution_owner=object(),
+    )
+
+    assert pending.task_id == "task-1"
+    assert future.done() is False
 
 
 def test_existing_pipeline_inputs_get_unified_projection_without_mutating_legacy_envelope() -> None:

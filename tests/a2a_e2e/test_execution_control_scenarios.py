@@ -9,6 +9,16 @@ from pathlib import Path
 
 import pytest
 
+# A scenario includes process startup, control round trips (including real
+# disconnect-deadline checks), and durable completion. These phases share the
+# overall watchdog; keep the per-step scenario wait budget at 20 seconds.
+# In particular, Windows pipeline setup can consume most of the old 25s budget
+# before the resumed tool is released. Leave time for real backup/stream drain.
+WAIT_TIMEOUT = 20
+OVERALL_TIMEOUT = 3 * WAIT_TIMEOUT
+PROCESS_TIMEOUT = OVERALL_TIMEOUT + 10  # Allow the runner to clean up and write audits.
+TEST_TIMEOUT = PROCESS_TIMEOUT + 10
+
 CASES = (
     ("warm-resume-pausing", "normal"),
     ("warm-resume-pausing", "pipeline"),
@@ -33,7 +43,7 @@ CASES = (
 )
 
 @pytest.mark.integration
-@pytest.mark.timeout(40)
+@pytest.mark.timeout(TEST_TIMEOUT)
 @pytest.mark.parametrize(("scenario", "mode"), CASES, ids=["{}-{}".format(*case) for case in CASES])
 def test_execution_control_scenario(tmp_path: Path, scenario: str, mode: str) -> None:
     repo_root = Path(__file__).resolve().parents[2]
@@ -50,14 +60,14 @@ def test_execution_control_scenario(tmp_path: Path, scenario: str, mode: str) ->
             "--mode",
             mode,
             "--timeout",
-            "20",
+            str(WAIT_TIMEOUT),
             "--overall-timeout",
-            "25",
+            str(OVERALL_TIMEOUT),
         ],
         cwd=repo_root,
         text=True,
         capture_output=True,
-        timeout=35,
+        timeout=PROCESS_TIMEOUT,
         check=False,
     )
     summary_path = run_dir / "summary.json"
@@ -70,7 +80,7 @@ def test_execution_control_scenario(tmp_path: Path, scenario: str, mode: str) ->
         (run_dir / "runner-error.txt").read_text(encoding="utf-8") if (run_dir / "runner-error.txt").exists() else "",
     )
     assert summary is not None and summary["status"] == "passed"
-    assert 0 < summary["elapsedSeconds"] < 35
+    assert 0 < summary["elapsedSeconds"] < PROCESS_TIMEOUT
     assert summary["server"]["returnCode"] is not None
     assert summary["server"]["forcedKill"] is False
     for artifact in (

@@ -2450,6 +2450,117 @@ async def test_non_retryable_exception_terminal_waits_for_active_interrupt(monke
 
 
 @pytest.mark.asyncio
+async def test_direct_route_gate_fence_is_published_only_after_interrupt_registration() -> None:
+    from iac_code.a2a import pipeline_executor as module
+    from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGate, DirectPipelineRouteOutcome
+
+    accepted_runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime())
+    accepted_queue = FakeEventQueue()
+    accepted_gate = DirectPipelineRouteGate()
+
+    assert await module._register_active_interrupt(
+        accepted_runtime,
+        event_queue=accepted_queue,
+        direct_route_gate=accepted_gate,
+    )
+    assert accepted_gate.outcome is DirectPipelineRouteOutcome.ACTIVE
+    assert accepted_queue.events == [accepted_gate.marker]
+    await module._settle_active_interrupt_safely(accepted_runtime)
+
+    terminal_runtime = module.A2APipelineRuntime(agent_runtime=_fake_runtime())
+    terminal_runtime.terminal_publication_started = True
+    terminal_queue = FakeEventQueue()
+    terminal_gate = DirectPipelineRouteGate()
+
+    assert not await module._register_active_interrupt(
+        terminal_runtime,
+        event_queue=terminal_queue,
+        direct_route_gate=terminal_gate,
+    )
+    assert terminal_gate.outcome is DirectPipelineRouteOutcome.RECOVERY_REQUIRED
+    assert terminal_queue.events == []
+
+
+@pytest.mark.asyncio
+async def test_direct_route_gate_rebinds_recovered_publisher_to_current_lifecycle_queue() -> None:
+    from iac_code.a2a import pipeline_executor as module
+    from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGate
+
+    stale_queue = FakeEventQueue()
+    current_queue = FakeEventQueue()
+    publisher = SimpleNamespace(event_queue=stale_queue)
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        publisher=publisher,
+    )
+    gate = DirectPipelineRouteGate()
+
+    assert await module._register_active_interrupt(
+        runtime,
+        event_queue=current_queue,
+        direct_route_gate=gate,
+    )
+
+    assert publisher.event_queue is current_queue
+    assert current_queue.events == [gate.marker]
+    assert stale_queue.events == []
+    await module._settle_active_interrupt_safely(runtime)
+
+
+@pytest.mark.asyncio
+async def test_direct_route_gate_fences_new_pipeline_owner_before_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.request_scoped_active_task import DirectPipelineRouteGate, DirectPipelineRouteOutcome
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    fake_pipeline = FakePipeline(
+        [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            )
+        ],
+        session_dir=tmp_path / "sidecar",
+    )
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: fake_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2APipelineExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    queue = FakeEventQueue()
+    gate = DirectPipelineRouteGate()
+
+    await executor.execute(
+        context=FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+        event_queue=queue,
+        task=task,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        prompt='{"selected_candidate_index": 0}',
+        direct_route_gate=gate,
+    )
+
+    assert gate.outcome is DirectPipelineRouteOutcome.ACTIVE
+    assert queue.events[0] is gate.marker
+    assert any(isinstance(event, TaskStatusUpdateEvent) for event in queue.events[1:])
+
+
+@pytest.mark.asyncio
 async def test_cancel_before_outbound_registration_aborts_and_joins_worker(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2763,9 +2874,10 @@ async def test_real_outbound_keeps_yielded_terminal_ahead_of_later_interrupt(
         )
     )
     await asyncio.wait_for(terminal_decision_started.wait(), timeout=1)
+    retry_queue = FakeEventQueue()
     interrupt = asyncio.create_task(
         executor._route_active_pipeline_interrupt(
-            FakeEventQueue(),
+            retry_queue,
             task=task,
             ctx=ctx,
             task_id="task-1",
@@ -2773,6 +2885,7 @@ async def test_real_outbound_keeps_yielded_terminal_ahead_of_later_interrupt(
             cwd=str(tmp_path),
             pipeline_input=normalize_pipeline_user_input("change course"),
             preserve_task_record=True,
+            bind_publisher_event_queue=True,
         )
     )
     await asyncio.sleep(0)
@@ -2781,6 +2894,9 @@ async def test_real_outbound_keeps_yielded_terminal_ahead_of_later_interrupt(
     await consumer
 
     assert pipeline.handler_calls == 0
+    retry_status = _status_events(retry_queue)[-1]["status"]
+    assert retry_status["state"] == "TASK_STATE_INPUT_REQUIRED"
+    assert retry_status["message"]["parts"] == [{"text": RETRY_TEXT}]
     assert publisher.calls == [
         ("single", PipelineEventType.PIPELINE_COMPLETED),
     ]
@@ -4272,11 +4388,13 @@ async def test_terminal_backup_blocked_reopens_permission_registration_after_pen
     registry = executor._permission_input_registry
 
     class ResumedPermissionOwner:
-        async def resolve_permission(self, pending, response) -> bool:
+        async def resolve_permission(self, pending, response, *, before_delivery=None) -> bool:
             await registry.claim(pending, response)
             approved = response.decision == "allow_once"
             future = pending.request.response_future
             assert future is not None
+            if before_delivery is not None:
+                await before_delivery()
             future.set_result(approved)
             await registry.complete(pending)
             return approved
@@ -8643,6 +8761,48 @@ async def test_active_task_route_answers_pending_question_without_marking_input_
 
 
 @pytest.mark.asyncio
+async def test_base_lifecycle_active_interrupt_publishes_binding_frame_before_routing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    stale_queue = FakeEventQueue()
+    current_queue = FakeEventQueue()
+    publisher = SimpleNamespace(event_queue=stale_queue)
+    runtime = module.A2APipelineRuntime(
+        agent_runtime=_fake_runtime(),
+        pipeline=object(),
+        publisher=publisher,
+    )
+    ctx = SimpleNamespace(runtime=runtime)
+    task = SimpleNamespace(task_id="task-1", context_id="ctx-1", state="input-required")
+    executor = _pipeline_executor()
+    route_registered = AsyncMock(return_value=True)
+    monkeypatch.setattr(executor, "_route_registered_active_pipeline_interrupt", route_registered)
+
+    routed = await executor._route_active_pipeline_interrupt(
+        current_queue,
+        task=task,
+        ctx=ctx,
+        task_id="task-1",
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        pipeline_input='{"selected_candidate_index": 0}',
+        preserve_task_record=True,
+        bind_publisher_event_queue=True,
+    )
+
+    assert routed is True
+    assert publisher.event_queue is current_queue
+    assert _status_events(current_queue)[0]["status"]["state"] == "TASK_STATE_WORKING"
+    assert _status_events(current_queue)[0]["taskId"] == "task-1"
+    assert _status_events(current_queue)[0]["contextId"] == "ctx-1"
+    assert stale_queue.events == []
+    route_registered.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_executor_routes_running_sidecar_pending_ask_to_ask_resume(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -9205,6 +9365,9 @@ async def test_pipeline_executor_resumes_waiting_input_after_stale_active_task_r
 ) -> None:
     from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
     from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.a2a.request_scoped_active_task import (
+        PipelineLifecycleEventQueueCarrier,
+    )
 
     cwd = tmp_path / "workspace"
     cwd.mkdir()
@@ -9265,13 +9428,16 @@ async def test_pipeline_executor_resumes_waiting_input_after_stale_active_task_r
     monkeypatch.setattr(executor, "_create_pipeline", lambda **_kwargs: fake_pipeline)
     queue = FakeEventQueue()
 
+    request_context = FakeRequestContext(
+        task_id=task_id,
+        context_id=context_id,
+        text="0",
+        metadata={"iac_code": {"cwd": str(cwd)}},
+    )
+    PipelineLifecycleEventQueueCarrier.attach(request_context)
+
     await executor.execute(
-        context=FakeRequestContext(
-            task_id=task_id,
-            context_id=context_id,
-            text="0",
-            metadata={"iac_code": {"cwd": str(cwd)}},
-        ),
+        context=request_context,
         event_queue=queue,
         task=task,
         task_id=task_id,
@@ -9281,6 +9447,7 @@ async def test_pipeline_executor_resumes_waiting_input_after_stale_active_task_r
     )
 
     assert fake_pipeline.resume_prompts == ["0"]
+    assert _status_events(queue)[0]["status"]["state"] == "TASK_STATE_WORKING"
     assert task.state == "input-required"
     assert ctx.active_task_id is None
     assert all(

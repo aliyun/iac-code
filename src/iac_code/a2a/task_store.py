@@ -22,7 +22,11 @@ from google.protobuf.json_format import MessageToDict, ParseDict
 
 from iac_code.a2a.backup import await_fenced, run_sync_fenced
 from iac_code.a2a.events import with_iac_code_session_metadata
-from iac_code.a2a.execution_control import current_execution_control, current_execution_termination_reason
+from iac_code.a2a.execution_control import (
+    ExecutionController,
+    current_execution_control,
+    current_execution_termination_reason,
+)
 from iac_code.a2a.metadata_redaction import strip_llm_headers_from_metadata
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
@@ -43,9 +47,11 @@ from iac_code.services.session_layout import SessionPaths, ensure_session_owned_
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
 from iac_code.utils.file_security import atomic_write_text
+from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 A2ATaskSnapshotList: TypeAlias = list[A2ATaskSnapshot]
+_RUNTIME_CLOSE_TIMEOUT_SECONDS = 2.0
 
 
 class A2ATaskStore(TaskStore):
@@ -89,6 +95,10 @@ class A2ATaskStore(TaskStore):
         self._permission_wait_active_probe: Callable[[], bool] | None = None
         self._execution_control_snapshot_provider: Callable[[str], dict[str, Any] | None] | None = None
         self._execution_control_active_probe: Callable[[], bool] | None = None
+        self._recoverable_input_admission_reserver: (
+            Callable[..., Awaitable[str | None]] | None
+        ) = None
+        self._recoverable_input_admission_releaser: Callable[[str], Awaitable[None]] | None = None
 
     def set_permission_wait_active_probe(self, probe: Callable[[], bool] | None) -> None:
         self._permission_wait_active_probe = probe
@@ -97,9 +107,13 @@ class A2ATaskStore(TaskStore):
         self,
         snapshot_provider: Callable[[str], dict[str, Any] | None] | None,
         active_probe: Callable[[], bool] | None,
+        recoverable_input_admission_reserver: Callable[..., Awaitable[str | None]] | None = None,
+        recoverable_input_admission_releaser: Callable[[str], Awaitable[None]] | None = None,
     ) -> None:
         self._execution_control_snapshot_provider = snapshot_provider
         self._execution_control_active_probe = active_probe
+        self._recoverable_input_admission_reserver = recoverable_input_admission_reserver
+        self._recoverable_input_admission_releaser = recoverable_input_admission_releaser
 
     def touch_context(self, context_id: str) -> None:
         """Restart the idle interval after a connection hold, without storage I/O."""
@@ -145,80 +159,316 @@ class A2ATaskStore(TaskStore):
         task_id = validate_protocol_id(task.id)
         _strip_task_llm_headers(task)
         async with self._mutation_lock:
-            record = self._tasks.get(task_id)
-            next_state = _task_state_from_sdk_task(task)
-            incoming_updated_at = _task_updated_at_from_sdk_task(task)
-            preserve_terminal = bool(
-                record is not None
-                and record.state
-                in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
-                and self._execution_is_terminating(task.context_id)
-            )
-            if preserve_terminal:
-                # Queued SDK working events must not undo the executor's final
-                # state while its immutable termination snapshot is committed.
-                assert record is not None
-                task = _copy_task(task)
-                task.status.state = TaskState.Value("TASK_STATE_" + record.state.upper().replace("-", "_"))
-            active_finalization = bool(
-                record is not None
-                and record.state
-                in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
-                and next_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
-                and record.active_task is not None
-                and not record.active_task.done()
-            )
-            stale_state_projection = bool(
-                record is not None
-                and record.state
-                in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
-                and next_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
-                and not active_finalization
-                and incoming_updated_at < record.updated_at
-            )
-            if stale_state_projection:
-                # The SDK consumes executor events asynchronously. An event
-                # older than a detached final state must not roll either task
-                # projection back.
-                return
-            self._attach_context_metadata(task)
-            self._attach_pending_permissions(task)
-            owner_tasks = self._sdk_tasks.setdefault(owner, {})
-            previous = owner_tasks.get(task_id)
-            if previous is not None:
-                self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
-            owner_tasks[task_id] = _copy_task(task)
-            self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
-            if preserve_terminal or active_finalization:
-                # During active finalization the SDK still needs the delayed
-                # nonterminal frame for stream ordering, but the durable record
-                # already describes the backup boundary and must stay final.
-                return
-            # The SDK saves the full Task before yielding every streaming frame. Executors already
-            # mirror task records explicitly at output/state durability boundaries, so repeated SDK
-            # saves with the same projected state only need the session-local mirror below.
-            persist_shared_snapshot = (
-                record is None
-                or task_id in self._task_persistence_dirty
-                or record.state != next_state
-                or record.owner != owner
-            )
-            if record is None:
-                record = A2ATaskRecord(
+            self._save_locked(task, owner=owner, task_id=task_id)
+
+    async def reconcile_recoverable_input_required_task(
+        self,
+        task: Task,
+        context_record: A2AContextRecord,
+        context: ServerCallContext | None = None,
+    ) -> str | None:
+        """Restore a sidecar-proven input wait and reserve its request-scoped continuation."""
+        owner = self._owner(context)
+        task_id = validate_protocol_id(task.id)
+        if task.status.state != TaskState.TASK_STATE_INPUT_REQUIRED:
+            raise ValueError("Recoverable task must be input-required")
+        if task.context_id != context_record.context_id:
+            raise ValueError("Recoverable task context does not match context record")
+        _strip_task_llm_headers(task)
+        context_id = validate_protocol_id(task.context_id)
+        async with self._termination_commit_locks.setdefault(context_id, asyncio.Lock()):
+            async with self._mutation_lock:
+                control = self._execution_snapshot(context_id)
+                if control is not None:
+                    if control.get("taskId") != task_id:
+                        return None
+                    phase = control.get("phase")
+                    backup = control.get("backup")
+                    backup_status = backup.get("status") if isinstance(backup, Mapping) else None
+                    terminated_recovery = phase == "terminated" and (
+                        control.get("releaseReady", False) or backup_status == "blocked"
+                    )
+                    if not terminated_recovery and control.get("inputHandoffReady") is not True:
+                        return None
+
+                reserve_admission = self._recoverable_input_admission_reserver
+                if reserve_admission is None:
+                    return None
+                admission = await reserve_admission(
+                    context_id=context_id,
                     task_id=task_id,
-                    context_id=task.context_id,
-                    state=next_state,
                     owner=owner,
-                    updated_at=incoming_updated_at,
                 )
-                self._tasks[task_id] = record
-                self._metrics.record_task_created()
-            else:
-                record.state = next_state
-                record.owner = owner
-                record.updated_at = incoming_updated_at
-                record.touch()
-            self._mirror_task(record, persist_shared_snapshot=persist_shared_snapshot)
+                if admission is None:
+                    return None
+
+                committed = False
+                try:
+                    record = self._tasks.get(task_id)
+                    if record is not None and (
+                        record.context_id != context_id
+                        or (record.active_task is not None and not record.active_task.done())
+                    ):
+                        return None
+                    persisted_task = self._load_task_snapshot(task_id) if record is None else None
+                    if persisted_task is not None and persisted_task.context_id != context_id:
+                        return None
+
+                    live_context = self._contexts.get(context_id)
+                    context_source = live_context or context_record
+                    if context_source.active_task_id not in {None, task_id}:
+                        return None
+
+                    current_state = (
+                        record.state if record is not None else persisted_task.state if persisted_task else None
+                    )
+                    if current_state == TASK_STATE_INPUT_REQUIRED and context_source.active_task_id is None:
+                        # A prior request may have committed Task/Context and then
+                        # failed before the SDK producer consumed its admission.
+                        # Re-admit from the same sidecar proof without requiring
+                        # the optional session-local mirror to exist after restart.
+                        committed = True
+                        return admission
+
+                    updated_at = _task_updated_at_from_sdk_task(task)
+                    output_text = (
+                        record.output_text
+                        if record is not None
+                        else (persisted_task.output_text if persisted_task else [])
+                    )
+                    expected_permission_backup_generation = (
+                        record.expected_permission_backup_generation
+                        if record is not None
+                        else (persisted_task.expected_permission_backup_generation if persisted_task else None)
+                    )
+                    task_snapshot = A2ATaskSnapshot(
+                        task_id=task_id,
+                        context_id=context_id,
+                        state=TASK_STATE_INPUT_REQUIRED,
+                        owner=owner,
+                        output_text=list(output_text),
+                        updated_at=updated_at,
+                        expected_permission_backup_generation=expected_permission_backup_generation,
+                    )
+                    context_snapshot = A2AContextSnapshot(
+                        context_id=context_id,
+                        session_id=context_source.session_id,
+                        cwd=context_source.cwd,
+                        telemetry_channel=context_source.telemetry_channel,
+                        active_task_id=None,
+                    )
+
+                    # Recovery is a cross-process handoff boundary. Use the same
+                    # strict write-and-readback contract as termination so a failed
+                    # task write cannot be followed by a released Context.
+                    self._persist_terminated_task_snapshots_strict(task_snapshot, context_snapshot)
+
+                    if record is None:
+                        record = _record_from_snapshot(task_snapshot)
+                        self._tasks[task_id] = record
+                        self._metrics.record_task_created()
+                    else:
+                        record.state = TASK_STATE_INPUT_REQUIRED
+                        record.owner = owner
+                        record.updated_at = updated_at
+                        record.active_task = None
+                        record.touch()
+                    self._task_persistence_dirty.discard(task_id)
+
+                    if live_context is None:
+                        live_context = context_record
+                        if live_context.lock is None:
+                            live_context.lock = asyncio.Lock()
+                        self._contexts[context_id] = live_context
+                    live_context.active_task_id = None
+                    live_context.touch()
+
+                    self._attach_context_metadata(task)
+                    self._attach_pending_permissions(task)
+                    owner_tasks = self._sdk_tasks.setdefault(owner, {})
+                    previous = owner_tasks.get(task_id)
+                    if previous is not None:
+                        self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
+                    owner_tasks[task_id] = _copy_task(task)
+                    self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(context_id, set()).add(task_id)
+                    committed = True
+                    return admission
+                finally:
+                    if not committed:
+                        await self.release_recoverable_input_admission(admission)
+
+    def can_continue_local_input_required_task(self, *, context_id: str, task_id: str) -> bool:
+        """Return whether the owning process can reuse its drained execution directly."""
+
+        control = self._execution_snapshot(context_id)
+        return bool(
+            control
+            and control.get("taskId") == task_id
+            and control.get("localInputContinuationReady") is True
+        )
+
+    async def release_recoverable_input_admission(self, admission: str | None) -> None:
+        if admission is None or self._recoverable_input_admission_releaser is None:
+            return
+        await self._recoverable_input_admission_releaser(admission)
+
+    def _save_locked(
+        self,
+        task: Task,
+        *,
+        owner: str,
+        task_id: str,
+    ) -> None:
+        record = self._tasks.get(task_id)
+        owner_tasks = self._sdk_tasks.setdefault(owner, {})
+        previous = owner_tasks.get(task_id)
+        next_state = _task_state_from_sdk_task(task)
+        incoming_updated_at = _task_updated_at_from_sdk_task(task)
+        preserve_terminal = bool(
+            record is not None
+            and record.state
+            in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+            and self._execution_is_terminating(task.context_id)
+        )
+        if preserve_terminal:
+            # Queued SDK events must not undo the executor's final state while
+            # its immutable termination snapshot is being committed or retained.
+            assert record is not None
+            task = _copy_task(task)
+            task.status.state = TaskState.Value("TASK_STATE_" + record.state.upper().replace("-", "_"))
+        execution = self._execution_snapshot(task.context_id)
+        # Executor cleanup clears active_task before delayed SDK events finish projecting.
+        # The control snapshot keeps the same turn's business terminal state until
+        # mark_execution_started changes executionStatus for a legitimate next turn.
+        active_finalization = bool(
+            record is not None
+            and record.state
+            in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+            and next_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
+            and (
+                (record.active_task is not None and not record.active_task.done())
+                or (
+                    execution is not None
+                    and execution.get("phase") == "running"
+                    and execution.get("taskId") == task_id
+                    and execution.get("executionStatus") == record.state
+                )
+            )
+        )
+        stale_recovered_working_projection = bool(
+            record is not None
+            and record.state == TASK_STATE_WORKING
+            and previous is not None
+            and _task_state_from_sdk_task(previous)
+            in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED}
+        )
+        stale_state_projection = bool(
+            record is not None
+            and (
+                record.state
+                in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+                or stale_recovered_working_projection
+            )
+            and next_state != record.state
+            and not active_finalization
+            and incoming_updated_at < record.updated_at
+        )
+        if stale_state_projection:
+            # The SDK consumes executor events asynchronously. An event older
+            # than a detached or recovered final state must not roll either
+            # projection back, including a queued terminal event from the old
+            # producer that arrives after a recovered execution starts.
+            # Preserve a delayed nonterminal event on TaskManager's mutable
+            # object so its status message can be folded into the following
+            # INPUT_REQUIRED history. Only terminal or recovered-lifecycle
+            # projections may close/corrupt the current SDK lifecycle and
+            # therefore need to be repaired in place.
+            if next_state in {
+                TASK_STATE_CANCELED,
+                TASK_STATE_COMPLETED,
+                TASK_STATE_FAILED,
+            } or stale_recovered_working_projection:
+                self._restore_rejected_sdk_projection(
+                    task,
+                    previous=previous,
+                    record=record,
+                    owner_tasks=owner_tasks,
+                    task_id=task_id,
+                )
+            return
+        self._attach_context_metadata(task)
+        self._attach_pending_permissions(task)
+        if previous is not None:
+            self._remove_sdk_task_from_index(owner, task_id, previous.context_id)
+        owner_tasks[task_id] = _copy_task(task)
+        self._sdk_tasks_by_context.setdefault(owner, {}).setdefault(task.context_id, set()).add(task_id)
+        if preserve_terminal or active_finalization:
+            # During active finalization the SDK still needs the delayed
+            # nonterminal frame for stream ordering, but the durable record
+            # already describes the backup boundary and must stay final.
+            return
+        # The SDK saves the full Task before yielding every streaming frame. Executors already
+        # mirror task records explicitly at output/state durability boundaries, so repeated SDK
+        # saves with the same projected state only need the session-local mirror below.
+        persist_shared_snapshot = (
+            record is None
+            or task_id in self._task_persistence_dirty
+            or record.state != next_state
+            or record.owner != owner
+        )
+        if record is None:
+            record = A2ATaskRecord(
+                task_id=task_id,
+                context_id=task.context_id,
+                state=next_state,
+                owner=owner,
+                updated_at=incoming_updated_at,
+            )
+            self._tasks[task_id] = record
+            self._metrics.record_task_created()
+        else:
+            record.state = next_state
+            record.owner = owner
+            record.updated_at = incoming_updated_at
+            record.touch()
+        self._mirror_task(record, persist_shared_snapshot=persist_shared_snapshot)
+
+    def _restore_rejected_sdk_projection(
+        self,
+        task: Task,
+        *,
+        previous: Task | None,
+        record: A2ATaskRecord,
+        owner_tasks: dict[str, Task],
+        task_id: str,
+    ) -> None:
+        """Repair the SDK TaskManager object after rejecting an out-of-date event."""
+
+        previous_state = _task_state_from_sdk_task(previous) if previous is not None else None
+        live_active_projection = bool(
+            record.state in {TASK_STATE_CANCELED, TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_INPUT_REQUIRED}
+            and previous_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
+            and record.active_task is not None
+            and not record.active_task.done()
+        )
+        if previous is not None and previous.context_id == record.context_id and (
+            previous_state == record.state or live_active_projection
+        ):
+            task.CopyFrom(previous)
+            return
+        restored = Task(id=task_id, context_id=record.context_id)
+        if previous is not None and previous.context_id == record.context_id:
+            restored.CopyFrom(previous)
+        restored.status.CopyFrom(
+            TaskStatus(
+                state=TaskState.Value("TASK_STATE_" + record.state.upper().replace("-", "_")),
+                timestamp=_timestamp_from_epoch(record.updated_at),
+            )
+        )
+        self._attach_context_metadata(restored)
+        self._attach_pending_permissions(restored)
+        owner_tasks[task_id] = _copy_task(restored)
+        task.CopyFrom(restored)
 
     def _attach_context_metadata(self, task: Task) -> None:
         context = self._contexts.get(task.context_id)
@@ -233,7 +483,7 @@ class A2ATaskStore(TaskStore):
             if control is not None:
                 iac_code = metadata.setdefault("iac_code", {})
                 if isinstance(iac_code, dict):
-                    iac_code["executionControl"] = control
+                    iac_code["executionControl"] = ExecutionController.protocol_snapshot(control)
         ParseDict(metadata, task.metadata)
 
     def _attach_pending_permissions(self, task: Task) -> None:
@@ -1025,6 +1275,11 @@ class A2ATaskStore(TaskStore):
             record = self._tasks.get(validate_protocol_id(task_id))
             if record is None or record.active_task is None or record.active_task.done():
                 return False
+            logger.warning(
+                "A2A task store canceling active task task_id=%s asyncio_task=%s source=cancel_task",
+                sanitize_strict_text(task_id),
+                sanitize_strict_text(record.active_task.get_name()),
+            )
             record.active_task.cancel()
             return True
 
@@ -1033,7 +1288,12 @@ class A2ATaskStore(TaskStore):
         return await self.commit_inactive_execution_task(task_id=task_id, context_id=context_id, cancel_wait=True)
 
     async def commit_inactive_execution_task(
-        self, *, task_id: str, context_id: str, cancel_wait: bool = False
+        self,
+        *,
+        task_id: str,
+        context_id: str,
+        cancel_wait: bool = False,
+        expected_state: str | None = None,
     ) -> bool:
         """Strictly commit an execution's final task/context snapshots off the event loop."""
 
@@ -1050,6 +1310,7 @@ class A2ATaskStore(TaskStore):
                     or record.context_id != context_id
                     or (record.active_task is not None and not record.active_task.done())
                     or record.state not in allowed_states
+                    or (expected_state is not None and record.state != expected_state)
                 ):
                     return False
                 if cancel_wait:
@@ -1161,6 +1422,12 @@ class A2ATaskStore(TaskStore):
             if record is None or record.active_task is None or record.active_task.done():
                 return False
             active_task = record.active_task
+            logger.warning(
+                "A2A task store canceling active task task_id=%s asyncio_task=%s "
+                "source=cancel_task_and_wait",
+                sanitize_strict_text(task_id),
+                sanitize_strict_text(active_task.get_name()),
+            )
             active_task.cancel()
 
         if active_task is asyncio.current_task():
@@ -1207,6 +1474,29 @@ class A2ATaskStore(TaskStore):
     async def is_task_active(self, task_id: str) -> bool:
         async with self._mutation_lock:
             return self._task_is_active_locked(task_id)
+
+    async def wait_until_task_inactive(self, task_id: str, *, timeout: float) -> None:
+        """Wait for the current in-process domain owner without canceling it."""
+
+        task_id = validate_protocol_id(task_id)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            async with self._mutation_lock:
+                record = self._tasks.get(task_id)
+                active_task = record.active_task if record is not None else None
+                if active_task is None or active_task.done():
+                    return
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise TimeoutError("Timed out waiting for A2A task owner to finish")
+            try:
+                await asyncio.wait_for(asyncio.shield(active_task), timeout=remaining)
+            except asyncio.CancelledError:
+                if not active_task.cancelled():
+                    raise
+            except Exception:
+                pass
 
     async def has_active_work(self) -> bool:
         """Return whether shutting down would interrupt in-process A2A work."""
@@ -1563,25 +1853,45 @@ def _write_session_snapshot(session_dir: Path, path: Path, data: dict[str, Any])
 async def _close_runtime(runtime: Any | None) -> None:
     if runtime is None:
         return
+    close_task = asyncio.create_task(_close_runtime_unbounded(runtime))
+    try:
+        done, _pending = await asyncio.wait({close_task}, timeout=_RUNTIME_CLOSE_TIMEOUT_SECONDS)
+    except asyncio.CancelledError:
+        close_task.cancel()
+        close_task.add_done_callback(_consume_runtime_close_result)
+        raise
+    if not done:
+        logger.warning("Timed out closing A2A runtime")
+        close_task.cancel()
+        close_task.add_done_callback(_consume_runtime_close_result)
+        return
+    _consume_runtime_close_result(close_task)
+
+
+def _consume_runtime_close_result(task: asyncio.Task[Any]) -> None:
+    try:
+        task.result()
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        logger.exception("Failed to close A2A runtime")
+
+
+async def _close_runtime_unbounded(runtime: Any | None) -> None:
+    if runtime is None:
+        return
     close = getattr(runtime, "aclose", None)
     if callable(close):
-        try:
-            result = close()
-            if asyncio.iscoroutine(result):
-                await result
-            return
-        except Exception:
-            logger.exception("Failed to close A2A runtime")
-            return
+        result = close()
+        if asyncio.iscoroutine(result):
+            await result
+        return
     manager = getattr(runtime, "mcp_manager", None)
     if manager is not None:
-        try:
-            await manager.disconnect_all()
-        except Exception:
-            logger.exception("Failed to disconnect A2A MCP manager")
+        await manager.disconnect_all()
     agent_runtime = getattr(runtime, "agent_runtime", None)
     if agent_runtime is not None and agent_runtime is not runtime:
-        await _close_runtime(agent_runtime)
+        await _close_runtime_unbounded(agent_runtime)
 
 
 def _runtime_path_directories(runtime: Any | None) -> tuple[list[str], list[str], list[str]]:
@@ -1644,7 +1954,11 @@ def _close_runtime_task_when_done(
         if loop.is_closed():
             discard_marker(done)
             return
-        loop.create_task(_close_runtime(runtime))
+        # This callback is already detached from request/execution progress.
+        # Start the close body directly so waiters observe the same cleanup
+        # ordering without adding another scheduling hop.
+        runtime_close_task = loop.create_task(_close_runtime_unbounded(runtime))
+        runtime_close_task.add_done_callback(_consume_runtime_close_result)
         if discarded_task_waiters is None or discarded_task_waiters.get(done, 0) <= 0:
             discard_marker(done)
 

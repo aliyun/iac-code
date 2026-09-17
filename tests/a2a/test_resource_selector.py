@@ -25,6 +25,7 @@ from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.resource_selector.profiles import PROFILE_HASH, get_profile
 from iac_code.resource_selector.tools import SelectCloudResourceTool
+from iac_code.services.session_backup import BackupReason
 from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import ToolContext
 from iac_code.types.stream_events import (
@@ -272,6 +273,17 @@ async def test_live_resource_selection_can_be_answered_while_input_required_is_p
     event = selection_event(future=asyncio.get_running_loop().create_future())
     resumed = asyncio.Event()
 
+    class RecordingBackup:
+        def __init__(self):
+            self.calls = []
+
+        async def backup(self, _service, _cwd, _session_id, *, reason, critical, **_kwargs):
+            self.calls.append((reason, critical))
+            return None
+
+    backup = RecordingBackup()
+    monkeypatch.setattr("iac_code.a2a.executor.backup_session_async", backup.backup)
+
     class ImmediateAnswerLoop:
         async def run_streaming(self, _prompt):
             yield event
@@ -301,16 +313,30 @@ async def test_live_resource_selection_can_be_answered_while_input_required_is_p
                         response=response(),
                     )
                 )
-                await asyncio.sleep(0)
+                # Observe answer delivery without waiting for the continuation,
+                # which needs execute() to release the context lock first.
+                await asyncio.shield(event.response_future)
 
     monkeypatch.setattr(executor, "_publish_status", publish_status)
 
-    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
-    assert answer_task is not None
-    await asyncio.wait_for(answer_task, timeout=1)
+    try:
+        await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+        assert answer_task is not None
+        await asyncio.shield(answer_task)
 
-    assert resumed.is_set()
-    assert not await executor._resource_selection_registry.has_pending_task("task-1")
+        assert event.response_future.done()
+        assert resumed.is_set()
+        assert not await executor._resource_selection_registry.has_pending_task("task-1")
+        record = await executor._task_store.get_task_record("task-1")
+        assert "selection accepted" in record.output_text
+        assert (BackupReason.NORMAL_TURN_END, False) in backup.calls
+    finally:
+        if answer_task is not None:
+            if not answer_task.done():
+                answer_task.cancel()
+            await asyncio.gather(answer_task, return_exceptions=True)
+        await executor._resource_selection_registry.cancel_task("task-1")
+        await executor._task_store.stop_cleanup_loop()
 
 
 @pytest.mark.asyncio

@@ -5,6 +5,8 @@ import time
 import httpx
 import pytest
 
+from iac_code.web.session_manager import WebTurnAdmissionLock
+
 
 class _PromptProvider:
     async def get_prompt(self, args: str, _context) -> str:
@@ -48,6 +50,38 @@ class _DynamicRuntime:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+class _TrackedDynamicRuntime(_DynamicRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.closed_event = asyncio.Event()
+
+    async def aclose(self) -> None:
+        await super().aclose()
+        self.closed_event.set()
+
+
+class _ObservedTurnAdmissionLock(WebTurnAdmissionLock):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_waiter = asyncio.Event()
+        self.second_waiter = asyncio.Event()
+        self._pending_waiters = 0
+
+    async def acquire(self):
+        contended = self.locked()
+        if contended:
+            self._pending_waiters += 1
+            if self._pending_waiters == 1:
+                self.first_waiter.set()
+            elif self._pending_waiters == 2:
+                self.second_waiter.set()
+        try:
+            return await super().acquire()
+        finally:
+            if contended:
+                self._pending_waiters -= 1
 
 
 @pytest.mark.asyncio
@@ -432,57 +466,68 @@ async def test_interrupting_dynamic_command_during_owner_handoff_cleans_reservat
     from iac_code.web.app import create_app
     from iac_code.web.session_manager import WebSessionManager
 
-    runtime_started = threading.Event()
+    loop = asyncio.get_running_loop()
+    runtime_started = asyncio.Event()
     release_runtime = threading.Event()
+    runtime = _TrackedDynamicRuntime()
 
     def create_runtime(_options):
-        runtime_started.set()
+        loop.call_soon_threadsafe(runtime_started.set)
         release_runtime.wait()
-        return _DynamicRuntime()
+        return runtime
 
     monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", create_runtime)
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path)
     session = manager.create_session(session_id="dynamic-command-handoff-cancel")
+    admission_lock = _ObservedTurnAdmissionLock()
+    session.turn_admission_lock = admission_lock
     app = create_app(session_manager=manager)
+    command_task = None
+    interrupt_task = None
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-        command_task = asyncio.create_task(
-            client.post(
-                f"/api/sessions/{session.session_id}/commands",
-                json={"command": "/mcp__remote__review details"},
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+            command_task = asyncio.create_task(
+                client.post(
+                    f"/api/sessions/{session.session_id}/commands",
+                    json={"command": "/mcp__remote__review details"},
+                )
             )
-        )
-        runtime_did_start = await asyncio.wait_for(asyncio.to_thread(runtime_started.wait, 1), timeout=2)
-        assert runtime_did_start is True
+            await runtime_started.wait()
 
-        await session.turn_admission_lock.acquire()
-        interrupt_task = asyncio.create_task(
-            client.post(
-                f"/api/sessions/{session.session_id}/interrupt",
-                json={"message": ""},
+            await admission_lock.acquire()
+            interrupt_task = asyncio.create_task(
+                client.post(
+                    f"/api/sessions/{session.session_id}/interrupt",
+                    json={"message": ""},
+                )
             )
-        )
-        for _ in range(100):
-            if len(session.turn_admission_lock._waiters or ()) >= 1:
-                break
-            await asyncio.sleep(0.01)
-        assert len(session.turn_admission_lock._waiters or ()) == 1
+            await admission_lock.first_waiter.wait()
+            release_runtime.set()
+            await admission_lock.second_waiter.wait()
+            admission_lock.release()
+
+            interrupted = await interrupt_task
+            command_response = await command_task
+    finally:
         release_runtime.set()
-        for _ in range(100):
-            if len(session.turn_admission_lock._waiters or ()) >= 2:
-                break
-            await asyncio.sleep(0.01)
-        assert len(session.turn_admission_lock._waiters or ()) == 2
-        session.turn_admission_lock.release()
-
-        interrupted = await asyncio.wait_for(interrupt_task, timeout=1)
-        command_response = await asyncio.wait_for(command_task, timeout=1)
+        if admission_lock.owner_task is asyncio.current_task():
+            admission_lock.release()
+        pending_tasks = [task for task in (command_task, interrupt_task) if task is not None]
+        for task in pending_tasks:
+            if not task.done():
+                task.cancel()
+        if pending_tasks:
+            await asyncio.gather(*pending_tasks, return_exceptions=True)
+        if runtime_started.is_set():
+            await runtime.closed_event.wait()
 
     assert interrupted.status_code == 200
     assert command_response.status_code == 409
     assert command_response.json()["canceled"] is True
     assert session.active_turn_task is None
-    assert session.turn_admission_lock.locked() is False
+    assert admission_lock.locked() is False
+    assert runtime.closed is True
 
 
 @pytest.mark.asyncio
@@ -490,44 +535,56 @@ async def test_cancelling_dynamic_command_during_owner_handoff_cleans_reservatio
     from iac_code.web.app import create_app
     from iac_code.web.session_manager import WebSessionManager
 
-    runtime_started = threading.Event()
+    loop = asyncio.get_running_loop()
+    runtime_started = asyncio.Event()
     release_runtime = threading.Event()
+    runtime = _TrackedDynamicRuntime()
 
     def create_runtime(_options):
-        runtime_started.set()
+        loop.call_soon_threadsafe(runtime_started.set)
         release_runtime.wait()
-        return _DynamicRuntime()
+        return runtime
 
     monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", create_runtime)
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path)
     session = manager.create_session(session_id="dynamic-command-handoff-client-cancel")
+    admission_lock = _ObservedTurnAdmissionLock()
+    session.turn_admission_lock = admission_lock
     app = create_app(session_manager=manager)
+    command_task = None
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-        command_task = asyncio.create_task(
-            client.post(
-                f"/api/sessions/{session.session_id}/commands",
-                json={"command": "/mcp__remote__review details"},
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
+            command_task = asyncio.create_task(
+                client.post(
+                    f"/api/sessions/{session.session_id}/commands",
+                    json={"command": "/mcp__remote__review details"},
+                )
             )
-        )
-        runtime_did_start = await asyncio.wait_for(asyncio.to_thread(runtime_started.wait, 1), timeout=2)
-        assert runtime_did_start is True
+            await runtime_started.wait()
 
-        await session.turn_admission_lock.acquire()
+            await admission_lock.acquire()
+            release_runtime.set()
+            await admission_lock.first_waiter.wait()
+            command_task.cancel()
+            admission_lock.release()
+
+            with pytest.raises(asyncio.CancelledError):
+                await command_task
+    finally:
         release_runtime.set()
-        for _ in range(100):
-            if len(session.turn_admission_lock._waiters or ()) >= 1:
-                break
-            await asyncio.sleep(0.01)
-        assert len(session.turn_admission_lock._waiters or ()) == 1
-        command_task.cancel()
-        session.turn_admission_lock.release()
-
-        with pytest.raises(asyncio.CancelledError):
-            await command_task
+        if admission_lock.owner_task is asyncio.current_task():
+            admission_lock.release()
+        if command_task is not None:
+            if not command_task.done():
+                command_task.cancel()
+            await asyncio.gather(command_task, return_exceptions=True)
+        if runtime_started.is_set():
+            await runtime.closed_event.wait()
 
     assert session.active_turn_task is None
-    assert session.turn_admission_lock.locked() is False
+    assert admission_lock.locked() is False
+    assert runtime.closed is True
 
 
 @pytest.mark.asyncio

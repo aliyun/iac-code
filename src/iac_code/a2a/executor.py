@@ -31,6 +31,8 @@ from iac_code.a2a.events import (
 )
 from iac_code.a2a.execution_control import (
     ExecutionControlService,
+    NaturalCompletionGenerationCarrier,
+    RecoverableInputAdmissionCarrier,
     bind_execution_control,
     clear_execution_participants,
     current_execution_control,
@@ -64,6 +66,7 @@ from iac_code.a2a.pipeline_executor import (
     WaitingInputCancelResult,
     cancel_waiting_input_task_from_sidecar,
     recoverable_task_id_from_sidecar,
+    sandbox_release_recoverable_task_id_from_sidecar,
     terminal_task_state_from_sidecar,
 )
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -76,6 +79,10 @@ from iac_code.a2a.pipeline_snapshot import (
 from iac_code.a2a.pipeline_stream import BACKUP_COMMITTED_EVENT_TYPE, PipelineA2AEventPublisher
 from iac_code.a2a.projection import a2a_safe_mode_enabled
 from iac_code.a2a.request_mode import resolve_request_run_mode
+from iac_code.a2a.request_scoped_active_task import (
+    DirectPipelineRouteGateCarrier,
+    PipelineLifecycleEventQueueCarrier,
+)
 from iac_code.a2a.resource_selector import (
     PendingResourceSelection,
     ResourceSelectionCheckpointStore,
@@ -97,6 +104,7 @@ from iac_code.a2a.task_store import A2ATaskStore, _close_runtime
 from iac_code.a2a.thinking_metadata import A2AThinkingMetadata
 from iac_code.a2a.types import (
     TASK_STATE_CANCELED,
+    TASK_STATE_COMPLETED,
     TASK_STATE_FAILED,
     TASK_STATE_INPUT_REQUIRED,
     TASK_STATE_WORKING,
@@ -1242,6 +1250,10 @@ def _string_value(value: Any) -> str:
 
 
 class IacCodeA2AExecutor(AgentExecutor):
+    _RECOVERABLE_RELEASE_REASONS = frozenset(
+        {"disconnect_timeout", "client_disconnect_control_timeout", "natural_completion"}
+    )
+
     def __init__(
         self,
         *,
@@ -1280,6 +1292,44 @@ class IacCodeA2AExecutor(AgentExecutor):
         if execution_control_service is not None:
             execution_control_service.set_termination_cleanup(self._terminate_detached_execution)
             execution_control_service.set_resume_callback(self._task_store.touch_context)
+
+    async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
+        if self._execution_control_service is None:
+            return
+        try:
+            await self._execution_control_service.wait_until_recoverable_input_continuation(
+                context_id=context_id,
+                task_id=task_id,
+                timeout=30,
+            )
+        except TimeoutError as exc:
+            raise InvalidParamsError("Pipeline continuation is still finalizing; retry the same request.") from exc
+
+    async def finalize_natural_execution(
+        self,
+        *,
+        context_id: str,
+        task_id: str,
+        owner: str,
+        completion_generation: int,
+    ) -> None:
+        """Finalize a delivered response without canceling its business task."""
+
+        if self._execution_control_service is None:
+            return
+
+        async def release_reversible_permission_closes() -> None:
+            closing_tokens = await self._permission_input_registry.reversible_closing_tokens(task_id)
+            for closing_token in closing_tokens:
+                await self._permission_input_registry.reopen_task(closing_token)
+
+        await self._execution_control_service.finalize_natural_completion(
+            context_id=context_id,
+            task_id=task_id,
+            owner=owner,
+            completion_generation=completion_generation,
+            finalized_cleanup=release_reversible_permission_closes,
+        )
 
     async def resolve_sideband_permission(
         self, response: PermissionResponse, *, metadata: Any = None
@@ -1324,7 +1374,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                 owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
                 current_task = asyncio.current_task()
                 if existing is not None and existing.owner == owner and current_task is not None:
-                    await existing.attach_task(current_task, mark_working=False)
+                    await existing.attach_task(current_task, mark_working=True)
+                    await existing.mark_execution_started()
                     bind_execution_control(existing)
             requested_llm_headers = resolve_a2a_llm_headers(metadata)
             with contextlib.ExitStack() as request_scope:
@@ -1376,16 +1427,38 @@ class IacCodeA2AExecutor(AgentExecutor):
             control = current_execution_control()
             if control is not None:
                 execution_status = "unknown"
+                natural_completion = False
                 try:
                     record = await self._task_store.get_task_record(control.task_id)
                     execution_status = record.state
+                    natural_completion = execution_status in {
+                        TASK_STATE_INPUT_REQUIRED,
+                        TASK_STATE_COMPLETED,
+                        TASK_STATE_FAILED,
+                    } and not await self._permission_input_registry.has_pending_task(control.task_id)
                 except ValueError:
                     pass
                 current_task = asyncio.current_task()
                 if current_task is not None:
-                    await control.detach_task(current_task, execution_status=execution_status)
+                    completion_generation = await control.detach_task(
+                        current_task,
+                        execution_status=execution_status,
+                        natural_completion=natural_completion,
+                    )
+                    response_already_delivered = NaturalCompletionGenerationCarrier.attach(
+                        context,
+                        completion_generation,
+                    )
+                    if completion_generation is not None and response_already_delivered:
+                        await self.finalize_natural_execution(
+                            context_id=context_id,
+                            task_id=control.task_id,
+                            owner=self._task_store.owner_for_context(getattr(context, "call_context", None)),
+                            completion_generation=completion_generation,
+                        )
             reset_execution_control(execution_scope)
             reset_execution_participants(participant_scope)
+            await RecoverableInputAdmissionCarrier.release(context)
 
     async def _execute(
         self,
@@ -1426,6 +1499,17 @@ class IacCodeA2AExecutor(AgentExecutor):
             return
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
+            if (
+                PipelineLifecycleEventQueueCarrier.read(context)
+                and not PipelineLifecycleEventQueueCarrier.is_bound(context)
+            ):
+                await self._publish_status(
+                    event_queue,
+                    task_id=permission_response.task_id,
+                    context_id=permission_response.context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                )
+                PipelineLifecycleEventQueueCarrier.mark_bound(context)
             response_metadata = getattr(context, "metadata", None) or getattr(
                 getattr(context, "message", None), "metadata", None
             )
@@ -1443,6 +1527,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 with a2a_request_context(aliyun_credential=response_credential):
                     approved = await self._permission_input_registry.answer(
                         permission_response,
+                        aliyun_credential=response_credential,
                         before_delivery=commit_llm_headers,
                     )
                 await activate_bound_llm_headers()
@@ -1648,16 +1733,49 @@ class IacCodeA2AExecutor(AgentExecutor):
                 restore_interrupted=not pipeline_mode,
             )
             if self._execution_control_service is not None:
+                recoverable_input_admission = RecoverableInputAdmissionCarrier.read(context)
                 control = await self._execution_control_service.begin_execution(
                     context_id=context_id,
                     task_id=task.task_id,
                     owner=owner,
                     cwd=cwd,
+                    execution_mode="pipeline" if pipeline_mode and not route_pipeline_handoff_to_normal else "normal",
                     continue_input_required=pipeline_mode and not route_pipeline_handoff_to_normal,
+                    recoverable_input_admission=recoverable_input_admission,
                 )
                 bind_execution_control(control)
                 await control.checkpoint()
                 await control.mark_execution_started()
+                current_task = getattr(context, "current_task", None)
+                needs_lifecycle_binding_frame = (
+                    pipeline_mode
+                    and not route_pipeline_handoff_to_normal
+                    and PipelineLifecycleEventQueueCarrier.read(context)
+                    and (
+                        recoverable_input_admission is not None
+                        or (
+                            isinstance(current_task, Task)
+                            and current_task.status is not None
+                            and current_task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+                        )
+                    )
+                )
+                if needs_lifecycle_binding_frame:
+                    # A cold recovered request reuses the SDK's existing
+                    # INPUT_REQUIRED Task, so there is no automatic initial
+                    # Task frame.  Bind ROS to the newly started execution
+                    # before Pipeline context/sidecar restoration can finish
+                    # without producing a public event.  Same-process reuse
+                    # (localInputContinuationReady) legitimately reenters
+                    # without a dispatcher-signed admission but hits the
+                    # same empty-first-frame window, so publish here too.
+                    await self._publish_status(
+                        event_queue,
+                        task_id=task_id,
+                        context_id=context_id,
+                        state=TaskState.TASK_STATE_WORKING,
+                    )
+                    PipelineLifecycleEventQueueCarrier.mark_bound(context)
             await publish_initial_task_if_missing()
             await self._task_store.ensure_task_not_expired(task.task_id)
         except InvalidParamsError:
@@ -1742,16 +1860,30 @@ class IacCodeA2AExecutor(AgentExecutor):
                 resource_selector_enabled=resource_selector_enabled,
             )
             try:
-                pipeline_result = await pipeline_executor.execute(
-                    context=context,
-                    event_queue=event_queue,
-                    task=task,
-                    task_id=task_id,
-                    context_id=context_id,
-                    cwd=cwd,
-                    pipeline_input=pipeline_input,
-                    active_followup_only=active_pipeline_owner is not None,
-                )
+                direct_route_gate = DirectPipelineRouteGateCarrier.read(context)
+                if direct_route_gate is None:
+                    pipeline_result = await pipeline_executor.execute(
+                        context=context,
+                        event_queue=event_queue,
+                        task=task,
+                        task_id=task_id,
+                        context_id=context_id,
+                        cwd=cwd,
+                        pipeline_input=pipeline_input,
+                        active_followup_only=active_pipeline_owner is not None,
+                    )
+                else:
+                    pipeline_result = await pipeline_executor.execute(
+                        context=context,
+                        event_queue=event_queue,
+                        task=task,
+                        task_id=task_id,
+                        context_id=context_id,
+                        cwd=cwd,
+                        pipeline_input=pipeline_input,
+                        active_followup_only=active_pipeline_owner is not None,
+                        direct_route_gate=direct_route_gate,
+                    )
                 if active_pipeline_owner is not None and pipeline_result is False:
                     owner_finished = active_pipeline_owner.done()
                     if owner_finished:
@@ -2904,6 +3036,8 @@ class IacCodeA2AExecutor(AgentExecutor):
         had_pending_permission = await self._permission_input_registry.has_pending_task(task_id)
         had_pending_resource_selection = await self._resource_selection_registry.has_pending_task(task_id)
         if had_pending_permission:
+            if reason == "natural_completion":
+                raise RuntimeError("Natural completion cannot release an active permission wait")
             await self._permission_input_registry.cancel_task(task_id)
             await self._task_store.set_pending_permissions(task_id, [])
             await self._task_store.discard_context_runtime(context_id, persist_context=False)
@@ -2933,9 +3067,64 @@ class IacCodeA2AExecutor(AgentExecutor):
                 canceled=task_record.state == TASK_STATE_CANCELED,
             )
         if task_record.state not in {TASK_STATE_INPUT_REQUIRED, TASK_STATE_CANCELED}:
-            if not await self._task_store.commit_inactive_execution_task(task_id=task_id, context_id=context_id):
+            if not await self._task_store.commit_inactive_execution_task(
+                task_id=task_id,
+                context_id=context_id,
+                expected_state=task_record.state,
+            ):
                 raise RuntimeError("Execution task did not reach a terminal state")
+            await self._task_store.discard_context_runtime(context_id, persist_context=False)
             return task_record.state
+        if reason == "natural_completion" and task_record.state == TASK_STATE_CANCELED:
+            if not await self._task_store.commit_inactive_execution_task(
+                task_id=task_id,
+                context_id=context_id,
+                expected_state=TASK_STATE_CANCELED,
+            ):
+                raise RuntimeError("Canceled execution changed during natural completion")
+            await self._task_store.discard_context_runtime(context_id, persist_context=False)
+            return TASK_STATE_CANCELED
+        if (
+            reason in self._RECOVERABLE_RELEASE_REASONS
+            and task_record.state == TASK_STATE_INPUT_REQUIRED
+            and not had_pending_permission
+        ):
+            if control is not None and control.execution_mode == "normal":
+                committed = await self._task_store.commit_inactive_execution_task(
+                    task_id=task_id,
+                    context_id=context_id,
+                    expected_state=TASK_STATE_INPUT_REQUIRED,
+                )
+                if committed:
+                    await self._task_store.discard_context_runtime(context_id, persist_context=False)
+                    committed_task = await self._task_store.get_task_record(task_id)
+                    if committed_task.state == TASK_STATE_INPUT_REQUIRED:
+                        return TASK_STATE_INPUT_REQUIRED
+            waiting_task_id = await run_sync_fenced(
+                sandbox_release_recoverable_task_id_from_sidecar,
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                context_id=context_id,
+            )
+            if waiting_task_id == task_id:
+                committed = await self._task_store.commit_inactive_execution_task(
+                    task_id=task_id,
+                    context_id=context_id,
+                    expected_state=TASK_STATE_INPUT_REQUIRED,
+                )
+                if committed:
+                    await self._task_store.discard_context_runtime(context_id, persist_context=False)
+                    committed_task = await self._task_store.get_task_record(task_id)
+                    committed_waiting_task_id = await run_sync_fenced(
+                        sandbox_release_recoverable_task_id_from_sidecar,
+                        cwd=context_record.cwd,
+                        session_id=context_record.session_id,
+                        context_id=context_id,
+                    )
+                    if committed_task.state == TASK_STATE_INPUT_REQUIRED and committed_waiting_task_id == task_id:
+                        return TASK_STATE_INPUT_REQUIRED
+            if reason == "natural_completion":
+                raise RuntimeError("Natural input completion lacks a recoverable handoff proof")
         cancel_result = await run_sync_fenced(
             cancel_waiting_input_task_from_sidecar,
             cwd=context_record.cwd,
@@ -3506,9 +3695,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 event_queue,
                 task_id=response.task_id,
                 context_id=response.context_id,
-                state=(
-                    TaskState.TASK_STATE_INPUT_REQUIRED if normal_turn_finished else TaskState.TASK_STATE_CANCELED
-                ),
+                state=(TaskState.TASK_STATE_INPUT_REQUIRED if normal_turn_finished else TaskState.TASK_STATE_CANCELED),
                 session_id=context_record.session_id,
             )
             await self._notify_terminal_task(
@@ -3837,9 +4024,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 return None
             if re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region_id) is None:
                 language = self._resolve_preferred_language(metadata) or "en"
-                raise InvalidParamsError(
-                    translate_message("Unsupported Alibaba Cloud region ID.", language=language)
-                )
+                raise InvalidParamsError(translate_message("Unsupported Alibaba Cloud region ID.", language=language))
             configured = AliyunCredentials.load()
             if configured is None:
                 return None
