@@ -290,6 +290,7 @@ class SessionBackupCoordinator:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._session_chains: dict[tuple[str, str], asyncio.Task[Any]] = {}
         self._staged_callbacks: dict[str, Callable[[int | None, str | None], Awaitable[None] | None]] = {}
+        self._committed_revisions: dict[str, int] = {}
         self._closed = False
 
     @property
@@ -338,10 +339,16 @@ class SessionBackupCoordinator:
             ) from exc
         if job is None:
             return SessionBackupHandoff(business_revision=0, backup_disabled=True)
+        self._committed_revisions[session_id] = job.business_revision
         if on_staged is not None:
             self._staged_callbacks[job.job_id] = on_staged
         self._schedule_capture(job)
         return SessionBackupHandoff(business_revision=job.business_revision, job_id=job.job_id)
+
+    def committed_business_revision(self, session_id: str | None) -> int | None:
+        """Return the newest business revision this process durably registered."""
+
+        return None if session_id is None else self._committed_revisions.get(session_id)
 
     async def wait_for_local_snapshot_quiescence(
         self,

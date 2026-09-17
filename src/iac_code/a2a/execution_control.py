@@ -1208,6 +1208,15 @@ class ExecutionController:
     def natural_handoff_receipt(self) -> dict[str, Any] | None:
         return None if self._natural_handoff is None else dict(self._natural_handoff)
 
+    def committed_business_revision(self) -> int | None:
+        """Return the durable business revision this session has already registered."""
+
+        coordinator = self._backup_coordinator
+        if coordinator is None or self.session_id is None:
+            return None
+        reader = getattr(coordinator, "committed_business_revision", None)
+        return reader(self.session_id) if callable(reader) else None
+
     def natural_handoff_admits_replacement(self) -> bool:
         """Return whether a committed business handoff lets an ordinary next turn start."""
 
