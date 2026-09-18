@@ -63,7 +63,9 @@ PROFILES = {
             ("scripts/iac_code.py", "scripts/iac_code.py"),
         ),
         bridge_path="scripts/iac_code.py",
-        user_agent_template="AlibabaCloud-Agent-Skills/alibabacloud-iac-code/{session-id}",
+        user_agent_template=(
+            "AlibabaCloud-Agent-Skills/alibabacloud-iac-code/{session-id} skill-version/{skill-version}"
+        ),
     ),
     "alibabacloud-ros-agent": SkillProfile(
         name="alibabacloud-ros-agent",

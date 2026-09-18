@@ -147,10 +147,11 @@ workflow; template-only and Runtime-cache workflows require no Alibaba Cloud RAM
 All outbound HTTP requests made by this AgentHub Skill carry this `User-Agent` template:
 
 ```text
-AlibabaCloud-Agent-Skills/{{SKILL_NAME}}/{session-id}
+AlibabaCloud-Agent-Skills/{{SKILL_NAME}}/{session-id} skill-version/{skill-version}
 ```
 
 - `{{SKILL_NAME}}` is the fixed AgentHub Skill identifier and matches the frontmatter `name`.
+- The skill version is the packaged `SKILL_VERSION` injected by the Skill release process.
 - The session ID must be a 32-character lowercase hexadecimal string generated exactly once per session.
   It must be reused unchanged for every outbound HTTP request in that session. The bridge reads `SKILL_SESSION_ID`
   after validation; if it is absent or invalid, the bridge generates the session ID with `uuid.uuid4().hex` and stores

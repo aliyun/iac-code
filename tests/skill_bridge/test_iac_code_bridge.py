@@ -131,6 +131,22 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
     assert "pip install" not in source
 
 
+def test_agenthub_user_agent_includes_packaged_skill_version(monkeypatch) -> None:
+    monkeypatch.setattr(bridge, "SKILL_DISTRIBUTION", "agenthub")
+    monkeypatch.setattr(
+        bridge,
+        "USER_AGENT_TEMPLATE",
+        "AlibabaCloud-Agent-Skills/alibabacloud-iac-code/{session-id} skill-version/{skill-version}",
+    )
+    monkeypatch.setattr(bridge, "SKILL_VERSION", "0.5.0")
+    monkeypatch.setenv("SKILL_SESSION_ID", "a" * 32)
+
+    assert (
+        bridge._skill_user_agent()
+        == "AlibabaCloud-Agent-Skills/alibabacloud-iac-code/{} skill-version/0.5.0".format("a" * 32)
+    )
+
+
 def test_manifest_selects_exact_cp312_target_and_checks_numeric_compatibility() -> None:
     artifact = _artifact(archive=Path("/tmp/runtime.zip"), digest="a" * 64, size=10)
     manifest = bridge.validate_manifest(_manifest(artifact))

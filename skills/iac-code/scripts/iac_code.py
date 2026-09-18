@@ -122,7 +122,7 @@ def _skill_user_agent():
     if re.fullmatch(r"[0-9a-f]{32}", value) is None:
         value = uuid.uuid4().hex
         os.environ["SKILL_SESSION_ID"] = value
-    return USER_AGENT_TEMPLATE.replace("{session-id}", value)
+    return USER_AGENT_TEMPLATE.replace("{session-id}", value).replace("{skill-version}", SKILL_VERSION)
 
 
 _SKILL_USER_AGENT = _skill_user_agent()
