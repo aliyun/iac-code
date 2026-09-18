@@ -357,28 +357,17 @@ class SessionBackupCoordinator:
         session_id: str | None,
         timeout: float | None = None,
     ) -> None:
-        """Let earlier snapshot attempts for this session finish before new writes start."""
+        """Fence the next turn behind a new snapshot generation without blocking on a copy.
 
-        if not self.enabled or session_id is None:
-            return
-        try:
-            project = await run_sync_fenced(self._project_for_session, cwd, session_id)
-        except Exception:
-            return
-        if project is None:
-            return
-        capture = self._session_chains.get((project, session_id))
-        if capture is None or capture.done():
-            return
-        try:
-            await asyncio.wait_for(asyncio.shield(capture), timeout=timeout or self._quiescence_timeout)
-        except asyncio.TimeoutError:
-            logger.warning(
-                "A2A session backup snapshot did not quiesce before the next turn session_id=%s",
-                session_id,
-            )
-        except Exception:
-            return
+        Each capture commits to an immutable, generation-versioned staging directory and
+        per-session captures are serialized through the capture chain, so an in-flight
+        snapshot always owns its own generation. The next turn therefore writes a fresh
+        generation and must never wait for the previous boundary's (potentially slow)
+        local capture or its staging->backup publish before it starts.
+        """
+
+        del cwd, session_id, timeout
+        return
 
     async def recover(self) -> int:
         """Re-arm durable to-do jobs left by a previous process."""

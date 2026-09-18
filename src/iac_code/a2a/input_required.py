@@ -1348,11 +1348,14 @@ class PermissionInputRegistry:
         backup_service = pending.backup_service
         if store is None or boundary_id is None or cwd is None or session_id is None or backup_service is None:
             return
-        await backup_permission_wait_checkpoint(
-            store=store,
-            boundary_id=boundary_id,
-            cwd=cwd,
-            session_id=session_id,
+        # Hand the staging->backup publish to the background coordinator so the
+        # permission decision future resolves without waiting for the copy. When
+        # the coordinator is disabled backup_durable_boundary keeps the existing
+        # synchronous compatibility copy so durability is never silently dropped.
+        await self.backup_durable_boundary(
+            pending,
+            cwd,
+            session_id,
             backup_service=backup_service,
             metrics=pending.backup_metrics,
         )

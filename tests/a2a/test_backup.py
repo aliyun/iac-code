@@ -263,6 +263,37 @@ async def test_register_boundary_rejects_a_closed_coordinator_instead_of_faking_
 
 
 @pytest.mark.asyncio
+async def test_wait_for_local_snapshot_quiescence_does_not_block_on_an_inflight_capture(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    coordinator, service, session_dir, _staging_root, _state_root = _staged_coordinator(monkeypatch, tmp_path)
+    (session_dir / "session.jsonl").write_text("v1\n", encoding="utf-8")
+    started, release = threading.Event(), threading.Event()
+    original = service.backup_session
+
+    def gated(*args, **kwargs):
+        started.set()
+        assert release.wait(5)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(service, "backup_session", gated)
+    try:
+        await _register(coordinator)
+        # The local capture is now stuck inside backup_session and will not finish.
+        assert await asyncio.to_thread(started.wait, 5)
+        # The next turn must observe generation-fenced staging and start immediately;
+        # it must never block on the in-flight (potentially slow) local capture.
+        await asyncio.wait_for(
+            coordinator.wait_for_local_snapshot_quiescence(cwd="/repo", session_id="s1"),
+            timeout=1,
+        )
+    finally:
+        release.set()
+        await coordinator.aclose()
+
+
+@pytest.mark.asyncio
 async def test_disabled_coordinator_reports_a_backup_disabled_handoff(tmp_path: Path) -> None:
     coordinator = SessionBackupCoordinator(None, state_root=tmp_path / "state")
 
