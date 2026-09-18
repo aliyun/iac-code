@@ -4,6 +4,7 @@ import shutil
 import threading
 import time
 from collections.abc import Callable
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -14,9 +15,11 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict, ParseDict
 from google.protobuf.timestamp_pb2 import Timestamp
 
+from iac_code.a2a.execution_control import ExecutionController
 from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.services.session_backup import BackupResult
 from iac_code.services.session_backup_state import SessionBackupState
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_storage import SessionStorage
@@ -102,6 +105,62 @@ async def wait_until(condition: Callable[[], bool], *, timeout: float = 1.0) -> 
     assert condition()
 
 
+class _StagedCancelBackup:
+    def backup_session(self, _cwd, _session_id, *, reason, critical, publication_proofs=None) -> BackupResult:
+        del reason, critical, publication_proofs
+        return BackupResult(
+            enabled=True,
+            staged_committed=True,
+            shared_committed=False,
+            generation=7,
+            commit_id="cancel-commit-7",
+        )
+
+
+@pytest.mark.asyncio
+async def test_canceled_task_release_proof_accepts_real_staged_execution_controller_receipt(tmp_path: Path) -> None:
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "canceled"
+    store.mirror_task(task)
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=persistence.root / "execution-control" / "ctx-1.json",
+        backup_service=_StagedCancelBackup(),
+        execution_id="exec-1",
+    )
+    control.bind_session(context.session_id)
+    try:
+        await control.terminate(
+            execution_id="exec-1",
+            request_id="cancel-1",
+            connection_epoch=1,
+            reason="explicit_terminate",
+        )
+        await wait_until(lambda: control.release_ready)
+
+        proof = await store.canceled_task_release_proof(context_id="ctx-1", task_id="task-1")
+
+        assert proof == {
+            "executionId": "exec-1",
+            "revision": control.persisted_revision,
+            "backupGeneration": 7,
+            "backupCommitId": "cancel-commit-7",
+        }
+    finally:
+        await control.close()
+
+
 def sdk_task(
     task_id: str,
     *,
@@ -147,6 +206,82 @@ async def test_permission_backup_generation_uses_next_existing_task_save(tmp_pat
     assert snapshot is not None
     assert snapshot.expected_permission_backup_generation == 7
     assert "expected_permission_backup_generation" not in str(await store.get("task-1"))
+
+
+@pytest.mark.asyncio
+async def test_permission_backup_generation_recovery_updates_cold_snapshot_without_reviving_task(tmp_path) -> None:
+    persistence = CountingTaskPersistence(tmp_path / "a2a")
+    persistence.save_task(
+        A2ATaskSnapshot(
+            task_id="task-1",
+            context_id="ctx-1",
+            state="input-required",
+            owner="owner-1",
+            output_text=["keep-output"],
+            status_message="keep-status",
+            updated_at=123.0,
+            expected_permission_backup_generation=4,
+        )
+    )
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    saves_before_recovery = persistence.task_save_count
+
+    await store.recover_expected_permission_backup_generation("task-1", 9)
+
+    assert store._tasks == {}
+    assert persistence.task_save_count == saves_before_recovery + 1
+    assert persistence.load_task("task-1") == A2ATaskSnapshot(
+        task_id="task-1",
+        context_id="ctx-1",
+        state="input-required",
+        owner="owner-1",
+        output_text=["keep-output"],
+        status_message="keep-status",
+        updated_at=123.0,
+        expected_permission_backup_generation=9,
+    )
+
+
+@pytest.mark.asyncio
+async def test_permission_backup_generation_recovery_is_monotonic_and_rejects_missing_task(tmp_path) -> None:
+    persistence = CountingTaskPersistence(tmp_path / "a2a")
+    persistence.save_task(
+        A2ATaskSnapshot(
+            task_id="task-1",
+            context_id="ctx-1",
+            state="input-required",
+            expected_permission_backup_generation=9,
+        )
+    )
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    saves_before_recovery = persistence.task_save_count
+
+    await store.recover_expected_permission_backup_generation("task-1", 7)
+
+    assert persistence.task_save_count == saves_before_recovery
+    assert persistence.load_task("task-1").expected_permission_backup_generation == 9
+    with pytest.raises(ValueError, match="A2A task not found"):
+        await store.recover_expected_permission_backup_generation("missing-task", 10)
+
+
+@pytest.mark.asyncio
+async def test_permission_backup_generation_recovery_does_not_revive_consumed_permission(tmp_path) -> None:
+    persistence = CountingTaskPersistence(tmp_path / "a2a")
+    consumed = A2ATaskSnapshot(
+        task_id="task-1",
+        context_id="ctx-1",
+        state="working",
+        status_message="permission already consumed",
+        expected_permission_backup_generation=None,
+    )
+    persistence.save_task(consumed)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    saves_before_recovery = persistence.task_save_count
+
+    await store.recover_expected_permission_backup_generation("task-1", 9)
+
+    assert persistence.task_save_count == saves_before_recovery
+    assert persistence.load_task("task-1") == consumed
 
 
 @pytest.mark.asyncio

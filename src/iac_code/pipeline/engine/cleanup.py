@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Iterator, Literal, cast
 
 import yaml
 
@@ -20,6 +21,7 @@ from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_PROGRESS,
     PIPELINE_EVENT_CLEANUP_STARTED,
 )
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
 from iac_code.utils.path_locks import PathLockRegistry
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -177,8 +179,9 @@ class CleanupLedger:
     tracking without broadening cleanup scope.
     """
 
-    def __init__(self, path: str | Path) -> None:
+    def __init__(self, path: str | Path, *, session_root: str | Path | None = None) -> None:
         self.path = Path(path)
+        self._mutation_dir = Path(session_root) if session_root is not None else self.path.parent
 
     def observed_resources(self) -> list[ObservedResource]:
         data = self._load()
@@ -577,8 +580,10 @@ class CleanupLedger:
         if isinstance(history, list):
             history.append(entry)
 
-    def _write_lock(self):
-        return _ledger_path_lock(self.path)
+    @contextmanager
+    def _write_lock(self) -> Iterator[None]:
+        with session_mutation_guard(self._mutation_dir), _ledger_path_lock(self.path):
+            yield
 
 
 class CleanupObserver:

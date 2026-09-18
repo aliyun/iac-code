@@ -47,7 +47,7 @@ ExecutionPhase = Literal[
 
 _PAUSE_PHASES = frozenset({"pausing", "pause_committing", "paused"})
 _TERMINAL_TASK_STATES = frozenset({"completed", "failed", "canceled", "input-required", "normal-turn-ended"})
-_BACKUP_RELEASE_STATUSES = frozenset({"disabled", "shared_committed", "staged_committed", "delegated"})
+_BACKUP_RELEASE_STATUSES = frozenset({"disabled", "shared_committed", "staged_committed"})
 _RECOVERABLE_INPUT_ADMISSION_TTL_SECONDS = 60.0
 NATURAL_COMPLETION_FINALIZED_GENERATION = "_naturalCompletionFinalizedGeneration"
 _CURRENT_CONTROL: ContextVar[Any] = ContextVar("a2a_execution_control", default=None)
@@ -554,6 +554,10 @@ class ExecutionController:
         self._backup_service = backup_service
         self._backup_coordinator = backup_coordinator
         self._natural_handoff: dict[str, Any] | None = None
+        self._natural_handoff_revision: int | None = None
+        self._pending_natural_handoff: dict[str, Any] | None = None
+        self._pending_natural_handoff_revision: int | None = None
+        self._pending_natural_handoff_requires_backup = False
         self._termination_cleanup = termination_cleanup
         self._on_resume = on_resume
         self._input_handoff_commit = input_handoff_commit
@@ -701,6 +705,10 @@ class ExecutionController:
             self._natural_completion_delivered_generation = None
             self._claimed_natural_completion_generation = None
             self._natural_handoff = None
+            self._natural_handoff_revision = None
+            self._pending_natural_handoff = None
+            self._pending_natural_handoff_revision = None
+            self._pending_natural_handoff_requires_backup = False
             self._pending_explicit_termination_reason = None
             self.revision += 1
             snapshot = self.snapshot()
@@ -1221,12 +1229,31 @@ class ExecutionController:
         """Return whether a committed business handoff lets an ordinary next turn start."""
 
         receipt = self._natural_handoff
+        handoff_revision = self._natural_handoff_revision
         return bool(
             receipt is not None
+            and isinstance(handoff_revision, int)
+            and self.persisted_revision >= handoff_revision
+            and self._backup_state_committed
+            and self._commit_error is None
             and receipt.get("version") == NATURAL_HANDOFF_VERSION
             and receipt.get("executionId") == self.execution_id
+            and receipt.get("ownerGeneration") == self.owner_generation
             and receipt.get("businessDrained") is True
-            and (receipt.get("pendingJobId") is not None or receipt.get("backupDisabled") is True)
+            and (
+                receipt.get("backupDisabled") is True
+                or (
+                    isinstance(receipt.get("businessRevision"), int)
+                    and receipt.get("businessRevision", 0) > 0
+                    and isinstance(receipt.get("pendingJobId"), str)
+                    and bool(receipt.get("pendingJobId"))
+                    and receipt.get("stagedCommitted") is True
+                    and isinstance(receipt.get("snapshotGeneration"), int)
+                    and receipt.get("snapshotGeneration", 0) > 0
+                    and isinstance(receipt.get("snapshotCommitId"), str)
+                    and bool(receipt.get("snapshotCommitId"))
+                )
+            )
             and self.termination_reason == "natural_completion"
             and self.phase in {"terminating", "terminated"}
             and self._pending_explicit_termination_reason is None
@@ -1543,6 +1570,10 @@ class ExecutionController:
         self._natural_completion_delivered_generation = None
         self._claimed_natural_completion_generation = None
         self._natural_handoff = None
+        self._natural_handoff_revision = None
+        self._pending_natural_handoff = None
+        self._pending_natural_handoff_revision = None
+        self._pending_natural_handoff_requires_backup = False
         self._pending_explicit_termination_reason = None
         self._termination_generation += 1
         self._termination_pause_id = self.pause_id if reason == "disconnect_timeout" else None
@@ -1578,6 +1609,10 @@ class ExecutionController:
         self._natural_completion_generation = None
         self._natural_completion_delivered_generation = None
         self._natural_handoff = None
+        self._natural_handoff_revision = None
+        self._pending_natural_handoff = None
+        self._pending_natural_handoff_revision = None
+        self._pending_natural_handoff_requires_backup = False
         self._pending_explicit_termination_reason = None
         self._termination_generation += 1
         self._termination_pause_id = None
@@ -1783,55 +1818,70 @@ class ExecutionController:
         """Delegate the directory copy, then publish the business handoff receipt."""
 
         coordinator = self._backup_coordinator
-        if coordinator is None or not getattr(coordinator, "enabled", False) or self.session_id is None:
-            async with self._condition:
-                if not self._owns_termination_locked(generation):
-                    return
-                self._publish_natural_handoff_locked(
+        requires_legacy_backup = (
+            coordinator is None or not getattr(coordinator, "enabled", False) or self.session_id is None
+        )
+        if requires_legacy_backup:
+            business_revision = 0
+            job_id = None
+            backup_disabled = True
+            staged_committed = False
+            snapshot_generation = None
+            snapshot_commit_id = None
+        else:
+            try:
+                handoff = await coordinator.register_boundary(
+                    cwd=self.cwd,
+                    session_id=self.session_id,
+                    context_id=self.context_id,
+                    execution_id=self.execution_id,
+                    boundary="natural_completion",
+                    reason=BackupReason.TERMINAL,
                     completion_generation=completion_generation,
-                    business_revision=0,
-                    job_id=None,
-                    backup_disabled=True,
                 )
-                snapshot = self.snapshot()
-            with suppress(Exception):
-                await self._persist_snapshot(snapshot)
-            await self._perform_backup(generation)
-            return
-        try:
-            handoff = await coordinator.register_boundary(
-                cwd=self.cwd,
-                session_id=self.session_id,
-                context_id=self.context_id,
-                execution_id=self.execution_id,
-                boundary="natural_completion",
-                reason=BackupReason.TERMINAL,
-                completion_generation=completion_generation,
-            )
-        except SessionBackupHandoffError as exc:
-            await self._commit_blocked_backup_state(
-                "session backup job could not be persisted",
-                exc,
-                generation=generation,
-            )
-            return
+            except SessionBackupHandoffError as exc:
+                await self._commit_blocked_backup_state(
+                    "session backup job could not be persisted",
+                    exc,
+                    generation=generation,
+                )
+                return
+            business_revision = handoff.business_revision
+            job_id = handoff.job_id
+            backup_disabled = handoff.backup_disabled
+            staged_committed = handoff.staged_committed
+            snapshot_generation = handoff.snapshot_generation
+            snapshot_commit_id = handoff.snapshot_commit_id
         async with self._condition:
             if not self._owns_termination_locked(generation):
                 return
-            self.backup = {
-                "status": "disabled" if handoff.backup_disabled else "delegated",
-                "jobId": handoff.job_id,
-                "businessRevision": handoff.business_revision,
-            }
+            self.backup = (
+                {"status": "pending"}
+                if requires_legacy_backup
+                else {"status": "disabled"}
+                if backup_disabled and job_id is None
+                else {
+                    "status": "disabled" if backup_disabled else "staged_committed",
+                    "jobId": job_id,
+                    "businessRevision": business_revision,
+                    "generation": snapshot_generation,
+                    "commitId": snapshot_commit_id,
+                }
+            )
             self._backup_state_committed = False
             self.release_ready = False
-            self._publish_natural_handoff_locked(
+            receipt, receipt_revision = self._prepare_natural_handoff_locked(
                 completion_generation=completion_generation,
-                business_revision=handoff.business_revision,
-                job_id=handoff.job_id,
-                backup_disabled=handoff.backup_disabled,
+                business_revision=business_revision,
+                job_id=job_id,
+                backup_disabled=backup_disabled,
+                staged_committed=staged_committed,
+                snapshot_generation=snapshot_generation,
+                snapshot_commit_id=snapshot_commit_id,
+                requires_backup=requires_legacy_backup,
             )
             snapshot = self.snapshot()
+            snapshot["naturalHandoff"] = dict(receipt)
             snapshot["commitError"] = None
         try:
             await self._persist_snapshot(snapshot)
@@ -1841,30 +1891,39 @@ class ExecutionController:
                     self._commit_error = "state_commit_failed"
             return
         async with self._condition:
-            if not self._owns_termination_locked(generation):
+            if not self._owns_termination_locked(generation) or not self._promote_natural_handoff_locked(
+                receipt_revision
+            ):
                 return
             self._commit_error = None
-            self._backup_state_committed = True
-            self._maybe_mark_release_ready_locked()
+            if not requires_legacy_backup:
+                self._backup_state_committed = True
+                self._maybe_mark_release_ready_locked()
             logger.info(
                 "A2A execution natural handoff committed context_id=%s task_id=%s execution_id=%s "
                 "business_revision=%s job_id=%s",
                 sanitize_strict_text(self.context_id),
                 sanitize_strict_text(self.task_id),
                 sanitize_strict_text(self.execution_id),
-                handoff.business_revision,
-                sanitize_strict_text(handoff.job_id or "none"),
+                business_revision,
+                sanitize_strict_text(job_id or "none"),
             )
+        if requires_legacy_backup:
+            await self._perform_backup(generation)
 
-    def _publish_natural_handoff_locked(
+    def _prepare_natural_handoff_locked(
         self,
         *,
         completion_generation: int | None,
         business_revision: int,
         job_id: str | None,
         backup_disabled: bool,
-    ) -> None:
-        self._natural_handoff = {
+        staged_committed: bool,
+        snapshot_generation: int | None,
+        snapshot_commit_id: str | None,
+        requires_backup: bool,
+    ) -> tuple[dict[str, Any], int]:
+        receipt = {
             "version": NATURAL_HANDOFF_VERSION,
             "contextId": self.context_id,
             "taskId": self.task_id,
@@ -1874,10 +1933,33 @@ class ExecutionController:
             "businessRevision": business_revision,
             "pendingJobId": job_id,
             "backupDisabled": backup_disabled,
+            "stagedCommitted": staged_committed,
+            "snapshotGeneration": snapshot_generation,
+            "snapshotCommitId": snapshot_commit_id,
             "businessDrained": True,
         }
         self.revision += 1
+        self._pending_natural_handoff = receipt
+        self._pending_natural_handoff_revision = self.revision
+        self._pending_natural_handoff_requires_backup = requires_backup
+        return receipt, self.revision
+
+    def _promote_natural_handoff_locked(self, receipt_revision: int) -> bool:
+        receipt = self._pending_natural_handoff
+        if (
+            receipt is None
+            or self._pending_natural_handoff_revision != receipt_revision
+            or self.persisted_revision < receipt_revision
+            or self.revision != receipt_revision
+        ):
+            return False
+        self._natural_handoff = receipt
+        self._natural_handoff_revision = receipt_revision
+        self._pending_natural_handoff = None
+        self._pending_natural_handoff_revision = None
+        self._pending_natural_handoff_requires_backup = False
         self._condition.notify_all()
+        return True
 
     async def _run_termination_cleanup(
         self,
@@ -2104,6 +2186,11 @@ class ExecutionController:
             if not self._owns_termination_locked(generation):
                 return
             snapshot = self.snapshot()
+            pending_receipt = self._pending_natural_handoff
+            pending_receipt_revision = self._pending_natural_handoff_revision
+            pending_receipt_requires_backup = self._pending_natural_handoff_requires_backup
+            if pending_receipt is not None:
+                snapshot["naturalHandoff"] = dict(pending_receipt)
             snapshot["commitError"] = None
             backup_complete = self.backup.get("status") in _BACKUP_RELEASE_STATUSES
         try:
@@ -2116,10 +2203,16 @@ class ExecutionController:
         async with self._condition:
             if not self._owns_termination_locked(generation):
                 return
+            if pending_receipt_revision is not None and not self._promote_natural_handoff_locked(
+                pending_receipt_revision
+            ):
+                return
             self._commit_error = None
-            self._backup_state_committed = True
-            if backup_complete:
+            self._backup_state_committed = not pending_receipt_requires_backup
+            if backup_complete and not pending_receipt_requires_backup:
                 self._maybe_mark_release_ready_locked()
+        if pending_receipt_requires_backup:
+            await self._perform_backup(generation)
 
     async def _retry_external_operations_and_resume(self) -> None:
         try:

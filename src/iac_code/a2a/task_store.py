@@ -7,10 +7,10 @@ import logging
 import time
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import Any, TypeAlias, cast
 
 from a2a.server.context import ServerCallContext
 from a2a.server.tasks import TaskStore
@@ -535,6 +535,53 @@ class A2ATaskStore(TaskStore):
             if current is None or generation > current:
                 record.expected_permission_backup_generation = generation
                 self._task_persistence_dirty.add(task_id)
+
+    async def recover_expected_permission_backup_generation(self, task_id: str, generation: int) -> None:
+        """Durably restore a staged permission boundary after process restart."""
+
+        task_id = validate_protocol_id(task_id)
+        if isinstance(generation, bool) or not isinstance(generation, int) or generation <= 0:
+            raise ValueError("Invalid permission backup generation")
+        if self._persistence is None:
+            raise ValueError("Permission backup recovery requires durable task persistence")
+        async with self._mutation_lock:
+            persisted = self._load_task_snapshot(task_id)
+            record = self._tasks.get(task_id)
+            if record is None and persisted is None:
+                raise ValueError(_("A2A task not found"))
+            if persisted is not None and persisted.task_id != task_id:
+                raise ValueError("Persisted A2A task identity mismatch")
+
+            if record is None:
+                assert persisted is not None
+                state = persisted.state
+                current = persisted.expected_permission_backup_generation
+            else:
+                state = record.state
+                current = record.expected_permission_backup_generation
+            if state != TASK_STATE_INPUT_REQUIRED:
+                # The permission was already consumed or the task terminalized.
+                # A delayed recovery callback must not revive that old boundary.
+                return
+            if current is not None and generation <= current:
+                return
+
+            if record is not None:
+                record.expected_permission_backup_generation = generation
+                snapshot = A2ATaskSnapshot(
+                    task_id=record.task_id,
+                    context_id=record.context_id,
+                    state=record.state,
+                    owner=record.owner,
+                    output_text=list(record.output_text),
+                    updated_at=record.updated_at,
+                    expected_permission_backup_generation=generation,
+                )
+            else:
+                assert persisted is not None
+                snapshot = replace(persisted, expected_permission_backup_generation=generation)
+            self._persistence.save_task(snapshot)
+            self._task_persistence_dirty.discard(task_id)
 
     async def delete(self, task_id: str, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)
@@ -1474,6 +1521,73 @@ class A2ATaskStore(TaskStore):
     async def is_task_active(self, task_id: str) -> bool:
         async with self._mutation_lock:
             return self._task_is_active_locked(task_id)
+
+    async def canceled_task_release_proof(self, *, context_id: str, task_id: str) -> dict[str, object] | None:
+        """Return a durable proof only after the old writer is fully released."""
+
+        context_id = validate_protocol_id(context_id)
+        task_id = validate_protocol_id(task_id)
+        async with self._mutation_lock:
+            record = self._tasks.get(task_id)
+            if record is None:
+                snapshot = self._load_task_snapshot(task_id)
+                if snapshot is not None:
+                    record = _record_from_snapshot(snapshot)
+            context = self._contexts.get(context_id)
+            if record is None or record.context_id != context_id or record.state != TASK_STATE_CANCELED:
+                return None
+            if record.active_task is not None and not record.active_task.done():
+                return None
+            if context is not None and context.active_task_id is not None:
+                return None
+            if self._persistence is None:
+                return None
+            control = self._persistence.load_execution_control(context_id)
+        if not isinstance(control, dict):
+            return None
+        revision = control.get("revision")
+        persisted_revision = control.get("persistedRevision")
+        if (
+            control.get("contextId") != context_id
+            or control.get("taskId") != task_id
+            or control.get("phase") != "terminated"
+            or control.get("executionStatus") != TASK_STATE_CANCELED
+            or control.get("terminationReason") != "explicit_terminate"
+            or control.get("releaseReady") is not True
+            or control.get("commitError") is not None
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or persisted_revision != revision
+        ):
+            return None
+        execution_id = control.get("executionId")
+        if not isinstance(execution_id, str) or not execution_id:
+            return None
+        if control.get("blockers") not in ([], None):
+            return None
+        backup_raw = control.get("backup")
+        if not isinstance(backup_raw, dict):
+            return None
+        backup = cast(dict[str, Any], backup_raw)
+        if backup.get("status") not in {
+            "disabled",
+            "shared_committed",
+            "staged_committed",
+        }:
+            return None
+        if backup.get("status") == "staged_committed" and (
+            not isinstance(backup.get("generation"), int)
+            or backup.get("generation", 0) <= 0
+            or not isinstance(backup.get("commitId"), str)
+            or not backup.get("commitId")
+        ):
+            return None
+        return {
+            "executionId": execution_id,
+            "revision": revision,
+            "backupGeneration": backup.get("generation"),
+            "backupCommitId": backup.get("commitId"),
+        }
 
     async def wait_until_task_inactive(self, task_id: str, *, timeout: float) -> None:
         """Wait for the current in-process domain owner without canceling it."""

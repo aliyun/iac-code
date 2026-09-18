@@ -19,6 +19,7 @@ from a2a.types import (
 from google.protobuf.json_format import ParseDict
 
 from iac_code import __version__
+from iac_code.a2a.backup import NATURAL_HANDOFF_VERSION
 from iac_code.a2a.exposure import format_a2a_exposure_types
 from iac_code.a2a.parts import supported_input_mime_types
 from iac_code.a2a.pipeline_events import PIPELINE_EVENTS_EXTENSION_URI
@@ -220,7 +221,7 @@ def build_agent_card(
                     "terminated",
                 ],
                 "toolBatchDrainOnPause": True,
-                "naturalHandoffVersion": "natural-handoff-v1",
+                "naturalHandoffVersion": NATURAL_HANDOFF_VERSION,
                 "transportScope": "http",
             },
             execution_control_extension.params,

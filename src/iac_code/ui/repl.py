@@ -2449,6 +2449,25 @@ class InlineREPL:
             return None
         return ledger if isinstance(ledger, CleanupLedger) else None
 
+    def _cleanup_ledger_for_session_path(self, path):
+        """Bind a writable ledger to the session that actually owns its path."""
+        from pathlib import Path
+
+        from iac_code.pipeline.config import get_working_directory
+        from iac_code.pipeline.engine.cleanup import CleanupLedger
+
+        path = Path(path)
+        for cwd in (get_working_directory(), self._original_cwd):
+            if not cwd:
+                continue
+            root = self._session_storage.session_dir(cwd, self._session_id)
+            if not isinstance(root, (str, Path)):
+                continue
+            root = Path(root)
+            if path.resolve().is_relative_to(root.resolve()):
+                return CleanupLedger(path, session_root=root)
+        raise ValueError("Cleanup ledger is not owned by the current session")
+
     def _cleanup_ledger_for_normal_chat(self):
         from pathlib import Path
 
@@ -2456,11 +2475,11 @@ class InlineREPL:
 
         prompt_path = self._cleanup_ledger_path_from_active_prompt()
         if prompt_path is not None:
-            return CleanupLedger(prompt_path)
+            return self._cleanup_ledger_for_session_path(prompt_path)
 
         explicit_path = getattr(self, "_pipeline_cleanup_ledger_path", None)
         if explicit_path:
-            ledger = CleanupLedger(Path(explicit_path))
+            ledger = self._cleanup_ledger_for_session_path(explicit_path)
             has_active_prompt = self._cleanup_prompt_exists_anywhere()
             if has_active_prompt:
                 return ledger
@@ -2501,11 +2520,12 @@ class InlineREPL:
                 continue
             seen.add(cwd)
             try:
-                path = Path(session_storage.session_dir(cwd, session_id)) / "pipeline" / "cleanup.yaml"
+                session_root = Path(session_storage.session_dir(cwd, session_id))
+                path = session_root / "pipeline" / "cleanup.yaml"
             except Exception:
                 continue
             if path.exists():
-                ledger = CleanupLedger(path)
+                ledger = CleanupLedger(path, session_root=session_root)
                 if ledger.load_failed():
                     continue
                 if ledger.pending_resources():
@@ -6572,7 +6592,8 @@ class InlineREPL:
         from iac_code.pipeline.engine.session import PipelineSession
 
         pipeline_cwd = get_working_directory() or self._original_cwd
-        sidecar = PipelineSession(self._session_storage.session_dir(pipeline_cwd, new_session_id) / "pipeline")
+        session_root = self._session_storage.session_dir(pipeline_cwd, new_session_id)
+        sidecar = PipelineSession(session_root / "pipeline", session_root=session_root)
         if not sidecar.has_resumable_status():
             return
 

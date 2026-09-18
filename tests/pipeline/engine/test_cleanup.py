@@ -4,7 +4,9 @@ import json
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
+import pytest
 import yaml
 
 import iac_code.pipeline.engine.cleanup as cleanup_module
@@ -18,6 +20,7 @@ from iac_code.pipeline.engine.cleanup import (
     is_active_cleanup_prompt_message,
     mark_cleanup_prompt_message_completed,
 )
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
 
 
@@ -34,6 +37,30 @@ def _observed_stack() -> ObservedResource:
         observed_at=1.0,
         metadata={"tool_name": "ros_stack"},
     )
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_cleanup_record_waits_for_snapshot_barrier(tmp_path, nested):
+    ledger = (
+        CleanupLedger(tmp_path / "pipeline" / "cleanup.yaml", session_root=tmp_path)
+        if nested
+        else CleanupLedger(tmp_path / "cleanup.yaml")
+    )
+    started = threading.Event()
+
+    def write_resource():
+        started.set()
+        return ledger.record_observed(_observed_stack())
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with session_mutation_guard(tmp_path):
+            future = pool.submit(write_resource)
+            assert started.wait(timeout=5)
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.2)
+            assert not ledger.path.exists()
+        assert future.result(timeout=5).written
+    assert ledger.observed_resources()[0].resource_id == "stack-123"
 
 
 def test_ledger_persists_observed_and_required_resources(tmp_path) -> None:

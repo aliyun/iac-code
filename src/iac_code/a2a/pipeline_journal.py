@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from iac_code.i18n import _
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.utils.path_locks import PathLockRegistry
 from iac_code.utils.state_io import cross_process_append_lock, fsync_parent_dir
 
@@ -72,19 +73,21 @@ class A2APipelineJournal:
     def read_all_repairing_tail(self) -> list[dict[str, Any]]:
         if not self.path.exists() and not _journal_lock_path(self.path).exists():
             return []
-        with _journal_transaction_lock(self.path):
-            if not self.path.exists():
-                return []
-            try:
+        with session_mutation_guard(_session_dir_from_pipeline_dir(self.pipeline_dir)):
+            with _journal_transaction_lock(self.path):
+                if not self.path.exists():
+                    return []
+                try:
+                    return self._read_all(strict=True)
+                except A2APipelineJournalReadError:
+                    if not self._repair_tail_locked():
+                        raise
                 return self._read_all(strict=True)
-            except A2APipelineJournalReadError:
-                if not self._repair_tail_locked():
-                    raise
-            return self._read_all(strict=True)
 
     def repair_tail(self) -> bool:
-        with _journal_transaction_lock(self.path):
-            return self._repair_tail_locked()
+        with session_mutation_guard(_session_dir_from_pipeline_dir(self.pipeline_dir)):
+            with _journal_transaction_lock(self.path):
+                return self._repair_tail_locked()
 
     def _repair_tail_locked(self) -> bool:
         if not self.path.exists():
@@ -166,29 +169,34 @@ class A2APipelineJournal:
 
 
 def _append_journal_bytes(path: Path, payload: bytes, *, durable: bool) -> None:
-    with _journal_transaction_lock(path):
-        _repair_existing_tail_before_append(path)
-        created = not path.exists()
-        offset: int | None = None
-        try:
-            with path.open("ab+") as handle:
-                handle.seek(0, os.SEEK_END)
-                offset = handle.tell()
-                handle.write(payload)
-                handle.flush()
-                if durable:
-                    os.fsync(handle.fileno())
-            if durable and created:
-                fsync_parent_dir(path)
-        except Exception:
-            if offset is not None:
-                _rollback_journal_append(
-                    path,
-                    offset=offset,
-                    durable=durable,
-                    unlink_empty_created=created and offset == 0,
-                )
-            raise
+    with session_mutation_guard(_session_dir_from_pipeline_dir(path.parent)):
+        with _journal_transaction_lock(path):
+            _repair_existing_tail_before_append(path)
+            created = not path.exists()
+            offset: int | None = None
+            try:
+                with path.open("ab+") as handle:
+                    handle.seek(0, os.SEEK_END)
+                    offset = handle.tell()
+                    handle.write(payload)
+                    handle.flush()
+                    if durable:
+                        os.fsync(handle.fileno())
+                if durable and created:
+                    fsync_parent_dir(path)
+            except Exception:
+                if offset is not None:
+                    _rollback_journal_append(
+                        path,
+                        offset=offset,
+                        durable=durable,
+                        unlink_empty_created=created and offset == 0,
+                    )
+                raise
+
+
+def _session_dir_from_pipeline_dir(pipeline_dir: Path) -> Path:
+    return pipeline_dir.parent.parent if pipeline_dir.parent.name == "a2a" else pipeline_dir.parent
 
 
 def _rollback_journal_append(

@@ -22,7 +22,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 TOKEN = "execution-control-e2e-token"
-NATURAL_HANDOFF_VERSION = "natural-handoff-v1"
+NATURAL_HANDOFF_VERSION = "natural-handoff-v2"
 STACK_ID = "stack-execution-control-e2e-0001"
 STACK_INSTANCES_OPERATION_ID = "stack-instances-operation-e2e-0001"
 SCENARIO_MODES = {
@@ -1259,7 +1259,7 @@ class _Scenario:
         return _wait_until(published, timeout=self.timeout, description="staged snapshot publication")
 
     def _assert_natural_handoff(self, state: dict[str, Any]) -> None:
-        """A natural boundary hands the copy to the coordinator instead of waiting for it."""
+        """A natural boundary commits local staging independently of remote publication."""
 
         backup = state.get("backup", {})
         handoff = state.get("naturalHandoff")
@@ -1274,24 +1274,24 @@ class _Scenario:
             assert backup.get("status") == "disabled", backup
             assert handoff["pendingJobId"] is None
             return
-        assert backup.get("status") == "delegated", backup
+        assert backup.get("status") == "staged_committed", backup
         job_id = handoff["pendingJobId"]
         assert job_id and backup.get("jobId") == job_id
         assert int(handoff["businessRevision"]) >= 1
         assert backup.get("businessRevision") == handoff["businessRevision"]
-        # The to-do job converges in the background: its durable marker is only
-        # removed once a staged snapshot covers the boundary.
+        assert handoff["stagedCommitted"] is True
+        assert int(handoff["snapshotGeneration"]) > 0
+        assert backup.get("generation") == handoff["snapshotGeneration"]
+        commit_id = handoff["snapshotCommitId"]
+        assert commit_id and backup.get("commitId") == commit_id
+        # Publication is a separate assertion after observing the local handoff.
         pending = self.run_dir / "staging" / ".pending" / "{}.json".format(job_id)
         _wait_until(
             lambda: True if not pending.exists() else None,
             timeout=self.timeout,
-            description="delegated backup job completion",
+            description="staged backup job completion",
         )
-        _wait_until(
-            lambda: True if self._shared_backup_text() else None,
-            timeout=self.timeout,
-            description="delegated backup publication",
-        )
+        self._wait_shared_publication(commit_id)
 
     def _wait_log_event(self, path: Path, event: str) -> dict[str, Any]:
         def observed() -> dict[str, Any] | None:

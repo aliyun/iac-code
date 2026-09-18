@@ -36,6 +36,7 @@ from iac_code.a2a.execution_control import (
     RecoverableInputAdmissionCarrier,
     RecoverableInputAdmissionLease,
 )
+from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.input_required import PERMISSION_QUERY_PREFIX
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -71,6 +72,52 @@ from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
 from .fakes import FakeAgentLoop, FakeEventQueue, FakeRuntime, pending_future
 
 _STREAM_TEST_TIMEOUT = 5
+
+
+@pytest.mark.asyncio
+async def test_background_service_start_waits_for_backup_recovery_before_admission() -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class Coordinator:
+        async def recover(self) -> int:
+            entered.set()
+            await release.wait()
+            return 1
+
+    components = A2ARuntimeComponents(
+        handler=SimpleNamespace(),
+        task_store=SimpleNamespace(),
+        card=None,
+        app=SimpleNamespace(),
+        _exit_stack=contextlib.AsyncExitStack(),
+        backup_coordinator=Coordinator(),
+    )
+    starting = asyncio.create_task(components.start_background_services())
+    await entered.wait()
+    assert not starting.done()
+
+    release.set()
+    await starting
+
+
+@pytest.mark.asyncio
+async def test_background_service_start_fails_closed_when_backup_recovery_fails() -> None:
+    class Coordinator:
+        async def recover(self) -> int:
+            raise RuntimeError("capture handoff failed")
+
+    components = A2ARuntimeComponents(
+        handler=SimpleNamespace(),
+        task_store=SimpleNamespace(),
+        card=None,
+        app=SimpleNamespace(),
+        _exit_stack=contextlib.AsyncExitStack(),
+        backup_coordinator=Coordinator(),
+    )
+
+    with pytest.raises(RuntimeError, match="capture handoff failed"):
+        await components.start_background_services()
 
 
 @pytest.mark.asyncio
@@ -1733,6 +1780,11 @@ async def test_handler_restores_backup_before_hydrating_omitted_pipeline_task_id
             assert context_id == "ctx-restore"
             return await asyncio.to_thread(backup_service.reconcile_session, cwd, ctx.session_id)
 
+        async def resolve_omitted_pipeline_task_id(self, *, context_id: str, cwd: str, invocation_id: str):
+            assert invocation_id
+            await self._reconcile_session_before_route(context_id=context_id, cwd=cwd)
+            return task_id
+
     handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
     handler.task_store = store
     handler.agent_executor = FakeExecutor()
@@ -1742,6 +1794,135 @@ async def test_handler_restores_backup_before_hydrating_omitted_pipeline_task_id
 
     assert params.message.task_id == task_id
     assert storage.session_dir(str(cwd), ctx.session_id).is_dir()
+
+
+@pytest.mark.asyncio
+async def test_handler_allocates_successor_when_canceled_task_still_has_running_sidecar(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    cwd = tmp_path / "workspace"
+    context_id = "ctx-1"
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(persistence=persistence)
+    ctx = await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(cwd),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    old_task = await store.get_or_create_task(task_id="task-old", context_id=context_id)
+    old_task.state = "canceled"
+    store.mirror_task(old_task)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=ctx.session_id)
+    running_event = {
+        "schemaVersion": "1.0",
+        "eventId": "evt-running",
+        "sequence": 1,
+        "eventType": "step_started",
+        "pipelineRunId": context_id,
+        "taskId": "task-old",
+        "contextId": context_id,
+        "status": "working",
+        "step": {"id": "deploy", "runId": "deploy-1", "attempt": 1},
+        "data": {},
+    }
+    A2APipelineJournal(pipeline_dir).append(running_event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([running_event]))
+    sidecar_dir = SessionStorage().session_dir(str(cwd), ctx.session_id) / "pipeline"
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    (sidecar_dir / "meta.yaml").write_text("status: canceled\ncurrent_step: deploy\n", encoding="utf-8")
+    control_dir = persistence.root / "execution-control"
+    control_dir.mkdir(parents=True)
+    (control_dir / f"{context_id}.json").write_text(
+        json.dumps(
+            {
+                "contextId": context_id,
+                "taskId": "task-old",
+                    "executionId": "execution-old",
+                    "phase": "terminated",
+                    "executionStatus": "canceled",
+                    "terminationReason": "explicit_terminate",
+                    "releaseReady": True,
+                    "revision": 11,
+                    "persistedRevision": 11,
+                    "commitError": None,
+                    "blockers": [],
+                    "backup": {
+                        "status": "staged_committed",
+                        "generation": 2,
+                        "commitId": "commit-cancel",
+                    },
+                }
+        ),
+        encoding="utf-8",
+    )
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = IacCodeA2AExecutor(task_store=store, model="test")
+    params = SimpleNamespace(message=SimpleNamespace(task_id=None, context_id=context_id, message_id="request-1"))
+
+    await handler._hydrate_recoverable_pipeline_task_id(params)
+    first_successor = params.message.task_id
+    params.message.task_id = None
+    await handler._hydrate_recoverable_pipeline_task_id(params)
+
+    assert first_successor != "task-old"
+    assert params.message.task_id == first_successor
+
+
+@pytest.mark.asyncio
+async def test_default_handler_accepts_precreated_successor_task_for_omitted_task_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    store = A2ATaskStore()
+    context_id = "ctx-successor"
+    await store.get_or_create_context(
+        context_id=context_id,
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+
+    class Executor:
+        async def resolve_omitted_pipeline_task_id(self, **_kwargs) -> str:
+            return "task-successor"
+
+        async def execute(self, request_context, event_queue) -> None:
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                        task_id=request_context.task_id,
+                        context_id=request_context.context_id,
+                        status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+                    )
+            )
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    handler = IacCodeRequestHandler(
+        agent_executor=Executor(),
+        task_store=store,
+        agent_card=SimpleNamespace(capabilities=SimpleNamespace(streaming=True, extensions=[])),
+    )
+    message = Message(
+        message_id="message-successor",
+        context_id=context_id,
+        role=Role.ROLE_USER,
+        parts=[Part(text="continue")],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline", "cwd": str(tmp_path)}}, message.metadata)
+
+    events = await _collect_async(
+        handler.on_message_send_stream(SendMessageRequest(message=message), ServerCallContext())
+    )
+
+    assert await store.get("task-successor") is not None
+    assert any(
+        isinstance(event, TaskStatusUpdateEvent) and event.status.state == TaskState.TASK_STATE_COMPLETED
+        for event in events
+    )
 
 
 @pytest.mark.asyncio

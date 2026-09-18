@@ -449,7 +449,7 @@ def create_app(
     async def lifespan(app: Starlette):
         push_worker_task: asyncio.Task[None] | None = None
         idle_shutdown_task: asyncio.Task[None] | None = None
-        components.start_background_services()
+        await components.start_background_services()
         try:
             await components.task_store.start_cleanup_loop()
             if components.push_worker is not None:
@@ -1107,7 +1107,7 @@ async def _serve_async_transport(server, *, components) -> None:
     push_worker_task: asyncio.Task[None] | None = None
     start_background_services = getattr(components, "start_background_services", None)
     if start_background_services is not None:
-        start_background_services()
+        await start_background_services()
     try:
         await components.task_store.start_cleanup_loop()
         if components.push_worker is not None:

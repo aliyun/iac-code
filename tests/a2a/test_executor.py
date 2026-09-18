@@ -18,7 +18,13 @@ from iac_code.a2a.execution_control import (
     RecoverableInputAdmissionCarrier,
     bind_execution_control,
 )
-from iac_code.a2a.executor import IacCodeA2AExecutor, _normal_handoff_has_backup_ack
+from iac_code.a2a.executor import (
+    IacCodeA2AExecutor,
+    _append_a2a_deferred_cleanup_prompt,
+    _cleanup_ledger_for_a2a_normal_chat,
+    _load_a2a_deferred_cleanup_prompts,
+    _normal_handoff_has_backup_ack,
+)
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.input_required import PermissionIdentityValidationError, PermissionResponse
 from iac_code.a2a.metrics import NoOpA2AMetrics
@@ -40,6 +46,7 @@ from iac_code.mcp.types import (
     MCPServerConfig,
     ScopedMCPServerConfig,
 )
+from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, create_cleanup_prompt_message
 from iac_code.pipeline.engine.user_input import PipelineUserInput
 from iac_code.services.permission_wait import PermissionExecutionIdentity, RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import (
@@ -53,6 +60,7 @@ from iac_code.services.session_backup import (
 )
 from iac_code.services.session_backup_staging import SessionBackupStagingWorker, StagedSessionBackupService
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.services.session_storage import SessionStorage
 from iac_code.skills.frontmatter import SkillFrontmatter
 from iac_code.skills.skill_definition import SkillDefinition
@@ -84,6 +92,122 @@ def _image_only_pipeline_input() -> PipelineUserInput:
 
 def _ensure_v2_session(cwd: str, session_id: str) -> Path:
     return SessionStorage().ensure_v2_session_dir_for_new_session(cwd, session_id)
+
+
+def test_normal_cleanup_prompt_ledger_uses_owning_session_mutation_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-cleanup-prompt"
+    storage = SessionStorage()
+    session_root = storage.ensure_v2_session_dir_for_new_session(str(cwd), session_id)
+    ledger_path = tmp_path / "external-ledger" / "cleanup.yaml"
+    storage.append(
+        str(cwd),
+        session_id,
+        create_cleanup_prompt_message("clean up the created stack", cleanup_ledger_path=ledger_path),
+    )
+
+    ledger = _cleanup_ledger_for_a2a_normal_chat(cwd=str(cwd), session_id=session_id)
+
+    assert ledger is not None
+    assert ledger.path == ledger_path
+    assert ledger._mutation_dir == session_root
+
+
+def test_normal_cleanup_fallback_ledger_uses_owning_session_mutation_root(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-cleanup-fallback"
+    storage = SessionStorage()
+    session_root = storage.ensure_v2_session_dir_for_new_session(str(cwd), session_id)
+    ledger_path = session_root / "pipeline" / "cleanup.yaml"
+    CleanupLedger(ledger_path).mark_cleanup_required(
+        [
+            CleanupResource(
+                provider="ros",
+                resource_type="stack",
+                resource_id="stack-123",
+                region_id="cn-hangzhou",
+            )
+        ],
+        source_step_id="deploy",
+        reason="rollback",
+    )
+
+    ledger = _cleanup_ledger_for_a2a_normal_chat(cwd=str(cwd), session_id=session_id)
+
+    assert ledger is not None
+    assert ledger.path == ledger_path
+    assert ledger._mutation_dir == session_root
+
+
+def test_deferred_cleanup_prompt_append_waits_for_session_capture_guard(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import iac_code.a2a.executor as executor_module
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-deferred-cleanup-guard"
+    session_root = SessionStorage().ensure_v2_session_dir_for_new_session(str(cwd), session_id)
+    write_started = threading.Event()
+    original_atomic_write = executor_module.atomic_write_text
+    results: list[bool] = []
+
+    def record_atomic_write(*args, **kwargs) -> None:
+        write_started.set()
+        original_atomic_write(*args, **kwargs)
+
+    monkeypatch.setattr(executor_module, "atomic_write_text", record_atomic_write)
+    writer = threading.Thread(
+        target=lambda: results.append(
+            _append_a2a_deferred_cleanup_prompt(cwd=str(cwd), session_id=session_id, prompt="resume after cleanup")
+        )
+    )
+
+    with session_mutation_guard(session_root):
+        writer.start()
+        write_started_while_capture_is_active = write_started.wait(timeout=0.2)
+    writer.join(timeout=2)
+
+    assert write_started_while_capture_is_active is False
+    assert writer.is_alive() is False
+    assert results == [True]
+    assert _load_a2a_deferred_cleanup_prompts(cwd=str(cwd), session_id=session_id) == ["resume after cleanup"]
+
+
+def test_deferred_cleanup_prompt_append_reports_persistence_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import iac_code.a2a.executor as executor_module
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-deferred-cleanup-write-failure"
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(cwd), session_id)
+
+    def fail_atomic_write(*_args, **_kwargs) -> None:
+        raise OSError("injected deferred cleanup write failure")
+
+    monkeypatch.setattr(executor_module, "atomic_write_text", fail_atomic_write)
+
+    assert (
+        _append_a2a_deferred_cleanup_prompt(cwd=str(cwd), session_id=session_id, prompt="resume after cleanup")
+        is False
+    )
+    assert _load_a2a_deferred_cleanup_prompts(cwd=str(cwd), session_id=session_id) == []
 
 
 @pytest.mark.asyncio
@@ -1216,6 +1340,62 @@ async def test_executor_runs_prompt_and_finishes_input_required(
         and dump(event).get("metadata", {}).get("iac_code", {}).get("assistantFinal", {}).get("complete") is True
     ]
     assert final_events[0]["status"]["message"]["parts"][0]["text"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_normal_terminal_has_no_later_context_snapshot_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    terminal_delivered = asyncio.Event()
+    release_terminal_consumer = asyncio.Event()
+
+    class BlockingTerminalQueue(FakeEventQueue):
+        async def enqueue_event(self, event) -> None:
+            await super().enqueue_event(event)
+            if (
+                isinstance(event, TaskStatusUpdateEvent)
+                and event.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+            ):
+                terminal_delivered.set()
+                await release_terminal_consumer.wait()
+
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([TextDeltaEvent(text="done")]),
+        session_id="session-terminal-order",
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
+
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    backup_service = SnapshotReadingBackupService()
+    post_terminal_mirrors: list[str | None] = []
+    original_mirror_context = store.mirror_context
+
+    def recording_mirror_context(record) -> None:
+        if terminal_delivered.is_set():
+            post_terminal_mirrors.append(record.active_task_id)
+        original_mirror_context(record)
+
+    monkeypatch.setattr(store, "mirror_context", recording_mirror_context)
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="qwen3.6-plus",
+        backup_service=backup_service,
+    )
+    queue = BlockingTerminalQueue()
+    execution = asyncio.create_task(
+        executor.execute(
+            FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
+            queue,
+        )
+    )
+
+    await asyncio.wait_for(terminal_delivered.wait(), timeout=2)
+    assert backup_service.calls[-1][2] is BackupReason.NORMAL_TURN_END
+    release_terminal_consumer.set()
+    await execution
+
+    assert post_terminal_mirrors == []
 
 
 @pytest.mark.asyncio

@@ -2626,7 +2626,16 @@ class _BlockingCoordinatorBackupService:
     def _source_for_backup(self, cwd: str, session_id: str) -> Path:
         return Path(cwd) / "projects" / "project" / session_id
 
-    def backup_session(self, _cwd, _session_id, *, reason, critical, publication_proofs=None) -> BackupResult:
+    def backup_session(
+        self,
+        _cwd,
+        _session_id,
+        *,
+        reason,
+        critical,
+        publication_proofs=None,
+        operation_commit_id=None,
+    ) -> BackupResult:
         del reason, critical, publication_proofs
         self.started.set()
         assert self.release.wait(5)
@@ -2634,14 +2643,14 @@ class _BlockingCoordinatorBackupService:
         return BackupResult(
             enabled=True,
             generation=1,
-            commit_id="commit-1",
+            commit_id=operation_commit_id,
             staged_committed=True,
             shared_committed=False,
         )
 
 
 @pytest.mark.asyncio
-async def test_natural_completion_hands_off_before_the_directory_copy_finishes(tmp_path: Path) -> None:
+async def test_natural_completion_hands_off_after_the_local_snapshot_finishes(tmp_path: Path) -> None:
     backup_service = _BlockingCoordinatorBackupService(tmp_path / "staging")
     coordinator = SessionBackupCoordinator(backup_service, state_root=tmp_path / "state", retry_delays=())
     control = ExecutionController(
@@ -2666,10 +2675,16 @@ async def test_natural_completion_hands_off_before_the_directory_copy_finishes(t
     )
     assert completion_generation is not None
     try:
-        observed = await control.finalize_natural_completion(
-            task_id="task-1",
-            completion_generation=completion_generation,
+        finalization = asyncio.create_task(
+            control.finalize_natural_completion(
+                task_id="task-1",
+                completion_generation=completion_generation,
+            )
         )
+        assert await asyncio.to_thread(backup_service.started.wait, 5)
+        assert finalization.done() is False
+        backup_service.release.set()
+        observed = await asyncio.wait_for(finalization, 5)
 
         assert observed["phase"] == "terminated"
         assert observed["terminationReason"] == "natural_completion"
@@ -2684,21 +2699,21 @@ async def test_natural_completion_hands_off_before_the_directory_copy_finishes(t
         assert handoff["backupDisabled"] is False
         assert handoff["businessRevision"] == 1
         assert handoff["pendingJobId"] is not None
+        assert handoff["stagedCommitted"] is True
+        assert handoff["snapshotGeneration"] == 1
+        assert isinstance(handoff["snapshotCommitId"], str) and handoff["snapshotCommitId"]
         assert observed["backup"] == {
-            "status": "delegated",
+            "status": "staged_committed",
             "jobId": handoff["pendingJobId"],
             "businessRevision": 1,
+            "generation": 1,
+            "commitId": handoff["snapshotCommitId"],
         }
-        # The handoff returned while the copy is still blocked inside the coordinator.
-        assert backup_service.copies == 0
+        assert backup_service.copies == 1
         marker = tmp_path / "staging" / ".pending" / "{}.json".format(handoff["pendingJobId"])
-        assert marker.is_file()
+        assert marker.exists() is False
         assert control.natural_handoff_admits_replacement() is True
         await _wait_for_condition(lambda: control.release_ready)
-
-        backup_service.release.set()
-        await _wait_for_condition(lambda: backup_service.copies == 1)
-        await _wait_for_condition(lambda: not marker.exists())
     finally:
         backup_service.release.set()
         await coordinator.aclose()
@@ -2759,12 +2774,200 @@ class _RecordingCoordinator:
     async def register_boundary(self, **kwargs):
         self.registrations.append(kwargs)
         return SessionBackupHandoff(
-            business_revision=len(self.registrations), job_id="job-{}".format(len(self.registrations))
+            business_revision=len(self.registrations),
+            job_id="job-{}".format(len(self.registrations)),
+            staged_committed=True,
+            snapshot_generation=len(self.registrations),
+            snapshot_commit_id="commit-{}".format(len(self.registrations)),
         )
 
     async def wait_for_local_snapshot_quiescence(self, *, cwd, session_id, timeout=None) -> None:
         del cwd, timeout
         self.quiescence_waits.append(session_id)
+
+
+async def _prepare_natural_handoff(
+    service: ExecutionControlService,
+    *,
+    session_id: str | None,
+) -> tuple[ExecutionController, int]:
+    control = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd="/repo",
+    )
+    if session_id is not None:
+        control.bind_session(session_id)
+    current = asyncio.current_task()
+    assert current is not None
+    generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert generation is not None
+    return control, generation
+
+
+@pytest.mark.asyncio
+async def test_natural_handoff_is_not_visible_or_replaceable_while_its_snapshot_commit_is_blocked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    coordinator = _RecordingCoordinator()
+    service = ExecutionControlService(
+        persistence_root=tmp_path,
+        backup_service=None,
+        backup_coordinator=coordinator,
+    )
+    control, completion_generation = await _prepare_natural_handoff(service, session_id="session-1")
+    commit_started = threading.Event()
+    allow_commit = threading.Event()
+    original_write = execution_control_module.atomic_write_json
+
+    def block_handoff_commit(path: Path, value: dict) -> None:
+        if value.get("naturalHandoff") is not None:
+            commit_started.set()
+            assert allow_commit.wait(5)
+        original_write(path, value)
+
+    monkeypatch.setattr(execution_control_module, "atomic_write_json", block_handoff_commit)
+    finalizing = asyncio.create_task(
+        control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+    )
+    try:
+        assert await asyncio.to_thread(commit_started.wait, 5)
+        assert control.natural_handoff_receipt() is None
+        assert control.snapshot()["naturalHandoff"] is None
+        assert control.natural_handoff_admits_replacement() is False
+
+        with pytest.raises(ExecutionControlConflictError):
+            await service.begin_execution(
+                context_id="ctx-1",
+                task_id="task-2",
+                owner="owner-1",
+                cwd="/repo",
+            )
+
+        allow_commit.set()
+        await asyncio.wait_for(finalizing, 5)
+        replacement = await service.begin_execution(
+            context_id="ctx-1",
+            task_id="task-2",
+            owner="owner-1",
+            cwd="/repo",
+        )
+        assert replacement is not control
+        current = asyncio.current_task()
+        assert current is not None
+        await replacement.detach_task(current, execution_status="input-required")
+    finally:
+        allow_commit.set()
+        await asyncio.gather(finalizing, return_exceptions=True)
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backup_enabled", [False, True])
+async def test_natural_handoff_snapshot_failure_is_fail_closed_when_backup_is_enabled_or_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    backup_enabled: bool,
+) -> None:
+    coordinator = _RecordingCoordinator() if backup_enabled else None
+    service = ExecutionControlService(
+        persistence_root=tmp_path,
+        backup_service=None,
+        backup_coordinator=coordinator,
+    )
+    control, completion_generation = await _prepare_natural_handoff(
+        service,
+        session_id="session-1" if backup_enabled else None,
+    )
+    original_write = execution_control_module.atomic_write_json
+
+    def fail_handoff_commit(path: Path, value: dict) -> None:
+        if value.get("naturalHandoff") is not None:
+            raise OSError("injected natural handoff snapshot failure")
+        original_write(path, value)
+
+    monkeypatch.setattr(execution_control_module, "atomic_write_json", fail_handoff_commit)
+    try:
+        observed = await control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+
+        assert observed["commitError"] == "state_commit_failed"
+        assert observed["releaseReady"] is False
+        assert observed["naturalHandoff"] is None
+        assert control.natural_handoff_receipt() is None
+        assert control.natural_handoff_admits_replacement() is False
+        with pytest.raises(ExecutionControlConflictError):
+            await service.begin_execution(
+                context_id="ctx-1",
+                task_id="task-2",
+                owner="owner-1",
+                cwd="/repo",
+            )
+    finally:
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_handoff_retry_publishes_only_the_receipt_that_was_persisted(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    control, completion_generation = await _prepare_natural_handoff(service, session_id=None)
+    fail_handoff_commit = True
+    original_write = execution_control_module.atomic_write_json
+
+    def injected_write(path: Path, value: dict) -> None:
+        if fail_handoff_commit and value.get("naturalHandoff") is not None:
+            raise OSError("injected natural handoff snapshot failure")
+        original_write(path, value)
+
+    monkeypatch.setattr(execution_control_module, "atomic_write_json", injected_write)
+    try:
+        await control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+        assert control.natural_handoff_receipt() is None
+        assert control.natural_handoff_admits_replacement() is False
+
+        fail_handoff_commit = False
+        await control.observe_state()
+        await _wait_for_condition(control.natural_handoff_admits_replacement)
+        # Admission becomes true after revision 4 is durable. A separate
+        # release-ready commit may already be writing revision 5, so compare
+        # file and in-memory revisions only after that public commit boundary.
+        await _wait_for_condition(lambda: control.release_ready)
+
+        receipt = control.natural_handoff_receipt()
+        assert receipt is not None
+        persisted_path = tmp_path / "execution-control" / "ctx-1.json"
+        persisted = json.loads(persisted_path.read_text(encoding="utf-8"))
+        assert persisted["naturalHandoff"] == receipt
+        assert persisted["persistedRevision"] == persisted["revision"]
+        assert control.snapshot()["persistedRevision"] == persisted["persistedRevision"]
+
+        restarted = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+        try:
+            reloaded = restarted.snapshot_for_context("ctx-1")
+            assert reloaded is not None
+            assert reloaded["naturalHandoff"] == receipt
+            assert reloaded["persistedRevision"] == persisted["persistedRevision"]
+        finally:
+            await restarted.close()
+    finally:
+        await service.close()
 
 
 async def _natural_handoff_turn(

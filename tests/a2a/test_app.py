@@ -3645,7 +3645,7 @@ def test_execution_state_answers_a_retired_natural_handoff_receipt_by_execution_
     assert retired.json()["executionId"] == retired_execution_id
     assert retired.json()["phase"] == "retired"
     receipt = retired.json()["naturalHandoff"]
-    assert receipt["version"] == "natural-handoff-v1"
+    assert receipt["version"] == "natural-handoff-v2"
     assert receipt["executionId"] == retired_execution_id
     assert receipt["businessDrained"] is True
     assert receipt["backupDisabled"] is True

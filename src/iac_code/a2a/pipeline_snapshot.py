@@ -11,13 +11,14 @@ from iac_code.a2a.artifacts import (
     sanitize_public_artifact_data,
     sanitize_public_tool_output_data,
 )
-from iac_code.a2a.pipeline_journal import to_json_safe
+from iac_code.a2a.pipeline_journal import _session_dir_from_pipeline_dir, to_json_safe
 from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_COMPLETED,
     PIPELINE_EVENT_CLEANUP_FAILED,
     PIPELINE_EVENT_CLEANUP_PROGRESS,
     PIPELINE_EVENT_CLEANUP_STARTED,
 )
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.state_io import atomic_write_json, atomic_write_text
 
@@ -51,37 +52,38 @@ class A2APipelineSnapshotStore:
         self.path = self.pipeline_dir / "a2a-snapshot.json"
 
     def save(self, snapshot: dict[str, Any], *, durable: bool = True, compact: bool = False) -> bool:
-        previous = self.load()
-        next_snapshot = copy.deepcopy(snapshot)
-        next_snapshot["snapshotVersion"] = _snapshot_version(previous) + 1
-        next_snapshot = to_json_safe(next_snapshot)
-        if not isinstance(next_snapshot, dict):
-            logger.warning(
-                "Skipping invalid A2A pipeline snapshot for %s",
-                sanitize_strict_text(self.path, fallback_summary="[PATH]"),
-            )
-            return False
-
-        try:
-            if compact:
-                content = json.dumps(
-                    next_snapshot,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                    allow_nan=False,
+        with session_mutation_guard(_session_dir_from_pipeline_dir(self.pipeline_dir)):
+            previous = self.load()
+            next_snapshot = copy.deepcopy(snapshot)
+            next_snapshot["snapshotVersion"] = _snapshot_version(previous) + 1
+            next_snapshot = to_json_safe(next_snapshot)
+            if not isinstance(next_snapshot, dict):
+                logger.warning(
+                    "Skipping invalid A2A pipeline snapshot for %s",
+                    sanitize_strict_text(self.path, fallback_summary="[PATH]"),
                 )
-                atomic_write_text(self.path, content + "\n", durable=durable)
-            else:
-                atomic_write_json(self.path, next_snapshot, durable=durable)
-            return True
-        except (OSError, TypeError, ValueError) as exc:
-            logger.warning(
-                "Failed to persist A2A pipeline snapshot path=%s error=%s",
-                sanitize_strict_text(self.path, fallback_summary="[PATH]"),
-                sanitize_strict_text(exc),
-            )
-            return False
+                return False
+
+            try:
+                if compact:
+                    content = json.dumps(
+                        next_snapshot,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                        allow_nan=False,
+                    )
+                    atomic_write_text(self.path, content + "\n", durable=durable)
+                else:
+                    atomic_write_json(self.path, next_snapshot, durable=durable)
+                return True
+            except (OSError, TypeError, ValueError) as exc:
+                logger.warning(
+                    "Failed to persist A2A pipeline snapshot path=%s error=%s",
+                    sanitize_strict_text(self.path, fallback_summary="[PATH]"),
+                    sanitize_strict_text(exc),
+                )
+                return False
 
     def load(self) -> dict[str, Any] | None:
         try:

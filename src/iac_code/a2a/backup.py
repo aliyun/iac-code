@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
+import stat
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
-NATURAL_HANDOFF_VERSION = "natural-handoff-v1"
+NATURAL_HANDOFF_VERSION = "natural-handoff-v2"
 PENDING_JOBS_DIRNAME = ".pending"
 _COORDINATOR_STATE_DIRNAME = "session-backup-coordinator"
 _COORDINATOR_LOCK_FILENAME = "coordinator.lock"
@@ -117,6 +118,7 @@ async def backup_session_async(
     backup_call: Callable[..., Any] | None = None,
 ) -> Any | None:
     failed_recorded = False
+    requires_local_staging_commit = getattr(backup_service, "staging_root", None) is not None
     try:
         kwargs: dict[str, Any] = {"reason": reason, "critical": critical}
         if publication_proofs is not None:
@@ -129,7 +131,7 @@ async def backup_session_async(
             )
             _record_backup_failed(metrics, reason=reason, critical=critical, retry_count=retry_count)
             failed_recorded = True
-            if critical:
+            if critical or requires_local_staging_commit:
                 raise SessionBackupBlocked(message, retry_count=retry_count, result=result)
             logger.warning(
                 "A2A session backup failed reason=%s critical=%s retry_count=%s: %s",
@@ -147,6 +149,13 @@ async def backup_session_async(
             _record_backup_failed(metrics, reason=reason, critical=critical, retry_count=retry_count)
         if critical:
             raise
+        if requires_local_staging_commit:
+            if isinstance(exc, SessionBackupBlocked):
+                raise
+            raise SessionBackupBlocked(
+                _("Session backup failed. Retry after the backup path is available."),
+                retry_count=retry_count,
+            ) from exc
         logger.warning(
             "A2A session backup failed reason=%s critical=%s retry_count=%s error_type=%s",
             reason.value,
@@ -196,6 +205,9 @@ class SessionBackupHandoff:
     business_revision: int
     job_id: str | None = None
     backup_disabled: bool = False
+    staged_committed: bool = False
+    snapshot_generation: int | None = None
+    snapshot_commit_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -212,6 +224,13 @@ class SessionBackupJob:
     fence: int
     completion_generation: int | None = None
     publication_proofs: Mapping[str, dict[str, Any]] = field(default_factory=dict)
+    capture_commit_id: str | None = None
+    capture_started: bool = False
+    staged_generation: int | None = None
+    staged_commit_id: str | None = None
+    callback_required: bool = False
+    callback_completed: bool = False
+    staged_action: Mapping[str, Any] | None = None
     attempts: int = 0
     error: str | None = None
 
@@ -230,6 +249,13 @@ class SessionBackupJob:
             "fence": self.fence,
             "completionGeneration": self.completion_generation,
             "publicationProofs": {key: dict(value) for key, value in (self.publication_proofs or {}).items()},
+            "captureCommitId": self.capture_commit_id,
+            "captureStarted": self.capture_started,
+            "stagedGeneration": self.staged_generation,
+            "stagedCommitId": self.staged_commit_id,
+            "callbackRequired": self.callback_required,
+            "callbackCompleted": self.callback_completed,
+            "stagedAction": None if self.staged_action is None else dict(self.staged_action),
             "attempts": self.attempts,
             "error": self.error,
         }
@@ -241,6 +267,18 @@ class SessionBackupJob:
         try:
             proofs = document.get("publicationProofs") or {}
             if not isinstance(proofs, dict):
+                return None
+            staged_action = document.get("stagedAction")
+            if staged_action is not None and not isinstance(staged_action, dict):
+                return None
+            callback_required = document.get("callbackRequired", False)
+            callback_completed = document.get("callbackCompleted", False)
+            capture_started = document.get("captureStarted", False)
+            if (
+                not isinstance(callback_required, bool)
+                or not isinstance(callback_completed, bool)
+                or not isinstance(capture_started, bool)
+            ):
                 return None
             return cls(
                 job_id=str(document["jobId"]),
@@ -257,6 +295,19 @@ class SessionBackupJob:
                     None if document.get("completionGeneration") is None else int(document["completionGeneration"])
                 ),
                 publication_proofs={str(key): dict(value) for key, value in proofs.items()},
+                capture_commit_id=(
+                    None if document.get("captureCommitId") is None else str(document["captureCommitId"])
+                ),
+                capture_started=capture_started,
+                staged_generation=(
+                    None if document.get("stagedGeneration") is None else int(document["stagedGeneration"])
+                ),
+                staged_commit_id=(
+                    None if document.get("stagedCommitId") is None else str(document["stagedCommitId"])
+                ),
+                callback_required=callback_required,
+                callback_completed=callback_completed,
+                staged_action=(None if staged_action is None else dict(staged_action)),
                 attempts=int(document.get("attempts") or 0),
                 error=(None if document.get("error") is None else str(document["error"])),
             )
@@ -269,7 +320,7 @@ class SessionBackupJob:
 
 
 class SessionBackupCoordinator:
-    """Own durable backup to-do jobs so a business boundary never waits for a copy."""
+    """Commit business-boundary snapshots locally and recover durable pending jobs."""
 
     def __init__(
         self,
@@ -279,17 +330,24 @@ class SessionBackupCoordinator:
         metrics: Any | None = None,
         retry_delays: tuple[float, ...] = _DEFAULT_RETRY_DELAYS,
         quiescence_timeout: float = _DEFAULT_CAPTURE_QUIESCENCE_TIMEOUT,
+        staged_action_resolver: (
+            Callable[[Mapping[str, Any], int, str], Awaitable[None] | None] | None
+        ) = None,
     ) -> None:
         self._backup_service = backup_service
         self._state_root = state_root
         self._metrics = metrics
-        self._retry_delays = tuple(retry_delays)
+        # Kept in the constructor for compatibility. A failed business-boundary
+        # capture must be retried by its caller while the source is still fenced;
+        # a background retry could otherwise snapshot a later turn as the old job.
+        del retry_delays
         self._quiescence_timeout = quiescence_timeout
         staging_root = getattr(backup_service, "staging_root", None)
         self._staging_root = Path(staging_root) if staging_root is not None else None
         self._tasks: set[asyncio.Task[Any]] = set()
         self._session_chains: dict[tuple[str, str], asyncio.Task[Any]] = {}
         self._staged_callbacks: dict[str, Callable[[int | None, str | None], Awaitable[None] | None]] = {}
+        self._staged_action_resolver = staged_action_resolver
         self._committed_revisions: dict[str, int] = {}
         self._closed = False
 
@@ -300,6 +358,14 @@ class SessionBackupCoordinator:
     @property
     def pending_root(self) -> Path | None:
         return None if self._staging_root is None else self._staging_root / PENDING_JOBS_DIRNAME
+
+    def set_staged_action_resolver(
+        self,
+        resolver: Callable[[Mapping[str, Any], int, str], Awaitable[None] | None] | None,
+    ) -> None:
+        """Install the typed callback resolver before startup recovery runs."""
+
+        self._staged_action_resolver = resolver
 
     async def register_boundary(
         self,
@@ -313,6 +379,7 @@ class SessionBackupCoordinator:
         completion_generation: int | None = None,
         publication_proofs: Mapping[str, BackupPublicationProof] | None = None,
         on_staged: Callable[[int | None, str | None], Awaitable[None] | None] | None = None,
+        staged_action: Mapping[str, Any] | None = None,
     ) -> SessionBackupHandoff:
         """Persist a backup to-do job while the caller still owns the session."""
 
@@ -332,6 +399,8 @@ class SessionBackupCoordinator:
                 reason.value,
                 completion_generation,
                 proofs,
+                on_staged is not None,
+                None if staged_action is None else dict(staged_action),
             )
         except Exception as exc:
             raise SessionBackupHandoffError(
@@ -342,8 +411,23 @@ class SessionBackupCoordinator:
         self._committed_revisions[session_id] = job.business_revision
         if on_staged is not None:
             self._staged_callbacks[job.job_id] = on_staged
-        self._schedule_capture(job)
-        return SessionBackupHandoff(business_revision=job.business_revision, job_id=job.job_id)
+        capture = self._schedule_capture(job)
+        try:
+            captured = await await_fenced(capture)
+        except Exception as exc:
+            raise SessionBackupHandoffError(
+                "session backup staged callback could not be committed: {}".format(type(exc).__name__)
+            ) from exc
+        if captured is None:
+            raise SessionBackupHandoffError("session backup snapshot could not be committed locally")
+        return SessionBackupHandoff(
+            business_revision=job.business_revision,
+            job_id=job.job_id,
+            backup_disabled=not captured.enabled,
+            staged_committed=bool(captured.staged_committed),
+            snapshot_generation=captured.generation,
+            snapshot_commit_id=captured.commit_id,
+        )
 
     def committed_business_revision(self, session_id: str | None) -> int | None:
         """Return the newest business revision this process durably registered."""
@@ -357,30 +441,30 @@ class SessionBackupCoordinator:
         session_id: str | None,
         timeout: float | None = None,
     ) -> None:
-        """Fence the next turn behind a new snapshot generation without blocking on a copy.
+        """Wait for already-started local snapshot work, never remote publication."""
 
-        Each capture commits to an immutable, generation-versioned staging directory and
-        per-session captures are serialized through the capture chain, so an in-flight
-        snapshot always owns its own generation. The next turn therefore writes a fresh
-        generation and must never wait for the previous boundary's (potentially slow)
-        local capture or its staging->backup publish before it starts.
-        """
-
-        del cwd, session_id, timeout
-        return
+        if not self.enabled or session_id is None:
+            return
+        project = self._project_for_session(cwd, session_id)
+        if project is None:
+            return
+        capture = self._session_chains.get((project, session_id))
+        if capture is None:
+            return
+        wait_timeout = self._quiescence_timeout if timeout is None else max(timeout, 0.0)
+        await asyncio.wait_for(asyncio.shield(capture), timeout=wait_timeout)
 
     async def recover(self) -> int:
         """Re-arm durable to-do jobs left by a previous process."""
 
         if not self.enabled:
             return 0
-        try:
-            jobs = await run_sync_fenced(self._load_pending_jobs)
-        except Exception as exc:
-            logger.warning("A2A session backup job recovery failed error_type=%s", type(exc).__name__)
-            return 0
-        for job in jobs:
-            self._schedule_capture(job)
+        jobs = await run_sync_fenced(self._load_pending_jobs)
+        captures = [self._schedule_capture(job) for job in jobs]
+        if captures:
+            recovered = await await_fenced(asyncio.gather(*captures))
+            if any(result is None for result in recovered):
+                raise SessionBackupHandoffError("recovered session backup snapshot could not be committed locally")
         if jobs:
             logger.info("A2A session backup recovered pending jobs count=%s", len(jobs))
         return len(jobs)
@@ -398,7 +482,7 @@ class SessionBackupCoordinator:
                 timeout=max(drain_timeout, 0.0),
             )
 
-    def _schedule_capture(self, job: SessionBackupJob, *, attempt: int = 0) -> None:
+    def _schedule_capture(self, job: SessionBackupJob, *, attempt: int = 0) -> asyncio.Task[BackupResult | None]:
         previous = self._session_chains.get(job.session_key)
         task = asyncio.ensure_future(self._run_capture(job, previous, attempt))
         task.set_name("a2a-session-backup-{}".format(job.job_id))
@@ -414,87 +498,154 @@ class SessionBackupCoordinator:
                     done.exception()
 
         task.add_done_callback(completed)
+        return task
 
     async def _run_capture(
         self,
         job: SessionBackupJob,
         previous: asyncio.Task[Any] | None,
         attempt: int,
-    ) -> None:
-        if previous is not None and not previous.done():
-            with suppress(BaseException):
+    ) -> BackupResult | None:
+        backup_service = self._backup_service
+        assert backup_service is not None
+        if previous is not None:
+            if not previous.done():
                 await asyncio.shield(previous)
+            previous.result()
+        if job.staged_generation is not None or job.staged_commit_id is not None:
+            return await self._finish_staged_job(job)
+        if not job.capture_commit_id:
+            raise SessionBackupHandoffError("session backup job is missing a durable capture identity")
+
+        recovered_result = await run_sync_fenced(self._find_committed_capture, job)
+        if recovered_result is not None:
+            staged_job = replace(
+                job,
+                staged_generation=recovered_result.generation,
+                staged_commit_id=recovered_result.commit_id,
+                attempts=attempt,
+                error=None,
+            )
+            await run_sync_fenced(self._write_pending_job, staged_job)
+            return await self._finish_staged_job(staged_job, result=recovered_result)
+        if job.capture_started:
+            raise SessionBackupHandoffError(
+                "session backup capture started but has no matching durable lineage proof"
+            )
+
+        capturing_job = replace(job, capture_started=True)
+        if not job.capture_started:
+            await run_sync_fenced(self._write_pending_job, capturing_job)
+
         result: BackupResult | None = None
         failure: BaseException | None = None
         try:
             result = cast(
                 BackupResult,
                 await run_sync_fenced(
-                    self._backup_service.backup_session,
-                    job.cwd,
-                    job.session_id,
-                    reason=BackupReason(job.reason),
+                    backup_service.backup_session,
+                    capturing_job.cwd,
+                    capturing_job.session_id,
+                    reason=BackupReason(capturing_job.reason),
                     critical=False,
                     publication_proofs={
                         key: BackupPublicationProof.from_dict(value)
-                        for key, value in (job.publication_proofs or {}).items()
+                        for key, value in (capturing_job.publication_proofs or {}).items()
                     },
+                    operation_commit_id=capturing_job.capture_commit_id,
                 ),
             )
         except Exception as exc:
             failure = exc
         if result is not None and not result.enabled:
             await self._clear_covered_jobs(job)
-            return
+            return result
         if result is not None and result.succeeded and result.staged_committed:
+            if result.commit_id != capturing_job.capture_commit_id:
+                raise SessionBackupHandoffError("session backup returned a mismatched capture identity")
+            if result.generation is None or result.generation <= 0 or not result.commit_id:
+                raise SessionBackupHandoffError("session backup returned an incomplete staged proof")
             _record_backup_succeeded(
                 self._metrics,
-                reason=BackupReason(job.reason),
+                reason=BackupReason(capturing_job.reason),
                 critical=False,
                 retry_count=result.retry_count,
             )
-            await self._clear_covered_jobs(job, generation=result.generation, commit_id=result.commit_id)
-            await self._notify_staged(job, result.generation, result.commit_id)
-            return
+            staged_job = replace(
+                capturing_job,
+                staged_generation=result.generation,
+                staged_commit_id=result.commit_id,
+                attempts=attempt,
+                error=None,
+            )
+            await run_sync_fenced(self._write_pending_job, staged_job)
+            return await self._finish_staged_job(staged_job, result=result)
         error_text = (
             str(getattr(result, "error", None) or "session backup did not stage a snapshot")
             if failure is None
             else type(failure).__name__
         )
-        _record_backup_failed(self._metrics, reason=BackupReason(job.reason), critical=False, retry_count=attempt)
+        _record_backup_failed(
+            self._metrics,
+            reason=BackupReason(capturing_job.reason),
+            critical=False,
+            retry_count=attempt,
+        )
         logger.warning(
             "A2A session backup job attempt failed job_id=%s attempt=%s error=%s",
-            job.job_id,
+            capturing_job.job_id,
             attempt + 1,
             error_text,
         )
-        retried = replace(job, attempts=attempt + 1, error=error_text)
+        retried = replace(capturing_job, attempts=attempt + 1, error=error_text)
         with suppress(Exception):
             await run_sync_fenced(self._write_pending_job, retried)
-        if not self._closed:
-            delay = self._retry_delays[min(attempt, len(self._retry_delays) - 1)]
-            self._schedule_retry(retried, attempt + 1, delay)
+        return None
 
-    def _schedule_retry(self, job: SessionBackupJob, attempt: int, delay: float) -> None:
-        async def retry() -> None:
-            await asyncio.sleep(delay)
-            if self._closed:
-                return
-            self._schedule_capture(job, attempt=attempt)
+    async def _finish_staged_job(
+        self,
+        job: SessionBackupJob,
+        *,
+        result: BackupResult | None = None,
+    ) -> BackupResult:
+        generation = job.staged_generation
+        commit_id = job.staged_commit_id
+        if generation is None or generation <= 0 or not commit_id or commit_id != job.capture_commit_id:
+            raise SessionBackupHandoffError("session backup durable staged proof is invalid")
 
-        task = asyncio.ensure_future(retry())
-        task.set_name("a2a-session-backup-retry-{}".format(job.job_id))
-        self._tasks.add(task)
-        task.add_done_callback(self._forget_task)
+        completed_job = job
+        if not job.callback_completed:
+            callback = self._staged_callbacks.get(job.job_id)
+            if callback is not None:
+                await self._notify_staged(job, generation, commit_id)
+            elif job.callback_required:
+                action = job.staged_action
+                resolver = self._staged_action_resolver
+                if action is None:
+                    raise SessionBackupHandoffError(
+                        "session backup staged callback has no durable recovery identity"
+                    )
+                if resolver is None:
+                    raise SessionBackupHandoffError("session backup staged callback resolver is unavailable")
+                outcome = resolver(action, generation, commit_id)
+                if inspect.isawaitable(outcome):
+                    await outcome
+            completed_job = replace(job, callback_completed=True)
+            await run_sync_fenced(self._write_pending_job, completed_job)
 
-    def _forget_task(self, done: asyncio.Task[Any]) -> None:
-        self._tasks.discard(done)
-        if not done.cancelled():
-            with suppress(BaseException):
-                done.exception()
+        await self._clear_covered_jobs(completed_job, generation=generation, commit_id=commit_id)
+        if result is not None:
+            return result
+        return BackupResult(
+            enabled=True,
+            succeeded=True,
+            generation=generation,
+            commit_id=commit_id,
+            staged_committed=True,
+        )
 
     async def _notify_staged(self, job: SessionBackupJob, generation: int | None, commit_id: str | None) -> None:
-        callback = self._staged_callbacks.pop(job.job_id, None)
+        callback = self._staged_callbacks.get(job.job_id)
         if callback is None:
             return
         try:
@@ -507,6 +658,9 @@ class SessionBackupCoordinator:
                 job.job_id,
                 type(exc).__name__,
             )
+            raise
+        else:
+            self._staged_callbacks.pop(job.job_id, None)
 
     async def _clear_covered_jobs(
         self,
@@ -523,6 +677,7 @@ class SessionBackupCoordinator:
                 job.job_id,
                 type(exc).__name__,
             )
+            raise
 
     def _commit_receipt_and_clear(
         self,
@@ -544,7 +699,7 @@ class SessionBackupCoordinator:
             }
             receipts_dir = state_dir / "receipts"
             ensure_private_dir(receipts_dir)
-            atomic_write_json(receipts_dir / "{}.json".format(job.job_id), receipt, durable=True)
+            atomic_write_json(self._receipt_path(job), receipt, durable=True)
             for path, pending in self._pending_documents():
                 if (
                     pending.project == job.project
@@ -563,6 +718,8 @@ class SessionBackupCoordinator:
         reason: str,
         completion_generation: int | None,
         publication_proofs: dict[str, dict[str, Any]],
+        callback_required: bool,
+        staged_action: dict[str, Any] | None,
     ) -> SessionBackupJob | None:
         project = self._project_for_session(cwd, session_id)
         if project is None:
@@ -584,9 +741,74 @@ class SessionBackupCoordinator:
                 fence=fence,
                 completion_generation=completion_generation,
                 publication_proofs=publication_proofs,
+                capture_commit_id=str(uuid.uuid4()),
+                callback_required=callback_required,
+                staged_action=staged_action,
             )
             self._write_pending_job(job)
         return job
+
+    def _find_committed_capture(self, job: SessionBackupJob) -> BackupResult | None:
+        """Find this job's exact immutable snapshot without consulting live session payload."""
+
+        backup_service = self._backup_service
+        staging_root = self._staging_root
+        if backup_service is None or staging_root is None or not job.capture_commit_id:
+            return None
+
+        project_dir = staging_root / "projects" / job.project
+        if project_dir.is_dir():
+            for path in sorted(project_dir.glob("{}_v*".format(job.session_id))):
+                if path.is_symlink() or not path.is_dir():
+                    continue
+                try:
+                    state = backup_service._read_state(path, session_id=job.session_id, shared=True)
+                except Exception as exc:
+                    if path.name.endswith(".copying"):
+                        raise SessionBackupHandoffError(
+                            "session backup has an unreadable in-progress copying snapshot"
+                        ) from exc
+                    raise
+                if path.name.endswith(".copying"):
+                    if state is not None and state.commit_id == job.capture_commit_id:
+                        raise SessionBackupHandoffError(
+                            "session backup capture identity is still in an uncommitted copying snapshot"
+                        )
+                    raise SessionBackupHandoffError(
+                        "session backup has a different in-progress copying snapshot"
+                    )
+                if state is not None and state.commit_id == job.capture_commit_id:
+                    return BackupResult(
+                        enabled=True,
+                        destination=path,
+                        generation=state.generation,
+                        commit_id=state.commit_id,
+                        staged_committed=True,
+                    )
+
+        backup_root_resolver = getattr(backup_service, "_backup_root", None)
+        if not callable(backup_root_resolver):
+            return None
+        backup_root = backup_root_resolver()
+        if backup_root is None:
+            return None
+        destination = Path(backup_root) / "projects" / job.project / job.session_id
+        state = backup_service._read_state(
+            destination,
+            session_id=job.session_id,
+            shared=True,
+            missing_ok=True,
+        )
+        if state is None or state.commit_id != job.capture_commit_id:
+            return None
+        return BackupResult(
+            enabled=True,
+            destination=destination,
+            generation=state.generation,
+            commit_id=state.commit_id,
+            shared_committed=True,
+            staged_committed=True,
+        )
 
     def _next_counters(self, state_dir: Path) -> tuple[int, int]:
         counter_path = state_dir / _COORDINATOR_COUNTER_FILENAME
@@ -616,35 +838,79 @@ class SessionBackupCoordinator:
 
     def _pending_documents(self) -> list[tuple[Path, SessionBackupJob]]:
         pending_root = self.pending_root
-        if pending_root is None or not pending_root.is_dir():
+        if pending_root is None:
             return []
+        try:
+            pending_mode = pending_root.stat().st_mode
+        except FileNotFoundError:
+            return []
+        except OSError as exc:
+            raise SessionBackupHandoffError(
+                "session backup pending jobs could not be loaded: {}".format(type(exc).__name__)
+            ) from exc
+        if not stat.S_ISDIR(pending_mode):
+            raise SessionBackupHandoffError("session backup pending jobs could not be loaded: invalid directory")
         jobs: list[tuple[Path, SessionBackupJob]] = []
         for path in sorted(pending_root.glob("*.json")):
-            if path.is_symlink() or not path.is_file():
+            if path.is_symlink():
                 continue
             try:
+                if not stat.S_ISREG(path.stat().st_mode):
+                    continue
                 job = SessionBackupJob.from_document(json.loads(path.read_text(encoding="utf-8")))
-            except (OSError, ValueError):
-                continue
-            if job is not None:
-                jobs.append((path, job))
+            except (OSError, ValueError) as exc:
+                raise SessionBackupHandoffError(
+                    "session backup pending jobs could not be loaded: {}".format(type(exc).__name__)
+                ) from exc
+            if job is None:
+                raise SessionBackupHandoffError("session backup pending jobs could not be loaded: invalid record")
+            jobs.append((path, job))
         return jobs
 
     def _load_pending_jobs(self) -> list[SessionBackupJob]:
-        jobs = [job for _path, job in self._pending_documents()]
-        return sorted(jobs, key=lambda item: (item.project, item.session_id, item.fence))
+        try:
+            jobs: list[SessionBackupJob] = []
+            for path, job in self._pending_documents():
+                receipt_path = self._receipt_path(job)
+                try:
+                    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    receipt = None
+                if (
+                    isinstance(receipt, dict)
+                    and receipt.get("jobId") == job.job_id
+                    and receipt.get("coveredThroughBusinessRevision") == job.business_revision
+                    and isinstance(receipt.get("backupGeneration"), int)
+                    and isinstance(receipt.get("commitId"), str)
+                    and bool(receipt.get("commitId"))
+                ):
+                    self._remove_pending_marker(path)
+                    continue
+                jobs.append(job)
+            return sorted(jobs, key=lambda item: (item.project, item.session_id, item.fence))
+        except SessionBackupHandoffError:
+            raise
+        except Exception as exc:
+            raise SessionBackupHandoffError(
+                "session backup pending jobs could not be loaded: {}".format(type(exc).__name__)
+            ) from exc
 
     def _remove_pending_marker(self, path: Path) -> None:
         with suppress(FileNotFoundError):
             path.unlink()
-        parent = path.parent
-        with suppress(OSError):
             fsync_parent_dir(path)
+        parent = path.parent
         with suppress(OSError):
             parent.rmdir()
 
+    def _receipt_path(self, job: SessionBackupJob) -> Path:
+        return self._session_state_dir(job.project, job.session_id) / "receipts" / "{}.json".format(job.job_id)
+
     def _project_for_session(self, cwd: str, session_id: str) -> str | None:
-        source = self._backup_service._source_for_backup(cwd, session_id)
+        backup_service = self._backup_service
+        if backup_service is None:
+            return None
+        source = backup_service._source_for_backup(cwd, session_id)
         return None if source is None else Path(source).parent.name
 
     def _session_state_dir(self, project: str, session_id: str) -> Path:

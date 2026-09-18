@@ -12,6 +12,7 @@ from typing import Any, Literal, overload
 import yaml
 
 from iac_code.pipeline.engine.types import StepStatus
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.utils.state_io import atomic_write_text
 
 PipelineStatus = Literal[
@@ -82,8 +83,9 @@ class PipelineSession:
         └── events.jsonl   — local event log (rollbacks, transitions)
     """
 
-    def __init__(self, session_dir: Path) -> None:
+    def __init__(self, session_dir: Path, *, session_root: Path | None = None) -> None:
         self.session_dir = session_dir
+        self._mutation_dir = session_root if session_root is not None else session_dir
         self.meta_path = session_dir / "meta.yaml"
         self.context_path = session_dir / "context.yaml"
         self.events_path = session_dir / "events.jsonl"
@@ -496,23 +498,24 @@ class PipelineSession:
         )
 
     def mark_discarded(self, reason: str | None = None) -> None:
-        self.session_dir.mkdir(parents=True, exist_ok=True)
-        existing = self._load_existing_meta()
-        existing.update(
-            {
-                "status": "discarded",
-                "resume_policy": "none",
-                "terminal": True,
-                "current_step": existing.get("current_step"),
-                "state_machine": existing.get("state_machine", {}),
-                "updated_at": time.time(),
-                "discarded_at": time.time(),
-                "reason": reason,
-            }
-        )
-        for key, value in _EMPTY_IDENTITY.items():
-            existing.setdefault(key, value)
-        self._atomic_write_yaml(self.meta_path, existing)
+        with session_mutation_guard(self._mutation_dir):
+            self.session_dir.mkdir(parents=True, exist_ok=True)
+            existing = self._load_existing_meta()
+            existing.update(
+                {
+                    "status": "discarded",
+                    "resume_policy": "none",
+                    "terminal": True,
+                    "current_step": existing.get("current_step"),
+                    "state_machine": existing.get("state_machine", {}),
+                    "updated_at": time.time(),
+                    "discarded_at": time.time(),
+                    "reason": reason,
+                }
+            )
+            for key, value in _EMPTY_IDENTITY.items():
+                existing.setdefault(key, value)
+            self._atomic_write_yaml(self.meta_path, existing)
 
     @overload
     def restore_sync(self) -> dict: ...
@@ -534,6 +537,10 @@ class PipelineSession:
             "context_snapshot": result.context_snapshot,
             "current_step": result.current_step,
         }
+
+    def restore_canceled_checkpoint_sync(self, identity: PipelineIdentity | dict) -> RestoreResult:
+        """Load a canceled checkpoint only for an explicitly fenced successor."""
+        return self._restore_result(identity, allow_canceled=True)
 
     @overload
     async def restore(self) -> dict: ...
@@ -621,26 +628,27 @@ class PipelineSession:
         normal_handoff: _MetadataValue = _PRESERVE_METADATA,
         prerequisites: _MetadataValue = _PRESERVE_METADATA,
     ) -> None:
-        self.session_dir.mkdir(parents=True, exist_ok=True)
-        existing_meta = self._load_existing_meta()
-        identity_data = self._identity_from(identity)
-        terminal = status in SKIP_RESTORE_STATUSES
-        meta = {
-            **identity_data,
-            "status": status,
-            "resume_policy": "none" if terminal else "active",
-            "terminal": terminal,
-            "current_step": step_id,
-            "state_machine": state_machine_snapshot,
-            "updated_at": time.time(),
-            "reason": reason,
-        }
-        self._preserve_metadata_field(meta, existing_meta, "execution", execution)
-        self._preserve_metadata_field(meta, existing_meta, "attempts", attempts)
-        self._preserve_metadata_field(meta, existing_meta, "normal_handoff", normal_handoff)
-        self._preserve_metadata_field(meta, existing_meta, "prerequisites", prerequisites)
-        self._atomic_write_yaml(self.context_path, context_snapshot)
-        self._atomic_write_yaml(self.meta_path, meta)
+        with session_mutation_guard(self._mutation_dir):
+            self.session_dir.mkdir(parents=True, exist_ok=True)
+            existing_meta = self._load_existing_meta()
+            identity_data = self._identity_from(identity)
+            terminal = status in SKIP_RESTORE_STATUSES
+            meta = {
+                **identity_data,
+                "status": status,
+                "resume_policy": "none" if terminal else "active",
+                "terminal": terminal,
+                "current_step": step_id,
+                "state_machine": state_machine_snapshot,
+                "updated_at": time.time(),
+                "reason": reason,
+            }
+            self._preserve_metadata_field(meta, existing_meta, "execution", execution)
+            self._preserve_metadata_field(meta, existing_meta, "attempts", attempts)
+            self._preserve_metadata_field(meta, existing_meta, "normal_handoff", normal_handoff)
+            self._preserve_metadata_field(meta, existing_meta, "prerequisites", prerequisites)
+            self._atomic_write_yaml(self.context_path, context_snapshot)
+            self._atomic_write_yaml(self.meta_path, meta)
 
     def _preserve_metadata_field(
         self,
@@ -657,7 +665,12 @@ class PipelineSession:
         if isinstance(value, dict):
             meta[key] = value
 
-    def _restore_result(self, identity: PipelineIdentity | dict | None) -> RestoreResult:
+    def _restore_result(
+        self,
+        identity: PipelineIdentity | dict | None,
+        *,
+        allow_canceled: bool = False,
+    ) -> RestoreResult:
         if not self.meta_path.exists():
             return RestoreResult(ok=False, reason="missing_meta")
 
@@ -678,7 +691,7 @@ class PipelineSession:
         if not self._valid_metadata_fields(meta):
             return self._restore_failure("invalid_meta", status=status)
         execution, attempts, normal_handoff, prerequisites = self._restore_metadata_fields(meta)
-        if status in SKIP_RESTORE_STATUSES:
+        if status in SKIP_RESTORE_STATUSES and not (allow_canceled and status == "canceled"):
             return RestoreResult(
                 ok=False,
                 reason=meta.get("reason"),
