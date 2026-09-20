@@ -270,7 +270,11 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
             assert "references/ram-policies.md" in skill
             assert "32-character lowercase hexadecimal string" in skill
             assert 'SKILL_DISTRIBUTION = "agenthub"' in bridge
-            assert "AlibabaCloud-Agent-Skills/{}/{{session-id}}".format(name) in bridge
+            expected_user_agent = "AlibabaCloud-Agent-Skills/{}/{{session-id}}".format(name)
+            if name == "alibabacloud-iac-code":
+                expected_user_agent += " skill-version/{skill-version}"
+                assert "skill-version/{skill-version}" in skill
+            assert expected_user_agent in bridge
             if name == "alibabacloud-ros-agent":
                 assert "`scripts/requirements.txt`" in skill
                 assert "requirements-code.txt" not in skill
