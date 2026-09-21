@@ -27,6 +27,15 @@ from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.services.session_storage import SessionStorage
 
 
+@pytest.fixture(autouse=True)
+def _freeze_snapshot_generated_at(monkeypatch: pytest.MonkeyPatch) -> None:
+    # reduce_pipeline_events stamps a wall-clock second into generatedAt and
+    # checkpoint_identity digests the whole snapshot. A re-reduction on the far
+    # side of a second boundary (slow CI runners) would change the digest and
+    # fail-close the continuation, so keep the stamp deterministic.
+    monkeypatch.setattr("iac_code.a2a.pipeline_snapshot._utc_now", lambda: "2026-01-01T00:00:00Z")
+
+
 def _checkpoint() -> PipelineCheckpointIdentity:
     return PipelineCheckpointIdentity(version=1, digest="a" * 64, sequence=7, event_id="evt-7")
 
