@@ -653,25 +653,25 @@ def test_real_runner_records_assistant_diagram_and_cloud_permission_block_order(
     stdout = "\n".join(
         json.dumps(item)
         for item in (
-        {
-            "type": "assistant",
-            "message": {
-                "content": [
-                    {"type": "text", "text": "```mermaid\ngraph TD\n```"},
-                    {
-                        "type": "tool_use",
-                        "id": "bridge-1",
-                        "name": "Bash",
-                        "input": {
-                            "command": (
-                                "ALICLOUD_ROS_AGENT_STATE_DIR=/tmp/state python3 "
-                                "/repo/skills/alicloud-ros-agent/scripts/ros_agent.py "
-                                "start --prompt-file request.txt --mode normal --follow"
-                            )
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "```mermaid\ngraph TD\n```"},
+                        {
+                            "type": "tool_use",
+                            "id": "bridge-1",
+                            "name": "Bash",
+                            "input": {
+                                "command": (
+                                    "ALICLOUD_ROS_AGENT_STATE_DIR=/tmp/state python3 "
+                                    "/repo/skills/alicloud-ros-agent/scripts/ros_agent.py "
+                                    "start --prompt-file request.txt --mode normal --follow"
+                                )
+                            },
                         },
-                    },
-                ]
-            },
+                    ]
+                },
             },
             {
                 "type": "user",

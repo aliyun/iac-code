@@ -79,6 +79,7 @@ class CanceledCheckpointSafety:
     safe: bool
     reason: str
 
+
 _TERMINAL_SIDECAR_STATUSES = {"completed", "user_aborted", "failed", "discarded"}
 _CURRENT_STEP_USER_INPUT_KEY = "current_step_user_input"
 _CURRENT_STEP_USER_INPUT_CONTENT_KEY = "current_step_user_input_content"
@@ -3037,9 +3038,7 @@ class PipelineRunner:
             and step.config.get("confirmation_accepts_parameter_overrides") is True
             and step.validate_structured_confirmation is not None
         ):
-            validation_message = self._structured_confirmation_validation_message(
-                step, current_conclusion, user_text
-            )
+            validation_message = self._structured_confirmation_validation_message(step, current_conclusion, user_text)
             if validation_message:
                 # The submitted parameters are illegal, so the step keeps its waiting input untouched: no
                 # bookkeeping is popped, no state is saved and no model turn is spent.
@@ -4558,8 +4557,7 @@ class PipelineRunner:
                     self._transcript_storage is not None
                     and attempt.get("status") == "running"
                     and not (
-                        first_step
-                        and (permission_checkpoint is not None or resource_selection_checkpoint is not None)
+                        first_step and (permission_checkpoint is not None or resource_selection_checkpoint is not None)
                     )
                 ):
                     loaded = self._transcript_storage.load(self._cwd, attempt["transcript_id"])

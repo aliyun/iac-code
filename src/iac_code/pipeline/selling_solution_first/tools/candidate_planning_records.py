@@ -43,9 +43,7 @@ def latest_candidate_outline_batch(records: list[dict[str, Any]]) -> CandidateOu
             continue
         sequence = _record_sequence(record, position)
         recorded_candidate_set_id = record.get("candidate_set_id")
-        candidate_set_id = (
-            str(recorded_candidate_set_id).strip() if isinstance(recorded_candidate_set_id, str) else ""
-        )
+        candidate_set_id = str(recorded_candidate_set_id).strip() if isinstance(recorded_candidate_set_id, str) else ""
         record_id = record.get("record_id")
         if not candidate_set_id:
             candidate_set_id = str(record_id).strip() if isinstance(record_id, str) else ""
@@ -54,11 +52,7 @@ def latest_candidate_outline_batch(records: list[dict[str, Any]]) -> CandidateOu
         # An identical repeated call is recorded as a successful idempotent observation with the
         # original candidateSetId.  It must not move the active batch boundary forward, otherwise
         # details already produced for that batch would be incorrectly invalidated.
-        if (
-            latest is not None
-            and latest.candidate_set_id == candidate_set_id
-            and latest.candidates == candidates
-        ):
+        if latest is not None and latest.candidate_set_id == candidate_set_id and latest.candidates == candidates:
             continue
         latest = CandidateOutlineBatch(
             candidate_set_id=candidate_set_id,

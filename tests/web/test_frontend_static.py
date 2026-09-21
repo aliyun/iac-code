@@ -11421,11 +11421,11 @@ def test_resource_selector_uses_compact_themed_controls() -> None:
     assert 'className = "blocking-detail resource-selector-status"' not in blocking
     # Refresh stays beside the selector as an accessible icon; only the two answer
     # actions belong in the footer.
-    assert 'controlRow.append(mountPoint, refresh)' in blocking
+    assert "controlRow.append(mountPoint, refresh)" in blocking
     assert 'refresh.setAttribute("aria-label", refreshLabel)' in blocking
     assert 'refresh.setAttribute("aria-busy", "true")' in blocking
-    assert 'footer.append(confirm, cancel)' in blocking
-    assert 'footer.append(refresh, confirm, cancel)' not in blocking
+    assert "footer.append(confirm, cancel)" in blocking
+    assert "footer.append(refresh, confirm, cancel)" not in blocking
     # Confirmation may perform server-side validation. A click must immediately
     # expose a busy state, prevent duplicate submissions, and restore controls on
     # failure instead of appearing inert. A successful response removes the local
@@ -11535,7 +11535,7 @@ def test_resource_selector_preserves_selection_across_app_renders() -> None:
     # standalone bundle's controlled selection contract.
     assert "selection: candidate" in blocking
     assert "resourceSelectionCandidates.delete(requestId)" in blocking
-    assert 'ore-resource-selector.min.js?v=16' in blocking
+    assert "ore-resource-selector.min.js?v=16" in blocking
 
 
 def test_resource_selector_external_links_use_host_opener(tmp_path: Path) -> None:

@@ -231,7 +231,7 @@ class StagedSessionBackupService(SessionBackupService):
                                         "staged session backup generation conflict",
                                         local_generation=base_state.generation,
                                         shared_generation=existing.generation,
-                                )
+                                    )
                                 self._write_state(source, existing)
                                 return BackupResult(
                                     enabled=True,

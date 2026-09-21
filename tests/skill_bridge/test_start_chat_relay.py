@@ -45,7 +45,7 @@ bridge = _load_module("start_chat_test_bridge", BRIDGE_PATH)
 
 
 def _write_relay_cli(tmp_path: Path) -> Path:
-    source = r'''import json
+    source = r"""import json
 import ssl
 import sys
 import urllib.parse
@@ -94,7 +94,7 @@ with urllib.request.urlopen(request, context=context, timeout=15) as response:
             event_id = line[3:].lstrip()
         elif line.startswith("data:"):
             data.append(line[5:].lstrip())
-'''
+"""
     script = tmp_path / "relay_cli.py"
     script.write_text(source, encoding="utf-8")
     if sys.platform == "win32":

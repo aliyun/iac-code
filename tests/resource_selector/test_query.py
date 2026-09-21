@@ -199,10 +199,7 @@ async def test_kms_alias_multi_api_supports_a_full_100_item_selector_page() -> N
             }
         }
 
-    requests = [
-        {"parameters": {"RegionId": "cn-hangzhou", "KeyId": "key-{:03d}".format(index)}}
-        for index in range(65)
-    ]
+    requests = [{"parameters": {"RegionId": "cn-hangzhou", "KeyId": "key-{:03d}".format(index)}} for index in range(65)]
     result = await ResourceSelectorQueryService(caller).query(
         pending_payload=pending("kms.key"),
         operation_key="kms.key.multiapi.kms.multiapi",
@@ -228,8 +225,7 @@ async def test_multi_api_rejects_more_than_one_full_selector_page_before_calling
         return {}
 
     requests = [
-        {"parameters": {"RegionId": "cn-hangzhou", "KeyId": "key-{:03d}".format(index)}}
-        for index in range(101)
+        {"parameters": {"RegionId": "cn-hangzhou", "KeyId": "key-{:03d}".format(index)}} for index in range(101)
     ]
     with pytest.raises(ResourceSelectorQueryError, match="selector_query_parameters_invalid"):
         await ResourceSelectorQueryService(caller).query(

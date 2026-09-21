@@ -38,13 +38,11 @@ from iac_code.types.stream_events import (
 
 from .fakes import FakeEventQueue, FakeRequestContext, FakeRuntime
 
-_E2E_CASES = json.loads(
-    (Path(__file__).parents[1] / "resource_selector/e2e-cases.json").read_text(encoding="utf-8")
-)["cases"]
+_E2E_CASES = json.loads((Path(__file__).parents[1] / "resource_selector/e2e-cases.json").read_text(encoding="utf-8"))[
+    "cases"
+]
 _ENABLED_E2E_CASES = [
-    case
-    for case in _E2E_CASES
-    if (profile := get_profile(case["selectorId"])) is not None and profile.enabled
+    case for case in _E2E_CASES if (profile := get_profile(case["selectorId"])) is not None and profile.enabled
 ]
 
 

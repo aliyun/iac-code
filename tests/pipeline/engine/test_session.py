@@ -12,9 +12,7 @@ from iac_code.services.session_mutation_guard import session_mutation_guard
 
 
 @pytest.mark.parametrize("use_session_root", [False, True])
-def test_snapshot_capture_waits_for_complete_context_and_metadata_transaction(
-    tmp_path, monkeypatch, use_session_root
-):
+def test_snapshot_capture_waits_for_complete_context_and_metadata_transaction(tmp_path, monkeypatch, use_session_root):
     session_root = tmp_path if use_session_root else None
     session = PipelineSession(tmp_path / "pipeline", session_root=session_root)
     session.save_running_sync("old-step", {}, {"value": "old"}, {})

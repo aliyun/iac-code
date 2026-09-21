@@ -332,8 +332,7 @@ class PipelineContinuationStore:
             or intent.checkpoint.sequence < 0
             or len(intent.checkpoint.digest) != 64
             or intent.phase not in {"reserved", "claimed", "running", "waiting_input", "unsafe", "settled"}
-            or (intent.phase in {"claimed", "running", "waiting_input", "unsafe", "settled"})
-            != bool(intent.claim_id)
+            or (intent.phase in {"claimed", "running", "waiting_input", "unsafe", "settled"}) != bool(intent.claim_id)
             or (intent.phase == "unsafe") != bool(intent.unsafe_reason)
         ):
             raise PipelineContinuationCorruptError("Continuation intent violates its protocol")

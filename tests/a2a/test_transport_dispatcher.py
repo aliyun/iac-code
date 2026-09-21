@@ -1839,21 +1839,21 @@ async def test_handler_allocates_successor_when_canceled_task_still_has_running_
             {
                 "contextId": context_id,
                 "taskId": "task-old",
-                    "executionId": "execution-old",
-                    "phase": "terminated",
-                    "executionStatus": "canceled",
-                    "terminationReason": "explicit_terminate",
-                    "releaseReady": True,
-                    "revision": 11,
-                    "persistedRevision": 11,
-                    "commitError": None,
-                    "blockers": [],
-                    "backup": {
-                        "status": "staged_committed",
-                        "generation": 2,
-                        "commitId": "commit-cancel",
-                    },
-                }
+                "executionId": "execution-old",
+                "phase": "terminated",
+                "executionStatus": "canceled",
+                "terminationReason": "explicit_terminate",
+                "releaseReady": True,
+                "revision": 11,
+                "persistedRevision": 11,
+                "commitError": None,
+                "blockers": [],
+                "backup": {
+                    "status": "staged_committed",
+                    "generation": 2,
+                    "commitId": "commit-cancel",
+                },
+            }
         ),
         encoding="utf-8",
     )
@@ -1892,10 +1892,10 @@ async def test_default_handler_accepts_precreated_successor_task_for_omitted_tas
         async def execute(self, request_context, event_queue) -> None:
             await event_queue.enqueue_event(
                 TaskStatusUpdateEvent(
-                        task_id=request_context.task_id,
-                        context_id=request_context.context_id,
-                        status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
-                    )
+                    task_id=request_context.task_id,
+                    context_id=request_context.context_id,
+                    status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+                )
             )
 
         async def cancel(self, _request_context, _event_queue) -> None:

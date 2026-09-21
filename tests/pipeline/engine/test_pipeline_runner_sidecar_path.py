@@ -915,11 +915,7 @@ async def test_canceled_started_attempt_is_unsafe_and_never_reexecutes_step(tmp_
     runner._step_executor.execute = execute_until_cancel
     stream = runner.run("create infrastructure")
     async for event in stream:
-        if (
-            isinstance(event, PipelineEvent)
-            and event.type == PipelineEventType.STEP_STARTED
-            and event.step_id == "s2"
-        ):
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_STARTED and event.step_id == "s2":
             runner.mark_execution_terminated("canceled by control plane")
             break
 

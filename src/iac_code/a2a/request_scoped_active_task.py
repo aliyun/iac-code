@@ -68,9 +68,7 @@ class RequestScopedActiveTask(ActiveTask):
     def _retirement_tasks(self) -> tuple[asyncio.Task[Any], ...]:
         current = asyncio.current_task()
         return tuple(
-            task
-            for task in (self._producer_task, self._consumer_task)
-            if task is not None and task is not current
+            task for task in (self._producer_task, self._consumer_task) if task is not None and task is not current
         )
 
     async def _finish_retirement(self, lifecycle_tasks: tuple[asyncio.Task[Any], ...]) -> None:
@@ -459,10 +457,7 @@ class RequestScopedActiveTaskRegistry(ActiveTaskRegistry):
         async with self._lock:
             if scoped is not None:
                 scoped._recovery_replacement_pending = False
-                if (
-                    self._active_tasks.get(task_id) is scoped
-                    and (remove_finished or scoped._is_finished.is_set())
-                ):
+                if self._active_tasks.get(task_id) is scoped and (remove_finished or scoped._is_finished.is_set()):
                     self._active_tasks.pop(task_id, None)
             self._recoveries_in_progress.discard(task_id)
 
@@ -478,8 +473,7 @@ class RequestScopedActiveTaskRegistry(ActiveTaskRegistry):
             return
         task = await self._task_store.get(task_id, call_context)
         if task is None or (
-            task.status.state not in TERMINAL_TASK_STATES
-            and task.status.state != TaskState.TASK_STATE_INPUT_REQUIRED
+            task.status.state not in TERMINAL_TASK_STATES and task.status.state != TaskState.TASK_STATE_INPUT_REQUIRED
         ):
             return
         await scoped.wait_for_accepted_requests()

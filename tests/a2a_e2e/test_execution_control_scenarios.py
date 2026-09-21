@@ -42,6 +42,7 @@ CASES = (
     ("recovery-during-normal-rollover", "normal"),
 )
 
+
 @pytest.mark.integration
 @pytest.mark.timeout(TEST_TIMEOUT)
 @pytest.mark.parametrize(("scenario", "mode"), CASES, ids=["{}-{}".format(*case) for case in CASES])

@@ -512,8 +512,8 @@ def test_normal_chat_cleanup_factory_writes_wait_for_session_snapshot(
     repl._session_id = "session-1"
     repl._session_storage = MagicMock()
     pipeline_cwd = "/pipeline" if separate_pipeline_cwd else "/workspace"
-    repl._session_storage.session_dir.side_effect = (
-        lambda cwd, sid: root if cwd == pipeline_cwd else tmp_path / "original-session"
+    repl._session_storage.session_dir.side_effect = lambda cwd, sid: (
+        root if cwd == pipeline_cwd else tmp_path / "original-session"
     )
     repl._cleanup_ledger_path_from_active_prompt = lambda: path if source == "prompt" else None
     repl._cleanup_prompt_exists_anywhere = lambda: False
@@ -526,9 +526,7 @@ def test_normal_chat_cleanup_factory_writes_wait_for_session_snapshot(
 
     def write():
         started.set()
-        return restored.record_observed(
-            ObservedResource(provider="ros", resource_type="stack", resource_id="stack-2")
-        )
+        return restored.record_observed(ObservedResource(provider="ros", resource_type="stack", resource_id="stack-2"))
 
     with ThreadPoolExecutor(max_workers=1) as pool:
         with session_mutation_guard(root):

@@ -302,9 +302,7 @@ class SessionBackupJob:
                 staged_generation=(
                     None if document.get("stagedGeneration") is None else int(document["stagedGeneration"])
                 ),
-                staged_commit_id=(
-                    None if document.get("stagedCommitId") is None else str(document["stagedCommitId"])
-                ),
+                staged_commit_id=(None if document.get("stagedCommitId") is None else str(document["stagedCommitId"])),
                 callback_required=callback_required,
                 callback_completed=callback_completed,
                 staged_action=(None if staged_action is None else dict(staged_action)),
@@ -330,9 +328,7 @@ class SessionBackupCoordinator:
         metrics: Any | None = None,
         retry_delays: tuple[float, ...] = _DEFAULT_RETRY_DELAYS,
         quiescence_timeout: float = _DEFAULT_CAPTURE_QUIESCENCE_TIMEOUT,
-        staged_action_resolver: (
-            Callable[[Mapping[str, Any], int, str], Awaitable[None] | None] | None
-        ) = None,
+        staged_action_resolver: (Callable[[Mapping[str, Any], int, str], Awaitable[None] | None] | None) = None,
     ) -> None:
         self._backup_service = backup_service
         self._state_root = state_root
@@ -529,9 +525,7 @@ class SessionBackupCoordinator:
             await run_sync_fenced(self._write_pending_job, staged_job)
             return await self._finish_staged_job(staged_job, result=recovered_result)
         if job.capture_started:
-            raise SessionBackupHandoffError(
-                "session backup capture started but has no matching durable lineage proof"
-            )
+            raise SessionBackupHandoffError("session backup capture started but has no matching durable lineage proof")
 
         capturing_job = replace(job, capture_started=True)
         if not job.capture_started:
@@ -622,9 +616,7 @@ class SessionBackupCoordinator:
                 action = job.staged_action
                 resolver = self._staged_action_resolver
                 if action is None:
-                    raise SessionBackupHandoffError(
-                        "session backup staged callback has no durable recovery identity"
-                    )
+                    raise SessionBackupHandoffError("session backup staged callback has no durable recovery identity")
                 if resolver is None:
                     raise SessionBackupHandoffError("session backup staged callback resolver is unavailable")
                 outcome = resolver(action, generation, commit_id)
@@ -774,9 +766,7 @@ class SessionBackupCoordinator:
                         raise SessionBackupHandoffError(
                             "session backup capture identity is still in an uncommitted copying snapshot"
                         )
-                    raise SessionBackupHandoffError(
-                        "session backup has a different in-progress copying snapshot"
-                    )
+                    raise SessionBackupHandoffError("session backup has a different in-progress copying snapshot")
                 if state is not None and state.commit_id == job.capture_commit_id:
                     return BackupResult(
                         enabled=True,

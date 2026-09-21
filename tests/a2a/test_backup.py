@@ -353,9 +353,7 @@ async def test_recover_uses_published_capture_identity_after_stage_record_crash(
     assert worker.run_once() == 1
     assert not list((staging_root / "projects").glob("**/s1_v*"))
     shared_state = json.loads(
-        (backup_root / "projects" / session_dir.parent.name / "s1" / ".backup-state.json").read_text(
-            encoding="utf-8"
-        )
+        (backup_root / "projects" / session_dir.parent.name / "s1" / ".backup-state.json").read_text(encoding="utf-8")
     )
     assert shared_state["commit_id"] == capture_commit_id
 
@@ -569,9 +567,7 @@ async def test_permission_staged_action_resolver_is_generation_fenced_and_does_n
                 "assistantMessageDigest": "a" * 64,
                 "orderedToolUseIds": ["tool-1"],
                 "currentIndex": 0,
-                "decisions": [
-                    {"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}
-                ],
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
             },
             policy=PermissionWaitPolicy(),
         )
@@ -624,9 +620,7 @@ async def test_cold_start_recovers_permission_stage_into_persisted_task_without_
                 "assistantMessageDigest": "a" * 64,
                 "orderedToolUseIds": ["tool-1"],
                 "currentIndex": 0,
-                "decisions": [
-                    {"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}
-                ],
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
             },
             policy=PermissionWaitPolicy(),
         )
@@ -676,9 +670,7 @@ async def test_cold_start_recovers_permission_stage_into_persisted_task_without_
     monkeypatch.setattr(service, "backup_session", reject_recapture)
     cold_task_store = A2ATaskStore(persistence=persistence, backup_service=service)
     cold_registry = PermissionInputRegistry()
-    cold_registry.set_staged_task_generation_recorder(
-        cold_task_store.recover_expected_permission_backup_generation
-    )
+    cold_registry.set_staged_task_generation_recorder(cold_task_store.recover_expected_permission_backup_generation)
     successor = SessionBackupCoordinator(
         service,
         state_root=state_root,
@@ -846,9 +838,7 @@ async def test_wait_for_local_snapshot_quiescence_waits_for_an_inflight_capture(
         registration = asyncio.create_task(_register(coordinator))
         # The local capture is now stuck inside backup_session and will not finish.
         assert await asyncio.to_thread(started.wait, 5)
-        quiescence = asyncio.create_task(
-            coordinator.wait_for_local_snapshot_quiescence(cwd="/repo", session_id="s1")
-        )
+        quiescence = asyncio.create_task(coordinator.wait_for_local_snapshot_quiescence(cwd="/repo", session_id="s1"))
         await asyncio.sleep(0.05)
         assert quiescence.done() is False
         release.set()

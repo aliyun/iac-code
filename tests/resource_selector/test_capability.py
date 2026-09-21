@@ -48,9 +48,7 @@ def test_a2a_requires_env_and_exact_client_handshake(monkeypatch) -> None:
 def test_bundled_manifest_matches_every_enabled_server_profile() -> None:
     root = static_root()
     vendor = root / "js" / "vendor"
-    manifest = json.loads(
-        (vendor / "ore-resource-selector.manifest.json").read_text(encoding="utf-8")
-    )
+    manifest = json.loads((vendor / "ore-resource-selector.manifest.json").read_text(encoding="utf-8"))
     bundle = (vendor / "ore-resource-selector.min.js").read_bytes()
     assert set(manifest) == {"bundleVersion", "schemaVersion", "profileHash", "sha256", "selectors"}
     assert manifest["profileHash"] == PROFILE_HASH
@@ -79,12 +77,8 @@ def test_exported_resource_selector_metadata_has_no_internal_source_provenance()
     capabilities = json.loads(
         (root / "src/iac_code/resource_selector/ore-capabilities.json").read_text(encoding="utf-8")
     )
-    operations = json.loads(
-        (root / "src/iac_code/resource_selector/ore-operations.json").read_text(encoding="utf-8")
-    )
-    fixtures = json.loads(
-        (root / "tests/resource_selector/contract-fixtures.json").read_text(encoding="utf-8")
-    )
+    operations = json.loads((root / "src/iac_code/resource_selector/ore-operations.json").read_text(encoding="utf-8"))
+    fixtures = json.loads((root / "tests/resource_selector/contract-fixtures.json").read_text(encoding="utf-8"))
     cases = json.loads((root / "tests/resource_selector/e2e-cases.json").read_text(encoding="utf-8"))
 
     assert all(

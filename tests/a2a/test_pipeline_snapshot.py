@@ -939,9 +939,7 @@ def test_reduce_public_narrative_shape_survives_incremental_reduction() -> None:
 
 def test_reduce_legacy_message_keeps_marker_fallback_after_resume() -> None:
     existing = reduce_pipeline_events([])
-    existing["display"]["messages"] = [
-        {"scope": "step", "runId": "step-a-1", "round": 1, "text": "legacy public text"}
-    ]
+    existing["display"]["messages"] = [{"scope": "step", "runId": "step-a-1", "round": 1, "text": "legacy public text"}]
 
     resumed = reduce_pipeline_events(
         [

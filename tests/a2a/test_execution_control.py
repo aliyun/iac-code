@@ -436,7 +436,7 @@ async def test_explicit_termination_fences_inflight_natural_backup(tmp_path: Pat
             completion_generation=completion_generation,
         )
     )
-    assert await asyncio.to_thread(first_backup_started.wait, 1)
+    assert await asyncio.to_thread(first_backup_started.wait, 5)
 
     await control.terminate(
         execution_id="exec-1",

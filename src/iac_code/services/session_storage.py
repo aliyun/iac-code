@@ -376,9 +376,10 @@ class SessionStorage:
             return self._ensure_v2_session_dir_for_new_session(cwd, session_id, git_branch=git_branch)
 
     def _session_write_guard(self, cwd: str, session_id: str):
-        if self._existing_legacy_session_path(cwd, session_id) is not None and self._directory_session_dir(
-            cwd, session_id
-        ) is None:
+        if (
+            self._existing_legacy_session_path(cwd, session_id) is not None
+            and self._directory_session_dir(cwd, session_id) is None
+        ):
             return nullcontext()
         return session_mutation_guard(self.session_dir(cwd, session_id))
 

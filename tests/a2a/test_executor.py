@@ -204,8 +204,7 @@ def test_deferred_cleanup_prompt_append_reports_persistence_failure(
     monkeypatch.setattr(executor_module, "atomic_write_text", fail_atomic_write)
 
     assert (
-        _append_a2a_deferred_cleanup_prompt(cwd=str(cwd), session_id=session_id, prompt="resume after cleanup")
-        is False
+        _append_a2a_deferred_cleanup_prompt(cwd=str(cwd), session_id=session_id, prompt="resume after cleanup") is False
     )
     assert _load_a2a_deferred_cleanup_prompts(cwd=str(cwd), session_id=session_id) == []
 
@@ -1353,10 +1352,7 @@ async def test_normal_terminal_has_no_later_context_snapshot_write(
     class BlockingTerminalQueue(FakeEventQueue):
         async def enqueue_event(self, event) -> None:
             await super().enqueue_event(event)
-            if (
-                isinstance(event, TaskStatusUpdateEvent)
-                and event.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
-            ):
+            if isinstance(event, TaskStatusUpdateEvent) and event.status.state == TaskState.TASK_STATE_INPUT_REQUIRED:
                 terminal_delivered.set()
                 await release_terminal_consumer.wait()
 

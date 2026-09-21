@@ -247,9 +247,7 @@ def test_cleanup_retains_live_copying_until_capture_finishes(
     capture_result: list[object] = []
 
     def capture() -> None:
-        capture_result.append(
-            service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
-        )
+        capture_result.append(service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True))
 
     capture_thread = threading.Thread(target=capture)
     capture_thread.start()

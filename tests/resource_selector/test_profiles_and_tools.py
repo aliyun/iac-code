@@ -57,27 +57,21 @@ async def test_resolver_exact_alias_unknown_out_of_scope_and_conditional_output_
 
     alias = json.loads(
         (
-            await resolver.execute(
-                tool_input={"association_property": "ALIYUN::ECS::Instance"}, context=ToolContext()
-            )
+            await resolver.execute(tool_input={"association_property": "ALIYUN::ECS::Instance"}, context=ToolContext())
         ).content
     )
     assert alias["selector_id"] == "ecs.instance"
 
     unknown = json.loads(
         (
-            await resolver.execute(
-                tool_input={"association_property": "ALIYUN::Nope::Missing"}, context=ToolContext()
-            )
+            await resolver.execute(tool_input={"association_property": "ALIYUN::Nope::Missing"}, context=ToolContext())
         ).content
     )
     assert unknown["status"] == "not_found"
 
     zone = json.loads(
         (
-            await resolver.execute(
-                tool_input={"association_property": "ALIYUN::ECS::ZoneId"}, context=ToolContext()
-            )
+            await resolver.execute(tool_input={"association_property": "ALIYUN::ECS::ZoneId"}, context=ToolContext())
         ).content
     )
     assert zone["status"] == "known_but_out_of_scope"
@@ -98,9 +92,7 @@ async def test_resolver_exact_alias_unknown_out_of_scope_and_conditional_output_
 @pytest.mark.asyncio
 async def test_resolver_search_is_bounded_and_does_not_disclose_static_whitelist() -> None:
     resolver = ResolveCloudResourceSelectorTool()
-    result = json.loads(
-        (await resolver.execute(tool_input={"query": "instance"}, context=ToolContext())).content
-    )
+    result = json.loads((await resolver.execute(tool_input={"query": "instance"}, context=ToolContext())).content)
     assert result["status"] == "ambiguous"
     assert 1 < len(result["candidates"]) <= 10
     assert "ALIYUN::" not in resolver.description

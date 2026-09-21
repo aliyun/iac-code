@@ -1645,9 +1645,7 @@ class AgentLoop:
         tool_use = tool_uses[0]
         if tool_use.name != "select_cloud_resource" or tool_use.id != frame.get("orderedToolUseIds", [None])[0]:
             raise ValueError("resource_selection_resume_invalid: selector tool changed")
-        if canonical_digest({"name": tool_use.name, "input": tool_use.input}) != frame.get(
-            "currentPayloadDigest"
-        ):
+        if canonical_digest({"name": tool_use.name, "input": tool_use.input}) != frame.get("currentPayloadDigest"):
             raise ValueError("resource_selection_resume_invalid: selector payload changed")
 
         queue: asyncio.Queue[Any] = asyncio.Queue()

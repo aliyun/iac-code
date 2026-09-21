@@ -440,8 +440,9 @@ class PermissionWaitCheckpointStore:
         candidate = dict(record)
         boundary_id = self._validate_record(candidate)
         path = self._record_path(boundary_id)
-        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
-            self.paths.permission_waits_lock_path
+        with (
+            session_mutation_guard(self.paths.session_dir),
+            cross_process_file_lock(self.paths.permission_waits_lock_path),
         ):
             if path.exists():
                 raise ValueError("permission boundary already exists")
@@ -456,8 +457,9 @@ class PermissionWaitCheckpointStore:
         boundary_id = self._validate_record(candidate)
         new_path = self._record_path(boundary_id)
         previous_path = self._record_path(previous_boundary_id)
-        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
-            self.paths.permission_waits_lock_path
+        with (
+            session_mutation_guard(self.paths.session_dir),
+            cross_process_file_lock(self.paths.permission_waits_lock_path),
         ):
             if new_path.exists():
                 raise ValueError("permission boundary already exists")
@@ -539,8 +541,9 @@ class PermissionWaitCheckpointStore:
         mutate: Callable[[dict[str, Any]], dict[str, Any] | None],
     ) -> dict[str, Any]:
         path = self._record_path(boundary_id)
-        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
-            self.paths.permission_waits_lock_path
+        with (
+            session_mutation_guard(self.paths.session_dir),
+            cross_process_file_lock(self.paths.permission_waits_lock_path),
         ):
             current = self._read(path)
             if current is None:
@@ -563,8 +566,9 @@ class PermissionWaitCheckpointStore:
         """Run a backup under the session barrier and permission generation fence."""
 
         path = self._record_path(boundary_id)
-        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
-            self.paths.permission_waits_lock_path
+        with (
+            session_mutation_guard(self.paths.session_dir),
+            cross_process_file_lock(self.paths.permission_waits_lock_path),
         ):
             current = self._read(path)
             if current is None or int(current.get("generation", 0)) != expected_generation:
@@ -725,8 +729,9 @@ class PermissionWaitCheckpointStore:
         """
 
         path = self._record_path(boundary_id)
-        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
-            self.paths.permission_waits_lock_path
+        with (
+            session_mutation_guard(self.paths.session_dir),
+            cross_process_file_lock(self.paths.permission_waits_lock_path),
         ):
             record = self._read(path)
             if record is None:
@@ -1287,6 +1292,7 @@ class PermissionWaitCoordinator:
             if self._owners.get(boundary_id) is not owner or owner.future.done():
                 return False
             try:
+
                 def reconcile() -> dict[str, Any]:
                     return owner.store.reconcile_deadline(
                         boundary_id,

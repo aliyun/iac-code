@@ -3227,9 +3227,7 @@ class IacCodeA2APipelineExecutor:
             and continuation_intent.successor_task_id == task_id
             and continuation_intent.phase == "unsafe"
         ):
-            raise PipelineContinuationUnsafeError(
-                continuation_intent.unsafe_reason or "canceled checkpoint is unsafe"
-            )
+            raise PipelineContinuationUnsafeError(continuation_intent.unsafe_reason or "canceled checkpoint is unsafe")
         if (
             continuation_intent is not None
             and continuation_intent.successor_task_id == task_id
@@ -5595,19 +5593,25 @@ def successor_task_id_from_sidecar(
         {"a2a": snapshot, "pipelineMeta": sidecar_meta},
         events[-1],
     )
-    return PipelineContinuationStore(
-        pipeline_dir,
-        session_dir=SessionStorage().session_dir(cwd, session_id),
-    ).reserve_successor(
-        context_id=context_id,
-        predecessor_task_id=owner.task_id,
-        invocation_id=invocation_id,
-        checkpoint=checkpoint,
-        cancellation_execution_id=proof_execution_id,
-        cancellation_revision=proof_revision,
-        cancellation_backup_generation=(proof_backup_generation if isinstance(proof_backup_generation, int) else None),
-        cancellation_backup_commit_id=(proof_backup_commit_id if isinstance(proof_backup_commit_id, str) else None),
-    ).successor_task_id
+    return (
+        PipelineContinuationStore(
+            pipeline_dir,
+            session_dir=SessionStorage().session_dir(cwd, session_id),
+        )
+        .reserve_successor(
+            context_id=context_id,
+            predecessor_task_id=owner.task_id,
+            invocation_id=invocation_id,
+            checkpoint=checkpoint,
+            cancellation_execution_id=proof_execution_id,
+            cancellation_revision=proof_revision,
+            cancellation_backup_generation=(
+                proof_backup_generation if isinstance(proof_backup_generation, int) else None
+            ),
+            cancellation_backup_commit_id=(proof_backup_commit_id if isinstance(proof_backup_commit_id, str) else None),
+        )
+        .successor_task_id
+    )
 
 
 def _coordinates_from_pending_input(pending_input: dict[str, Any]) -> dict[str, Any]:
