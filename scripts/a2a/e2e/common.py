@@ -87,6 +87,8 @@ class ManagedServer:
         allowed_cwd: str,
         env: dict[str, str],
         log_prefix: Path,
+        run_mode: str = "pipeline",
+        server_args: list[str] | None = None,
     ) -> None:
         self._python_cmd = list(python_cmd)
         self._config_path = config_path
@@ -94,18 +96,20 @@ class ManagedServer:
         self._allowed_cwd = allowed_cwd
         self._env = dict(env)
         self._env["PYTHONUTF8"] = "1"
-        self._env["IAC_CODE_MODE"] = "pipeline"
+        self._env["IAC_CODE_MODE"] = run_mode
         allowed = self._env.get("IACCODE_A2A_ALLOWED_CWDS", "")
         if allowed_cwd not in allowed.split(os.pathsep):
             self._env["IACCODE_A2A_ALLOWED_CWDS"] = os.pathsep.join(item for item in [allowed, allowed_cwd] if item)
         self._log_prefix = log_prefix
+        self._server_args = list(server_args) if server_args is not None else None
         self.process: subprocess.Popen[str] | None = None
         self._stdout_handle: Any | None = None
         self._stderr_handle: Any | None = None
         self._tee_threads: list[threading.Thread] = []
 
     def start(self) -> None:
-        cmd = [*self._python_cmd, "-m", "iac_code.cli.main", "a2a", "--config", str(self._config_path)]
+        command = self._server_args or ["-m", "iac_code.cli.main", "a2a", "--config", str(self._config_path)]
+        cmd = [*self._python_cmd, *command]
         self._stdout_handle = (self._log_prefix.with_suffix(".stdout.log")).open("w", encoding="utf-8")
         self._stderr_handle = (self._log_prefix.with_suffix(".stderr.log")).open("w", encoding="utf-8")
         self.process = subprocess.Popen(

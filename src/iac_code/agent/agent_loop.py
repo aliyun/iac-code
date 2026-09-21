@@ -1150,20 +1150,26 @@ class AgentLoop:
         reference into the complete ``session.jsonl`` file.
         """
 
+        def durable_ref(index: int) -> str:
+            ref = f"session.jsonl:{index}"
+            if self._transcript_id is not None:
+                return f"pipeline/transcripts/{self._transcript_id}/{ref}"
+            return ref
+
         message_index = len(self.context_manager.get_messages()) - 1
         storage = self._session_storage
         if storage is None:
-            return f"session.jsonl:{message_index}"
+            return durable_ref(message_index)
         try:
             persisted_messages = storage.load(self._cwd, self._session_id)
         except (OSError, RuntimeError, TypeError, ValueError):
-            return f"session.jsonl:{message_index}"
+            return durable_ref(message_index)
         if not isinstance(persisted_messages, list) or not persisted_messages:
-            return f"session.jsonl:{message_index}"
+            return durable_ref(message_index)
 
         persisted_assistant = persisted_messages[-1]
         if persisted_assistant.role != "assistant":
-            return f"session.jsonl:{message_index}"
+            return durable_ref(message_index)
         persisted_content = (
             [block.model_dump(mode="json") for block in persisted_assistant.content]
             if isinstance(persisted_assistant.content, list)
@@ -1175,7 +1181,7 @@ class AgentLoop:
             and persisted_tool_use_ids == ordered_tool_use_ids
         ):
             message_index = len(persisted_messages) - 1
-        return f"session.jsonl:{message_index}"
+        return durable_ref(message_index)
 
     async def resume_permission_boundary(
         self,
@@ -1615,11 +1621,13 @@ class AgentLoop:
         input_id: str,
         selector_id: str,
         profile_hash: str,
+        selector: Mapping[str, Any],
+        prompt: str,
         response: dict[str, Any],
     ) -> AsyncGenerator[StreamEvent, None]:
         """Resume one durable resource-selector tool call without a new user message."""
 
-        from iac_code.resource_selector.tools import resource_selection_resume_scope
+        from iac_code.resource_selector.tools import resumed_selection_result
 
         messages = self.context_manager.get_messages()
         if not messages or messages[-1].role != "assistant":
@@ -1670,18 +1678,15 @@ class AgentLoop:
             env_overrides=dict(self._tool_context_env_overrides),
             telemetry_attributes=dict(self._telemetry_attributes),
         )
-        with resource_selection_resume_scope(
-            {
-                tool_use.id: {
-                    "input_id": input_id,
-                    "selector_id": selector_id,
-                    "profile_hash": profile_hash,
-                    "response": response,
-                }
-            }
-        ):
-            results = await self._execute_tool_batch_with_execution_control([request], context)
-        result = results[0]
+        result = resumed_selection_result(
+            tool_use_id=tool_use.id,
+            input_id=input_id,
+            selector_id=selector_id,
+            profile_hash=profile_hash,
+            selector=selector,
+            prompt=prompt,
+            response=response,
+        )
         processed = self._result_storage.process(request.id, result.content)
         result_metadata = self._tool_result_event_metadata(result.metadata, processed)
         result_metadata = self._tool_result_render_metadata(
@@ -1720,6 +1725,7 @@ class AgentLoop:
                 Message(role="user", content=[result_block]),
                 git_branch=self._current_git_branch,
             )
+        await execution_checkpoint()
         async for event in self.continue_streaming():
             yield event
 

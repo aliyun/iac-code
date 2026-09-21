@@ -117,7 +117,13 @@ _TERMINAL_A2A_STATUSES = {"completed", "failed", "canceled"}
 _WAITING_A2A_STATUSES = {"waiting_input", "input_required"}
 _RUNNING_A2A_STATUSES = {"working"}
 _SANDBOX_RELEASE_RECOVERABLE_INPUT_KINDS = frozenset(
-    {"ask_user_question", "candidate_selection", "deployment_confirmation", "pipeline_pause_confirmation"}
+    {
+        "ask_user_question",
+        "candidate_selection",
+        "cloud_resource_selection",
+        "deployment_confirmation",
+        "pipeline_pause_confirmation",
+    }
 )
 _PENDING_BACKUP_VISIBILITY = "pending_backup"
 _COMMITTED_BACKUP_VISIBILITY = "committed"
@@ -2396,20 +2402,6 @@ class IacCodeA2APipelineExecutor:
                     next_event = None
 
                 resource_selection = _resource_selection_from_stream_event(event)
-                if resource_selection is not None and event is not resource_selection:
-                    # Parallel candidate streams do not own the parent Pipeline transcript.
-                    # Resolve locally instead of publishing a boundary that cannot be recovered
-                    # from the parent step after a process restart.
-                    future = resource_selection.response_future
-                    if future is not None and not future.done():
-                        future.set_result(
-                            {
-                                "status": "selector_surface_unavailable",
-                                "input_id": resource_selection.input_id,
-                                "selector_id": resource_selection.selector_id,
-                            }
-                        )
-                    continue
 
                 if _is_pipeline_terminal_stream_event(event):
                     terminal_publication = await self._publish_terminal_stream_event(
@@ -2450,7 +2442,7 @@ class IacCodeA2APipelineExecutor:
                     if terminal_handoff_result.attempted:
                         text = None
                     else:
-                        if isinstance(event, CloudResourceSelectionEvent):
+                        if resource_selection is not None:
                             if self._resource_selection_registry is None:
                                 raise RuntimeError("Pipeline resource selection registry is unavailable")
                             if outbound is not None:
@@ -2466,7 +2458,7 @@ class IacCodeA2APipelineExecutor:
                                 context_id=selector_context.context_id,
                                 session_id=selector_session_id,
                                 cwd=selector_cwd,
-                                event=event,
+                                event=resource_selection,
                                 store=store,
                                 resume_from_checkpoint=True,
                             )
@@ -5505,6 +5497,21 @@ def recoverable_task_id_from_sidecar(
     )
     if owner is None:
         return None
+    authoritative_snapshot = _authoritative_snapshot_for_task(
+        snapshot_store=snapshot_store,
+        journal=journal,
+        task_id=owner.task_id,
+        context_id=context_id,
+    )
+    normal_handoff = (
+        authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
+    )
+    if (
+        isinstance(normal_handoff, dict)
+        and normal_handoff.get("action") == "switch_to_normal"
+        and normal_handoff.get("targetMode") == "normal"
+    ):
+        return None
     status = _normalized_a2a_status(owner.status)
     if status in _TERMINAL_A2A_STATUSES:
         return None
@@ -5513,12 +5520,7 @@ def recoverable_task_id_from_sidecar(
     if status not in _WAITING_A2A_STATUSES:
         return None
     pending_input = _pending_input_from_snapshot(
-        _authoritative_snapshot_for_task(
-            snapshot_store=snapshot_store,
-            journal=journal,
-            task_id=owner.task_id,
-            context_id=context_id,
-        ),
+        authoritative_snapshot,
         task_id=owner.task_id,
         context_id=context_id,
     )

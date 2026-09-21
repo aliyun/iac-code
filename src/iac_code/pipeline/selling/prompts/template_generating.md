@@ -20,6 +20,9 @@
 ## ROS 模板来源
 生成后的模板文件路径就是 `{candidate.output_path}`。调用 `ros_validate_template` 校验时，必须传 `template_url = "{candidate.output_path}"`。不要调用 `aliyun_api` 的 ROS `ValidateTemplate` 接口，不要传 `TemplateBody`、`TemplateId` 或 `TemplateScratchId`。
 
+## 已有云资源选择
+候选方案确实需要一个现有云资源或其派生值、且用户尚未给出具体值时，按技能的资源选择器规则在本步骤补齐，再写入模板；不要编造资源 ID，也不要改用 `ask_user_question` 索要 ID。
+
 ## 输出
 文件写入完成后调用 `complete_step` 提交结论。
 

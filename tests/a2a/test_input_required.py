@@ -255,6 +255,59 @@ async def test_natural_completion_fails_closed_for_active_permission(tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_natural_completion_preserves_active_resource_selection(tmp_path, monkeypatch) -> None:
+    class DisabledBackup:
+        def initialize_session(self, *_args, **_kwargs):
+            return None
+
+        def backup_session(self, *_args, **_kwargs):
+            return BackupResult(enabled=False)
+
+    class ResourceRegistry:
+        canceled = False
+
+        async def has_pending_task(self, task_id: str) -> bool:
+            assert task_id == "task-1"
+            return True
+
+        async def cancel_task(self, task_id: str) -> int:
+            assert task_id == "task-1"
+            self.canceled = True
+            return 1
+
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    store = A2ATaskStore(backup_service=DisabledBackup())
+    context = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        runtime_factory=lambda _session_id: object(),
+    )
+    context.active_task_id = None
+    store.mirror_context(context)
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    registry = ResourceRegistry()
+    executor = IacCodeA2AExecutor(
+        task_store=store,
+        model="fake-model",
+        backup_service=DisabledBackup(),
+    )
+    executor._resource_selection_registry = registry
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.sandbox_release_recoverable_task_id_from_sidecar",
+        lambda **_kwargs: "task-1",
+    )
+
+    result = await executor._terminate_detached_execution("ctx-1", "task-1", "natural_completion")
+
+    assert result == "input-required"
+    assert registry.canceled is False
+    assert (await store.get_task_record("task-1")).state == "input-required"
+
+
+@pytest.mark.asyncio
 async def test_terminate_detached_pipeline_permission_cancels_sidecar_without_handoff(tmp_path) -> None:
     from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 
@@ -350,6 +403,7 @@ async def test_terminate_detached_pipeline_permission_cancels_sidecar_without_ha
         ("disconnect_timeout", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
         ("client_disconnect_control_timeout", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
         ("natural_completion", "candidate_selection", {}, False, "input-required", "waiting_input", 0),
+        ("natural_completion", "cloud_resource_selection", {}, False, "input-required", "waiting_input", 0),
         ("disconnect_timeout", "deployment_confirmation", {}, False, "input-required", "waiting_input", 0),
         (
             "disconnect_timeout",

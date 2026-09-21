@@ -27,6 +27,39 @@ bounds one wait step and `--overall-timeout` bounds the whole scenario. Failure
 cleanup releases every marker, closes streams, and stops the server with bounded
 waits.
 
+## Live A2A cloud-resource selection matrix
+
+`resource_selector/run_live_resource_selector.py` starts a real HTTP A2A server and uses the LLM and Alibaba
+Cloud credentials from the selected iac-code configuration. The LLM must actually call
+`resolve_cloud_resource_selector` and `select_cloud_resource`. The runner then consumes the authoritative selector
+contract from A2A `input_required`, calls fixed read-only VPC/VSwitch queries through
+`ResourceSelectorQueryService`, and returns real candidates through the `IAC_CODE_RESOURCE_SELECTION` protocol.
+
+The eight scenarios cover normal selection and a following turn, process restart while selection is pending,
+non-empty cancellation, deterministic empty-list cancellation, sequential VPC-to-VSwitch selection, duplicate and
+conflicting replies, Pipeline-to-Normal handoff before selection, and selection inside a Pipeline step followed by
+handoff. They never create, update, or delete cloud resources. The isolated server configuration denies direct
+`aliyun_api` and ROS resource-operation tools, and its credential copy is removed after the run. The Pipeline cases
+use tiny test-only pipeline definitions while retaining the production A2A Pipeline executor, real agent runtime,
+real provider, selector tools, checkpointing, handoff, and transport code.
+
+```bash
+uv run python scripts/a2a/e2e/resource_selector/run_live_resource_selector.py \
+  --allow-real-cloud \
+  --scenario selected-next-turn \
+  --region cn-hangzhou \
+  --run-dir /tmp/iac-selector-live-selected
+
+IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_E2E=1 \
+uv run pytest -q tests/a2a_e2e/test_live_resource_selector.py
+```
+
+The runner reads `~/.iac-code` by default. Use `--source-config-dir` or
+`IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_CONFIG_DIR` for another configuration. Set
+`IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_SCENARIOS=selected-next-turn` to restrict the pytest entry point to one
+scenario. The live tests are skipped unless explicitly enabled because they consume LLM quota and access the
+configured cloud account.
+
 ## Real StartChat permission-wait matrix
 
 `run_start_chat_permission_wait.py` is the credential-gated, repeatable chain

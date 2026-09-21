@@ -1,10 +1,12 @@
 import asyncio
+import json
 
 import pytest
 
 from iac_code.agent.agent_loop import AgentLoop
 from iac_code.agent.message import Message, ToolUseBlock
 from iac_code.providers.base import ToolDefinition
+from iac_code.resource_selector.profiles import PROFILE_HASH
 from iac_code.services.permission_wait import (
     PermissionWaitPolicy,
     build_permission_checkpoint,
@@ -32,6 +34,82 @@ USER_DENIED_TOOL_RESULT = (
     "The user explicitly denied this tool operation. This is not a cloud API or IAM permission error. "
     "Do not retry this operation or perform the same action with another tool unless the user asks again."
 )
+
+
+@pytest.mark.asyncio
+async def test_resume_resource_selection_completes_private_checkpoint_when_tool_is_unregistered() -> None:
+    class ContinueProvider:
+        def get_model_name(self) -> str:
+            return "fake"
+
+        async def stream(self, messages, system, tools=None):
+            assert not any(tool.name == "select_cloud_resource" for tool in (tools or []))
+            yield MessageStartEvent(message_id="continued")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    tool_input = {
+        "question": "请选择杭州 ECS",
+        "selector_id": "ecs.instance",
+        "association_property_metadata": {"RegionId": "cn-hangzhou"},
+    }
+    assistant = Message(
+        role="assistant",
+        content=[ToolUseBlock(id="select-1", name="select_cloud_resource", input=tool_input)],
+    )
+    digest = canonical_digest([block.model_dump(mode="json") for block in assistant.content])
+    loop = AgentLoop(
+        provider_manager=ContinueProvider(),
+        system_prompt="system",
+        tool_registry=ToolRegistry(),
+        max_turns=1,
+        resume_messages=[assistant],
+    )
+    events = [
+        event
+        async for event in loop.resume_resource_selection_boundary(
+            {
+                "assistantMessageRef": "session.jsonl:0",
+                "assistantMessageDigest": digest,
+                "orderedToolUseIds": ["select-1"],
+                "currentIndex": 0,
+                "currentPayloadDigest": canonical_digest(
+                    {"name": "select_cloud_resource", "input": tool_input}
+                ),
+            },
+            input_id="resource-" + "a" * 32,
+            selector_id="ecs.instance",
+            profile_hash=PROFILE_HASH,
+            selector={
+                "id": "ecs.instance",
+                "associationProperty": "ALIYUN::ECS::Instance::InstanceId",
+                "outputKind": "resource_id",
+                "associationPropertyMetadata": {"RegionId": "cn-hangzhou"},
+                "source": None,
+            },
+            prompt="请选择杭州 ECS",
+            response={
+                "status": "selected",
+                "input_id": "resource-" + "a" * 32,
+                "selector_id": "ecs.instance",
+                "value": "i-test123",
+                "label": "app-server",
+            },
+        )
+    ]
+
+    result = next(event for event in events if isinstance(event, ToolResultEvent))
+    assert result.is_error is False
+    assert json.loads(result.result) == {
+        "association_property": "ALIYUN::ECS::Instance::InstanceId",
+        "kind": "cloud_resource",
+        "label": "app-server",
+        "region_id": "cn-hangzhou",
+        "resource_type": "ALIYUN::ECS::Instance",
+        "schema_version": 1,
+        "selector_id": "ecs.instance",
+        "value": "i-test123",
+        "value_kind": "resource_id",
+    }
 
 
 class WriteTool(Tool):
@@ -355,6 +433,32 @@ async def test_resume_permission_boundary_forwards_tool_progress_events() -> Non
     progress_index = next(index for index, event in enumerate(events) if isinstance(event, StackProgressEvent))
     result_index = next(index for index, event in enumerate(events) if isinstance(event, ToolResultEvent))
     assert progress_index < result_index
+
+
+def test_pipeline_canonical_assistant_message_ref_includes_transcript_path() -> None:
+    assistant = Message(
+        role="assistant",
+        content=[ToolUseBlock(id="tool-1", name="write_test", input={"value": "same"})],
+    )
+    loop = AgentLoop(
+        provider_manager=FakeProviderManager(),
+        system_prompt="system",
+        tool_registry=ToolRegistry(),
+        max_turns=1,
+        resume_messages=[assistant],
+        session_id="transcript-step-1",
+        root_session_id="root-session",
+        transcript_id="transcript-step-1",
+    )
+
+    message_ref = loop._canonical_permission_assistant_message_ref(
+        assistant_message_digest=canonical_digest(
+            [block.model_dump(mode="json") for block in assistant.content]
+        ),
+        ordered_tool_use_ids=["tool-1"],
+    )
+
+    assert message_ref == "pipeline/transcripts/transcript-step-1/session.jsonl:0"
 
 
 @pytest.mark.asyncio

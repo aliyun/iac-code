@@ -407,6 +407,8 @@ class StepExecutor:
                     input_id=str(resource_selection_checkpoint.get("inputId") or ""),
                     selector_id=str(selector.get("id") or ""),
                     profile_hash=str(resource_selection_checkpoint.get("profileHash") or ""),
+                    selector=selector,
+                    prompt=str(resource_selection_checkpoint.get("prompt") or ""),
                     response=tool_response,
                 )
             elif permission_checkpoint is not None:

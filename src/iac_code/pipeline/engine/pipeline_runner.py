@@ -1976,7 +1976,30 @@ class PipelineRunner:
         self,
         checkpoint: dict[str, Any],
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
-        """Resume the current top-level step from an exact selector boundary."""
+        """Resume the current parent or candidate step from an exact selector boundary."""
+
+        coordinates = checkpoint.get("pipelineCoordinates")
+        candidate_coordinate = coordinates.get("candidate") if isinstance(coordinates, dict) else None
+        candidate_index = candidate_coordinate.get("index") if isinstance(candidate_coordinate, dict) else None
+        if isinstance(candidate_index, int):
+            current_step = self.state_machine.current_step
+            if current_step.step_type != PipelineStepType.PARALLEL_SUB_PIPELINE.value:
+                raise ValueError("resource_selection_resume_invalid: pipeline coordinates changed")
+            previous = getattr(self, "_restored_candidate_resource_selection", None)
+            self._restored_candidate_resource_selection = {
+                "candidate_index": candidate_index,
+                "checkpoint": checkpoint,
+            }
+            try:
+                async for event in self._continue_from_current(resume_running_step=True):
+                    yield event
+            finally:
+                if previous is None:
+                    if hasattr(self, "_restored_candidate_resource_selection"):
+                        delattr(self, "_restored_candidate_resource_selection")
+                else:
+                    self._restored_candidate_resource_selection = previous
+            return
 
         transcript_id = self._execution.get("transcript_id") if isinstance(self._execution, dict) else None
         transcript_id = transcript_id if isinstance(transcript_id, str) else None
@@ -4041,6 +4064,13 @@ class PipelineRunner:
         precompleted_tools = restored_ask.get("precompleted_tools") if restored_ask is not None else None
         return precompleted_tools if isinstance(precompleted_tools, dict) else None
 
+    def _candidate_resource_selection_checkpoint(self, candidate_index: int) -> dict[str, Any] | None:
+        restored = getattr(self, "_restored_candidate_resource_selection", None)
+        if not isinstance(restored, dict) or restored.get("candidate_index") != candidate_index:
+            return None
+        checkpoint = restored.get("checkpoint")
+        return checkpoint if isinstance(checkpoint, dict) else None
+
     def _requested_candidate_indices(self, scope: str | None) -> list[int]:
         """Resolve a candidate_scope verdict to concrete candidate indices.
 
@@ -5362,6 +5392,7 @@ class PipelineRunner:
                 ask_user_message = self._candidate_user_message_for_restored_ask_user_question(i)
                 candidate_resume_messages = self._candidate_resume_messages_for_restored_ask_user_question(i)
                 candidate_precompleted_tools = self._candidate_precompleted_tools_for_restored_ask_user_question(i)
+                candidate_resource_selection_checkpoint = self._candidate_resource_selection_checkpoint(i)
                 if ask_user_message is not None:
                     candidate_user_message = ask_user_message
                 parameters = inspect.signature(execute_streaming).parameters
@@ -5392,6 +5423,8 @@ class PipelineRunner:
                         recovery_kwargs["precompleted_tools"] = candidate_precompleted_tools
                     if "resume_messages" in parameters or has_var_keyword:
                         recovery_kwargs["resume_messages"] = candidate_resume_messages
+                    if "resource_selection_checkpoint" in parameters or has_var_keyword:
+                        recovery_kwargs["resource_selection_checkpoint"] = candidate_resource_selection_checkpoint
                     event_stream = execute_streaming(**stream_kwargs, **recovery_kwargs)
                 else:
                     event_stream = execute_streaming(**stream_kwargs)

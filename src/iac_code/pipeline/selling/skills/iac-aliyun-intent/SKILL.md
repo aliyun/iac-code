@@ -179,6 +179,8 @@ conclusion_schema:
 
 澄清方向不是询问用户是否要使用 IaC。AI 售卖流程默认就是把部署/云资源需求收敛为方案；澄清问题应帮助用户补齐部署意图、架构偏好和约束。
 
+已有云资源的具体 ID、名称或派生值不属于意图澄清。用户已经明确要复用或引用某类资源时，记录对应的 `action: "use_existing"`/`"reference"` 并继续；禁止用 `ask_user_question` 索要资源 ID/名称，也禁止先用 `aliyun_api` 枚举资源再让用户从文本选项中选择。具体值由后续模板生成步骤的资源选择器补齐。
+
 `ask_user_question.options[].id` 必须由当前问题动态生成。不要在 skill 中假设或依赖固定 selected_id；后续判断要结合 `selected_label` 和 `free_text` 的实际语义。
 
 每次 `ask_user_question` 只问一个问题：聚焦当前最关键的一个缺口，不要把多个问题塞进同一个 `question`，也不要把不同问题的候选混进同一个 `options`。`options` 只应是这一个问题下互斥的答案。若还有其它缺口，等这一轮用户回答回到同一个 AgentLoop 后再问下一个，或直接基于已有信息 `complete_step`。

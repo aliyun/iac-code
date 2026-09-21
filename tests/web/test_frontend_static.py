@@ -1770,7 +1770,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-323" in html
-    assert "/static/js/app.js?v=web-repl-ui-375" in html
+    assert "/static/js/app.js?v=web-repl-ui-380" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1781,7 +1781,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
     assert "./components/tool_cards.js?v=live-inline-tools-v26" in app_source
-    assert "./components/blocking.js?v=blocking-keys-v8" in app_source
+    assert "./components/blocking.js?v=blocking-keys-v13" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
     # 否则回访浏览器会加载「新 app.js + 旧缓存 events.js」,让队列行为与当前代码不一致。
     assert 'from "./events.js?v=' in app_source
@@ -1804,7 +1804,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-375" in index_html
+    assert "web-repl-ui-380" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-324" in app_source
@@ -11405,7 +11405,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-375" in html
+    assert "web-repl-ui-380" in html
     assert "web-repl-ui-343" not in html
 
 
@@ -11535,7 +11535,7 @@ def test_resource_selector_preserves_selection_across_app_renders() -> None:
     # standalone bundle's controlled selection contract.
     assert "selection: candidate" in blocking
     assert "resourceSelectionCandidates.delete(requestId)" in blocking
-    assert "ore-resource-selector.min.js?v=16" in blocking
+    assert "ore-resource-selector.min.js?v=23" in blocking
 
 
 def test_resource_selector_external_links_use_host_opener(tmp_path: Path) -> None:

@@ -34,6 +34,7 @@ from iac_code.a2a.pipeline_journal import A2APipelineJournal
 from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
 from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipeline_events
 from iac_code.a2a.request_scoped_active_task import PipelineLifecycleEventQueueCarrier
+from iac_code.a2a.resource_selector import ResourceSelectionResponse
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import ImageBlock, Message, TextBlock
 from iac_code.commands.registry import CommandRegistry, PromptCommand
@@ -391,6 +392,111 @@ async def test_handoff_normal_permission_is_restored_from_pipeline_snapshot(
     normal_events = [event for event in journal.read_all() if event.get("scope") == "normal"]
     assert [event["eventType"] for event in normal_events] == ["permission_requested", "permission_resolved"]
     assert [event["sequence"] for event in normal_events] == [3, 4]
+
+
+@pytest.mark.asyncio
+async def test_handoff_normal_resource_selection_is_restored_from_pipeline_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from iac_code.a2a.executor import (
+        _persist_normal_resource_selection_snapshot_request,
+        _persist_normal_resource_selection_snapshot_resolution,
+    )
+
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    cwd = tmp_path / "workspace"
+    cwd.mkdir()
+    session_id = "session-normal-resource"
+    context_id = "ctx-normal-resource"
+    _ensure_v2_session(str(cwd), session_id)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id=session_id)
+    handoff_events = _committed_normal_handoff_events(
+        context_id=context_id,
+        task_id="task-pipeline",
+        summary="handoff",
+    )
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append_many(handoff_events, durable=True)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    snapshot_store.save(reduce_pipeline_events(handoff_events))
+
+    input_id = "resource-" + "a" * 32
+    selection_envelope = {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "requestTaskId": "task-normal",
+        "contextId": context_id,
+        "inputId": input_id,
+        "toolUseId": "tool-normal-resource",
+        "prompt": "请选择一个 VPC",
+        "required": True,
+        "selector": {
+            "id": "vpc.vpc",
+            "associationProperty": "ALIYUN::ECS::VPC",
+            "outputKind": "resource_id",
+            "associationPropertyMetadata": {"RegionId": "cn-hangzhou"},
+            "source": None,
+        },
+    }
+    pending = SimpleNamespace(
+        event=SimpleNamespace(input_id=input_id),
+        envelope=lambda: dict(selection_envelope),
+    )
+    await _persist_normal_resource_selection_snapshot_request(
+        cwd=str(cwd),
+        session_id=session_id,
+        pending=pending,
+    )
+
+    requested_snapshot = snapshot_store.load()
+    assert requested_snapshot is not None
+    requested_history = requested_snapshot["control"]["inputHistory"]
+    assert len(requested_history) == 1
+    assert requested_history[0]["eventType"] == "input_required"
+    assert requested_history[0]["scope"] == "normal"
+    assert requested_history[0]["input"] == selection_envelope
+    assert requested_snapshot["pendingInput"]["inputId"] == input_id
+    assert requested_snapshot["pendingInput"]["scope"] == "normal"
+    assert requested_snapshot["status"] == "completed"
+    assert recoverable_task_id_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+    ) is None
+
+    response = ResourceSelectionResponse(
+        task_id="task-normal",
+        context_id=context_id,
+        input_id=input_id,
+        tool_use_id="tool-normal-resource",
+        status="selected",
+        selector_id="vpc.vpc",
+        value="vpc-test",
+        label="test-vpc",
+    )
+    assert await _persist_normal_resource_selection_snapshot_resolution(
+        cwd=str(cwd),
+        session_id=session_id,
+        response=response,
+    )
+
+    resolved_snapshot = snapshot_store.load()
+    assert resolved_snapshot is not None
+    resolved_history = resolved_snapshot["control"]["inputHistory"]
+    assert [item["eventType"] for item in resolved_history] == ["input_required", "input_received"]
+    assert resolved_history[1]["data"] == response.to_dict()
+    assert resolved_snapshot["pendingInput"] is None
+    assert resolved_snapshot["status"] == "completed"
+    assert recoverable_task_id_from_sidecar(
+        cwd=str(cwd),
+        session_id=session_id,
+        context_id=context_id,
+    ) is None
+    normal_events = [event for event in journal.read_all() if event.get("scope") == "normal"]
+    assert [event["eventType"] for event in normal_events] == ["input_required", "input_received"]
 
 
 @pytest.mark.asyncio
@@ -2937,7 +3043,10 @@ async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
 
 
 @pytest.mark.asyncio
-async def test_executor_marks_failed_response_as_natural_completion(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("terminal_state", ["failed", "canceled"])
+async def test_executor_marks_terminal_response_as_natural_completion(
+    monkeypatch, tmp_path: Path, terminal_state: str
+) -> None:
     observed: dict[str, object] = {}
 
     class Control:
@@ -2974,7 +3083,7 @@ async def test_executor_marks_failed_response_as_natural_completion(monkeypatch,
     )
 
     async def fail_execution(*_args, **_kwargs) -> None:
-        record.state = "failed"
+        record.state = terminal_state
         bind_execution_control(Control())
 
     monkeypatch.setattr(executor, "_execute", fail_execution)
@@ -2990,7 +3099,7 @@ async def test_executor_marks_failed_response_as_natural_completion(monkeypatch,
     await executor.execute(context, FakeEventQueue())
 
     assert observed == {
-        "execution_status": "failed",
+        "execution_status": terminal_state,
         "natural_completion": True,
         "finalized_generation": 17,
     }
@@ -5219,11 +5328,113 @@ async def test_executor_refreshes_cloud_tools_with_aliyun_metadata_for_reused_co
 
 
 @pytest.mark.asyncio
-async def test_a2a_normal_selector_registration_tracks_capability_and_request_credentials(
+async def test_live_resource_selection_does_not_wait_for_its_own_pipeline_release() -> None:
+    class Control:
+        task_id = "task-1"
+        phase = "running"
+
+        def input_handoff_ready(self) -> bool:
+            return False
+
+    class ExecutionControlService:
+        def get_for_context(self, context_id: str):
+            assert context_id == "ctx-1"
+            return Control()
+
+        async def wait_until_recoverable_input_continuation(self, **_kwargs) -> None:
+            raise AssertionError("live resource selection must release the current producer")
+
+    class ResourceSelectionRegistry:
+        async def has_pending_task(self, task_id: str) -> bool:
+            assert task_id == "task-1"
+            return True
+
+    executor = IacCodeA2AExecutor.__new__(IacCodeA2AExecutor)
+    executor._execution_control_service = ExecutionControlService()
+    executor._resource_selection_registry = ResourceSelectionRegistry()
+
+    assert executor.can_continue_live_pipeline_input(context_id="ctx-1", task_id="task-1") is True
+    await executor.wait_until_recoverable_pipeline_input(context_id="ctx-1", task_id="task-1")
+
+
+@pytest.mark.asyncio
+async def test_live_permission_does_not_wait_for_its_own_pipeline_release() -> None:
+    class Control:
+        task_id = "task-1"
+        phase = "running"
+
+        def input_handoff_ready(self) -> bool:
+            return False
+
+    class ExecutionControlService:
+        def get_for_context(self, context_id: str):
+            assert context_id == "ctx-1"
+            return Control()
+
+        async def wait_until_recoverable_input_continuation(self, **_kwargs) -> None:
+            raise AssertionError("live permission must release the current producer")
+
+    class EmptyResourceSelectionRegistry:
+        async def has_pending_task(self, task_id: str) -> bool:
+            assert task_id == "task-1"
+            return False
+
+    class PermissionInputRegistry:
+        async def has_pending_task(self, task_id: str) -> bool:
+            assert task_id == "task-1"
+            return True
+
+    executor = IacCodeA2AExecutor.__new__(IacCodeA2AExecutor)
+    executor._execution_control_service = ExecutionControlService()
+    executor._resource_selection_registry = EmptyResourceSelectionRegistry()
+    executor._permission_input_registry = PermissionInputRegistry()
+
+    await executor.wait_until_recoverable_pipeline_input(context_id="ctx-1", task_id="task-1")
+
+
+@pytest.mark.asyncio
+async def test_durable_pipeline_input_waits_for_recoverable_release() -> None:
+    class Control:
+        task_id = "task-1"
+        phase = "running"
+
+        def input_handoff_ready(self) -> bool:
+            return True
+
+    class ExecutionControlService:
+        waited = False
+
+        def get_for_context(self, context_id: str):
+            assert context_id == "ctx-1"
+            return Control()
+
+        async def wait_until_recoverable_input_continuation(self, **kwargs) -> None:
+            assert kwargs["context_id"] == "ctx-1"
+            assert kwargs["task_id"] == "task-1"
+            self.waited = True
+
+    class PendingRegistry:
+        async def has_pending_task(self, task_id: str) -> bool:
+            assert task_id == "task-1"
+            return True
+
+    service = ExecutionControlService()
+    executor = IacCodeA2AExecutor.__new__(IacCodeA2AExecutor)
+    executor._execution_control_service = service
+    executor._resource_selection_registry = PendingRegistry()
+    executor._permission_input_registry = PendingRegistry()
+
+    assert executor.can_continue_live_pipeline_input(context_id="ctx-1", task_id="task-1") is False
+    await executor.wait_until_recoverable_pipeline_input(context_id="ctx-1", task_id="task-1")
+
+    assert service.waited is True
+
+
+@pytest.mark.asyncio
+async def test_a2a_normal_selector_registration_tracks_server_flag_and_request_credentials(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    from iac_code.resource_selector.profiles import PROFILE_HASH
     from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
@@ -5273,9 +5484,9 @@ async def test_a2a_normal_selector_registration_tracks_capability_and_request_cr
     )
     executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
     capability = {
-        "schemaVersion": 1,
-        "queryMode": "ros_api_json",
-        "profileHash": PROFILE_HASH,
+        "schemaVersion": 999,
+        "queryMode": "legacy-value-is-ignored",
+        "profileHash": "sha256:legacy-value-is-ignored",
     }
 
     def request_metadata(*, advertise_selector: bool, include_credential: bool) -> dict:
@@ -5321,7 +5532,7 @@ async def test_a2a_normal_selector_registration_tracks_capability_and_request_cr
         await runtime.aclose()
 
     assert observed == [
-        (True, False, False),
+        (True, True, True),
         (True, True, True),
         (False, False, False),
     ]

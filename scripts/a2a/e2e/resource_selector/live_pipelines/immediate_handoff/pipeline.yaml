@@ -1,0 +1,27 @@
+name: immediate_handoff
+
+on_complete:
+  action: switch_to_normal
+  apply_on: [completed]
+  handoff_context:
+    include: [handoff]
+
+context_dependencies:
+  handoff: []
+
+max_rollbacks: 0
+
+steps:
+  - id: prepare_normal_chat
+    conclusion_field: handoff
+    forward: null
+    prompt: prompts/prepare_normal_chat.md
+    max_agent_turns: 4
+    conclusion_schema:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ready

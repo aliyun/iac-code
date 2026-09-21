@@ -15,9 +15,18 @@
           "product": "ecs",
           "action": "DescribeInstances",
           "allowedParameters": [
+            "InstanceChargeType",
             "InstanceName",
+            "InstanceNetworkType",
+            "InstanceType",
+            "InstanceTypeFamily",
+            "InternetChargeType",
             "MaxResults",
-            "NextToken"
+            "NextToken",
+            "OSType",
+            "RegionId",
+            "ResourceGroupId",
+            "Status"
           ]
         }
       ]
@@ -30,7 +39,10 @@
           "requestKind": "dataApi",
           "product": "ecs",
           "action": "DescribeAvailableResource",
-          "allowedParameters": []
+          "allowedParameters": [
+            "DestinationResource",
+            "RegionId"
+          ]
         },
         {
           "key": "vpc.vswitch.dataapi.ecs.describesecuritygroups",
@@ -61,7 +73,10 @@
           "allowedParameters": [
             "PageNumber",
             "PageSize",
-            "VSwitchName"
+            "RegionId",
+            "VSwitchName",
+            "VpcId",
+            "ZoneId"
           ]
         }
       ]
@@ -77,7 +92,10 @@
           "allowedParameters": [
             "PageNumber",
             "PageSize",
-            "SearchKey"
+            "RegionId",
+            "SearchKey",
+            "VpcId",
+            "ZoneId"
           ]
         }
       ]
@@ -117,6 +135,7 @@
           "action": "GetBucket",
           "allowedParameters": [
             "BucketName",
+            "RegionId",
             "delimiter",
             "marker",
             "max-keys",
@@ -134,9 +153,17 @@
           "product": "r-kvstore",
           "action": "DescribeInstances",
           "allowedParameters": [
+            "ChargeType",
+            "EditionType",
+            "InstanceClass",
+            "InstanceStatus",
+            "InstanceType",
+            "NetworkType",
             "PageNumber",
             "PageSize",
-            "SearchKey"
+            "RegionId",
+            "SearchKey",
+            "VpcId"
           ]
         }
       ]
@@ -149,7 +176,10 @@
           "requestKind": "dataApi",
           "product": "r-kvstore",
           "action": "DescribeDBInstanceNetInfo",
-          "allowedParameters": []
+          "allowedParameters": [
+            "InstanceId",
+            "RegionId"
+          ]
         }
       ]
     },
@@ -162,7 +192,6 @@
           "product": "ecs",
           "action": "DescribeManagedInstances",
           "allowedParameters": [
-            "OsType",
             "PageNumber",
             "RegionId"
           ]
@@ -178,16 +207,10 @@
           "product": "ecs",
           "action": "DescribeDisks",
           "allowedParameters": [
-            "Category",
-            "DiskChargeType",
-            "DiskType",
-            "InstanceId",
             "PageNumber",
             "PageSize",
             "RegionId",
-            "SnapshotId",
-            "Tag",
-            "ZoneId"
+            "Tag"
           ]
         }
       ]
@@ -201,18 +224,13 @@
           "product": "ecs",
           "action": "DescribeImages",
           "allowedParameters": [
-            "Architecture",
-            "ImageFamily",
             "ImageId",
             "ImageOwnerAlias",
-            "InstanceType",
             "IsSupportCloudinit",
             "IsSupportIoOptimized",
-            "OSType",
             "PageNumber",
             "PageSize",
-            "RegionId",
-            "Usage"
+            "RegionId"
           ]
         }
       ]
@@ -226,13 +244,9 @@
           "product": "ecs",
           "action": "DescribeSecurityGroups",
           "allowedParameters": [
-            "NetworkType",
             "PageNumber",
             "PageSize",
-            "RegionId",
-            "ResourceGroupId",
-            "SecurityGroupType",
-            "VpcId"
+            "RegionId"
           ]
         }
       ]
@@ -246,13 +260,8 @@
           "product": "ecs",
           "action": "DescribeSnapshots",
           "allowedParameters": [
-            "Category",
-            "DiskId",
-            "InstanceId",
             "PageNumber",
-            "RegionId",
-            "SnapshotType",
-            "Status"
+            "RegionId"
           ]
         }
       ]
@@ -268,7 +277,6 @@
           "allowedParameters": [
             "CommandId",
             "PageNumber",
-            "Provider",
             "RegionId"
           ]
         },
@@ -279,6 +287,7 @@
           "action": "DescribeImages",
           "allowedParameters": [
             "ImageId",
+            "Provider",
             "RegionId"
           ]
         }
@@ -339,11 +348,9 @@
           "product": "ecs",
           "action": "DescribeDeploymentSets",
           "allowedParameters": [
-            "NetworkType",
             "PageNumber",
             "PageSize",
-            "RegionId",
-            "Strategy"
+            "RegionId"
           ]
         }
       ]
@@ -484,13 +491,8 @@
           "product": "vpc",
           "action": "DescribeNatGateways",
           "allowedParameters": [
-            "InstanceChargeType",
-            "NatType",
-            "NetworkType",
             "PageNumber",
-            "RegionId",
-            "VpcId",
-            "ZoneId"
+            "RegionId"
           ]
         }
       ]
@@ -504,11 +506,9 @@
           "product": "vpc",
           "action": "DescribeEipAddresses",
           "allowedParameters": [
-            "ChargeType",
             "PageNumber",
             "PageSize",
-            "RegionId",
-            "Status"
+            "RegionId"
           ]
         }
       ]
@@ -537,8 +537,7 @@
           "action": "DescribeCens",
           "allowedParameters": [
             "PageNumber",
-            "PageSize",
-            "ResourceGroupId"
+            "PageSize"
           ]
         }
       ]
@@ -569,17 +568,9 @@
           "product": "slb",
           "action": "DescribeLoadBalancers",
           "allowedParameters": [
-            "AddressType",
-            "InternetChargeType",
-            "MasterZoneId",
-            "NetworkType",
             "PageNumber",
             "PageSize",
-            "PayType",
-            "RegionId",
-            "SlaveZoneId",
-            "VSwitchId",
-            "VpcId"
+            "RegionId"
           ]
         }
       ]
@@ -593,7 +584,6 @@
           "product": "slb",
           "action": "DescribeAccessControlLists",
           "allowedParameters": [
-            "AddressIPVersion",
             "PageNumber",
             "PageSize",
             "RegionId"
@@ -620,8 +610,7 @@
           "product": "slb",
           "action": "DescribeServerCertificates",
           "allowedParameters": [
-            "RegionId",
-            "ResourceGroupId"
+            "RegionId"
           ]
         }
       ]
@@ -635,10 +624,8 @@
           "product": "nlb",
           "action": "ListLoadBalancers",
           "allowedParameters": [
-            "AddressType",
             "MaxResults",
-            "RegionId",
-            "ZoneId"
+            "RegionId"
           ]
         }
       ]
@@ -680,11 +667,8 @@
           "product": "alb",
           "action": "ListLoadBalancers",
           "allowedParameters": [
-            "AddressType",
             "MaxResults",
-            "PayType",
-            "RegionId",
-            "ZoneId"
+            "RegionId"
           ]
         }
       ]
@@ -714,9 +698,7 @@
           "action": "ListUserCertificateOrder",
           "allowedParameters": [
             "OrderType",
-            "RegionId",
-            "ResourceGroupId",
-            "Status"
+            "RegionId"
           ]
         }
       ]
@@ -780,12 +762,7 @@
           "product": "eci",
           "action": "DescribeContainerGroups",
           "allowedParameters": [
-            "ComputeCategory",
-            "RegionId",
-            "SecurityGroupId",
-            "Status",
-            "VSwitchId",
-            "ZoneId"
+            "RegionId"
           ]
         }
       ]
@@ -800,13 +777,8 @@
           "action": "DescribeClustersV1",
           "allowedParameters": [
             "RegionId",
-            "cluster_id",
-            "cluster_spec",
-            "cluster_type",
-            "name",
             "page_number",
             "page_size",
-            "profile",
             "region_id"
           ]
         }
@@ -899,8 +871,6 @@
           "action": "ListClusters",
           "allowedParameters": [
             "ClusterStates",
-            "ClusterTypes",
-            "PaymentTypes",
             "RegionId"
           ]
         }
@@ -917,9 +887,7 @@
           "allowedParameters": [
             "PageNumber",
             "PageSize",
-            "RegionId",
-            "ServiceType",
-            "SupportEngine"
+            "RegionId"
           ]
         }
       ]
@@ -933,8 +901,7 @@
           "product": "hologram_2022",
           "action": "ListInstances",
           "allowedParameters": [
-            "RegionId",
-            "cmsInstanceType"
+            "RegionId"
           ]
         }
       ]
@@ -948,8 +915,7 @@
           "product": "centaur-console",
           "action": "ListClusters",
           "allowedParameters": [
-            "PageNumber",
-            "PageSize"
+            "ClusterType"
           ]
         }
       ]
@@ -981,8 +947,7 @@
             "BucketName",
             "RegionId",
             "delimiter",
-            "max-keys",
-            "prefix"
+            "max-keys"
           ]
         }
       ]
@@ -996,10 +961,8 @@
           "product": "nas",
           "action": "DescribeFileSystems",
           "allowedParameters": [
-            "FileSystemType",
             "PageNumber",
-            "RegionId",
-            "VpcId"
+            "RegionId"
           ]
         }
       ]
@@ -1103,8 +1066,7 @@
           "product": "ram",
           "action": "ListPolicies",
           "allowedParameters": [
-            "MaxItems",
-            "PolicyType"
+            "MaxItems"
           ]
         }
       ]
@@ -1246,7 +1208,6 @@
           "product": "kms",
           "action": "ListKeys",
           "allowedParameters": [
-            "Filters",
             "PageNumber",
             "PageSize",
             "RegionId"
@@ -1306,9 +1267,7 @@
           "allowedParameters": [
             "DirectoryId",
             "MaxResults",
-            "ProvisionType",
-            "RegionId",
-            "Status"
+            "RegionId"
           ]
         }
       ]
@@ -1324,7 +1283,6 @@
           "allowedParameters": [
             "DirectoryId",
             "MaxResults",
-            "ProvisionType",
             "RegionId"
           ]
         }
@@ -1341,8 +1299,7 @@
           "allowedParameters": [
             "DirectoryId",
             "MaxResults",
-            "RegionId",
-            "StatusNotifications"
+            "RegionId"
           ]
         }
       ]
@@ -1356,7 +1313,6 @@
           "product": "cr",
           "action": "ListInstance",
           "allowedParameters": [
-            "InstanceStatus",
             "PageNo",
             "RegionId"
           ]
@@ -1391,8 +1347,6 @@
             "InstanceId",
             "PageNo",
             "RegionId",
-            "RepoName",
-            "RepoNamespaceName",
             "RepoStatus"
           ]
         }
@@ -1426,8 +1380,7 @@
           "action": "ListNamespace",
           "allowedParameters": [
             "Page",
-            "RegionId",
-            "Status"
+            "RegionId"
           ]
         }
       ]
@@ -1441,13 +1394,8 @@
           "product": "fc-api",
           "action": "ListServices",
           "allowedParameters": [
-            "X-Fc-Account-Id",
-            "X-Fc-Date",
-            "X-Fc-Trace-Id",
             "limit",
-            "prefix",
-            "regionId",
-            "startKey"
+            "regionId"
           ]
         }
       ]
@@ -1461,15 +1409,9 @@
           "product": "fc-api",
           "action": "ListFunctions",
           "allowedParameters": [
-            "X-Fc-Account-Id",
-            "X-Fc-Date",
-            "X-Fc-Trace-Id",
             "limit",
-            "prefix",
-            "qualifier",
             "regionId",
-            "serviceName",
-            "startKey"
+            "serviceName"
           ]
         }
       ]
@@ -1484,7 +1426,6 @@
           "action": "ListFunctions",
           "allowedParameters": [
             "limit",
-            "prefix",
             "regionId"
           ]
         }
@@ -1501,16 +1442,6 @@
           "allowedParameters": [
             "Filter.1.Name",
             "Filter.1.Value.1",
-            "Filter.2.Name",
-            "Filter.2.Value.1",
-            "Filter.3.Name",
-            "Filter.3.Value.1",
-            "Filter.4.Name",
-            "Filter.4.Value.1",
-            "Filter.5.Name",
-            "Filter.5.Value.1",
-            "Filter.6.Name",
-            "Filter.6.Value.1",
             "RegionId"
           ]
         }
@@ -1526,8 +1457,6 @@
           "action": "ListServices",
           "allowedParameters": [
             "AllVersions",
-            "Filter.1.Name",
-            "Filter.2.Name",
             "MaxResults",
             "RegionId"
           ]
@@ -1556,9 +1485,6 @@
           "product": "computenest0521",
           "action": "ListArtifacts",
           "allowedParameters": [
-            "ArtifactType",
-            "Filter.1.Name",
-            "Filter.1.Values.1",
             "RegionId"
           ]
         }
@@ -1574,8 +1500,6 @@
           "action": "ListServices",
           "allowedParameters": [
             "AllVersions",
-            "Filter.1.Name",
-            "Filter.2.Name",
             "MaxResults",
             "RegionId"
           ]
@@ -1696,8 +1620,7 @@
           "action": "DescribePolicyGroups",
           "allowedParameters": [
             "MaxResults",
-            "RegionId",
-            "Scope"
+            "RegionId"
           ]
         }
       ]
@@ -1729,8 +1652,6 @@
           "product": "APIG",
           "action": "ListGateways",
           "allowedParameters": [
-            "gatewayType",
-            "keyword",
             "pageNumber",
             "pageSize",
             "regionId"
@@ -1748,8 +1669,7 @@
           "action": "ListInstances",
           "allowedParameters": [
             "PageSize",
-            "RegionId",
-            "Status"
+            "RegionId"
           ]
         }
       ]
@@ -1892,10 +1812,7 @@
           "requestKind": "dataApi",
           "product": "oos",
           "action": "ListApplications",
-          "allowedParameters": [
-            "ApplicationType",
-            "Tags"
-          ]
+          "allowedParameters": []
         }
       ]
     },
@@ -1909,7 +1826,6 @@
           "action": "ListApplicationGroups",
           "allowedParameters": [
             "ApplicationName",
-            "DeployRegionId",
             "MaxResults"
           ]
         }
@@ -1924,8 +1840,7 @@
           "product": "oos",
           "action": "ListGitAccounts",
           "allowedParameters": [
-            "Platform",
-            "RoleName"
+            "Platform"
           ]
         }
       ]
@@ -1954,7 +1869,6 @@
           "product": "oos",
           "action": "ListGitRepositories",
           "allowedParameters": [
-            "OrgName",
             "Owner",
             "PageNumber",
             "PageSize",
@@ -1990,7 +1904,6 @@
           "product": "oos",
           "action": "ListPatchBaselines",
           "allowedParameters": [
-            "Name",
             "RegionId"
           ]
         }
@@ -2178,7 +2091,6 @@
           "action": "ListDomains",
           "allowedParameters": [
             "gatewayId",
-            "gatewayType",
             "pageNumber",
             "pageSize",
             "regionId"

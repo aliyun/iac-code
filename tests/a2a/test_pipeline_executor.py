@@ -4003,7 +4003,7 @@ async def test_sub_pipeline_permission_stays_working_without_global_pause(
 
 
 @pytest.mark.asyncio
-async def test_sub_pipeline_resource_selection_reports_surface_unavailable(
+async def test_sub_pipeline_resource_selection_publishes_recoverable_input(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -4024,6 +4024,13 @@ async def test_sub_pipeline_resource_selection_reports_surface_unavailable(
                     association_property_metadata={"RegionId": "cn-hangzhou"},
                     source=None,
                     profile_hash=PROFILE_HASH,
+                    continuation_frame={
+                        "assistantMessageRef": "pipeline/transcripts/transcript_att_0001/session.jsonl:0",
+                        "assistantMessageDigest": "a" * 64,
+                        "orderedToolUseIds": ["tool-1"],
+                        "currentIndex": 0,
+                        "currentPayloadDigest": "b" * 64,
+                    },
                     response_future=future,
                 ),
             )
@@ -4034,16 +4041,24 @@ async def test_sub_pipeline_resource_selection_reports_surface_unavailable(
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
     executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
 
+    queue = FakeEventQueue()
     await executor.execute(
         FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}),
-        FakeEventQueue(),
+        queue,
     )
 
-    assert future.result() == {
-        "status": "selector_surface_unavailable",
-        "input_id": "resource-" + "a" * 32,
-        "selector_id": "ecs.instance",
-    }
+    dumped_events = [dump(event) for event in queue.events]
+    resource_inputs = [
+        event
+        for event in dumped_events
+        if event.get("metadata", {}).get("iac_code", {}).get("input", {}).get("kind")
+        == "cloud_resource_selection"
+    ]
+    assert resource_inputs, dumped_events
+    resource_event = resource_inputs[0]
+    assert resource_event["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+    assert resource_event["metadata"]["iac_code"]["pipeline"]["candidate"]["index"] == 0
+    assert not future.done()
 
 
 @pytest.mark.asyncio

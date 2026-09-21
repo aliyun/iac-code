@@ -76,6 +76,22 @@ msgid ""
 msgstr "クリーンアップ状態を利用できません。セッションファイルとクラウドリソースを手動で確認してください。"
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot could not be persisted."
+msgstr "通常チャットのリソース選択復元スナップショットを保存できませんでした。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot is already resolved."
+msgstr "通常チャットのリソース選択復元スナップショットはすでに解決済みです。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore response conflicts with the snapshot."
+msgstr "通常チャットのリソース選択復元応答がスナップショットと競合しています。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot identity is incomplete."
+msgstr "通常チャットのリソース選択復元スナップショットの識別情報が不完全です。"
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot could not be persisted."
 msgstr "通常チャットの権限復元スナップショットを保存できませんでした。"
 

@@ -807,6 +807,29 @@ class TestStepOneContract:
         assert "统一由下一步处理" in skill_text
         assert "status: awaiting_selection" in skill_text
 
+    def test_existing_resource_identity_is_deferred_to_resource_selector(self, prompt_text, skill_text):
+        for text in (prompt_text, skill_text):
+            assert "具体 ID、名称或派生值" in text
+            assert "ask_user_question" in text
+            assert "资源选择器" in text
+            assert "生成模板前先选择" in text
+        # The skill owns the enumeration prohibitions; the prompt keeps the
+        # step-level scope and defers the judgement criteria to the skill.
+        assert "实例、密钥、Bucket 等资源清单" in skill_text
+        assert "实例、密钥、Bucket 等资源清单" not in prompt_text
+        assert "禁止把任何云资源候选塞进 `ask_user_question`" in skill_text
+        assert "禁止把任何云资源候选塞进 `ask_user_question`" not in prompt_text
+        assert "禁止项以技能为准" in prompt_text
+
+    def test_explicit_minimal_existing_resource_plan_does_not_require_architecture_clarification(
+        self, prompt_text, skill_text
+    ):
+        for text in (prompt_text, skill_text):
+            assert "最小方案" in text
+            assert "不" in text and "新建" in text
+        assert "不再追问栈内还要创建什么" in prompt_text
+        assert "不要再用 `ask_user_question` 追问栈内还要创建" in skill_text
+
     def test_skill_replaces_old_intent_when_user_requests_a_different_deployment(self, skill_text):
         assert "全新的部署目标" in skill_text
         assert "本轮最新输入视为新的权威需求" in skill_text

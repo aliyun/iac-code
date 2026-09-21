@@ -30,6 +30,7 @@ from iac_code.a2a.events import (
     with_iac_code_session_metadata,
 )
 from iac_code.a2a.execution_control import (
+    ExecutionControlConflictError,
     ExecutionControlService,
     NaturalCompletionGenerationCarrier,
     RecoverableInputAdmissionCarrier,
@@ -94,6 +95,7 @@ from iac_code.a2a.resource_selector import (
     PendingResourceSelection,
     ResourceSelectionCheckpointStore,
     ResourceSelectionInputRegistry,
+    ResourceSelectionResponse,
     parse_resource_selection_response,
 )
 from iac_code.a2a.resource_selector import (
@@ -196,6 +198,10 @@ _CLEANUP_ONLY_METADATA_KEY = "cleanupOnly"
 class SessionBackupNotReadyInvalidParamsError(InvalidParamsError):
     code = -32602
     jsonrpc_error_data_passthrough = True
+
+
+class InputResponseExecutionControlConflictError(ExecutionControlConflictError):
+    """An input response raced the previous turn's execution-control release."""
 
 
 def _format_exception(exc: BaseException) -> str:
@@ -652,6 +658,147 @@ def _normal_permission_snapshot_item(snapshot: dict[str, Any], input_id: str) ->
         if item_input_id == input_id and item.get("scope") == "normal":
             return item
     return None
+
+
+def _normal_resource_selection_snapshot_events(snapshot: dict[str, Any], input_id: str) -> list[dict[str, Any]]:
+    control = snapshot.get("control")
+    if not isinstance(control, dict):
+        return []
+    history = control.get("inputHistory")
+    if not isinstance(history, list):
+        return []
+    matches: list[dict[str, Any]] = []
+    for item in history:
+        if not isinstance(item, dict) or item.get("scope") != "normal":
+            continue
+        payload = item.get("input") or item.get("data")
+        if not isinstance(payload, dict):
+            continue
+        if payload.get("kind") == "cloud_resource_selection" and payload.get("inputId") == input_id:
+            matches.append(item)
+    return matches
+
+
+async def _persist_normal_resource_selection_snapshot_event(
+    *,
+    cwd: str,
+    session_id: str,
+    input_id: str,
+    event_type: str,
+    payload: dict[str, Any],
+    handoff_proven: bool = False,
+) -> bool:
+    """Persist post-handoff Normal resource-selection state in the Pipeline restore artifact."""
+
+    state = _a2a_pipeline_state_for_session(cwd=cwd, session_id=session_id)
+    if state is None:
+        return False
+    snapshot_store, journal, snapshot, journal_events = state
+    existing = _normal_resource_selection_snapshot_events(snapshot, input_id)
+    requested = next((item for item in existing if item.get("eventType") == "input_required"), None)
+    resolved = next((item for item in existing if item.get("eventType") == "input_received"), None)
+    # Pipeline-scoped selections share the same response path. Only a request explicitly projected
+    # into Normal scope belongs to this restore record.
+    if event_type == "input_received" and requested is None:
+        return False
+    normal_handoff = snapshot.get("normalHandoff")
+    if (
+        not isinstance(normal_handoff, dict)
+        or normal_handoff.get("action") != "switch_to_normal"
+        or normal_handoff.get("targetMode") != "normal"
+        or not _normal_handoff_has_backup_ack(normal_handoff, journal_events)
+    ):
+        if not handoff_proven:
+            raise RuntimeError(_("Normal resource selection restore snapshot could not be persisted."))
+
+    if event_type == "input_required":
+        if resolved is not None:
+            raise RuntimeError(_("Normal resource selection restore snapshot is already resolved."))
+        if requested is not None:
+            return True
+    elif event_type == "input_received":
+        if resolved is not None:
+            existing_payload = resolved.get("data")
+            if isinstance(existing_payload, dict) and existing_payload == payload:
+                return True
+            raise RuntimeError(_("Normal resource selection restore response conflicts with the snapshot."))
+    else:
+        raise ValueError("unsupported normal resource selection snapshot event")
+
+    pipeline_run_id = _string_value(snapshot.get("pipelineRunId"))
+    pipeline_task_id = _string_value(snapshot.get("taskId"))
+    context_id = _string_value(snapshot.get("contextId"))
+    pipeline_name = _string_value(snapshot.get("pipelineName"))
+    if not all((pipeline_run_id, pipeline_task_id, context_id, pipeline_name)):
+        raise RuntimeError(_("Normal resource selection restore snapshot identity is incomplete."))
+
+    translator = PipelineEventTranslator(
+        PipelineA2AContext(
+            pipeline_run_id=pipeline_run_id,
+            task_id=pipeline_task_id,
+            context_id=context_id,
+            pipeline_name=pipeline_name,
+            iac_code_session_id=session_id,
+        )
+    )
+    translator.hydrate_from_events(journal_events)
+    envelope = translator.manual_event(
+        event_type,
+        "normal",
+        status="input_required" if event_type == "input_required" else "working",
+        data=payload,
+    )
+    if event_type == "input_required":
+        envelope["input"] = payload
+    publisher = PipelineA2AEventPublisher(
+        None,
+        translator,
+        journal,
+        snapshot_store,
+        extreme_performance=False,
+    )
+    persisted = await publisher.persist_envelope(
+        envelope,
+        require_durable_metadata=True,
+        require_journal_metadata=True,
+    )
+    if persisted is None:
+        raise RuntimeError(_("Normal resource selection restore snapshot could not be persisted."))
+    return True
+
+
+async def _persist_normal_resource_selection_snapshot_request(
+    *,
+    cwd: str,
+    session_id: str,
+    pending: PendingResourceSelection,
+    handoff_proven: bool = False,
+) -> None:
+    await _persist_normal_resource_selection_snapshot_event(
+        cwd=cwd,
+        session_id=session_id,
+        input_id=pending.event.input_id,
+        event_type="input_required",
+        payload=pending.envelope(),
+        handoff_proven=handoff_proven,
+    )
+
+
+async def _persist_normal_resource_selection_snapshot_resolution(
+    *,
+    cwd: str,
+    session_id: str,
+    response: ResourceSelectionResponse,
+    handoff_proven: bool = False,
+) -> bool:
+    return await _persist_normal_resource_selection_snapshot_event(
+        cwd=cwd,
+        session_id=session_id,
+        input_id=response.input_id,
+        event_type="input_received",
+        payload=response.to_dict(),
+        handoff_proven=handoff_proven,
+    )
 
 
 async def _persist_normal_permission_snapshot_event(
@@ -1346,6 +1493,22 @@ class IacCodeA2AExecutor(AgentExecutor):
     async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
         if self._execution_control_service is None:
             return
+        control = self._execution_control_service.get_for_context(context_id)
+        if (
+            control is not None
+            and control.task_id == task_id
+            and control.phase == "running"
+            and not control.input_handoff_ready()
+            and (
+                await self._resource_selection_registry.has_pending_task(task_id)
+                or await self._permission_input_registry.has_pending_task(task_id)
+            )
+        ):
+            # An interactive card can be delivered before its detached
+            # Pipeline producer has left the running phase. The response is
+            # the event that releases that live producer, so waiting for
+            # termination here would deadlock the continuation against itself.
+            return
         try:
             await self._execution_control_service.wait_until_recoverable_input_continuation(
                 context_id=context_id,
@@ -1354,6 +1517,17 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
         except TimeoutError as exc:
             raise InvalidParamsError("Pipeline continuation is still finalizing; retry the same request.") from exc
+
+    def can_continue_live_pipeline_input(self, *, context_id: str, task_id: str) -> bool:
+        if self._execution_control_service is None:
+            return False
+        control = self._execution_control_service.get_for_context(context_id)
+        return bool(
+            control is not None
+            and control.task_id == task_id
+            and control.phase == "running"
+            and not control.input_handoff_ready()
+        )
 
     async def finalize_natural_execution(
         self,
@@ -1406,6 +1580,12 @@ class IacCodeA2AExecutor(AgentExecutor):
         metadata = getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None)
         permission_response = parse_permission_response(getattr(context, "message", None))
         resource_selection_response = parse_resource_selection_response(getattr(context, "message", None))
+        current_sdk_task = getattr(context, "current_task", None)
+        pipeline_input_response = bool(
+            resolve_request_run_mode(getattr(context, "message", None)) is RunMode.PIPELINE
+            and isinstance(current_sdk_task, Task)
+            and current_sdk_task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        )
         context_id = (
             context.context_id
             or (permission_response.context_id if permission_response is not None else None)
@@ -1418,13 +1598,23 @@ class IacCodeA2AExecutor(AgentExecutor):
         )
         try:
             if (
-                permission_response is not None or resource_selection_response is not None
+                permission_response is not None or resource_selection_response is not None or pipeline_input_response
             ) and self._execution_control_service is not None:
-                existing = self._execution_control_service.get_for_context(context_id)
+                get_for_context = getattr(self._execution_control_service, "get_for_context", None)
+                existing = get_for_context(context_id) if callable(get_for_context) else None
                 owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
                 current_task = asyncio.current_task()
-                if existing is not None and existing.owner == owner and current_task is not None:
-                    await existing.attach_task(current_task, mark_working=True)
+                recovery_admission = RecoverableInputAdmissionCarrier.read(context)
+                if (
+                    recovery_admission is None
+                    and existing is not None
+                    and existing.owner == owner
+                    and current_task is not None
+                ):
+                    try:
+                        await existing.attach_task(current_task, mark_working=True)
+                    except ExecutionControlConflictError as exc:
+                        raise InputResponseExecutionControlConflictError(str(exc)) from exc
                     await existing.mark_execution_started()
                     bind_execution_control(existing)
             requested_llm_headers = resolve_a2a_llm_headers(metadata)
@@ -1485,6 +1675,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         TASK_STATE_INPUT_REQUIRED,
                         TASK_STATE_COMPLETED,
                         TASK_STATE_FAILED,
+                        TASK_STATE_CANCELED,
                     } and not await self._permission_input_registry.has_pending_task(control.task_id)
                 except ValueError:
                     pass
@@ -2300,6 +2491,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     current_assistant_text: list[str] = []
                     final_assistant_text = ""
                     detached_permission = None
+                    detached_resource_selection: PendingResourceSelection | None = None
 
                     async def finalize_normal_turn(target_queue: EventQueue) -> None:
                         nonlocal final_assistant_text, normal_turn_finished
@@ -2450,62 +2642,6 @@ class IacCodeA2AExecutor(AgentExecutor):
                             self._task_store.mirror_context(ctx)
                             ctx.lock.release()
 
-                    async def resume_detached_resource_selection(
-                        target_queue: EventQueue,
-                        pending: PendingResourceSelection,
-                    ) -> None:
-                        if ctx.lock is None:
-                            ctx.lock = asyncio.Lock()
-                        await ctx.lock.acquire()
-                        try:
-                            ctx.active_task_id = task.task_id
-                            task.active_task = asyncio.current_task()
-                            task.state = TASK_STATE_WORKING
-                            self._task_store.mirror_task(task)
-                            self._task_store.mirror_context(ctx)
-                            await self._publish_status(
-                                target_queue,
-                                task_id=task_id,
-                                context_id=context_id,
-                                state=TaskState.TASK_STATE_WORKING,
-                                metadata={
-                                    "iac_code": {
-                                        "inputReceived": {
-                                            "schemaVersion": 1,
-                                            "kind": "cloud_resource_selection",
-                                            "inputId": pending.event.input_id,
-                                            "toolUseId": pending.event.tool_use_id,
-                                            "status": pending.response.status if pending.response else "selected",
-                                        }
-                                    }
-                                },
-                                session_id=ctx.session_id,
-                            )
-                            with a2a_request_context(
-                                session_id=ctx.session_id,
-                                user_id=user_id,
-                                aliyun_credential=aliyun_credential,
-                                preferred_language=preferred_language,
-                            ):
-                                completed = await consume_normal_stream(target_queue)
-                            await self._resource_selection_registry.complete(pending)
-                            if completed:
-                                await finalize_normal_turn(target_queue)
-                            else:
-                                await mark_detached_input_required()
-                        except asyncio.CancelledError:
-                            await cancel_normal_turn(target_queue)
-                            if current_execution_termination_reason() is None:
-                                raise
-                        finally:
-                            task.active_task = None
-                            ctx.active_task_id = None
-                            ctx.touch()
-                            task.touch()
-                            self._task_store.mirror_task(task)
-                            self._task_store.mirror_context(ctx)
-                            ctx.lock.release()
-
                     async def consume_normal_stream(target_queue: EventQueue) -> bool:
                         try:
                             return await consume_normal_stream_inner(target_queue)
@@ -2518,6 +2654,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     async def consume_normal_stream_inner(target_queue: EventQueue) -> bool:
                         nonlocal current_assistant_text, final_assistant_text
                         nonlocal detached_permission
+                        nonlocal detached_resource_selection
                         async for event in stream:
                             if isinstance(event, MessageStartEvent):
                                 current_assistant_text = []
@@ -2629,10 +2766,20 @@ class IacCodeA2AExecutor(AgentExecutor):
                                     cwd=cwd,
                                     event=event,
                                     store=store,
+                                    resume_from_checkpoint=True,
                                 )
-                                pending_resource.continuation = resume_detached_resource_selection
+                                detached_resource_selection = pending_resource
                                 store.create(resource_selection_checkpoint_record(pending_resource))
                                 await self._resource_selection_registry.register(pending_resource)
+                                await _persist_normal_resource_selection_snapshot_request(
+                                    cwd=cwd,
+                                    session_id=ctx.session_id,
+                                    pending=pending_resource,
+                                    handoff_proven=self._normal_handoff_has_state_proof(
+                                        cwd=cwd,
+                                        session_id=ctx.session_id,
+                                    ),
+                                )
                                 await backup_session_async(
                                     self._backup_service,
                                     cwd,
@@ -2641,13 +2788,19 @@ class IacCodeA2AExecutor(AgentExecutor):
                                     critical=True,
                                     metrics=self._metrics,
                                 )
+                                input_projection = pending_resource.envelope()
                                 await self._publish_status(
                                     target_queue,
                                     task_id=task_id,
                                     context_id=context_id,
                                     state=TaskState.TASK_STATE_INPUT_REQUIRED,
                                     text=event.question,
-                                    metadata={"iac_code": {"inputRequired": pending_resource.envelope()}},
+                                    metadata={
+                                        "iac_code": {
+                                            "input": input_projection,
+                                            "inputRequired": input_projection,
+                                        }
+                                    },
                                     session_id=ctx.session_id,
                                 )
                                 return False
@@ -2674,6 +2827,11 @@ class IacCodeA2AExecutor(AgentExecutor):
                 if completed:
                     await finalize_normal_turn(event_queue)
                 else:
+                    if detached_resource_selection is not None:
+                        close_stream = getattr(stream, "aclose", None)
+                        if callable(close_stream):
+                            await close_stream()
+                        await self._task_store.discard_context_runtime(context_id)
                     await mark_detached_input_required()
             except asyncio.CancelledError:
                 await cancel_normal_turn(event_queue)
@@ -2775,6 +2933,8 @@ class IacCodeA2AExecutor(AgentExecutor):
             raise InvalidParamsError("Task belongs to a different owner")
 
         pending = await self._resource_selection_registry.pending_for_response(response)
+        context_record = None
+        record = None
         if pending is not None:
             _accepted, replayed = await self._resource_selection_registry.answer(
                 pending,
@@ -2783,48 +2943,77 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
             if activate_bound_llm_headers is not None:
                 await activate_bound_llm_headers()
+            await _persist_normal_resource_selection_snapshot_resolution(
+                cwd=pending.cwd,
+                session_id=pending.session_id,
+                response=response,
+                handoff_proven=self._normal_handoff_has_state_proof(
+                    cwd=pending.cwd,
+                    session_id=pending.session_id,
+                ),
+            )
             continuation = await self._resource_selection_registry.claim_continuation(pending)
             if continuation is not None:
                 await continuation(event_queue, pending)
                 return
-            await self._publish_status(
-                event_queue,
-                task_id=response.task_id,
-                context_id=response.context_id,
-                state=TaskState.TASK_STATE_WORKING,
-                metadata={
-                    "iac_code": {
-                        "inputReceived": {
-                            "schemaVersion": 1,
-                            "kind": "cloud_resource_selection",
-                            "inputId": response.input_id,
-                            "toolUseId": response.tool_use_id,
-                            "status": response.status,
-                            "replayed": replayed,
+            if not pending.resume_from_checkpoint:
+                await self._publish_status(
+                    event_queue,
+                    task_id=response.task_id,
+                    context_id=response.context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                    metadata={
+                        "iac_code": {
+                            "inputReceived": {
+                                "schemaVersion": 1,
+                                "kind": "cloud_resource_selection",
+                                "inputId": response.input_id,
+                                "toolUseId": response.tool_use_id,
+                                "status": response.status,
+                                "replayed": replayed,
+                            }
                         }
-                    }
-                },
+                    },
+                )
+                return
+            try:
+                context_record = await self._task_store.get_context_record(response.context_id)
+            except ValueError as exc:
+                raise InvalidParamsError("resource_selection_resume_invalid: context not found") from exc
+            store = pending.store
+            record = store.load(response.input_id)
+            if record is None:
+                raise InvalidParamsError("resource_selection_resume_invalid: pending input not found")
+        else:
+            try:
+                context_record = await self._task_store.get_context_record(response.context_id)
+            except ValueError as exc:
+                raise InvalidParamsError("resource_selection_resume_invalid: context not found") from exc
+            store = ResourceSelectionCheckpointStore(context_record.cwd, context_record.session_id)
+            record = store.load(response.input_id)
+            if record is None:
+                raise InvalidParamsError("resource_selection_resume_invalid: pending input not found")
+            from iac_code.a2a.resource_selector import pending_from_record
+
+            pending = pending_from_record(record=record, cwd=context_record.cwd, store=store)
+            _accepted, replayed = await self._resource_selection_registry.answer(
+                pending,
+                response,
+                before_delivery=commit_llm_headers,
             )
-            return
-
-        try:
-            context_record = await self._task_store.get_context_record(response.context_id)
-        except ValueError as exc:
-            raise InvalidParamsError("resource_selection_resume_invalid: context not found") from exc
-        store = ResourceSelectionCheckpointStore(context_record.cwd, context_record.session_id)
-        record = store.load(response.input_id)
-        if record is None:
-            raise InvalidParamsError("resource_selection_resume_invalid: pending input not found")
-        from iac_code.a2a.resource_selector import pending_from_record
-
-        pending = pending_from_record(record=record, cwd=context_record.cwd, store=store)
-        _accepted, replayed = await self._resource_selection_registry.answer(
-            pending,
-            response,
-            before_delivery=commit_llm_headers,
-        )
-        if activate_bound_llm_headers is not None:
-            await activate_bound_llm_headers()
+            if activate_bound_llm_headers is not None:
+                await activate_bound_llm_headers()
+            await _persist_normal_resource_selection_snapshot_resolution(
+                cwd=context_record.cwd,
+                session_id=context_record.session_id,
+                response=response,
+                handoff_proven=self._normal_handoff_has_state_proof(
+                    cwd=context_record.cwd,
+                    session_id=context_record.session_id,
+                ),
+            )
+        assert context_record is not None
+        assert record is not None
         if replayed and record.get("state") == "resolved":
             await self._publish_status(
                 event_queue,
@@ -2855,6 +3044,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         user_id = self._resolve_user_id(metadata)
         preferred_language = self._resolve_preferred_language(metadata)
         aliyun_credential = self._resolve_aliyun_credential(metadata)
+        resource_selector_enabled = ResourceSelectorCapability.for_surface("a2a", request_metadata=metadata).enabled
         continuation_frame = record.get("continuationFrame")
         assistant_ref = continuation_frame.get("assistantMessageRef") if isinstance(continuation_frame, dict) else None
         if isinstance(assistant_ref, str) and assistant_ref.startswith("pipeline/transcripts/"):
@@ -2883,7 +3073,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 request_policy_override=request_policy_override,
                 backup_service=self._backup_service,
                 context_ready_callback=activate_bound_llm_headers,
-                resource_selector_enabled=True,
+                resource_selector_enabled=resource_selector_enabled,
             )
             await pipeline_executor.execute(
                 context=context,
@@ -2895,7 +3085,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 pipeline_input="",
                 resource_selection_checkpoint=record,
             )
-            store.resolve(response.input_id)
+            await self._resource_selection_registry.complete(pending)
             return
 
         storage = SessionStorage()
@@ -2919,7 +3109,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         resume_messages=loaded,
                         a2a_safe_mode=_a2a_safe_mode_enabled(),
                         source="a2a-resource-selection-recovery",
-                        resource_selector_enabled=True,
+                        resource_selector_enabled=resource_selector_enabled,
                     )
                 )
                 configure_runtime_model(
@@ -2929,7 +3119,6 @@ class IacCodeA2AExecutor(AgentExecutor):
                     metadata_api_key=metadata_api_key,
                     request_policy_override=request_policy_override,
                 )
-                refresh_runtime_cloud_tools(runtime)
                 return runtime
 
         ctx = await self._task_store.get_or_create_context(
@@ -2940,7 +3129,14 @@ class IacCodeA2AExecutor(AgentExecutor):
         runtime = ctx.runtime
         if runtime is None or not hasattr(runtime, "agent_loop"):
             raise InvalidParamsError("resource_selection_resume_invalid: runtime is unavailable")
-        runtime.set_resource_selector_enabled(True)
+        with a2a_request_context(
+            session_id=context_record.session_id,
+            user_id=user_id,
+            aliyun_credential=aliyun_credential,
+            preferred_language=preferred_language,
+        ):
+            refresh_runtime_cloud_tools(runtime)
+            runtime.set_resource_selector_enabled(resource_selector_enabled)
         task = await self._task_store.get_or_create_task(
             task_id=response.task_id,
             context_id=response.context_id,
@@ -2970,6 +3166,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             session_id=ctx.session_id,
         )
         final_text = ""
+        detached_recovered_selection: PendingResourceSelection | None = None
 
         async def finish_recovered_stream(target_queue: EventQueue) -> None:
             await backup_session_async(
@@ -2996,7 +3193,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
 
         async def consume_recovered_stream(target_queue: EventQueue, recovered_stream: Any) -> bool:
-            nonlocal final_text
+            nonlocal detached_recovered_selection, final_text
             async for event in recovered_stream:
                 if isinstance(event, TextDeltaEvent):
                     final_text += event.text
@@ -3009,61 +3206,21 @@ class IacCodeA2AExecutor(AgentExecutor):
                         cwd=context_record.cwd,
                         event=event,
                         store=next_store,
+                        resume_from_checkpoint=True,
                     )
+                    detached_recovered_selection = next_pending
                     next_store.create(resource_selection_checkpoint_record(next_pending))
                     await self._resource_selection_registry.register(next_pending)
+                    await _persist_normal_resource_selection_snapshot_request(
+                        cwd=context_record.cwd,
+                        session_id=ctx.session_id,
+                        pending=next_pending,
+                        handoff_proven=self._normal_handoff_has_state_proof(
+                            cwd=context_record.cwd,
+                            session_id=ctx.session_id,
+                        ),
+                    )
 
-                    async def continue_recovered_stream(
-                        next_queue: EventQueue,
-                        claimed: PendingResourceSelection,
-                    ) -> None:
-                        if ctx.lock is None:
-                            ctx.lock = asyncio.Lock()
-                        await ctx.lock.acquire()
-                        try:
-                            task.state = TASK_STATE_WORKING
-                            task.active_task = asyncio.current_task()
-                            ctx.active_task_id = task.task_id
-                            self._task_store.mirror_task(task)
-                            self._task_store.mirror_context(ctx)
-                            await self._publish_status(
-                                next_queue,
-                                task_id=response.task_id,
-                                context_id=response.context_id,
-                                state=TaskState.TASK_STATE_WORKING,
-                                metadata={
-                                    "iac_code": {
-                                        "inputReceived": {
-                                            "schemaVersion": 1,
-                                            "kind": "cloud_resource_selection",
-                                            "inputId": claimed.event.input_id,
-                                            "toolUseId": claimed.event.tool_use_id,
-                                            "status": claimed.response.status if claimed.response else "selected",
-                                        }
-                                    }
-                                },
-                                session_id=ctx.session_id,
-                            )
-                            with a2a_request_context(
-                                session_id=ctx.session_id,
-                                user_id=user_id,
-                                aliyun_credential=aliyun_credential,
-                                preferred_language=preferred_language,
-                            ):
-                                completed = await consume_recovered_stream(next_queue, recovered_stream)
-                            await self._resource_selection_registry.complete(claimed)
-                            if completed:
-                                await finish_recovered_stream(next_queue)
-                        finally:
-                            task.active_task = None
-                            ctx.active_task_id = None
-                            task.touch()
-                            ctx.touch()
-                            self._task_store.mirror_task(task)
-                            self._task_store.mirror_context(ctx)
-                            ctx.lock.release()
-
-                    next_pending.continuation = continue_recovered_stream
                     await backup_session_async(
                         self._backup_service,
                         context_record.cwd,
@@ -3075,13 +3232,19 @@ class IacCodeA2AExecutor(AgentExecutor):
                     task.state = TASK_STATE_INPUT_REQUIRED
                     task.touch()
                     self._task_store.mirror_task(task)
+                    input_projection = next_pending.envelope()
                     await self._publish_status(
                         target_queue,
                         task_id=response.task_id,
                         context_id=response.context_id,
                         state=TaskState.TASK_STATE_INPUT_REQUIRED,
                         text=event.question,
-                        metadata={"iac_code": {"inputRequired": next_pending.envelope()}},
+                        metadata={
+                            "iac_code": {
+                                "input": input_projection,
+                                "inputRequired": input_projection,
+                            }
+                        },
                         session_id=ctx.session_id,
                     )
                     await self._notify_terminal_task(
@@ -3118,9 +3281,22 @@ class IacCodeA2AExecutor(AgentExecutor):
                     input_id=pending.event.input_id,
                     selector_id=pending.event.selector_id,
                     profile_hash=pending.event.profile_hash,
+                    selector={
+                        "id": pending.event.selector_id,
+                        "associationProperty": pending.event.association_property,
+                        "outputKind": pending.event.output_kind,
+                        "associationPropertyMetadata": pending.event.association_property_metadata,
+                        "source": pending.event.source,
+                    },
+                    prompt=pending.event.question,
                     response=response.tool_response(expected_selector_id=pending.event.selector_id),
                 )
                 completed = await consume_recovered_stream(event_queue, recovered_stream)
+                if not completed and detached_recovered_selection is not None:
+                    close_stream = getattr(recovered_stream, "aclose", None)
+                    if callable(close_stream):
+                        await close_stream()
+                    await self._task_store.discard_context_runtime(response.context_id)
             await self._resource_selection_registry.complete(pending)
             if completed:
                 await finish_recovered_stream(event_queue)
@@ -3142,8 +3318,13 @@ class IacCodeA2AExecutor(AgentExecutor):
             await self._task_store.set_pending_permissions(task_id, [])
             await self._task_store.discard_context_runtime(context_id, persist_context=False)
         if had_pending_resource_selection:
-            await self._resource_selection_registry.cancel_task(task_id)
-            await self._task_store.discard_context_runtime(context_id, persist_context=False)
+            # A delivered resource-selection card is a durable, recoverable
+            # Pipeline boundary. Keep the live continuation and its pending
+            # checkpoint while natural completion releases the current turn;
+            # explicit/disconnect termination still cancels it as before.
+            if reason != "natural_completion":
+                await self._resource_selection_registry.cancel_task(task_id)
+                await self._task_store.discard_context_runtime(context_id, persist_context=False)
 
         try:
             task_record = await self._task_store.get_task_record(task_id)

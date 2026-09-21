@@ -1,0 +1,17 @@
+{
+  "input": {
+    "zh": "中文",
+    "regex": "^[^\\\\x00-\\\\x1f-\\\\x7f]+$",
+    "emoji": "😀",
+    "nested": {
+      "z": null,
+      "a": [
+        true,
+        false,
+        3
+      ]
+    },
+    "delete": ""
+  },
+  "canonical": "{\"delete\":\"\\u007f\",\"emoji\":\"\\ud83d\\ude00\",\"nested\":{\"a\":[true,false,3],\"z\":null},\"regex\":\"^[^\\\\\\\\x00-\\\\\\\\x1f-\\\\\\\\x7f]+$\",\"zh\":\"\\u4e2d\\u6587\"}"
+}

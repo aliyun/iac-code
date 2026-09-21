@@ -100,6 +100,117 @@ async def test_resolver_search_is_bounded_and_does_not_disclose_static_whitelist
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["VSwitch", "vSwitch ID", "Virtual Switch", "交换机"])
+async def test_resolver_prefers_vpc_vswitch_for_generic_vswitch_queries(query: str) -> None:
+    resolver = ResolveCloudResourceSelectorTool(lambda: "cn-hangzhou")
+
+    result = json.loads(
+        (
+            await resolver.execute(
+                tool_input={
+                    "query": query,
+                    "association_property_metadata": {"VpcId": "vpc-test123"},
+                },
+                context=ToolContext(),
+            )
+        ).content
+    )
+
+    assert result["status"] == "resolved"
+    assert result["selector_id"] == "vpc.vswitch"
+    assert result["association_property"] == "ALIYUN::VPC::VSwitch::VSwitchId"
+    assert result["normalized_metadata"] == {
+        "RegionId": "cn-hangzhou",
+        "VpcId": "vpc-test123",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolver_keeps_exact_ecs_vswitch_association_property() -> None:
+    resolver = ResolveCloudResourceSelectorTool(lambda: "cn-hangzhou")
+
+    result = json.loads(
+        (
+            await resolver.execute(
+                tool_input={
+                    "association_property": "ALIYUN::ECS::VSwitch",
+                    "association_property_metadata": {"VpcId": "vpc-test123"},
+                },
+                context=ToolContext(),
+            )
+        ).content
+    )
+
+    assert result["status"] == "resolved"
+    assert result["selector_id"] == "ecs.vswitch"
+    assert result["association_property"] == "ALIYUN::ECS::VSwitch"
+
+
+@pytest.mark.asyncio
+async def test_resolver_uses_concise_english_query_and_falls_back_from_unknown_association_property() -> None:
+    resolver = ResolveCloudResourceSelectorTool(lambda: "cn-hangzhou")
+
+    assert "concise English resource keyword" in resolver.description
+    assert "rather than guessing" in resolver.input_schema["properties"]["association_property"]["description"]
+    assert "not a natural-language sentence" in resolver.input_schema["properties"]["query"]["description"]
+
+    concise = json.loads(
+        (
+            await resolver.execute(
+                tool_input={"query": "VPC", "product": "VPC"},
+                context=ToolContext(),
+            )
+        ).content
+    )
+    assert concise["status"] == "resolved"
+    assert concise["selector_id"] == "vpc.vpc"
+
+    fallback = json.loads(
+        (
+            await resolver.execute(
+                tool_input={
+                    "association_property": "ALIYUN::VPC::VPC",
+                    "query": "VPC",
+                    "product": "VPC",
+                },
+                context=ToolContext(),
+            )
+        ).content
+    )
+    assert fallback["status"] == "resolved"
+    assert fallback["selector_id"] == "vpc.vpc"
+
+    defensive_sentence_fallback = json.loads(
+        (
+            await resolver.execute(
+                tool_input={
+                    "association_property": "ALIYUN::VPC::VSwitch",
+                    "query": "为新建交换机选择要绑定的已有 VPC",
+                    "product": "VPC",
+                },
+                context=ToolContext(),
+            )
+        ).content
+    )
+    assert defensive_sentence_fallback["status"] == "resolved"
+    assert defensive_sentence_fallback["selector_id"] == "vpc.vpc"
+
+    exact_property_wins = json.loads(
+        (
+            await resolver.execute(
+                tool_input={
+                    "association_property": "ALIYUN::ECS::VPC::VPCId",
+                    "query": "OSS Bucket",
+                },
+                context=ToolContext(),
+            )
+        ).content
+    )
+    assert exact_property_wins["status"] == "resolved"
+    assert exact_property_wins["selector_id"] == "vpc.vpc"
+
+
+@pytest.mark.asyncio
 async def test_resolver_prefers_user_choice_and_recognizes_oos_github_account_aliases() -> None:
     resolver = ResolveCloudResourceSelectorTool(lambda: "cn-hangzhou")
 
@@ -246,6 +357,86 @@ def test_metadata_defaults_aliases_template_bindings_and_conditions() -> None:
     assert managed_instance is not None
     invalid_enum = normalize_metadata(managed_instance, {"RegionId": "cn-hangzhou", "OsType": "macos"})
     assert any(item["path"] == "OsType" for item in invalid_enum.invalid_parameters)
+
+
+@pytest.mark.asyncio
+async def test_cen_and_oss_object_profiles_enforce_single_resource_metadata() -> None:
+    resolver = ResolveCloudResourceSelectorTool(lambda: "cn-hangzhou")
+
+    cen = get_profile("cen.instance")
+    assert cen is not None
+    assert cen.metadata_schema["properties"]["Multiple"] == {
+        "type": "boolean",
+        "default": False,
+        "affects": ["ui_behavior"],
+        "const": False,
+    }
+    invalid_cen = json.loads(
+        (
+            await resolver.execute(
+                tool_input={
+                    "association_property": cen.association_property,
+                    "association_property_metadata": {"Multiple": True},
+                },
+                context=ToolContext(),
+            )
+        ).content
+    )
+    assert invalid_cen["status"] == "selector_contract_invalid"
+
+    oss = get_profile("oss.object")
+    assert oss is not None
+    properties = oss.metadata_schema["properties"]
+    assert "UploadFileMetadata" not in properties
+    assert properties["Mode"]["const"] == "select"
+    assert properties["Multiple"]["const"] is False
+    assert properties["MaxNumber"]["const"] == 1
+    assert properties["ShowUpload"]["const"] is False
+    resolved = json.loads(
+        (
+            await resolver.execute(
+                tool_input={
+                    "association_property": oss.association_property,
+                    "association_property_metadata": {
+                        "RegionId": "cn-hangzhou",
+                        "BucketName": "bucket-a",
+                    },
+                },
+                context=ToolContext(),
+            )
+        ).content
+    )
+    assert resolved["status"] == "resolved"
+    assert resolved["normalized_metadata"] | {
+        "Mode": "select",
+        "Multiple": False,
+        "MaxNumber": 1,
+        "ShowUpload": False,
+    } == resolved["normalized_metadata"]
+
+    for invalid_metadata in (
+        {"Mode": "upload"},
+        {"Multiple": True},
+        {"MaxNumber": 2},
+        {"ShowUpload": True},
+        {"UploadFileMetadata": {"Directory": True}},
+    ):
+        result = json.loads(
+            (
+                await resolver.execute(
+                    tool_input={
+                        "association_property": oss.association_property,
+                        "association_property_metadata": {
+                            "RegionId": "cn-hangzhou",
+                            "BucketName": "bucket-a",
+                            **invalid_metadata,
+                        },
+                    },
+                    context=ToolContext(),
+                )
+            ).content
+        )
+        assert result["status"] == "selector_contract_invalid"
 
 
 @pytest.mark.parametrize(
@@ -416,6 +607,38 @@ async def test_select_tool_emits_one_event_and_returns_structured_result(respons
         assert result["kind"] == "cloud_resource"
         assert result["value"] == "i-test123"
         assert result["region_id"] == "cn-hangzhou"
+
+
+@pytest.mark.asyncio
+async def test_select_tool_preserves_known_non_empty_state_on_cancel() -> None:
+    queue: asyncio.Queue = asyncio.Queue()
+    tool = SelectCloudResourceTool()
+    task = asyncio.create_task(
+        tool.execute(
+            tool_input={
+                "question": "请选择实例",
+                "selector_id": "ecs.instance",
+                "association_property_metadata": {"RegionId": "cn-hangzhou"},
+            },
+            context=ToolContext(event_queue=queue, tool_use_id="tool-1"),
+        )
+    )
+    event = await queue.get()
+    assert isinstance(event, CloudResourceSelectionEvent)
+    assert event.response_future is not None
+    event.response_future.set_result(
+        {
+            "status": "canceled",
+            "input_id": event.input_id,
+            "selector_id": event.selector_id,
+            "options_empty": False,
+        }
+    )
+
+    result = json.loads((await task).content)
+
+    assert result["status"] == "canceled"
+    assert result["options_empty"] is False
 
 
 @pytest.mark.asyncio

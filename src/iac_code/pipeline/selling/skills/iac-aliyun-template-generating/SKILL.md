@@ -63,6 +63,8 @@ conclusion_schema:
 
 示例：`resource_intents: [{"product": "SecurityGroup", "action": "create"}, {"product": "VPC", "action": "use_existing"}]` 时，只生成 `ALIYUN::ECS::SecurityGroup`，不要生成 `ALIYUN::ECS::VPC` 或 `ALIYUN::ECS::VSwitch`。
 
+当 `action=use_existing/reference` 的资源缺少具体 ID、名称或派生值时，只有实现候选方案确实需要该值才使用资源选择器；场景合适时优先让用户选择，不要编造，也不要改用 `ask_user_question` 索要 ID。不确定 selector ID 或参数时先调用 `resolve_cloud_resource_selector`，再单独调用 `select_cloud_resource`。用户取消后尊重取消结果，不自动重试；列表为空时根据 `options_empty` 调整模板或回退说明缺少资源。
+
 ## 用户硬约束
 
 候选架构的 `hard_constraints` 必须原样贯穿模板生成：

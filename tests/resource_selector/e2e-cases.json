@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "generatedFrom": {
-    "bundleSha256": "8e3452fbf0480beffe8ae3b6aff045a6ebd4f14f90146d5bc16e314074f82e6c",
-    "profileHash": "sha256:9a0b5ea612c96be97a62bd06167b0308f6e8066dde64533edc4d27664837f193"
+    "bundleSha256": "351f78a7db34df60b1c739de13cd9db6e9f4a1b54c99dbddab5af3e4cadd37fc",
+    "profileHash": "sha256:85c511b22967c6208c5bfcdfecde7ebacc60b6c2c93a473b71931d49cff7968b"
   },
   "cases": [
     {
@@ -274,7 +274,9 @@
             "RegionId": "cn-hangzhou",
             "ImageOwnerAlias": "system",
             "PageNumber": 1,
-            "PageSize": 100
+            "PageSize": 100,
+            "IsSupportIoOptimized": false,
+            "IsSupportCloudinit": false
           },
           "parameterVariants": [
             {
@@ -2858,8 +2860,8 @@
         "selector_id": "ess.eci_scaling_configuration",
         "value": "value-ess-eci-scaling-configuration",
         "association_property_metadata": {
-          "RegionId": "cn-hangzhou",
-          "ScalingGroupId": "context-scalinggroupid-ess-eci-container"
+          "ScalingGroupId": "context-scalinggroupid-ess-eci-container",
+          "RegionId": "cn-hangzhou"
         }
       },
       "expectedRequests": [
@@ -2901,8 +2903,8 @@
         "selector_id": "oss.object",
         "value": "value-oss-object",
         "association_property_metadata": {
-          "RegionId": "cn-hangzhou",
           "BucketName": "context-bucketname-oss-object-version",
+          "RegionId": "cn-hangzhou",
           "ValueType": "ObjectName"
         }
       },
@@ -3001,8 +3003,8 @@
         "selector_id": "cr.repository",
         "value": "value-cr-repository",
         "association_property_metadata": {
-          "RegionId": "cn-hangzhou",
           "InstanceId": "context-instanceid-cr-repository-tag",
+          "RegionId": "cn-hangzhou",
           "RepoName": "value-cr-repository",
           "RepoNamespaceName": "context-reponamespacename-cr-repository-tag"
         }
@@ -3044,7 +3046,16 @@
             "InstanceId": "context-instanceid-cr-repository-tag",
             "RepoId": "test-value",
             "PageNo": 1
-          }
+          },
+          "parameterVariants": [
+            {
+              "parameters": {
+                "RegionId": "cn-hangzhou",
+                "InstanceId": "context-instanceid-cr-repository-tag",
+                "PageNo": 1
+              }
+            }
+          ]
         }
       ],
       "expected": {
@@ -3097,7 +3108,9 @@
       "source": {
         "selector_id": "computenest.artifact",
         "value": "value-computenest-artifact",
-        "association_property_metadata": {}
+        "association_property_metadata": {
+          "RegionId": "cn-hangzhou"
+        }
       },
       "expectedRequests": [
         {

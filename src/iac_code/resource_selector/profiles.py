@@ -1092,6 +1092,20 @@ def _catalog_profiles() -> tuple[SelectorProfile, ...]:
             }
         if selector_id == "oss.object" and "ValueType" in properties:
             properties["ValueType"].update({"const": "ObjectName", "default": "ObjectName"})
+        if selector_id == "cen.instance" and "Multiple" in properties:
+            properties["Multiple"].update({"const": False, "default": False})
+        if selector_id == "oss.object":
+            for metadata_key, scalar_value in (
+                ("Mode", "select"),
+                ("Multiple", False),
+                ("MaxNumber", 1),
+                ("ShowUpload", False),
+            ):
+                if metadata_key in properties:
+                    properties[metadata_key].update({"const": scalar_value, "default": scalar_value})
+            # Upload settings expose directory/nested-multi-select behavior and
+            # are deliberately outside the single-resource model contract.
+            properties.pop("UploadFileMetadata", None)
         if selector_id == "domain.domain" and "ShowDomainPrefixInput" in properties:
             properties["ShowDomainPrefixInput"].update({"const": False, "default": False})
         operations = []
