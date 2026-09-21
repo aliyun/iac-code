@@ -27,9 +27,7 @@ _CASE_DOCUMENT = json.loads((_ROOT / "e2e-cases.json").read_text(encoding="utf-8
 _FIXTURE_DOCUMENT = json.loads((_ROOT / "contract-fixtures.json").read_text(encoding="utf-8"))
 _CASES = _CASE_DOCUMENT["cases"]
 _ENABLED_CASES = [
-    case
-    for case in _CASES
-    if (profile := get_profile(case["selectorId"])) is not None and profile.enabled
+    case for case in _CASES if (profile := get_profile(case["selectorId"])) is not None and profile.enabled
 ]
 _FIXTURES = _FIXTURE_DOCUMENT["fixtures"]
 _CAPABILITIES = json.loads(
@@ -47,6 +45,7 @@ def test_every_declared_operation_has_an_explicit_response_projector() -> None:
     operations = [operation for profile in iter_profiles() for operation in profile.operations]
     assert len(operations) == 143
     assert all(operation.response_projector in registry for operation in operations)
+
 
 def operation_parameters(operation: QueryOperation, case: dict[str, Any], request: dict[str, Any]) -> dict[str, Any]:
     """Replay the audited ORE request while rebinding trusted context values."""
@@ -68,9 +67,7 @@ def operation_parameters(operation: QueryOperation, case: dict[str, Any], reques
         source_parameter = profile.source_parameter_for(operation.key)
         if source_parameter and source_parameter in bound and isinstance(source, dict):
             source_value = source.get("value")
-            bound[source_parameter] = (
-                [source_value] if profile.selector_id == "ess.eci_container" else source_value
-            )
+            bound[source_parameter] = [source_value] if profile.selector_id == "ess.eci_container" else source_value
         return bound
 
     if operation.request_kind != "multiApi":
@@ -110,9 +107,7 @@ def expected_server_calls(
         for key, value in params.items():
             if key != "requests" and key in operation.batch_parameters:
                 normalized[key] = value
-        calls.append(
-            (operation.product, operation.action, region_id, _adapt_server_parameters(operation, normalized))
-        )
+        calls.append((operation.product, operation.action, region_id, _adapt_server_parameters(operation, normalized)))
     return calls
 
 
@@ -134,11 +129,9 @@ def test_complete_catalog_sets_and_contract_evidence_are_exact() -> None:
     assert all_profile_ids == operation_ids == case_ids
     assert profile_ids == capability_ids
     assert all(profile.enabled and profile.unsupported_reason is None and profile.operations for profile in profiles)
-    assert {
-        (profile.selector_id, profile.unsupported_reason)
-        for profile in all_profiles
-        if not profile.enabled
-    } == {("dashvector.cluster", "public_endpoint_unavailable")}
+    assert {(profile.selector_id, profile.unsupported_reason) for profile in all_profiles if not profile.enabled} == {
+        ("dashvector.cluster", "public_endpoint_unavailable")
+    }
 
     operation_count = sum(len(profile.operations) for profile in all_profiles)
     server_signatures = {
@@ -157,32 +150,24 @@ def test_complete_catalog_sets_and_contract_evidence_are_exact() -> None:
     # signatures into their distinct public API contracts.
     assert len(server_signatures) == 124
 
-    fixture_ids = {
-        request["fixtureId"]
-        for case in _CASES
-        for request in case["expectedRequests"]
-    }
+    fixture_ids = {request["fixtureId"] for case in _CASES for request in case["expectedRequests"]}
     assert fixture_ids == set(_FIXTURES)
     assert all(_FIXTURES[fixture_id]["response"] for fixture_id in fixture_ids)
     requests = [request for case in _CASES for request in case["expectedRequests"]]
     assert all(set(_FIXTURES[request["fixtureId"]]) == {"api", "response"} for request in requests)
     assert all(
-        set(request) in (
+        set(request)
+        in (
             {"operationKey", "fixtureId", "parameters"},
             {"operationKey", "fixtureId", "parameters", "parameterVariants"},
         )
         for request in requests
     )
     assert all(
-        set(variant) == {"parameters"}
-        for request in requests
-        for variant in request.get("parameterVariants", [])
+        set(variant) == {"parameters"} for request in requests for variant in request.get("parameterVariants", [])
     )
 
-    bundle = (
-        Path(__file__).parents[2]
-        / "src/iac_code/web/static/js/vendor/ore-resource-selector.min.js"
-    ).read_bytes()
+    bundle = (Path(__file__).parents[2] / "src/iac_code/web/static/js/vendor/ore-resource-selector.min.js").read_bytes()
     generated_from = {
         "bundleSha256": hashlib.sha256(bundle).hexdigest(),
         "profileHash": PROFILE_HASH,

@@ -73,6 +73,13 @@ from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass(frozen=True)
+class CanceledCheckpointSafety:
+    safe: bool
+    reason: str
+
+
 _TERMINAL_SIDECAR_STATUSES = {"completed", "user_aborted", "failed", "discarded"}
 _CURRENT_STEP_USER_INPUT_KEY = "current_step_user_input"
 _CURRENT_STEP_USER_INPUT_CONTENT_KEY = "current_step_user_input_content"
@@ -680,8 +687,11 @@ class PipelineRunner:
                     raw_session_dir = self._writable_pipeline_sidecar_session_dir(session_dir(self._cwd, session_id))
             elif callable(session_dir):
                 raw_session_dir = session_dir(self._cwd, session_id)
+        self._session_root = Path(raw_session_dir) if isinstance(raw_session_dir, (str, Path)) else None
         self.session = (
-            PipelineSession(Path(raw_session_dir) / "pipeline") if isinstance(raw_session_dir, (str, Path)) else None
+            PipelineSession(Path(raw_session_dir) / "pipeline", session_root=Path(raw_session_dir))
+            if isinstance(raw_session_dir, (str, Path))
+            else None
         )
 
         resolved_prerequisites = prerequisite_resolution
@@ -858,7 +868,10 @@ class PipelineRunner:
         session_dir = getattr(session, "session_dir", None)
         if not isinstance(session_dir, (str, Path)):
             return None
-        return CleanupLedger(Path(session_dir) / "cleanup.yaml")
+        return CleanupLedger(
+            Path(session_dir) / "cleanup.yaml",
+            session_root=getattr(self, "_session_root", None),
+        )
 
     def _handle_resource_observed(
         self,
@@ -1167,6 +1180,27 @@ class PipelineRunner:
                     error_id=failure.error_id,
                 )
             return result
+        return self._apply_restored_checkpoint(result)
+
+    def restore_canceled_checkpoint_sync(self) -> RestoreResult:
+        """Restore progress for a successor after its external fence is claimed."""
+        if not self.session:
+            return RestoreResult(ok=False, reason="missing_session")
+        result = self.session.restore_canceled_checkpoint_sync(self._pipeline_identity)
+        if not result.ok or result.status != "canceled":
+            return result
+        self._sidecar_restore_result = result
+        self._sidecar_status = result.status
+        return self._apply_restored_checkpoint(result)
+
+    def canceled_checkpoint_safety(self) -> CanceledCheckpointSafety:
+        """Classify whether cancellation happened at a proven step boundary."""
+        active_attempt_id = self._execution.get("active_attempt_id")
+        if isinstance(active_attempt_id, str) and active_attempt_id:
+            return CanceledCheckpointSafety(safe=False, reason="active_attempt_outcome_unverified")
+        return CanceledCheckpointSafety(safe=True, reason="step_boundary")
+
+    def _apply_restored_checkpoint(self, result: RestoreResult) -> RestoreResult:
         assert result.state_machine_snapshot is not None
         assert result.context_snapshot is not None
         self.state_machine = StateMachine.from_snapshot(
@@ -3004,9 +3038,7 @@ class PipelineRunner:
             and step.config.get("confirmation_accepts_parameter_overrides") is True
             and step.validate_structured_confirmation is not None
         ):
-            validation_message = self._structured_confirmation_validation_message(
-                step, current_conclusion, user_text
-            )
+            validation_message = self._structured_confirmation_validation_message(step, current_conclusion, user_text)
             if validation_message:
                 # The submitted parameters are illegal, so the step keeps its waiting input untouched: no
                 # bookkeeping is popped, no state is saved and no model turn is spent.
@@ -4525,8 +4557,7 @@ class PipelineRunner:
                     self._transcript_storage is not None
                     and attempt.get("status") == "running"
                     and not (
-                        first_step
-                        and (permission_checkpoint is not None or resource_selection_checkpoint is not None)
+                        first_step and (permission_checkpoint is not None or resource_selection_checkpoint is not None)
                     )
                 ):
                     loaded = self._transcript_storage.load(self._cwd, attempt["transcript_id"])

@@ -570,8 +570,8 @@ def test_check_returns_safe_default_chain_and_effective_skill_policy(monkeypatch
         "managerIdleSeconds": bridge.MANAGER_IDLE_SECONDS,
         "enableThinking": True,
         "aliyunCLIProfile": "",
-            "currentProfile": {"configured": True, "mode": "DefaultCredentialChain", "regionId": "cn-hangzhou"},
-            "startChatReconnectReady": True,
+        "currentProfile": {"configured": True, "mode": "DefaultCredentialChain", "regionId": "cn-hangzhou"},
+        "startChatReconnectReady": True,
     }
     assert captured == {
         "sdk": {"sdk": True},
@@ -1187,9 +1187,9 @@ def test_cli_plugin_parser_streams_and_unwraps_each_json_line() -> None:
 
     events = list(
         bridge.iter_cli_plugin_payloads(
-                [
-                    json.dumps({"id": "v1.stream.1", "data": first}) + "\n",
-                    json.dumps({"id": "v1.stream.2", "data": second}) + "\n",
+            [
+                json.dumps({"id": "v1.stream.1", "data": first}) + "\n",
+                json.dumps({"id": "v1.stream.2", "data": second}) + "\n",
             ]
         )
     )
@@ -1216,7 +1216,7 @@ def test_cli_plugin_parser_accepts_pretty_printed_objects_and_arrays() -> None:
 
 
 def test_cli_plugin_parser_reports_an_unterminated_buffer_as_malformed() -> None:
-    events = list(bridge.iter_cli_plugin_payloads(['{\n', '  "data": {\n']))
+    events = list(bridge.iter_cli_plugin_payloads(["{\n", '  "data": {\n']))
 
     assert events == [{"id": None, "payload": None, "raw": '{\n  "data": {'}]
 
@@ -2021,7 +2021,7 @@ def test_run_chat_consumes_fake_cli_stream_without_network(monkeypatch, tmp_path
                 state="TASK_STATE_INPUT_REQUIRED",
                 text="done",
                 metadata={"assistantFinal": {"complete": True}},
-            )
+            ),
         },
         separators=(",", ":"),
     )
@@ -2431,26 +2431,26 @@ def test_run_respond_sends_json_as_the_only_start_chat_control_payload(monkeypat
         encoding="utf-8",
     )
     acknowledgement = {
-                "result": {
-                    "messageId": "permission-ack-1",
-                    "taskId": "task-1",
-                    "contextId": "session-1",
-                    "role": "ROLE_AGENT",
-                    "parts": [
-                        {
-                            "mediaType": "application/json",
-                            "data": {
-                                "schemaVersion": 1,
-                                "kind": "permission_ack",
-                                "inputId": "permission-1",
-                                "toolUseId": "tool-1",
-                                "decision": "deny",
-                                "accepted": True,
-                            },
-                        }
-                    ],
+        "result": {
+            "messageId": "permission-ack-1",
+            "taskId": "task-1",
+            "contextId": "session-1",
+            "role": "ROLE_AGENT",
+            "parts": [
+                {
+                    "mediaType": "application/json",
+                    "data": {
+                        "schemaVersion": 1,
+                        "kind": "permission_ack",
+                        "inputId": "permission-1",
+                        "toolUseId": "tool-1",
+                        "decision": "deny",
+                        "accepted": True,
+                    },
                 }
-            }
+            ],
+        }
+    }
     completed = _status_event(state="TASK_STATE_COMPLETED")
     output = json.dumps(
         [
@@ -2756,9 +2756,7 @@ def test_managed_worker_outlives_start_and_follow_returns_step_start_before_fina
     assert not bridge._pid_alive(started["workerPid"])
 
 
-def test_managed_remote_bootstrap_is_committed_before_ack_and_recovers_lost_result(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_managed_remote_bootstrap_is_committed_before_ack_and_recovers_lost_result(monkeypatch, tmp_path: Path) -> None:
     state_root = tmp_path / "state"
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(state_root))
     workspace = tmp_path / "workspace"
@@ -4943,13 +4941,13 @@ def test_code_reconnect_recovers_terminal_tail_without_resending_query(monkeypat
     terminal = _status_event(state="TASK_STATE_COMPLETED", text="final")
     artifact = {
         "result": {
-                "artifactUpdate": {
-                    "contextId": "session-1",
-                    "artifact": {
-                        "artifactId": "template",
-                        "name": "template.yaml",
-                        "parts": [{"url": "file:///workspace/template.yaml"}],
-                    },
+            "artifactUpdate": {
+                "contextId": "session-1",
+                "artifact": {
+                    "artifactId": "template",
+                    "name": "template.yaml",
+                    "parts": [{"url": "file:///workspace/template.yaml"}],
+                },
             }
         }
     }
@@ -5068,9 +5066,7 @@ def test_remote_bootstrap_is_correlated_committed_and_replayed_idempotently(monk
     assert result["state"] == "turn-completed"
     assert result["eventCount"] == 2
     assert result["sessionId"] == "session-1"
-    assert acknowledgements == [
-        {"invocationId": calls[0][1], "eventId": "v1.bootstrap.1", "committed": True}
-    ]
+    assert acknowledgements == [{"invocationId": calls[0][1], "eventId": "v1.bootstrap.1", "committed": True}]
     assert _command_body(calls[1][0]) == {
         "StreamOptions.Action": "Reconnect",
         "StreamOptions.Cursor": "v1.bootstrap.1",
@@ -5366,9 +5362,7 @@ def test_cli_size_limits_are_distinct_and_enforced_after_wrapper_decode(monkeypa
     monkeypatch.setattr(bridge, "MAX_CLI_BATCH_BYTES", 400)
     first = {"contextId": "session-1", "value": "x" * 45}
     second = {"contextId": "session-1", "value": "y" * 45}
-    wrapped = json.dumps(
-        [{"id": "v1.size.1", "data": first}, {"id": "v1.size.2", "data": second}]
-    )
+    wrapped = json.dumps([{"id": "v1.size.1", "data": first}, {"id": "v1.size.2", "data": second}])
 
     with pytest.raises(bridge.BridgeError) as error:
         list(bridge.iter_cli_plugin_payloads([wrapped]))
@@ -5464,7 +5458,7 @@ def test_stream_identity_change_fails_without_reconnect(monkeypatch, tmp_path: P
     monkeypatch.setattr(
         bridge.subprocess,
         "Popen",
-        lambda command, **_kwargs: (calls.append(command) or _FakeCLIProcess(output)),
+        lambda command, **_kwargs: calls.append(command) or _FakeCLIProcess(output),
     )
 
     with pytest.raises(bridge.BridgeError) as error:

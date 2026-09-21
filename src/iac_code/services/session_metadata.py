@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from iac_code.i18n import _
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.state_io import atomic_write_text
 
@@ -103,10 +104,11 @@ def read_session_layout_version(session_dir: Path) -> int | None:
 
 
 def write_session_metadata(session_dir: Path, metadata: SessionMetadata) -> None:
-    ensure_private_dir(session_dir)
-    path = session_dir / SESSION_METADATA_FILENAME
-    atomic_write_text(path, json.dumps(metadata.to_dict(), ensure_ascii=False) + "\n", encoding="utf-8")
-    ensure_private_file(path)
+    with session_mutation_guard(session_dir):
+        ensure_private_dir(session_dir)
+        path = session_dir / SESSION_METADATA_FILENAME
+        atomic_write_text(path, json.dumps(metadata.to_dict(), ensure_ascii=False) + "\n", encoding="utf-8")
+        ensure_private_file(path)
 
 
 def session_metadata_entry_exists(session_dir: Path) -> bool:

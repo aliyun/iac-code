@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import shutil
 import stat
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,7 @@ from iac_code.services.session_metadata import (
     session_metadata_entry_exists,
     write_session_metadata,
 )
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.project_paths import (
     get_projects_dir,
@@ -370,6 +372,24 @@ class SessionStorage:
         git_branch: str | None = None,
     ) -> Path | None:
         """Create v2 metadata for a brand-new session, leaving legacy state untouched."""
+        with self._session_write_guard(cwd, session_id):
+            return self._ensure_v2_session_dir_for_new_session(cwd, session_id, git_branch=git_branch)
+
+    def _session_write_guard(self, cwd: str, session_id: str):
+        if (
+            self._existing_legacy_session_path(cwd, session_id) is not None
+            and self._directory_session_dir(cwd, session_id) is None
+        ):
+            return nullcontext()
+        return session_mutation_guard(self.session_dir(cwd, session_id))
+
+    def _ensure_v2_session_dir_for_new_session(
+        self,
+        cwd: str,
+        session_id: str,
+        *,
+        git_branch: str | None = None,
+    ) -> Path | None:
         if self._existing_legacy_session_path(cwd, session_id) is not None:
             return None
         directory_session_dir = self._directory_session_dir(cwd, session_id)
@@ -481,6 +501,7 @@ class SessionStorage:
         allowed_files = {
             ".backup-state.json",
             ".backup-lock",
+            ".session-mutation.lock",
             ".permission-audit.jsonl.lock",
             "permission-audit.jsonl",
             ".usage.jsonl.lock",
@@ -517,7 +538,8 @@ class SessionStorage:
         except OSError:
             return False
         return any(
-            child.name != SESSION_METADATA_FILENAME and SessionStorage._is_allowed_sidecar_child(child)
+            child.name not in {SESSION_METADATA_FILENAME, ".session-mutation.lock"}
+            and SessionStorage._is_allowed_sidecar_child(child)
             for child in children
         )
 
@@ -666,24 +688,26 @@ class SessionStorage:
         git_branch: str | None = None,
     ) -> None:
         """Append a single message (real-time persistence)."""
-        path, was_new = self._prepare_session_write(cwd, session_id)
-        ensure_private_dir(path.parent)
-        data = self._stamp(message.to_dict(), cwd, session_id, git_branch)
-        append_jsonl_locked(path, [data])
-        ensure_private_file(path)
-        self._ensure_new_session_metadata(cwd, session_id, git_branch=git_branch, was_new=was_new)
+        with self._session_write_guard(cwd, session_id):
+            path, was_new = self._prepare_session_write(cwd, session_id)
+            ensure_private_dir(path.parent)
+            data = self._stamp(message.to_dict(), cwd, session_id, git_branch)
+            append_jsonl_locked(path, [data])
+            ensure_private_file(path)
+            self._ensure_new_session_metadata(cwd, session_id, git_branch=git_branch, was_new=was_new)
 
     def append_meta(self, cwd: str, session_id: str, meta_entry: dict[str, Any]) -> None:
         """Append a lite-meta row (no ``role``, distinguished by ``type``)."""
         if "type" not in meta_entry:
             raise ValueError("meta_entry must include a 'type' field")
-        path, was_new = self._prepare_session_write(cwd, session_id)
-        ensure_private_dir(path.parent)
-        entry = dict(meta_entry)
-        entry["session_id"] = session_id
-        append_jsonl_locked(path, [entry])
-        ensure_private_file(path)
-        self._ensure_new_session_metadata(cwd, session_id, git_branch=None, was_new=was_new)
+        with self._session_write_guard(cwd, session_id):
+            path, was_new = self._prepare_session_write(cwd, session_id)
+            ensure_private_dir(path.parent)
+            entry = dict(meta_entry)
+            entry["session_id"] = session_id
+            append_jsonl_locked(path, [entry])
+            ensure_private_file(path)
+            self._ensure_new_session_metadata(cwd, session_id, git_branch=None, was_new=was_new)
 
     def save(
         self,
@@ -695,17 +719,18 @@ class SessionStorage:
         preserve_cleanup_prompts: bool = False,
     ) -> None:
         """Overwrite the session file with the given messages."""
-        path, was_new = self._prepare_session_write(cwd, session_id)
-        if preserve_cleanup_prompts:
-            messages = self._merge_preserved_cleanup_prompts(cwd, session_id, messages)
-        ensure_private_dir(path.parent)
-        lines = []
-        for msg in messages:
-            data = self._stamp(msg.to_dict(), cwd, session_id, git_branch)
-            lines.append(json.dumps(data, ensure_ascii=False) + "\n")
-        atomic_write_text(path, "".join(lines), durable=True)
-        ensure_private_file(path)
-        self._ensure_new_session_metadata(cwd, session_id, git_branch=git_branch, was_new=was_new)
+        with self._session_write_guard(cwd, session_id):
+            path, was_new = self._prepare_session_write(cwd, session_id)
+            if preserve_cleanup_prompts:
+                messages = self._merge_preserved_cleanup_prompts(cwd, session_id, messages)
+            ensure_private_dir(path.parent)
+            lines = []
+            for msg in messages:
+                data = self._stamp(msg.to_dict(), cwd, session_id, git_branch)
+                lines.append(json.dumps(data, ensure_ascii=False) + "\n")
+            atomic_write_text(path, "".join(lines), durable=True)
+            ensure_private_file(path)
+            self._ensure_new_session_metadata(cwd, session_id, git_branch=git_branch, was_new=was_new)
 
     def _merge_preserved_cleanup_prompts(
         self,

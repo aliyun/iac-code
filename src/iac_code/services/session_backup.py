@@ -11,7 +11,7 @@ import stat
 import tempfile
 import time
 import uuid
-from contextlib import contextmanager, suppress
+from contextlib import ExitStack, contextmanager, suppress
 from dataclasses import dataclass, replace
 from enum import Enum
 from functools import wraps
@@ -31,7 +31,7 @@ from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.path_components import is_unsafe_windows_path_component
 from iac_code.utils.project_paths import project_dir_candidates
 from iac_code.utils.public_errors import sanitize_public_text
-from iac_code.utils.state_io import atomic_write_json, fsync_parent_dir, safe_replace
+from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock, fsync_parent_dir, safe_replace
 
 BACKUP_ENV_VAR = "IAC_CODE_CONFIG_BACKUP_DIR"
 BACKUP_STATE_FILENAME = ".backup-state.json"
@@ -230,12 +230,16 @@ class SessionBackupService:
         reason: BackupReason,
         critical: bool,
         publication_proofs: Mapping[str, BackupPublicationProof] | None = None,
+        operation_commit_id: str | None = None,
     ) -> BackupResult:
         if not self._backup_enabled():
             return BackupResult(enabled=False)
         self._validate_session_id(session_id)
         proofs = dict(publication_proofs or {})
-        operation_commit_id = str(uuid.uuid4())
+        if operation_commit_id is None:
+            operation_commit_id = str(uuid.uuid4())
+        elif not isinstance(operation_commit_id, str) or not operation_commit_id.strip():
+            raise SessionBackupError("backup operation commit id must be a non-empty string")
 
         try:
             source = self._source_for_backup(cwd, session_id)
@@ -424,9 +428,7 @@ class SessionBackupService:
         minimum_generation: int | None = None,
     ) -> SessionReconcileResult:
         if minimum_generation is not None and (
-            isinstance(minimum_generation, bool)
-            or not isinstance(minimum_generation, int)
-            or minimum_generation <= 0
+            isinstance(minimum_generation, bool) or not isinstance(minimum_generation, int) or minimum_generation <= 0
         ):
             raise ValueError("minimum_generation must be a positive integer")
         if not self._backup_enabled():
@@ -437,10 +439,18 @@ class SessionBackupService:
             return SessionReconcileResult(enabled=False, action="disabled")
 
         destination = Path(self._session_storage.session_dir(cwd, session_id))
-        with self._session_restore_lock(destination):
+        with self._session_restore_lock(destination), ExitStack() as shared_locks:
             local = self._source_for_backup(cwd, session_id)
             local_state = self._read_state(local, session_id=session_id, missing_ok=True) if local is not None else None
             shared = self._source_for_restore(cwd, session_id, backup_root)
+            if shared is not None:
+                shared_locks.enter_context(
+                    self._shared_session_lock(
+                        backup_root,
+                        project=shared.parent.name,
+                        session_id=session_id,
+                    )
+                )
             shared_state = (
                 self._read_state(
                     shared,
@@ -451,9 +461,7 @@ class SessionBackupService:
                 if shared is not None
                 else None
             )
-            if minimum_generation is not None and (
-                local_state is None or local_state.generation < minimum_generation
-            ):
+            if minimum_generation is not None and (local_state is None or local_state.generation < minimum_generation):
                 if shared_state is None or shared_state.generation < minimum_generation:
                     raise SessionBackupNotReadyError(
                         minimum_generation=minimum_generation,
@@ -1230,6 +1238,22 @@ class SessionBackupService:
                 finally:
                     with suppress(OSError):
                         fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    @staticmethod
+    def _shared_session_lock_path(backup_root: Path, *, project: str, session_id: str) -> Path:
+        return backup_root / ".locks" / project / "{}.lock".format(session_id)
+
+    @contextmanager
+    def _shared_session_lock(self, backup_root: Path, *, project: str, session_id: str):
+        """Serialize one shared session publication with cold restore/reconcile reads.
+
+        Restore callers acquire their local restore lock first. Publishers only
+        acquire this shared lock and never participate in local session capture.
+        """
+
+        lock_path = self._shared_session_lock_path(backup_root, project=project, session_id=session_id)
+        with cross_process_file_lock(lock_path):
+            yield
 
     def _open_backup_lock_file(self, lock_path: Path):
         if lock_path.is_symlink() or self._is_reparse_point(lock_path):

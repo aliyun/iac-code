@@ -96,6 +96,7 @@ def test_agent_card_advertises_execution_control_extension() -> None:
     assert extension["params"]["pauseEndpoint"] == "/iac-code/execution/pause"
     assert extension["params"]["sessionRecoveryEndpoint"] == "/iac-code/session/recovery"
     assert extension["params"]["toolBatchDrainOnPause"] is True
+    assert extension["params"]["naturalHandoffVersion"] == "natural-handoff-v2"
     assert extension["params"]["transportScope"] == "http"
 
 

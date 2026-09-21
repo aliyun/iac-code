@@ -22,6 +22,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 TOKEN = "execution-control-e2e-token"
+NATURAL_HANDOFF_VERSION = "natural-handoff-v2"
 STACK_ID = "stack-execution-control-e2e-0001"
 STACK_INSTANCES_OPERATION_ID = "stack-instances-operation-e2e-0001"
 SCENARIO_MODES = {
@@ -616,10 +617,14 @@ class _Scenario:
             assert not (self.control_dir / marker).exists()
             _write_marker(self.control_dir, marker)
         self._wait_log_event(self.run_dir / "fixture-lifecycle.jsonl", "bootstrap.closed")
-        local = self._wait_state(lambda value: value["phase"] == "terminated", "bootstrap local termination")
-        assert not local["releaseReady"] and local["backup"]["status"] != "disabled"
+        # The staged local snapshot releases the execution while BACKUP_DIR is still gated.
+        terminal = self._wait_state(
+            lambda value: value["phase"] == "terminated" and value["releaseReady"] is True,
+            "bootstrap local snapshot release",
+        )
+        assert terminal["backup"]["status"] == "staged_committed", terminal["backup"]
+        assert not self._shared_backup_text(), "release must not wait for BACKUP_DIR"
         _write_marker(self.control_dir, "allow-shared")
-        terminal = self._wait_state(lambda value: value["releaseReady"], "bootstrap shared backup")
         self._assert_shared_backup(terminal, None, require_reason=False)
         self._assert_task_canceled(require_reason=False)
         snapshots = list((self.run_dir / "shared-backup").rglob("a2a/task.json"))
@@ -629,9 +634,7 @@ class _Scenario:
 
     def _terminate_during_turn_backup(self, initial: _BackgroundStream) -> None:
         _wait_until(
-            lambda: snapshot
-            if "ISOLATION_FIXTURE_FINAL" in json.dumps(snapshot := initial.snapshot())
-            else None,
+            lambda: snapshot if "ISOLATION_FIXTURE_FINAL" in json.dumps(snapshot := initial.snapshot()) else None,
             timeout=self.timeout,
             description="final stream event before turn backup disconnect",
         )
@@ -1011,9 +1014,13 @@ class _Scenario:
             _write_marker(self.control_dir, "release-sdk")
         else:
             self._pause(epoch=1, request_id="pause-stack-instances", timeout=1.0)
-        local = self._wait_state(lambda value: value["phase"] == "terminated", "stack instances local termination")
+        local = self._wait_state(
+            lambda value: value["phase"] == "terminated" and value["releaseReady"] is True,
+            "stack instances local snapshot release",
+        )
         assert local["terminationReason"] == ("explicit_terminate" if inflight else "disconnect_timeout")
-        assert not local["releaseReady"] and local["backup"]["status"] == "pending"
+        # The durable local snapshot releases the execution; BACKUP_DIR is still gated.
+        assert local["backup"]["status"] == "staged_committed", local["backup"]
         assert not list((self.run_dir / "shared-backup").rglob("external-operations.json"))
         assert local["externalOperations"] == [
             {
@@ -1027,12 +1034,11 @@ class _Scenario:
             }
         ]
         _write_marker(self.control_dir, "allow-shared")
-        terminal = self._wait_state(lambda value: value["releaseReady"], "stack instances shared backup")
-        self._assert_shared_backup(terminal, STACK_INSTANCES_OPERATION_ID, require_reason=not inflight)
+        self._assert_shared_backup(local, STACK_INSTANCES_OPERATION_ID, require_reason=not inflight)
         self._assert_task_canceled(require_reason=not inflight)
         operations = list((self.run_dir / "shared-backup").rglob("external-operations.json"))
         assert len(operations) == 1
-        assert json.loads(operations[0].read_text(encoding="utf-8"))["operations"] == terminal["externalOperations"]
+        assert json.loads(operations[0].read_text(encoding="utf-8"))["operations"] == local["externalOperations"]
         events = self._tool_events()
         assert len([value for value in events if value["event"] == "sdk.started"]) == 1
         assert len([value for value in events if value["event"] == "sdk.returned"]) == 1
@@ -1061,37 +1067,31 @@ class _Scenario:
 
     def _timeout_backup_blocked(self) -> None:
         self._pause(epoch=1, request_id="pause-backup-blocked", timeout=1.0)
-        blocked = self._wait_state(
+        # BACKUP_DIR stays unreachable; only the local snapshot gates the release.
+        staged = self._wait_state(
             lambda value: (
                 value["phase"] == "terminated"
-                and value.get("backup", {}).get("status") == "blocked"
-                and value.get("releaseReady") is False
+                and value.get("backup", {}).get("status") == "staged_committed"
+                and value.get("releaseReady") is True
             ),
-            "blocked shared backup",
+            "staged snapshot release while shared publication is blocked",
         )
-        generation = blocked["backup"]["generation"]
-        commit_id = blocked["backup"]["commitId"]
+        generation = staged["backup"]["generation"]
+        commit_id = staged["backup"]["commitId"]
+        assert not self._shared_backup_text(), "release must not wait for BACKUP_DIR"
         status, health = _http_json("GET", self.server.url + "/health", timeout=1.0)
         assert status == 200 and health.get("status") == "healthy"
         counts_before = self._counts()
         _write_marker(self.control_dir, "allow-shared")
-        _wait_until(
-            lambda: any(
-                str(commit_id) in path.read_text(encoding="utf-8")
-                for path in (self.run_dir / "shared-backup").rglob("*")
-                if path.is_file()
-            ),
-            timeout=self.timeout,
-            description="blocked commit publication",
-        )
+        self._wait_shared_publication(str(commit_id))
         self._terminate(epoch=2, request_id="retry-backup-finalization")
         terminal = self._wait_state(
             lambda value: (
                 value["phase"] == "terminated"
-                and value.get("backup", {}).get("status") == "shared_committed"
+                and value.get("backup", {}).get("status") == "staged_committed"
                 and value.get("releaseReady") is True
             ),
-            "shared backup retry",
+            "terminal backup retry",
         )
         assert terminal["backup"]["generation"] == generation
         assert terminal["backup"]["commitId"] == commit_id
@@ -1127,7 +1127,7 @@ class _Scenario:
         )
         assert final.get("executionStatus") == completed.get("executionStatus")
         assert final.get("streamAvailable") is False
-        self._assert_shared_backup(final, None, require_reason=False)
+        self._assert_natural_handoff(final)
         assert len(self._provider_calls()) == 1
 
     def _capture_recovery(self, suffix: str) -> dict[str, Any]:
@@ -1158,11 +1158,11 @@ class _Scenario:
             lambda value: (
                 value["phase"] == "terminated"
                 and value.get("terminationReason") == "natural_completion"
-                and value.get("releaseReady") is True
+                and value.get("naturalHandoff") is not None
             ),
-            "natural completion release",
+            "natural completion handoff",
         )
-        self._assert_shared_backup(state, None, require_reason=False)
+        self._assert_natural_handoff(state)
         assert state["executionId"] == self.execution_id
         assert state["serverInstanceId"] == self.server_instance_id
         assert len([value for value in self._tool_events() if value.get("event") == "tool.started"]) == 1
@@ -1226,18 +1226,11 @@ class _Scenario:
         require_reason: bool = True,
     ) -> None:
         backup = state.get("backup", {})
-        assert backup.get("status") == "shared_committed", backup
+        # A durable local snapshot is enough to release; the independent
+        # publisher mirrors it into BACKUP_DIR afterwards.
+        assert backup.get("status") in {"shared_committed", "staged_committed"}, backup
         assert backup.get("generation") and backup.get("commitId")
-        shared_files = [path for path in (self.run_dir / "shared-backup").rglob("*") if path.is_file()]
-        assert shared_files, "shared backup is empty"
-        texts = []
-        for path in shared_files:
-            try:
-                texts.append(path.read_text(encoding="utf-8"))
-            except (OSError, UnicodeDecodeError):
-                continue
-        joined = "\n".join(texts)
-        assert str(backup["commitId"]) in joined
+        joined = self._wait_shared_publication(str(backup["commitId"]))
         if require_reason:
             assert "disconnect_timeout" in joined
         if expected_operation is not None:
@@ -1245,6 +1238,60 @@ class _Scenario:
                 operation.get("resourceId") == expected_operation for operation in state.get("externalOperations", [])
             )
             assert expected_operation in joined
+
+    def _shared_backup_text(self) -> str:
+        texts = []
+        for path in (self.run_dir / "shared-backup").rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                texts.append(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError):
+                continue
+        return "\n".join(texts)
+
+    def _wait_shared_publication(self, commit_id: str) -> str:
+        def published() -> str | None:
+            self.server.assert_running()
+            joined = self._shared_backup_text()
+            return joined if commit_id in joined else None
+
+        return _wait_until(published, timeout=self.timeout, description="staged snapshot publication")
+
+    def _assert_natural_handoff(self, state: dict[str, Any]) -> None:
+        """A natural boundary commits local staging independently of remote publication."""
+
+        backup = state.get("backup", {})
+        handoff = state.get("naturalHandoff")
+        assert handoff, state
+        assert handoff["version"] == NATURAL_HANDOFF_VERSION, handoff
+        assert handoff["contextId"] == self.context_id
+        assert handoff["taskId"] == self.task_id
+        assert handoff["executionId"] == self.execution_id == state["executionId"]
+        assert handoff["businessDrained"] is True
+        assert int(handoff["ownerGeneration"]) >= 1
+        if handoff.get("backupDisabled") is True:
+            assert backup.get("status") == "disabled", backup
+            assert handoff["pendingJobId"] is None
+            return
+        assert backup.get("status") == "staged_committed", backup
+        job_id = handoff["pendingJobId"]
+        assert job_id and backup.get("jobId") == job_id
+        assert int(handoff["businessRevision"]) >= 1
+        assert backup.get("businessRevision") == handoff["businessRevision"]
+        assert handoff["stagedCommitted"] is True
+        assert int(handoff["snapshotGeneration"]) > 0
+        assert backup.get("generation") == handoff["snapshotGeneration"]
+        commit_id = handoff["snapshotCommitId"]
+        assert commit_id and backup.get("commitId") == commit_id
+        # Publication is a separate assertion after observing the local handoff.
+        pending = self.run_dir / "staging" / ".pending" / "{}.json".format(job_id)
+        _wait_until(
+            lambda: True if not pending.exists() else None,
+            timeout=self.timeout,
+            description="staged backup job completion",
+        )
+        self._wait_shared_publication(commit_id)
 
     def _wait_log_event(self, path: Path, event: str) -> dict[str, Any]:
         def observed() -> dict[str, Any] | None:

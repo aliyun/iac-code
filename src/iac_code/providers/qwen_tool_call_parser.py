@@ -299,8 +299,7 @@ def recover_xml_tool_calls(text: str, tools: list[ToolDefinition] | None) -> Xml
         contained = [
             item
             for item in recovered_ranges
-            if wrapper_start + wrapper.start("body") <= item[0]
-            and item[1] <= wrapper_start + wrapper.end("body")
+            if wrapper_start + wrapper.start("body") <= item[0] and item[1] <= wrapper_start + wrapper.end("body")
         ]
         if not contained:
             return None
@@ -385,11 +384,7 @@ def _position_inside_markdown_fence(
         length = len(match.group(1))
         if open_fence is None:
             open_fence = (delimiter, length)
-        elif (
-            open_fence[0] == delimiter
-            and length >= open_fence[1]
-            and not line[match.end() :].strip()
-        ):
+        elif open_fence[0] == delimiter and length >= open_fence[1] and not line[match.end() :].strip():
             open_fence = None
     return open_fence is not None
 

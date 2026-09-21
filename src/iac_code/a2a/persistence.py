@@ -130,6 +130,18 @@ class A2APersistenceStore:
             return None
         return self._context_from_dict(data)
 
+    def load_execution_control(self, context_id: str) -> dict[str, object] | None:
+        """Load the cross-process execution fence; malformed state fails closed."""
+
+        context_id = validate_protocol_id(context_id)
+        path = self.root / "execution-control" / f"{context_id}.json"
+        if not path.exists():
+            return None
+        data = self._read_json(path)
+        if not isinstance(data, dict):
+            raise ValueError("Invalid A2A execution control snapshot")
+        return data
+
     def save_routes(self, routes: list[A2ARouteSnapshot]) -> None:
         """Persist a cold-start cache of route metadata.
 

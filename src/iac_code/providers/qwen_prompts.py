@@ -25,9 +25,7 @@ def prepare_qwen_system_prompt(system: str, model: str, tools: list[ToolDefiniti
     parameter_name = next(iter(properties), None) if isinstance(properties, dict) else None
     normalized = normalized_model_name(model)
     if "coder" in normalized:
-        parameter = (
-            f"\n<parameter={parameter_name}>VALUE</parameter>" if isinstance(parameter_name, str) else ""
-        )
+        parameter = f"\n<parameter={parameter_name}>VALUE</parameter>" if isinstance(parameter_name, str) else ""
         example = f"<tool_call><function={example_name}>{parameter}</function></tool_call>"
     elif "-vl" in normalized or normalized.endswith("vl") or "qwen-vl" in normalized:
         arguments = {parameter_name: "VALUE"} if isinstance(parameter_name, str) else {}

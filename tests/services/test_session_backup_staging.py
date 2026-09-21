@@ -1,10 +1,14 @@
 import json
+import multiprocessing
+import os
 import threading
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from iac_code.agent.message import Message
+from iac_code.services import session_backup_staging as staging_module
 from iac_code.services.session_backup import (
     BACKUP_STATE_FILENAME,
     BackupReason,
@@ -27,6 +31,7 @@ from iac_code.services.session_backup_state import (
 )
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
 from iac_code.services.session_storage import SessionStorage
+from iac_code.utils.state_io import cross_process_append_lock
 
 
 def _create_staged_service(
@@ -52,6 +57,36 @@ def _create_staged_service(
 def _read_state(path: Path, *, shared: bool = False) -> SessionBackupState:
     payload = json.loads((path / BACKUP_STATE_FILENAME).read_text(encoding="utf-8"))
     return SessionBackupState.from_dict(payload, shared=shared)
+
+
+def _hold_copying_owner_lock(
+    lock_path: str,
+    acquired_event,
+    release_event,
+    remove_when_released: bool,
+) -> None:
+    lease = staging_module._CopyingSnapshotOwnerLock(SessionBackupService(), Path(lock_path))
+    with lease.acquire(blocking=True) as acquired:
+        if not acquired:
+            raise RuntimeError("blocking owner lock was not acquired")
+        if remove_when_released and hasattr(lease, "remove_when_released"):
+            lease.remove_when_released()
+        acquired_event.set()
+        if not release_event.wait(5):
+            raise RuntimeError("owner lock release was not signaled")
+
+
+def _hold_preopened_owner_inode(lock_path: str, opened_event, acquired_event, release_event) -> None:
+    import fcntl
+
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "a+b") as lock_file:
+        opened_event.set()
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        acquired_event.set()
+        if not release_event.wait(5):
+            raise RuntimeError("pre-opened owner inode release was not signaled")
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def test_staged_reconcile_generation_fence_keeps_backup_disabled_behavior(
@@ -90,6 +125,216 @@ def test_staged_backup_creates_immutable_versions_without_writing_final_root(
     assert _read_state(second_snapshot, shared=True).generation == 2
     assert not list(staging_root.rglob("*.copying"))
     assert not backup_root.exists()
+
+
+def test_cleanup_recovers_complete_copying_snapshot_after_capture_process_crash(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, backup_root = _create_staged_service(monkeypatch, tmp_path)
+    (session_dir / "session.jsonl").write_text("crash-safe\n", encoding="utf-8")
+    original_write_state = service._write_state
+    crashed = False
+
+    def crash_after_copying_state(path: Path, state) -> None:
+        nonlocal crashed
+        original_write_state(path, state)
+        if path.name.endswith(".copying") and not crashed:
+            crashed = True
+            raise KeyboardInterrupt("capture process crashed")
+
+    monkeypatch.setattr(service, "_write_state", crash_after_copying_state)
+    with pytest.raises(KeyboardInterrupt, match="capture process crashed"):
+        service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+
+    project = session_dir.parent.name
+    copying = staging_root / "projects" / project / "s1_v1.copying"
+    assert copying.is_dir()
+
+    worker = SessionBackupStagingWorker(staging_root, backup_root)
+    assert worker.cleanup_incomplete_snapshots() == 1
+    snapshot = staging_root / "projects" / project / "s1_v1"
+    assert copying.exists() is False
+    assert snapshot.is_dir()
+    assert worker.run_once() == 1
+    shared = backup_root / "projects" / project / "s1"
+    assert (shared / "session.jsonl").read_text(encoding="utf-8") == "crash-safe\n"
+    assert _read_state(shared, shared=True).generation == 1
+
+
+def test_capture_crash_before_copy_leaves_only_stable_lock_outside_tmp(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, backup_root = _create_staged_service(monkeypatch, tmp_path)
+    original_remove = service._remove_copying_snapshot
+
+    def crash_before_copying_created(path: Path) -> None:
+        original_remove(path)
+        raise KeyboardInterrupt("capture process crashed before copy")
+
+    monkeypatch.setattr(service, "_remove_copying_snapshot", crash_before_copying_created)
+    with pytest.raises(KeyboardInterrupt, match="before copy"):
+        service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+
+    project = session_dir.parent.name
+    copying = staging_root / "projects" / project / "s1_v1.copying"
+    owner_lock = staging_module._copying_owner_lock_path(staging_root, copying)
+    assert owner_lock.is_file()
+    assert staging_root not in owner_lock.parents
+
+    worker = SessionBackupStagingWorker(staging_root, backup_root)
+    assert worker.cleanup_incomplete_snapshots() == 0
+    assert copying.exists() is False
+    assert owner_lock.is_file()
+
+
+def test_copying_owner_lock_keeps_one_stable_inode_across_waiting_processes(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("controlled pre-opened inode interleave uses flock")
+    context = multiprocessing.get_context("spawn")
+    lock_path = tmp_path / "stable-copying-owner.lock"
+    first_acquired = context.Event()
+    release_first = context.Event()
+    second_opened = context.Event()
+    second_acquired = context.Event()
+    release_second = context.Event()
+    first = context.Process(
+        target=_hold_copying_owner_lock,
+        args=(str(lock_path), first_acquired, release_first, True),
+    )
+    second = context.Process(
+        target=_hold_preopened_owner_inode,
+        args=(str(lock_path), second_opened, second_acquired, release_second),
+    )
+    first.start()
+    assert first_acquired.wait(5)
+    second.start()
+    assert second_opened.wait(5)
+    assert second_acquired.wait(0.1) is False
+    release_first.set()
+    assert second_acquired.wait(5)
+
+    contender = staging_module._CopyingSnapshotOwnerLock(SessionBackupService(), lock_path)
+    with contender.acquire(blocking=False) as acquired:
+        assert acquired is False
+
+    release_second.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+    assert first.exitcode == 0
+    assert second.exitcode == 0
+    assert lock_path.is_file()
+
+
+def test_cleanup_retains_live_copying_until_capture_finishes(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, backup_root = _create_staged_service(monkeypatch, tmp_path)
+    (session_dir / "session.jsonl").write_text("live-copy\n", encoding="utf-8")
+    mirror_complete = threading.Event()
+    release_capture = threading.Event()
+    original_mirror = service._mirror
+
+    def pause_live_copy(source: Path, destination: Path):
+        result = original_mirror(source, destination)
+        mirror_complete.set()
+        assert release_capture.wait(5)
+        return result
+
+    monkeypatch.setattr(service, "_mirror", pause_live_copy)
+    capture_result: list[object] = []
+
+    def capture() -> None:
+        capture_result.append(service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True))
+
+    capture_thread = threading.Thread(target=capture)
+    capture_thread.start()
+    assert mirror_complete.wait(5)
+    project = session_dir.parent.name
+    copying = staging_root / "projects" / project / "s1_v1.copying"
+    assert copying.is_dir()
+
+    worker = SessionBackupStagingWorker(staging_root, backup_root)
+    assert worker.cleanup_incomplete_snapshots() == 0
+    assert copying.is_dir()
+
+    release_capture.set()
+    capture_thread.join(timeout=5)
+    assert capture_thread.is_alive() is False
+    assert len(capture_result) == 1
+    assert worker.run_once() == 1
+    shared = backup_root / "projects" / project / "s1"
+    assert (shared / "session.jsonl").read_text(encoding="utf-8") == "live-copy\n"
+
+
+def test_staged_backup_waits_for_the_transcript_writer_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, _backup_root = _create_staged_service(monkeypatch, tmp_path)
+    transcript = session_dir / "session.jsonl"
+    transcript.write_text("complete-line\n", encoding="utf-8")
+    finished = threading.Event()
+
+    def capture() -> None:
+        service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+        finished.set()
+
+    with cross_process_append_lock(transcript):
+        worker = threading.Thread(target=capture)
+        worker.start()
+        assert finished.wait(0.1) is False
+
+    worker.join(timeout=5)
+    assert finished.is_set()
+    snapshot = staging_root / "projects" / session_dir.parent.name / "s1_v1"
+    assert (snapshot / "session.jsonl").read_text(encoding="utf-8") == "complete-line\n"
+
+
+def test_staged_backup_cannot_observe_a_session_writer_between_transcript_and_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, _backup_root = _create_staged_service(monkeypatch, tmp_path)
+    storage = service._session_storage
+    metadata_started = threading.Event()
+    release_metadata = threading.Event()
+    capture_finished = threading.Event()
+    original_write_metadata = write_session_metadata
+
+    def gated_metadata(path: Path, metadata: SessionMetadata) -> None:
+        metadata_started.set()
+        assert release_metadata.wait(5)
+        original_write_metadata(path, metadata)
+
+    monkeypatch.setattr("iac_code.services.session_storage.write_session_metadata", gated_metadata)
+
+    writer = threading.Thread(
+        target=storage.append,
+        args=("/repo", "s1", Message(role="user", content="boundary message")),
+        kwargs={"git_branch": "boundary-branch"},
+    )
+
+    def capture() -> None:
+        service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+        capture_finished.set()
+
+    writer.start()
+    assert metadata_started.wait(5)
+    capture_worker = threading.Thread(target=capture)
+    capture_worker.start()
+    assert capture_finished.wait(0.1) is False
+
+    release_metadata.set()
+    writer.join(timeout=5)
+    capture_worker.join(timeout=5)
+    assert capture_finished.is_set()
+    snapshot = staging_root / "projects" / session_dir.parent.name / "s1_v1"
+    snapshot_metadata = json.loads((snapshot / "metadata.json").read_text(encoding="utf-8"))
+    assert snapshot_metadata["git_branch"] == "boundary-branch"
+    assert "boundary message" in (snapshot / "session.jsonl").read_text(encoding="utf-8")
 
 
 def test_wait_until_shared_committed_verifies_exact_staged_commit(
@@ -408,6 +653,68 @@ def test_terminal_publication_restores_in_another_sandbox(
     ]
 
 
+def test_cold_restore_waits_for_inflight_shared_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    service, session_dir, staging_root, backup_root = _create_staged_service(monkeypatch, tmp_path)
+    first_payload = session_dir / "first.txt"
+    second_payload = session_dir / "second.txt"
+    first_payload.write_text("first-v1\n", encoding="utf-8")
+    second_payload.write_text("second-v1\n", encoding="utf-8")
+    service.backup_session("/repo", "s1", reason=BackupReason.NORMAL_TURN_END, critical=True)
+    worker = SessionBackupStagingWorker(staging_root, backup_root)
+    assert worker.run_once() == 1
+
+    first_payload.write_text("first-generation-2\n", encoding="utf-8")
+    second_payload.write_text("second-generation-2\n", encoding="utf-8")
+    service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+
+    sandbox_storage = SessionStorage(projects_dir=tmp_path / "cold-sandbox" / "projects")
+    sandbox_service = StagedSessionBackupService(
+        tmp_path / "cold-sandbox-staging",
+        sandbox_storage,
+        retry_delays=(),
+    )
+    restore_finished = threading.Event()
+    restore_result: list[object] = []
+
+    def restore() -> None:
+        try:
+            restore_result.append(sandbox_service.restore_session("/repo", "s1"))
+        finally:
+            restore_finished.set()
+
+    restore_thread: threading.Thread | None = None
+    restore_finished_during_publication: bool | None = None
+    original_copy_file = worker._service._copy_file
+    blocked = False
+
+    def start_restore_between_payload_files(source: Path, destination: Path) -> None:
+        nonlocal blocked, restore_finished_during_publication, restore_thread
+        original_copy_file(source, destination)
+        if source.name in {"first.txt", "second.txt"} and not blocked:
+            blocked = True
+            restore_thread = threading.Thread(target=restore)
+            restore_thread.start()
+            restore_finished_during_publication = restore_finished.wait(0.1)
+
+    monkeypatch.setattr(worker._service, "_copy_file", start_restore_between_payload_files)
+    pending = worker.scan_snapshots()
+    assert len(pending) == 1
+    worker.publish_snapshot(pending[0])
+    assert restore_thread is not None
+    restore_thread.join(timeout=5)
+
+    assert restore_thread.is_alive() is False
+    assert restore_finished_during_publication is False
+    assert len(restore_result) == 1
+    restored_dir = sandbox_storage.session_dir("/repo", "s1")
+    assert (restored_dir / "first.txt").read_text(encoding="utf-8") == "first-generation-2\n"
+    assert (restored_dir / "second.txt").read_text(encoding="utf-8") == "second-generation-2\n"
+    assert _read_state(restored_dir).generation == 2
+
+
 def test_staged_reconcile_refreshes_old_sandbox_after_async_publication(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -586,7 +893,7 @@ def test_a2a_runtime_requires_final_root_and_rejects_overlapping_roots(
         create_a2a_session_backup_runtime()
 
 
-def test_staging_process_cleans_copying_before_start_and_stops_child(tmp_path: Path) -> None:
+def test_staging_process_retains_copying_before_start_and_stops_child(tmp_path: Path) -> None:
     staging_root = tmp_path / "staging"
     copying = staging_root / "projects" / "project" / "s1_v1.copying"
     copying.mkdir(parents=True)
@@ -638,7 +945,8 @@ def test_staging_process_cleans_copying_before_start_and_stops_child(tmp_path: P
     process = SessionBackupStagingProcess(staging_root, backup_root, process_context=context)
 
     process.start()
-    assert not copying.exists()
+    # Only the owning session writer may remove an in-progress copy.
+    assert copying.is_dir()
     assert context.process is not None and context.process.started is True
     assert context.created_events[1].wait_timeout == 5.0
     process.close()

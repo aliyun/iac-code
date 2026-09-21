@@ -211,9 +211,7 @@ def build_app(root: Path):
     async def result(request):
         selector_id = request.path_params["selector_id"]
         value = state.results.get(selector_id)
-        return JSONResponse(
-            {"ready": value is not None, "result": value, "calls": state.calls.get(selector_id, [])}
-        )
+        return JSONResponse({"ready": value is not None, "result": value, "calls": state.calls.get(selector_id, [])})
 
     app.routes.insert(0, Route("/__e2e/bootstrap", bootstrap, methods=["GET"]))
     app.routes.insert(1, Route("/__e2e/results/{selector_id:path}", result, methods=["GET"]))

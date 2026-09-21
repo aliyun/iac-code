@@ -1,7 +1,10 @@
 """Regression tests for /resume swap during pipeline mode (问题 4)."""
 
+import asyncio
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -17,6 +20,7 @@ from iac_code.pipeline.engine.prerequisites import (
     PrerequisiteResolution,
 )
 from iac_code.pipeline.engine.user_input import PipelineUserInput
+from iac_code.services.session_mutation_guard import session_mutation_guard
 
 
 def _make_repl_with_pipeline(tmp_path: Path, session_id_old: str, session_id_new: str):
@@ -942,6 +946,33 @@ async def test_swap_session_discard_marks_sidecar_without_deleting(tmp_path):
 
     delete.assert_not_called()
     mark_discarded.assert_called_once_with(reason="discarded from /resume picker")
+
+
+def test_swap_session_discard_waits_for_target_session_snapshot(tmp_path):
+    from iac_code.ui.repl import InlineREPL
+
+    repl, sessions_root = _make_repl_with_pipeline(tmp_path, "old", "new")
+    root = sessions_root / "new"
+    sidecar = root / "pipeline"
+    sidecar.mkdir(parents=True)
+    meta_path = sidecar / "meta.yaml"
+    meta_path.write_text(yaml.safe_dump({"status": "running", "current_step": "step1"}), encoding="utf-8")
+    started = threading.Event()
+
+    async def choose_discard(_meta_path):
+        started.set()
+        return "discard"
+
+    repl._confirm_pipeline_resume = choose_discard
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with session_mutation_guard(root):
+            future = pool.submit(asyncio.run, InlineREPL.swap_session_async(repl, "new"))
+            assert started.wait(5)
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.2)
+            assert yaml.safe_load(meta_path.read_text(encoding="utf-8"))["status"] == "running"
+        future.result(timeout=5)
+    assert yaml.safe_load(meta_path.read_text(encoding="utf-8"))["status"] == "discarded"
 
 
 @pytest.mark.asyncio

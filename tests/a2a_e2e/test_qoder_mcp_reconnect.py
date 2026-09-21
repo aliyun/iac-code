@@ -185,9 +185,7 @@ def _request(
         ),
     ],
 )
-def test_scenario_checks_cover_normal_first_timeout_and_reconnect_timeout(
-    scenario, requests, final_text
-) -> None:
+def test_scenario_checks_cover_normal_first_timeout_and_reconnect_timeout(scenario, requests, final_text) -> None:
     runner = _runner()
 
     checks = runner._scenario_checks(scenario, {"requests": requests}, final_text, "marker")

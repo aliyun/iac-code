@@ -67,7 +67,23 @@ def with_iac_code_session_metadata(metadata: dict[str, Any] | None, session_id: 
     iac_code = dict(merged.get("iac_code") or {})
     iac_code[IAC_CODE_SESSION_ID_METADATA_KEY] = session_id
     merged["iac_code"] = iac_code
+    _stamp_recovery_watermark(merged, session_id)
     return merged
+
+
+def _stamp_recovery_watermark(metadata: dict[str, Any], session_id: str) -> None:
+    """Publish the locally committed progress floor of this business boundary."""
+
+    from iac_code.a2a.execution_control import current_execution_control
+
+    control = current_execution_control()
+    if control is None or control.session_id != session_id:
+        return
+    revision = control.committed_business_revision()
+    if revision is None:
+        return
+    metadata.setdefault("businessRevision", revision)
+    metadata.setdefault("ownerGeneration", control.owner_generation)
 
 
 def _truncate(value: Any, *, _depth: int = 0) -> Any:
@@ -516,11 +532,7 @@ async def publish_stream_event(
             task_id=task_id,
             context_id=context_id,
             state=TaskState.TASK_STATE_WORKING,
-            metadata={
-                "iac_code": {
-                    "usage": usage
-                }
-            },
+            metadata={"iac_code": {"usage": usage}},
             iac_code_session_id=iac_code_session_id,
         )
         return None

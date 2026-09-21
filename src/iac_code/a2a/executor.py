@@ -59,14 +59,21 @@ from iac_code.a2a.parts import (
     resolve_workspace_path,
     trust_request_cwd,
 )
+from iac_code.a2a.pipeline_continuation import (
+    PipelineContinuationConflictError,
+    PipelineContinuationStore,
+    PipelineContinuationUnsafeError,
+)
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_executor import (
     RICH_CANDIDATE_PRESENTATION,
     IacCodeA2APipelineExecutor,
     WaitingInputCancelResult,
     cancel_waiting_input_task_from_sidecar,
+    current_pipeline_task_id_from_sidecar,
     recoverable_task_id_from_sidecar,
     sandbox_release_recoverable_task_id_from_sidecar,
+    successor_task_id_from_sidecar,
     terminal_task_state_from_sidecar,
 )
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -163,6 +170,7 @@ from iac_code.services.session_backup_state import (
     BackupPublicationProof,
     SessionBackupState,
 )
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
 from iac_code.types.stream_events import (
@@ -299,11 +307,17 @@ def _message_is_cleanup_prompt(message: Any) -> bool:
 
 
 def _cleanup_ledger_for_a2a_normal_chat(*, cwd: str, session_id: str) -> CleanupLedger | None:
+    storage = SessionStorage()
     try:
-        messages = SessionStorage().load(cwd, session_id)
+        messages = storage.load(cwd, session_id)
     except Exception:
         logger.warning("Failed to inspect A2A session cleanup prompt", exc_info=True)
         messages = []
+    try:
+        session_root = storage.session_dir(cwd, session_id)
+    except Exception:
+        logger.warning("Failed to locate A2A session cleanup ledger", exc_info=True)
+        return None
     has_active_cleanup_prompt = False
     for message in messages:
         if not is_active_cleanup_prompt_message(message):
@@ -311,15 +325,15 @@ def _cleanup_ledger_for_a2a_normal_chat(*, cwd: str, session_id: str) -> Cleanup
         has_active_cleanup_prompt = True
         ledger_path = cleanup_prompt_ledger_path(message)
         if ledger_path:
-            return CleanupLedger(ledger_path)
+            return CleanupLedger(ledger_path, session_root=session_root)
     try:
-        path = SessionStorage().session_dir(cwd, session_id) / "pipeline" / "cleanup.yaml"
+        path = session_root / "pipeline" / "cleanup.yaml"
     except Exception:
         logger.warning("Failed to locate A2A pipeline cleanup ledger", exc_info=True)
         return None
     if not path.exists():
         return None
-    ledger = CleanupLedger(path)
+    ledger = CleanupLedger(path, session_root=session_root)
     if has_active_cleanup_prompt:
         return ledger
     if ledger.load_failed():
@@ -455,24 +469,78 @@ def _a2a_cleanup_ledger_unavailable(
     return ledger.load_failed()
 
 
+class _A2ADeferredCleanupPromptStore:
+    """Serialize deferred cleanup-prompt mutations with session capture."""
+
+    def __init__(self, *, cwd: str, session_id: str) -> None:
+        self._session_root = SessionStorage().session_dir(cwd, session_id)
+        self.path = self._session_root / "a2a" / _DEFERRED_CLEANUP_PROMPTS_FILENAME
+
+    def load(self) -> tuple[list[str], bool]:
+        if not self.path.exists():
+            return [], False
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.warning("Failed to load deferred A2A cleanup prompts", exc_info=True)
+            return [], True
+        raw_prompts = data.get("prompts") if isinstance(data, dict) else None
+        if not isinstance(raw_prompts, list):
+            raw_prompt = data.get("prompt") if isinstance(data, dict) else None
+            raw_prompts = [raw_prompt] if isinstance(raw_prompt, str) else []
+        return [prompt for prompt in raw_prompts if isinstance(prompt, str) and prompt.strip()], False
+
+    def save(self, prompts: list[str]) -> bool:
+        with session_mutation_guard(self._session_root):
+            return self._save_locked(prompts)
+
+    def append(self, prompt: str) -> bool:
+        prompt = prompt.strip()
+        if not prompt:
+            return True
+        with session_mutation_guard(self._session_root):
+            prompts, load_failed = self.load()
+            if load_failed:
+                return False
+            if prompts and _is_cleanup_continue_prompt(prompt):
+                prompts = [prompts[-1]]
+            else:
+                prompts = [prompt]
+            return self._save_locked(prompts)
+
+    def clear(self) -> bool:
+        with session_mutation_guard(self._session_root):
+            try:
+                self.path.unlink()
+            except FileNotFoundError:
+                return True
+            except OSError:
+                logger.warning("Failed to clear deferred A2A cleanup prompts", exc_info=True)
+                return False
+            return True
+
+    def _save_locked(self, prompts: list[str]) -> bool:
+        if not prompts:
+            return self.clear()
+        try:
+            ensure_private_dir(self.path.parent)
+            atomic_write_text(
+                self.path,
+                json.dumps({"prompts": prompts}, ensure_ascii=False, sort_keys=True),
+            )
+            ensure_private_file(self.path)
+        except OSError:
+            logger.warning("Failed to persist deferred A2A cleanup prompt", exc_info=True)
+            return False
+        return True
+
+
 def _a2a_deferred_cleanup_prompts_path(*, cwd: str, session_id: str) -> Path:
-    return SessionStorage().session_dir(cwd, session_id) / "a2a" / _DEFERRED_CLEANUP_PROMPTS_FILENAME
+    return _A2ADeferredCleanupPromptStore(cwd=cwd, session_id=session_id).path
 
 
 def _read_a2a_deferred_cleanup_prompts(*, cwd: str, session_id: str) -> tuple[list[str], bool]:
-    path = _a2a_deferred_cleanup_prompts_path(cwd=cwd, session_id=session_id)
-    if not path.exists():
-        return [], False
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        logger.warning("Failed to load deferred A2A cleanup prompts", exc_info=True)
-        return [], True
-    raw_prompts = data.get("prompts") if isinstance(data, dict) else None
-    if not isinstance(raw_prompts, list):
-        raw_prompt = data.get("prompt") if isinstance(data, dict) else None
-        raw_prompts = [raw_prompt] if isinstance(raw_prompt, str) else []
-    return [prompt for prompt in raw_prompts if isinstance(prompt, str) and prompt.strip()], False
+    return _A2ADeferredCleanupPromptStore(cwd=cwd, session_id=session_id).load()
 
 
 def _load_a2a_deferred_cleanup_prompts(*, cwd: str, session_id: str) -> list[str]:
@@ -480,45 +548,16 @@ def _load_a2a_deferred_cleanup_prompts(*, cwd: str, session_id: str) -> list[str
     return prompts
 
 
-def _save_a2a_deferred_cleanup_prompts(*, cwd: str, session_id: str, prompts: list[str]) -> None:
-    path = _a2a_deferred_cleanup_prompts_path(cwd=cwd, session_id=session_id)
-    if not prompts:
-        _clear_a2a_deferred_cleanup_prompts(cwd=cwd, session_id=session_id)
-        return
-    try:
-        ensure_private_dir(path.parent)
-        atomic_write_text(
-            path,
-            json.dumps({"prompts": prompts}, ensure_ascii=False, sort_keys=True),
-        )
-        ensure_private_file(path)
-    except OSError:
-        logger.warning("Failed to persist deferred A2A cleanup prompt", exc_info=True)
+def _save_a2a_deferred_cleanup_prompts(*, cwd: str, session_id: str, prompts: list[str]) -> bool:
+    return _A2ADeferredCleanupPromptStore(cwd=cwd, session_id=session_id).save(prompts)
 
 
 def _append_a2a_deferred_cleanup_prompt(*, cwd: str, session_id: str, prompt: str) -> bool:
-    prompt = prompt.strip()
-    if not prompt:
-        return True
-    prompts, load_failed = _read_a2a_deferred_cleanup_prompts(cwd=cwd, session_id=session_id)
-    if load_failed:
-        return False
-    if prompts and _is_cleanup_continue_prompt(prompt):
-        prompts = [prompts[-1]]
-    else:
-        prompts = [prompt]
-    _save_a2a_deferred_cleanup_prompts(cwd=cwd, session_id=session_id, prompts=prompts)
-    return True
+    return _A2ADeferredCleanupPromptStore(cwd=cwd, session_id=session_id).append(prompt)
 
 
-def _clear_a2a_deferred_cleanup_prompts(*, cwd: str, session_id: str) -> None:
-    path = _a2a_deferred_cleanup_prompts_path(cwd=cwd, session_id=session_id)
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except OSError:
-        logger.warning("Failed to clear deferred A2A cleanup prompts", exc_info=True)
+def _clear_a2a_deferred_cleanup_prompts(*, cwd: str, session_id: str) -> bool:
+    return _A2ADeferredCleanupPromptStore(cwd=cwd, session_id=session_id).clear()
 
 
 def _a2a_prompts_after_cleanup(*, cwd: str, session_id: str, prompt: str) -> tuple[list[str], bool] | None:
@@ -1289,6 +1328,17 @@ class IacCodeA2AExecutor(AgentExecutor):
         self._metadata_echo_redactor = A2AMetadataEchoRedactor()
         self._backup_service = backup_service or SessionBackupService()
         self._execution_control_service = execution_control_service
+        self._backup_coordinator = getattr(execution_control_service, "backup_coordinator", None)
+        self._permission_input_registry.set_backup_coordinator(self._backup_coordinator)
+        recover_generation = getattr(
+            self._task_store,
+            "recover_expected_permission_backup_generation",
+            self._task_store.record_expected_permission_backup_generation,
+        )
+        self._permission_input_registry.set_staged_task_generation_recorder(recover_generation)
+        set_staged_action_resolver = getattr(self._backup_coordinator, "set_staged_action_resolver", None)
+        if callable(set_staged_action_resolver):
+            set_staged_action_resolver(self._permission_input_registry.resolve_staged_backup_action)
         if execution_control_service is not None:
             execution_control_service.set_termination_cleanup(self._terminate_detached_execution)
             execution_control_service.set_resume_callback(self._task_store.touch_context)
@@ -1499,9 +1549,8 @@ class IacCodeA2AExecutor(AgentExecutor):
             return
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
-            if (
-                PipelineLifecycleEventQueueCarrier.read(context)
-                and not PipelineLifecycleEventQueueCarrier.is_bound(context)
+            if PipelineLifecycleEventQueueCarrier.read(context) and not PipelineLifecycleEventQueueCarrier.is_bound(
+                context
             ):
                 await self._publish_status(
                     event_queue,
@@ -1637,6 +1686,8 @@ class IacCodeA2AExecutor(AgentExecutor):
         public_path_roots: list[dict[str, str]] | None = None
         context_execution_token: str | None = None
         active_pipeline_owner: asyncio.Task[Any] | None = None
+        continuation_store: PipelineContinuationStore | None = None
+        continuation_intent = None
 
         async def publish_initial_task_if_missing() -> None:
             nonlocal initial_task_published
@@ -1663,9 +1714,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             metadata = getattr(context, "metadata", None) or getattr(
                 getattr(context, "message", None), "metadata", None
             )
-            resource_selector_enabled = ResourceSelectorCapability.for_surface(
-                "a2a", request_metadata=metadata
-            ).enabled
+            resource_selector_enabled = ResourceSelectorCapability.for_surface("a2a", request_metadata=metadata).enabled
             cwd = self._resolve_cwd(metadata)
             public_path_roots = build_public_path_roots(cwd=cwd)
             pipeline_mode = resolve_request_run_mode(metadata) == RunMode.PIPELINE
@@ -1722,9 +1771,46 @@ class IacCodeA2AExecutor(AgentExecutor):
                 if normal_input.has_images:
                     self._validate_pipeline_request_input(normal_input, model=model)
             if pipeline_mode and requested_task_id is None:
-                recovered_task_id = await self._recoverable_pipeline_task_id_for_context(context_id=context_id, cwd=cwd)
+                message = getattr(context, "message", None)
+                invocation_id = getattr(message, "message_id", None) or "executor-" + uuid.uuid4().hex
+                recovered_task_id = await self._recoverable_pipeline_task_id_for_context(
+                    context_id=context_id,
+                    cwd=cwd,
+                    invocation_id=invocation_id,
+                )
                 if recovered_task_id is not None:
                     task_id = recovered_task_id
+            if pipeline_mode:
+                try:
+                    context_record = await self._task_store.get_context_record(context_id)
+                except ValueError:
+                    context_record = None
+                if context_record is not None:
+                    pipeline_dir = existing_a2a_pipeline_dir_for_session(
+                        cwd=cwd,
+                        session_id=context_record.session_id,
+                    )
+                    intent_path = pipeline_dir / "continuation-intent.json"
+                    if intent_path.is_file():
+                        continuation_store = PipelineContinuationStore(
+                            pipeline_dir,
+                            session_dir=pipeline_dir.parent.parent,
+                        )
+                        continuation_intent = continuation_store.load(context_id=context_id)
+                        if continuation_intent is not None and continuation_intent.successor_task_id != task_id:
+                            continuation_store = None
+                            continuation_intent = None
+                        elif (
+                            continuation_intent is not None
+                            and continuation_intent.phase in {"reserved", "claimed"}
+                            and continuation_intent.invocation_id
+                            != (getattr(getattr(context, "message", None), "message_id", None) or "")
+                        ):
+                            raise InvalidParamsError("A different invocation owns the Pipeline continuation.")
+                        elif continuation_intent is not None and continuation_intent.phase == "unsafe":
+                            raise PipelineContinuationUnsafeError(
+                                continuation_intent.unsafe_reason or "canceled checkpoint is unsafe"
+                            )
             owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
             task = await self._task_store.get_or_create_task(
                 task_id=task_id,
@@ -1860,6 +1946,22 @@ class IacCodeA2AExecutor(AgentExecutor):
                 resource_selector_enabled=resource_selector_enabled,
             )
             try:
+                if (
+                    continuation_store is not None
+                    and continuation_intent is not None
+                    and continuation_intent.phase == "reserved"
+                ):
+                    try:
+                        continuation_intent = continuation_store.claim_execution(
+                            successor_task_id=task_id,
+                            invocation_id=continuation_intent.invocation_id,
+                            checkpoint=continuation_intent.checkpoint,
+                            expected_fence=continuation_intent.fence,
+                        )
+                    except PipelineContinuationConflictError as exc:
+                        raise InvalidParamsError(
+                            "Pipeline successor is already executing; observe the same task."
+                        ) from exc
                 direct_route_gate = DirectPipelineRouteGateCarrier.read(context)
                 if direct_route_gate is None:
                     pipeline_result = await pipeline_executor.execute(
@@ -2636,9 +2738,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             finally:
                 task.active_task = None
                 ctx.active_task_id = None
-                ctx.touch()
                 task.touch()
-                self._task_store.mirror_context(ctx)
                 # Force-flush telemetry between tasks. The a2a server may run in
                 # an ephemeral sandbox that's destroyed immediately after the
                 # response is delivered, before the natural batch interval or
@@ -4432,7 +4532,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                 ),
             )
 
-    async def _recoverable_pipeline_task_id_for_context(self, *, context_id: str, cwd: str) -> str | None:
+    async def resolve_omitted_pipeline_task_id(
+        self,
+        *,
+        context_id: str,
+        cwd: str,
+        invocation_id: str,
+    ) -> str | None:
         try:
             ctx = await self._task_store.get_context_record(context_id)
         except Exception:
@@ -4440,10 +4546,68 @@ class IacCodeA2AExecutor(AgentExecutor):
         if ctx.cwd != cwd:
             return None
         try:
-            return recoverable_task_id_from_sidecar(cwd=cwd, session_id=ctx.session_id, context_id=context_id)
+            pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=ctx.session_id)
+            intent_path = pipeline_dir / "continuation-intent.json"
+            if intent_path.is_file():
+                intent = PipelineContinuationStore(
+                    pipeline_dir,
+                    session_dir=pipeline_dir.parent.parent,
+                ).load(context_id=context_id)
+                if intent is not None and intent.phase != "settled":
+                    if intent.phase in {"reserved", "claimed"} and intent.invocation_id != invocation_id:
+                        raise PipelineContinuationConflictError("A different invocation owns the continuation")
+                    return intent.successor_task_id
+            task_id = recoverable_task_id_from_sidecar(cwd=cwd, session_id=ctx.session_id, context_id=context_id)
+            owner_task_id = current_pipeline_task_id_from_sidecar(
+                cwd=cwd,
+                session_id=ctx.session_id,
+                context_id=context_id,
+            )
+            if owner_task_id is None:
+                return task_id
+            try:
+                owner_task = await self._task_store.get_task_record(owner_task_id)
+            except ValueError:
+                return task_id
+            if owner_task.state != TASK_STATE_CANCELED:
+                return task_id
+            cancellation_proof = await self._task_store.canceled_task_release_proof(
+                context_id=context_id,
+                task_id=owner_task_id,
+            )
+            if cancellation_proof is None:
+                if await self._task_store.canceled_owner_release_pending(
+                    context_id=context_id,
+                    task_id=owner_task_id,
+                ):
+                    raise InvalidParamsError("Pipeline cancellation is still finalizing; retry the request.")
+                raise InvalidParamsError(
+                    "Pipeline cancellation release proof is unavailable; retry after recovery completes."
+                )
+            return successor_task_id_from_sidecar(
+                cwd=cwd,
+                session_id=ctx.session_id,
+                context_id=context_id,
+                canceled_task_id=owner_task_id,
+                invocation_id=invocation_id,
+                cancellation_proof=cancellation_proof,
+            )
         except Exception:
             logger.debug("Failed to recover A2A pipeline task id", exc_info=True)
-            return None
+            raise
+
+    async def _recoverable_pipeline_task_id_for_context(
+        self,
+        *,
+        context_id: str,
+        cwd: str,
+        invocation_id: str | None = None,
+    ) -> str | None:
+        return await self.resolve_omitted_pipeline_task_id(
+            context_id=context_id,
+            cwd=cwd,
+            invocation_id=invocation_id or "executor-" + uuid.uuid4().hex,
+        )
 
     def _log_executor_exception(self, stage: str, *, task_id: str, context_id: str) -> None:
         logger.error("A2A executor %s failed (task_id=%s, context_id=%s)", stage, task_id, context_id)

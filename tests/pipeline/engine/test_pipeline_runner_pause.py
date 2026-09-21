@@ -151,6 +151,7 @@ class TestPauseEventEndToEnd:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
+
     @pytest.mark.asyncio
     async def test_pause_then_resume_releases_existing_loop(self, pipeline_runner):
         """Resuming after pause sets the event and any AgentLoop parked on it wakes up."""
@@ -228,6 +229,7 @@ async def test_execution_control_blocks_pipeline_before_starting_first_step(pipe
         reconnect_timeout_seconds=30,
     )
     start_pipeline.set()
+
     async def wait_until_paused():
         while control.phase != "paused":
             await asyncio.sleep(0.005)

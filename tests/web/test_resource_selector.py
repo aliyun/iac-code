@@ -40,9 +40,7 @@ def test_answer_is_explicit_single_value_idempotent_and_conflict_safe(tmp_path, 
         return {"Instances": {"Instance": [{"InstanceId": "i-test123", "InstanceName": "app-server"}]}}
 
     query_service = ResourceSelectorQueryService(caller)
-    with TestClient(
-        create_app(session_manager=manager, resource_selector_query_service=query_service)
-    ) as client:
+    with TestClient(create_app(session_manager=manager, resource_selector_query_service=query_service)) as client:
         body = {
             "sessionId": session.session_id,
             "inputId": "resource-test",

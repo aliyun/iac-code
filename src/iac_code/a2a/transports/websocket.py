@@ -116,7 +116,7 @@ class WebSocketA2AServerApp:
         @asynccontextmanager
         async def lifespan(app: Starlette):
             push_worker_task: asyncio.Task[None] | None = None
-            components.start_background_services()
+            await components.start_background_services()
             try:
                 await components.task_store.start_cleanup_loop()
                 if components.push_worker is not None:

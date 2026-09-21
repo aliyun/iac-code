@@ -21,8 +21,7 @@ from iac_code.web.session_manager import WebSessionManager
 
 ROOT = Path(__file__).resolve().parent
 CASES = {
-    item["selectorId"]: item
-    for item in json.loads((ROOT / "e2e-cases.json").read_text(encoding="utf-8"))["cases"]
+    item["selectorId"]: item for item in json.loads((ROOT / "e2e-cases.json").read_text(encoding="utf-8"))["cases"]
 }
 FIXTURES = json.loads((ROOT / "contract-fixtures.json").read_text(encoding="utf-8"))["fixtures"]
 

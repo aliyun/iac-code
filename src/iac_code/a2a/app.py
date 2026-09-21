@@ -449,7 +449,7 @@ def create_app(
     async def lifespan(app: Starlette):
         push_worker_task: asyncio.Task[None] | None = None
         idle_shutdown_task: asyncio.Task[None] | None = None
-        components.start_background_services()
+        await components.start_background_services()
         try:
             await components.task_store.start_cleanup_loop()
             if components.push_worker is not None:
@@ -673,6 +673,15 @@ def create_app(
             expected_execution_id = request.query_params.get("executionId")
             pause_id = request.query_params.get("pauseId")
             if expected_execution_id is not None and expected_execution_id != state.get("executionId"):
+                retired_receipt = service.natural_handoff_receipt(validate_protocol_id(expected_execution_id))
+                if retired_receipt is not None:
+                    return JSONResponse(
+                        {
+                            "executionId": expected_execution_id,
+                            "phase": "retired",
+                            "naturalHandoff": retired_receipt,
+                        }
+                    )
                 raise ExecutionControlConflictError("executionId does not identify the current execution")
             if pause_id is not None and pause_id != state.get("pauseId"):
                 raise ExecutionControlConflictError("pauseId does not identify the current pause")
@@ -1098,7 +1107,7 @@ async def _serve_async_transport(server, *, components) -> None:
     push_worker_task: asyncio.Task[None] | None = None
     start_background_services = getattr(components, "start_background_services", None)
     if start_background_services is not None:
-        start_background_services()
+        await start_background_services()
     try:
         await components.task_store.start_cleanup_loop()
         if components.push_worker is not None:

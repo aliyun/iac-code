@@ -65,9 +65,7 @@ class EipAssociationCheck:
         ecs_resources = {
             name: definition
             for name, definition in resources.items()
-            if isinstance(name, str)
-            and isinstance(definition, Mapping)
-            and definition.get("Type") in _ECS_TYPES
+            if isinstance(name, str) and isinstance(definition, Mapping) and definition.get("Type") in _ECS_TYPES
         }
         diagnostics: list[Diagnostic] = []
         for association_name, association in resources.items():
@@ -83,9 +81,7 @@ class EipAssociationCheck:
                 target = ecs_resources[target_name]
                 target_properties = target.get("Properties")
                 allocate_public_ip = (
-                    target_properties.get("AllocatePublicIP")
-                    if isinstance(target_properties, Mapping)
-                    else None
+                    target_properties.get("AllocatePublicIP") if isinstance(target_properties, Mapping) else None
                 )
                 if _is_explicit_false(allocate_public_ip):
                     continue

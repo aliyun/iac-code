@@ -23,8 +23,7 @@ from iac_code.resource_selector.query import (
 
 ROOT = Path(__file__).resolve().parents[1] / "resource_selector"
 CASES = {
-    item["selectorId"]: item
-    for item in json.loads((ROOT / "e2e-cases.json").read_text(encoding="utf-8"))["cases"]
+    item["selectorId"]: item for item in json.loads((ROOT / "e2e-cases.json").read_text(encoding="utf-8"))["cases"]
 }
 
 _PAGINATION_PARAMETERS = {
@@ -102,11 +101,13 @@ def _minimum_request_parameters(
                 or wire_source_parameter.startswith("{}.Values.".format(prefix))
             )
         )
-        if not any(
-            candidate.startswith("{}.Value.".format(prefix))
-            or candidate.startswith("{}.Values.".format(prefix))
-            for candidate in result
-        ) and not source_supplies_value:
+        if (
+            not any(
+                candidate.startswith("{}.Value.".format(prefix)) or candidate.startswith("{}.Values.".format(prefix))
+                for candidate in result
+            )
+            and not source_supplies_value
+        ):
             result.pop(key)
     # convertRequestToArray emits a continuous 1-based sequence.  The offline
     # case contains every optional filter; after removing placeholder pairs,

@@ -1,5 +1,6 @@
 """Regression test for sidecar path migration (问题 4)."""
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -894,6 +895,91 @@ async def test_resume_from_sidecar_preserves_step_attempts_after_parent_rollback
         (call.kwargs["step_id"], call.kwargs["step_attempt"])
         for call in runner2._observability.step_started.call_args_list
     ] == [("s1", 2), ("s2", 2)]
+
+
+@pytest.mark.asyncio
+async def test_canceled_started_attempt_is_unsafe_and_never_reexecutes_step(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+    initial_calls: list[str] = []
+
+    async def execute_until_cancel(step, context, session_id, user_message=None, **_kwargs):
+        initial_calls.append(step.step_id)
+        if step.step_id == "s1":
+            conclusion = {"value": "already-created"}
+            context.set_conclusion(step.conclusion_field, conclusion)
+            yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+            return
+        await asyncio.Event().wait()
+        yield
+
+    runner._step_executor.execute = execute_until_cancel
+    stream = runner.run("create infrastructure")
+    async for event in stream:
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_STARTED and event.step_id == "s2":
+            runner.mark_execution_terminated("canceled by control plane")
+            break
+
+    assert runner.state_machine.current_step_index == 1
+    restored = _build_two_step_runner(tmp_path, resume_from_sidecar=True)
+    restore_result = restored.restore_canceled_checkpoint_sync()
+    assert restore_result.ok is True
+    assert restore_result.status == "canceled"
+    assert restored.state_machine.current_step_index == 1
+    await stream.aclose()
+    resumed_calls: list[str] = []
+
+    async def resume_current_step(step, context, session_id, user_message=None, **_kwargs):
+        resumed_calls.append(step.step_id)
+        conclusion = {"value": "continued"}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    restored._step_executor.execute = resume_current_step
+    safety = restored.canceled_checkpoint_safety()
+
+    assert initial_calls == ["s1"]
+    assert safety.safe is False
+    assert safety.reason == "active_attempt_outcome_unverified"
+    assert resumed_calls == []
+    assert restored.context.get_conclusion("x") == {"value": "already-created"}
+
+
+@pytest.mark.asyncio
+async def test_canceled_step_boundary_continues_without_repeating_completed_step(tmp_path):
+    runner = _build_two_step_runner(tmp_path)
+
+    async def complete_steps(step, context, session_id, user_message=None, **_kwargs):
+        conclusion = {"value": f"completed-{step.step_id}"}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    runner._step_executor.execute = complete_steps
+    stream = runner.run("create infrastructure")
+    async for event in stream:
+        if isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED:
+            runner.mark_execution_terminated("canceled at step boundary")
+            break
+
+    restored = _build_two_step_runner(tmp_path, resume_from_sidecar=True)
+    restore_result = restored.restore_canceled_checkpoint_sync()
+    await stream.aclose()
+    assert restore_result.ok is True
+    assert restored.canceled_checkpoint_safety().safe is True
+
+    resumed_calls: list[str] = []
+
+    async def resume_next(step, context, session_id, user_message=None, **_kwargs):
+        resumed_calls.append(step.step_id)
+        conclusion = {"value": "continued"}
+        context.set_conclusion(step.conclusion_field, conclusion)
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion=conclusion)
+
+    restored._step_executor.execute = resume_next
+    async for _event in restored.continue_from_sidecar():
+        pass
+
+    assert resumed_calls == ["s2"]
+    assert restored.context.get_conclusion("x") == {"value": "completed-s1"}
 
 
 @pytest.mark.asyncio

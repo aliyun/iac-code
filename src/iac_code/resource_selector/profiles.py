@@ -734,9 +734,7 @@ _SOURCE_PARAMETER_KEYS: dict[str, str] = {
 _SOURCE_OPERATION_PARAMETERS: dict[str, tuple[tuple[str, str | None], ...]] = {
     # This selector lists all file systems and locates VolumeId in the
     # response; VolumeId is not part of the public request contract.
-    "ehpc.mount_target": (
-        ("ehpc.mount_target.dataapi.ehpc.listfilesystemwithmounttargets", None),
-    ),
+    "ehpc.mount_target": (("ehpc.mount_target.dataapi.ehpc.listfilesystemwithmounttargets", None),),
     # RepoName resolves RepoId through GetRepository.  The other calls do not
     # accept RepoName and must stay fenced by that resolution chain.
     "cr.repository_tag": (
@@ -751,9 +749,7 @@ _SOURCE_OPERATION_PARAMETERS: dict[str, tuple[tuple[str, str | None], ...]] = {
         ),
     ),
     # Metadata is PascalCase, but APIG's request contract is lower camel case.
-    "apig.domain": (
-        ("apig.domain.dataapi.apig.listdomains", "gatewayId"),
-    ),
+    "apig.domain": (("apig.domain.dataapi.apig.listdomains", "gatewayId"),),
 }
 
 
@@ -948,9 +944,7 @@ _SERVER_METADATA_PARAMETER_OVERRIDES: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     # ORE derives the SAE API's NamespaceId from the selector metadata key
     # SAENamespaceId and adds the selected region prefix before querying.
-    "ecs.vswitch.dataapi.serverless.describenamespaceresources": (
-        ("SAENamespaceId", "NamespaceId"),
-    ),
+    "ecs.vswitch.dataapi.serverless.describenamespaceresources": (("SAENamespaceId", "NamespaceId"),),
     # VpcId can be produced by the preceding SAE/security-group lookup.  It is
     # validated against the BFF's observed parent set instead of being treated
     # as caller-owned AssociationPropertyMetadata.
@@ -1094,8 +1088,7 @@ def _catalog_profiles() -> tuple[SelectorProfile, ...]:
         value_pattern_by_attribute = None
         if output_kind_by_attribute is not None:
             value_pattern_by_attribute = {
-                attribute: _VALUE_PATTERNS_BY_OUTPUT_KIND[kind]
-                for attribute, kind in output_kind_by_attribute.items()
+                attribute: _VALUE_PATTERNS_BY_OUTPUT_KIND[kind] for attribute, kind in output_kind_by_attribute.items()
             }
         if selector_id == "oss.object" and "ValueType" in properties:
             properties["ValueType"].update({"const": "ObjectName", "default": "ObjectName"})
@@ -1119,8 +1112,7 @@ def _catalog_profiles() -> tuple[SelectorProfile, ...]:
             metadata_parameters = tuple(
                 (metadata_keys_by_lower[name.lower()], name)
                 for name in allowed
-                if name.lower() in metadata_keys_by_lower
-                and name != source_parameter_key
+                if name.lower() in metadata_keys_by_lower and name != source_parameter_key
             )
             metadata_parameters = _SERVER_METADATA_PARAMETER_OVERRIDES.get(
                 operation["key"],

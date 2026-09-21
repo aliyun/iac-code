@@ -1,11 +1,74 @@
 import json
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 
 import pytest
 import yaml
 
 from iac_code.pipeline.engine.session import PipelineSession
+from iac_code.services.session_mutation_guard import session_mutation_guard
+
+
+@pytest.mark.parametrize("use_session_root", [False, True])
+def test_snapshot_capture_waits_for_complete_context_and_metadata_transaction(tmp_path, monkeypatch, use_session_root):
+    session_root = tmp_path if use_session_root else None
+    session = PipelineSession(tmp_path / "pipeline", session_root=session_root)
+    session.save_running_sync("old-step", {}, {"value": "old"}, {})
+    context_written = threading.Event()
+    allow_metadata = threading.Event()
+    original_write = session._atomic_write_yaml
+
+    def pause_after_context(path, data):
+        original_write(path, data)
+        if path == session.context_path:
+            context_written.set()
+            assert allow_metadata.wait(timeout=5)
+
+    def capture():
+        with session_mutation_guard(session_root or session.session_dir):
+            return (
+                yaml.safe_load(session.context_path.read_text(encoding="utf-8")),
+                yaml.safe_load(session.meta_path.read_text(encoding="utf-8")),
+            )
+
+    monkeypatch.setattr(session, "_atomic_write_yaml", pause_after_context)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        writer = pool.submit(session.save_running_sync, "new-step", {}, {"value": "new"}, {})
+        try:
+            assert context_written.wait(timeout=5)
+            snapshot = pool.submit(capture)
+            with pytest.raises(TimeoutError):
+                snapshot.result(timeout=0.2)
+        finally:
+            allow_metadata.set()
+        writer.result(timeout=5)
+        context, metadata = snapshot.result(timeout=5)
+    assert context == {"value": "new"}
+    assert metadata["current_step"] == "new-step"
+
+
+def test_discard_waits_for_session_boundary_before_read_modify_write(tmp_path):
+    session = PipelineSession(tmp_path / "pipeline", session_root=tmp_path)
+    session.save_running_sync("old-step", {}, {"value": "old"}, {})
+    started = threading.Event()
+
+    def discard():
+        started.set()
+        session.mark_discarded("replaced")
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with session_mutation_guard(tmp_path):
+            future = pool.submit(discard)
+            assert started.wait(timeout=5)
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.2)
+            session.save_running_sync("new-step", {}, {"value": "new"}, {})
+        future.result(timeout=5)
+    metadata = yaml.safe_load(session.meta_path.read_text(encoding="utf-8"))
+    assert metadata["status"] == "discarded"
+    assert metadata["current_step"] == "new-step"
 
 
 @pytest.fixture
