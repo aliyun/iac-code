@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -932,9 +933,100 @@ class PermissionInputRegistry:
         self._pending: dict[tuple[str, str], PendingPermission] = {}
         self._closing_tasks: dict[str, _PermissionTaskClosingState] = {}
         self._permission_wait_coordinator: PermissionWaitCoordinator | None = None
+        self._backup_coordinator: Any | None = None
+        self._staged_task_generation_recorder: Callable[[str, int], Awaitable[None]] | None = None
 
     def set_permission_wait_coordinator(self, coordinator: PermissionWaitCoordinator | None) -> None:
         self._permission_wait_coordinator = coordinator
+
+    def set_backup_coordinator(self, coordinator: Any | None) -> None:
+        self._backup_coordinator = coordinator
+
+    def set_staged_task_generation_recorder(
+        self,
+        recorder: Callable[[str, int], Awaitable[None]] | None,
+    ) -> None:
+        self._staged_task_generation_recorder = recorder
+
+    async def resolve_staged_backup_action(
+        self,
+        action: Mapping[str, Any],
+        generation: int,
+        commit_id: str,
+    ) -> None:
+        """Replay the durable permission callback without reviving a consumed boundary."""
+
+        required = {
+            "kind",
+            "cwd",
+            "sessionId",
+            "boundaryId",
+            "checkpointGeneration",
+            "taskId",
+            "contextId",
+        }
+        if set(action) != required or action.get("kind") != "permission_generation_v1":
+            raise ValueError("unsupported staged backup action")
+        cwd = action.get("cwd")
+        session_id = action.get("sessionId")
+        boundary_id = action.get("boundaryId")
+        task_id = action.get("taskId")
+        context_id = action.get("contextId")
+        checkpoint_generation = action.get("checkpointGeneration")
+        if (
+            not isinstance(cwd, str)
+            or not cwd
+            or not isinstance(session_id, str)
+            or not session_id
+            or not isinstance(boundary_id, str)
+            or not boundary_id
+            or not isinstance(task_id, str)
+            or not task_id
+            or not isinstance(context_id, str)
+            or not context_id
+        ):
+            raise ValueError("invalid permission staged backup identity")
+        if (
+            isinstance(checkpoint_generation, bool)
+            or not isinstance(checkpoint_generation, int)
+            or checkpoint_generation <= 0
+            or isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation <= 0
+            or not isinstance(commit_id, str)
+            or not commit_id
+        ):
+            raise ValueError("invalid permission staged backup generation")
+
+        store = PermissionWaitCheckpointStore(cwd, session_id)
+        record = store.load(boundary_id)
+        if (
+            record is None
+            or record.get("boundaryId") != boundary_id
+            or record.get("sessionId") != session_id
+            or record.get("taskId") != task_id
+            or record.get("contextId") != context_id
+            or record.get("phase") not in {"WAITING", "TIMEOUT_GRACE", "SUSPENDING", "SUSPENDED", "RESTORING"}
+        ):
+            raise ValueError("permission staged backup identity is no longer active")
+        store.run_generation_fenced(
+            boundary_id,
+            expected_generation=checkpoint_generation,
+            operation=lambda: None,
+        )
+        recorder = self._staged_task_generation_recorder
+        if recorder is None:
+            raise RuntimeError("permission staged backup task recorder is unavailable")
+        await recorder(task_id, generation)
+        store.run_generation_fenced(
+            boundary_id,
+            expected_generation=checkpoint_generation,
+            operation=lambda: None,
+        )
+
+    @property
+    def backup_coordinator(self) -> Any | None:
+        return self._backup_coordinator
 
     @property
     def durable_permission_wait_enabled(self) -> bool:
@@ -1058,8 +1150,10 @@ class PermissionInputRegistry:
         *,
         backup_service: Any,
         metrics: Any | None = None,
+        backup_coordinator: Any | None = None,
+        on_staged: Callable[[int | None, str | None], Awaitable[None] | None] | None = None,
     ) -> Any | None:
-        """Commit the critical shared copy under the documented lock order."""
+        """Delegate the copy to the backup coordinator, or commit the compatibility copy."""
 
         store = pending.checkpoint_store
         boundary_id = pending.boundary_id
@@ -1069,6 +1163,17 @@ class PermissionInputRegistry:
         pending.backup_session_id = session_id
         pending.backup_service = backup_service
         pending.backup_metrics = metrics
+        coordinator = backup_coordinator or self._backup_coordinator
+        if coordinator is not None and getattr(coordinator, "enabled", False):
+            return await self._delegate_durable_boundary_backup(
+                pending,
+                cwd,
+                session_id,
+                store=store,
+                boundary_id=boundary_id,
+                backup_coordinator=coordinator,
+                on_staged=on_staged,
+            )
         result = await backup_permission_wait_checkpoint(
             store=store,
             boundary_id=boundary_id,
@@ -1082,6 +1187,60 @@ class PermissionInputRegistry:
             current = pending.expected_backup_generation
             pending.expected_backup_generation = generation if current is None else max(current, generation)
         return result
+
+    async def _delegate_durable_boundary_backup(
+        self,
+        pending: PendingPermission,
+        cwd: str,
+        session_id: str,
+        *,
+        store: PermissionWaitCheckpointStore,
+        boundary_id: str,
+        backup_coordinator: Any,
+        on_staged: Callable[[int | None, str | None], Awaitable[None] | None] | None,
+    ) -> Any | None:
+        from iac_code.services.session_backup import BackupReason
+
+        record = store.load(boundary_id)
+        if record is None:
+            raise RuntimeError("permission checkpoint is unavailable for critical backup")
+        checkpoint_generation = int(record["generation"])
+
+        async def staged(generation: int | None, commit_id: str | None) -> None:
+            if generation is not None:
+                store.run_generation_fenced(
+                    boundary_id,
+                    expected_generation=checkpoint_generation,
+                    operation=lambda: self._apply_expected_backup_generation(pending, generation),
+                )
+            if on_staged is not None:
+                outcome = on_staged(generation, commit_id)
+                if inspect.isawaitable(outcome):
+                    await outcome
+
+        return await backup_coordinator.register_boundary(
+            cwd=cwd,
+            session_id=session_id,
+            context_id=pending.context_id,
+            execution_id=pending.task_id,
+            boundary="permission_publication",
+            reason=BackupReason.INPUT_REQUIRED,
+            on_staged=staged,
+            staged_action={
+                "kind": "permission_generation_v1",
+                "cwd": cwd,
+                "sessionId": session_id,
+                "boundaryId": boundary_id,
+                "checkpointGeneration": checkpoint_generation,
+                "taskId": pending.task_id,
+                "contextId": pending.context_id,
+            },
+        )
+
+    @staticmethod
+    def _apply_expected_backup_generation(pending: PendingPermission, generation: int) -> None:
+        current = pending.expected_backup_generation
+        pending.expected_backup_generation = generation if current is None else max(current, generation)
 
     def activate_durable_boundary(
         self,
@@ -1281,11 +1440,14 @@ class PermissionInputRegistry:
         backup_service = pending.backup_service
         if store is None or boundary_id is None or cwd is None or session_id is None or backup_service is None:
             return
-        await backup_permission_wait_checkpoint(
-            store=store,
-            boundary_id=boundary_id,
-            cwd=cwd,
-            session_id=session_id,
+        # Hand the staging->backup publish to the background coordinator so the
+        # permission decision future resolves without waiting for the copy. When
+        # the coordinator is disabled backup_durable_boundary keeps the existing
+        # synchronous compatibility copy so durability is never silently dropped.
+        await self.backup_durable_boundary(
+            pending,
+            cwd,
+            session_id,
             backup_service=backup_service,
             metrics=pending.backup_metrics,
         )
@@ -1409,8 +1571,7 @@ class PermissionInputRegistry:
             if closing is None or closing.permanent:
                 return ()
             return tuple(
-                PermissionTaskClosingToken(task_id=task_id, token_id=token_id)
-                for token_id in closing.reversible_tokens
+                PermissionTaskClosingToken(task_id=task_id, token_id=token_id) for token_id in closing.reversible_tokens
             )
 
     async def fail(self, pending: PendingPermission) -> None:

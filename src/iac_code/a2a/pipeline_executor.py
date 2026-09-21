@@ -19,7 +19,7 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import ParseDict
 
 from iac_code.a2a.artifacts import artifact_store_for_session
-from iac_code.a2a.backup import backup_session_async
+from iac_code.a2a.backup import SessionBackupHandoffError, backup_session_async
 from iac_code.a2a.events import make_text_part, publish_mcp_warnings
 from iac_code.a2a.execution_control import (
     current_execution_control,
@@ -27,6 +27,11 @@ from iac_code.a2a.execution_control import (
     execution_non_advancing_wait,
 )
 from iac_code.a2a.input_required import PendingPermission, staged_permission_backup_generation
+from iac_code.a2a.pipeline_continuation import (
+    PipelineContinuationStore,
+    PipelineContinuationUnsafeError,
+    checkpoint_identity,
+)
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_flow_monitor import (
     PipelineA2AFlowIdentity,
@@ -982,6 +987,31 @@ class IacCodeA2APipelineExecutor:
                     pipeline_runtime.pipeline = pipeline
                     pipeline_runtime.publisher = publisher
                     self._task_store.mirror_context(ctx)
+                continuation_store = None
+                continuation_intent = None
+                continuation_path = publisher.journal.pipeline_dir / "continuation-intent.json"
+                if continuation_path.is_file():
+                    continuation_store = PipelineContinuationStore(
+                        publisher.journal.pipeline_dir,
+                        session_dir=publisher.journal.pipeline_dir.parent.parent,
+                    )
+                    continuation_intent = continuation_store.load(context_id=context_id)
+                    if continuation_intent is not None and continuation_intent.successor_task_id != task_id:
+                        continuation_store = None
+                        continuation_intent = None
+                    if (
+                        continuation_intent is not None
+                        and continuation_intent.successor_task_id == task_id
+                        and continuation_intent.phase in {"claimed", "waiting_input"}
+                    ):
+                        assert continuation_store is not None
+                        if continuation_intent.claim_id is None:
+                            raise PipelineContinuationUnsafeError("successor claim ownership is unavailable")
+                        continuation_intent = continuation_store.begin_execution(
+                            successor_task_id=task_id,
+                            claim_id=continuation_intent.claim_id,
+                            expected_fence=continuation_intent.fence,
+                        )
                 stream = _stream_with_pending_rollback_cleanup(
                     stream=selected.stream,
                     pipeline=pipeline,
@@ -1081,6 +1111,11 @@ class IacCodeA2APipelineExecutor:
 
                     detached_permission.install(resume_detached_pipeline)
                     task.state = TASK_STATE_INPUT_REQUIRED
+                    if continuation_store is not None and continuation_intent is not None:
+                        continuation_intent = continuation_store.pause_for_input(
+                            successor_task_id=task_id,
+                            expected_fence=continuation_intent.fence,
+                        )
                     ctx.active_task_id = None
                     task.touch()
                     ctx.touch()
@@ -1123,6 +1158,11 @@ class IacCodeA2APipelineExecutor:
 
                     detached_resource_selection.install(resume_detached_resource_selection)
                     task.state = TASK_STATE_INPUT_REQUIRED
+                    if continuation_store is not None and continuation_intent is not None:
+                        continuation_intent = continuation_store.pause_for_input(
+                            successor_task_id=task_id,
+                            expected_fence=continuation_intent.fence,
+                        )
                     ctx.active_task_id = None
                     task.touch()
                     ctx.touch()
@@ -1168,6 +1208,32 @@ class IacCodeA2APipelineExecutor:
                     allow_terminal_snapshot=not terminal_sidecar or terminal_snapshot_available,
                     allow_sidecar_terminal_fallback=sidecar_terminal_fallback_available,
                 )
+                if (
+                    task.state == TASK_STATE_INPUT_REQUIRED
+                    and continuation_store is not None
+                    and continuation_intent is not None
+                ):
+                    continuation_intent = continuation_store.pause_for_input(
+                        successor_task_id=task_id,
+                        expected_fence=continuation_intent.fence,
+                    )
+                if task.state == TASK_STATE_COMPLETED:
+                    intent_path = publisher.journal.pipeline_dir / "continuation-intent.json"
+                    if intent_path.is_file():
+                        continuation_store = PipelineContinuationStore(
+                            publisher.journal.pipeline_dir,
+                            session_dir=publisher.journal.pipeline_dir.parent.parent,
+                        )
+                        continuation_intent = continuation_store.load(context_id=context_id)
+                        if (
+                            continuation_intent is not None
+                            and continuation_intent.successor_task_id == task_id
+                            and continuation_intent.phase == "running"
+                        ):
+                            continuation_store.settle(
+                                successor_task_id=task_id,
+                                expected_fence=continuation_intent.fence,
+                            )
                 self._task_store.mirror_task(task)
                 if not stream_had_events and terminal_sidecar and not terminal_status_published:
                     await self._publish_status(
@@ -2946,6 +3012,15 @@ class IacCodeA2APipelineExecutor:
         # generation after publication.
         return
 
+    @staticmethod
+    async def _delegate_or_backup(awaitable: Awaitable[Any]) -> Any:
+        """Report a local job/checkpoint persistence failure as a blocked backup."""
+
+        try:
+            return await awaitable
+        except SessionBackupHandoffError as exc:
+            raise SessionBackupBlocked(str(exc)) from exc
+
     async def _backup_pipeline_publication(
         self,
         envelope: dict[str, Any],
@@ -2965,13 +3040,44 @@ class IacCodeA2APipelineExecutor:
             }
         try:
             pending = publisher.pending_durable_permission if reason == BackupReason.INPUT_REQUIRED else None
+            coordinator = (
+                self._permission_input_registry.backup_coordinator
+                if self._permission_input_registry is not None
+                else None
+            )
+            delegated = coordinator is not None and getattr(coordinator, "enabled", False)
             if pending is not None and self._permission_input_registry is not None:
-                backup_result = await self._permission_input_registry.backup_durable_boundary(
-                    pending,
-                    cwd,
-                    session_id,
-                    backup_service=self._backup_service,
-                    metrics=self._metrics,
+
+                async def record_staged_generation(generation: int | None, _commit_id: str | None) -> None:
+                    if generation is not None:
+                        await self._task_store.record_expected_permission_backup_generation(task.task_id, generation)
+
+                backup_result = await self._delegate_or_backup(
+                    self._permission_input_registry.backup_durable_boundary(
+                        pending,
+                        cwd,
+                        session_id,
+                        backup_service=self._backup_service,
+                        metrics=self._metrics,
+                        on_staged=record_staged_generation,
+                    )
+                )
+                if not delegated:
+                    generation = staged_permission_backup_generation(backup_result)
+                    if generation is not None:
+                        await self._task_store.record_expected_permission_backup_generation(task.task_id, generation)
+            elif delegated:
+                assert coordinator is not None
+                backup_result = await self._delegate_or_backup(
+                    coordinator.register_boundary(
+                        cwd=cwd,
+                        session_id=session_id,
+                        context_id=getattr(task, "context_id", "") or "",
+                        execution_id=task.task_id,
+                        boundary="pipeline_publication",
+                        reason=reason,
+                        publication_proofs=publication_proofs,
+                    )
                 )
             else:
                 backup_result = await backup_session_async(
@@ -2983,10 +3089,6 @@ class IacCodeA2APipelineExecutor:
                     metrics=self._metrics,
                     publication_proofs=publication_proofs,
                 )
-            if pending is not None:
-                generation = staged_permission_backup_generation(backup_result)
-                if generation is not None:
-                    await self._task_store.record_expected_permission_backup_generation(task.task_id, generation)
         except SessionBackupBlocked as exc:
             sidecar_synced = await _sync_pipeline_backup_blocked_sidecar(
                 pipeline,
@@ -3111,6 +3213,86 @@ class IacCodeA2APipelineExecutor:
         fresh_pipeline_factory: Callable[[], Any],
     ) -> _SelectedPipelineStream:
         status = getattr(pipeline, "sidecar_status", None)
+        pipeline_dir = publisher.journal.pipeline_dir
+        continuation_intent = None
+        continuation_store = None
+        if (pipeline_dir / "continuation-intent.json").is_file():
+            continuation_store = PipelineContinuationStore(
+                pipeline_dir,
+                session_dir=pipeline_dir.parent.parent,
+            )
+            continuation_intent = continuation_store.load(context_id=context_id)
+        if (
+            continuation_intent is not None
+            and continuation_intent.successor_task_id == task_id
+            and continuation_intent.phase == "unsafe"
+        ):
+            raise PipelineContinuationUnsafeError(
+                continuation_intent.unsafe_reason or "canceled checkpoint is unsafe"
+            )
+        if (
+            continuation_intent is not None
+            and continuation_intent.successor_task_id == task_id
+            and continuation_intent.phase == "running"
+        ):
+            assert continuation_store is not None
+            if status == "waiting_input" and _sidecar_matches_task(
+                publisher,
+                task_id=task_id,
+                context_id=context_id,
+                sidecar_status=status,
+            ):
+                continuation_intent = continuation_store.pause_for_input(
+                    successor_task_id=task_id,
+                    expected_fence=continuation_intent.fence,
+                )
+            else:
+                continuation_store.mark_unsafe(
+                    successor_task_id=task_id,
+                    checkpoint=continuation_intent.checkpoint,
+                    expected_fence=continuation_intent.fence,
+                    reason="successor_execution_outcome_unverified",
+                )
+                raise PipelineContinuationUnsafeError("successor_execution_outcome_unverified")
+        is_successor = False
+        if (
+            continuation_intent is not None
+            and continuation_intent.successor_task_id == task_id
+            and continuation_intent.phase == "claimed"
+        ):
+            predecessor_snapshot = _authoritative_snapshot_for_task(
+                snapshot_store=publisher.snapshot_store,
+                journal=publisher.journal,
+                task_id=continuation_intent.predecessor_task_id,
+                context_id=context_id,
+            )
+            predecessor_events = _events_for_task_context(
+                publisher.journal.read_all_repairing_tail(),
+                task_id=continuation_intent.predecessor_task_id,
+                context_id=context_id,
+            )
+            try:
+                pipeline_meta = yaml.safe_load(
+                    (publisher.journal.pipeline_dir.parent.parent / "pipeline" / "meta.yaml").read_text(
+                        encoding="utf-8"
+                    )
+                )
+            except (OSError, UnicodeError, yaml.YAMLError):
+                pipeline_meta = None
+            if isinstance(predecessor_snapshot, dict) and predecessor_events and isinstance(pipeline_meta, dict):
+                is_successor = continuation_intent.checkpoint == checkpoint_identity(
+                    {"a2a": predecessor_snapshot, "pipelineMeta": pipeline_meta},
+                    predecessor_events[-1],
+                )
+            if not is_successor:
+                assert continuation_store is not None
+                continuation_store.mark_unsafe(
+                    successor_task_id=task_id,
+                    checkpoint=continuation_intent.checkpoint,
+                    expected_fence=continuation_intent.fence,
+                    reason="successor_checkpoint_fence_changed",
+                )
+                raise PipelineContinuationUnsafeError("successor_checkpoint_fence_changed")
         pending_backup_blocked = _pending_backup_blocked_input_from_sidecar(
             publisher,
             task_id=task_id,
@@ -3171,7 +3353,9 @@ class IacCodeA2APipelineExecutor:
             )
         if status == "running":
             _raise_if_sidecar_restore_failed(pipeline, status)
-            if not _sidecar_matches_task(publisher, task_id=task_id, context_id=context_id, sidecar_status=status):
+            if not is_successor and not _sidecar_matches_task(
+                publisher, task_id=task_id, context_id=context_id, sidecar_status=status
+            ):
                 raise _active_sidecar_mismatch_error_from_publisher(
                     publisher,
                     context_id=context_id,
@@ -3228,6 +3412,34 @@ class IacCodeA2APipelineExecutor:
         if status in _TERMINAL_SIDECAR_STATUSES:
             if _terminal_sidecar_matches_task(publisher, status, task_id=task_id, context_id=context_id):
                 return _SelectedPipelineStream(pipeline=pipeline, stream=_empty_stream())
+            if is_successor and status in {"canceled", "user_aborted", "discarded"}:
+                restore_canceled = getattr(pipeline, "restore_canceled_checkpoint_sync", None)
+                if not callable(restore_canceled):
+                    raise ValueError("Pipeline successor cannot restore the canceled checkpoint safely")
+                restore_result = restore_canceled()
+                if not getattr(restore_result, "ok", False) or getattr(restore_result, "status", None) != "canceled":
+                    raise ValueError("Pipeline successor canceled checkpoint restore failed")
+                safety_check = getattr(pipeline, "canceled_checkpoint_safety", None)
+                if not callable(safety_check):
+                    raise PipelineContinuationUnsafeError("checkpoint safety evidence is unavailable")
+                safety = safety_check()
+                if not getattr(safety, "safe", False):
+                    reason = str(getattr(safety, "reason", None) or "canceled attempt outcome is unverified")
+                    assert continuation_store is not None
+                    assert continuation_intent is not None
+                    continuation_store.mark_unsafe(
+                        successor_task_id=task_id,
+                        checkpoint=continuation_intent.checkpoint,
+                        expected_fence=continuation_intent.fence,
+                        reason=reason,
+                    )
+                    raise PipelineContinuationUnsafeError(reason)
+                assert continuation_store is not None
+                assert continuation_intent is not None
+                return _SelectedPipelineStream(
+                    pipeline=pipeline,
+                    stream=pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input)),
+                )
             pipeline = await self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
             return _SelectedPipelineStream(
                 pipeline=pipeline,
@@ -5313,6 +5525,89 @@ def recoverable_task_id_from_sidecar(
         context_id=context_id,
     )
     return owner.task_id if pending_input is not None else None
+
+
+def current_pipeline_task_id_from_sidecar(*, cwd: str, session_id: str, context_id: str) -> str | None:
+    pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+    owner = _current_sidecar_owner_from_stores(
+        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
+        journal=A2APipelineJournal(pipeline_dir),
+        context_id=context_id,
+    )
+    return owner.task_id if owner is not None else None
+
+
+def successor_task_id_from_sidecar(
+    *,
+    cwd: str,
+    session_id: str,
+    context_id: str,
+    canceled_task_id: str,
+    invocation_id: str,
+    cancellation_proof: dict[str, object],
+) -> str | None:
+    """Reserve the one successor for a canceled durable Pipeline owner.
+
+    ``canceled_task_id`` covers the cancellation convergence window where the
+    Task snapshot is already terminal but the Pipeline sidecar still projects
+    ``running``.  The intent file fences concurrent workers onto one new Task.
+    """
+
+    pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+    journal = A2APipelineJournal(pipeline_dir)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    owner = _current_sidecar_owner_from_stores(
+        snapshot_store=snapshot_store,
+        journal=journal,
+        context_id=context_id,
+    )
+    if owner is None:
+        return None
+    if owner.task_id != canceled_task_id:
+        return None
+    try:
+        sidecar_meta_path = SessionStorage().session_dir(cwd, session_id) / "pipeline" / "meta.yaml"
+        sidecar_meta = yaml.safe_load(sidecar_meta_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        return None
+    if not isinstance(sidecar_meta, dict) or sidecar_meta.get("status") != "canceled":
+        return None
+    snapshot = _authoritative_snapshot_for_task(
+        snapshot_store=snapshot_store,
+        journal=journal,
+        task_id=owner.task_id,
+        context_id=context_id,
+    )
+    events = _events_for_task_context(
+        journal.read_all_repairing_tail(),
+        task_id=owner.task_id,
+        context_id=context_id,
+    )
+    if not isinstance(snapshot, dict) or not events:
+        return None
+    proof_execution_id = cancellation_proof.get("executionId")
+    proof_revision = cancellation_proof.get("revision")
+    proof_backup_generation = cancellation_proof.get("backupGeneration")
+    proof_backup_commit_id = cancellation_proof.get("backupCommitId")
+    if not isinstance(proof_execution_id, str) or not isinstance(proof_revision, int):
+        return None
+    checkpoint = checkpoint_identity(
+        {"a2a": snapshot, "pipelineMeta": sidecar_meta},
+        events[-1],
+    )
+    return PipelineContinuationStore(
+        pipeline_dir,
+        session_dir=SessionStorage().session_dir(cwd, session_id),
+    ).reserve_successor(
+        context_id=context_id,
+        predecessor_task_id=owner.task_id,
+        invocation_id=invocation_id,
+        checkpoint=checkpoint,
+        cancellation_execution_id=proof_execution_id,
+        cancellation_revision=proof_revision,
+        cancellation_backup_generation=(proof_backup_generation if isinstance(proof_backup_generation, int) else None),
+        cancellation_backup_commit_id=(proof_backup_commit_id if isinstance(proof_backup_commit_id, str) else None),
+    ).successor_task_id
 
 
 def _coordinates_from_pending_input(pending_input: dict[str, Any]) -> dict[str, Any]:

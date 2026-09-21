@@ -54,6 +54,25 @@ async def wait_until(predicate, timeout=10):
     await asyncio.wait_for(wait(), timeout)
 
 
+async def wait_for_published_json(shared, pattern, key, expected, timeout=10):
+    """Wait for the independent publisher to mirror a document into BACKUP_DIR."""
+
+    def published():
+        for path in shared.rglob(pattern):
+            try:
+                if json.loads(path.read_text(encoding="utf-8")).get(key) == expected:
+                    return True
+            except (OSError, ValueError):
+                continue
+        return False
+
+    await wait_until(published, timeout)
+
+
+async def wait_for_published_task_state(shared, expected, timeout=10):
+    await wait_for_published_json(shared, "a2a/task.json", "state", expected, timeout)
+
+
 class _ObservedBackupGate:
     def __init__(self, backup_session, loop):
         self._backup_session = backup_session
@@ -646,10 +665,12 @@ async def test_terminate_waits_for_bootstrap_and_cleanup_then_backs_up(tmp_path,
             await execution
         await wait_until(lambda: control.release_ready)
         assert closed.is_set()
-        assert control.backup["status"] == "shared_committed"
+        # A staged snapshot releases the execution; the publisher mirrors it afterwards.
+        assert control.backup["status"] == ("staged_committed" if staged else "shared_committed")
+        await wait_until(lambda: len(list(shared.rglob("a2a/task.json"))) == 1)
         snapshots = list(shared.rglob("a2a/task.json"))
         assert len(snapshots) == 1
-        assert json.loads(snapshots[0].read_text(encoding="utf-8"))["state"] == "canceled"
+        await wait_for_published_task_state(shared, "canceled")
     finally:
         release.set()
         close_release.set()
@@ -926,23 +947,21 @@ async def test_ros_result_commit_drains_repeated_cancellation(tmp_path, monkeypa
 
 @pytest.mark.asyncio
 async def test_slow_rollover_only_serializes_its_own_context(tmp_path, monkeypatch):
-    from iac_code.a2a import execution_control as module
-
     service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
     first = await service.begin_execution(context_id="ctx-1", task_id="task-1", owner="", cwd=str(tmp_path))
     background = asyncio.create_task(asyncio.Event().wait())
     first.register_spawned_task(background, kind="background_agent")
     await first.detach_task(asyncio.current_task(), execution_status="normal-turn-ended")
     started, release = threading.Event(), threading.Event()
-    original_write = module.atomic_write_json
+    original_persist = first._persist_snapshot
 
-    def blocked_write(path, value):
-        if value.get("contextId") == "ctx-1":
+    async def blocked_persist(snapshot):
+        if snapshot.get("contextId") == "ctx-1":
             started.set()
-            assert release.wait(3)
-        original_write(path, value)
+            assert await asyncio.to_thread(release.wait, 3)
+        await original_persist(snapshot)
 
-    monkeypatch.setattr(module, "atomic_write_json", blocked_write)
+    monkeypatch.setattr(first, "_persist_snapshot", blocked_persist)
 
     async def begin(context, task):
         result = await service.begin_execution(context_id=context, task_id=task, owner="", cwd=str(tmp_path))
@@ -1046,11 +1065,12 @@ async def test_permission_termination_context_write_is_off_loop_and_gates_releas
                 execution_id=control.execution_id, request_id="retry", connection_epoch=2, reason="explicit_terminate"
             )
         await wait_until(lambda: control.release_ready)
+        assert control.backup["status"] == "staged_committed"
         assert all(on_loop is False and locked is False for on_loop, locked in writes)
         assert store._persistence.load_task("task-1").state == "canceled"
         assert store._persistence.load_context("ctx-1").active_task_id is None
-        snapshot = next(shared.rglob("a2a/task.json"))
-        assert json.loads(snapshot.read_text(encoding="utf-8"))["state"] == "canceled"
+        # Release no longer waits for the publisher; the snapshot still reaches BACKUP_DIR.
+        await wait_for_published_task_state(shared, "canceled")
     finally:
         release.set()
         await service.close()
@@ -1130,6 +1150,9 @@ async def test_stack_instances_id_survives_termination_and_staged_backup(tmp_pat
                 "toolUseId": "call-1",
             }
         ]
+        assert control.backup["status"] == "staged_committed"
+        # The staged snapshot releases the execution; the publisher mirrors it afterwards.
+        await wait_until(lambda: any(shared.rglob("external-operations.json")))
         snapshot = next(shared.rglob("external-operations.json"))
         assert json.loads(snapshot.read_text(encoding="utf-8"))["operations"] == control.external_operations
     finally:

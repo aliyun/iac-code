@@ -642,19 +642,27 @@ def main() -> int:
         ExecutionController.rollover_normal_execution = observed_rollover
 
     if args.scenario == "slow-rollover-storage":
-        from iac_code.a2a import execution_control as control_module
+        from iac_code.a2a.execution_control import ExecutionController
 
-        original_write = control_module.atomic_write_json
+        original_persist = ExecutionController._persist_snapshot
+        rollover_gate_claimed = False
 
-        def gated_rollover(path: Path, value: Any) -> None:
-            if (control_dir / "arm-rollover").exists() and value.get("phase") == "running":
-                lifecycle.write("rollover.commit_started", contextId=value.get("contextId"))
-                _wait_for_marker_sync(control_dir, "release-storage")
-            original_write(path, value)
-            if (control_dir / "arm-rollover").exists() and value.get("phase") == "running":
+        async def gated_rollover(self: Any, snapshot: dict[str, Any]) -> None:
+            nonlocal rollover_gate_claimed
+            gated = (
+                (control_dir / "arm-rollover").exists()
+                and snapshot.get("phase") == "running"
+                and not rollover_gate_claimed
+            )
+            if gated:
+                rollover_gate_claimed = True
+                lifecycle.write("rollover.commit_started", contextId=snapshot.get("contextId"))
+                await _wait_for_marker(control_dir, "release-storage")
+            await original_persist(self, snapshot)
+            if gated:
                 lifecycle.write("rollover.commit_finished")
 
-        control_module.atomic_write_json = gated_rollover
+        ExecutionController._persist_snapshot = gated_rollover
     if args.scenario == "legacy-cancel-idle":
         from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
 

@@ -24,6 +24,7 @@ from iac_code.services.providers.aliyun_identity import (
     CallerIdentityKind,
 )
 from iac_code.services.session_layout import SessionPaths, ensure_session_owned_dir
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionWaitOutcome
 from iac_code.utils.file_security import ensure_private_file
@@ -439,7 +440,9 @@ class PermissionWaitCheckpointStore:
         candidate = dict(record)
         boundary_id = self._validate_record(candidate)
         path = self._record_path(boundary_id)
-        with cross_process_file_lock(self.paths.permission_waits_lock_path):
+        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
+            self.paths.permission_waits_lock_path
+        ):
             if path.exists():
                 raise ValueError("permission boundary already exists")
             atomic_write_json(path, candidate, durable=True)
@@ -453,7 +456,9 @@ class PermissionWaitCheckpointStore:
         boundary_id = self._validate_record(candidate)
         new_path = self._record_path(boundary_id)
         previous_path = self._record_path(previous_boundary_id)
-        with cross_process_file_lock(self.paths.permission_waits_lock_path):
+        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
+            self.paths.permission_waits_lock_path
+        ):
             if new_path.exists():
                 raise ValueError("permission boundary already exists")
             previous = self._read(previous_path)
@@ -534,7 +539,9 @@ class PermissionWaitCheckpointStore:
         mutate: Callable[[dict[str, Any]], dict[str, Any] | None],
     ) -> dict[str, Any]:
         path = self._record_path(boundary_id)
-        with cross_process_file_lock(self.paths.permission_waits_lock_path):
+        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
+            self.paths.permission_waits_lock_path
+        ):
             current = self._read(path)
             if current is None:
                 raise ValueError("permission boundary not found")
@@ -553,10 +560,12 @@ class PermissionWaitCheckpointStore:
         expected_generation: int,
         operation: Callable[[], Any],
     ) -> Any:
-        """Run a backup while holding permission lock before its backup lock."""
+        """Run a backup under the session barrier and permission generation fence."""
 
         path = self._record_path(boundary_id)
-        with cross_process_file_lock(self.paths.permission_waits_lock_path):
+        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
+            self.paths.permission_waits_lock_path
+        ):
             current = self._read(path)
             if current is None or int(current.get("generation", 0)) != expected_generation:
                 raise ValueError("permission generation changed")
@@ -716,7 +725,9 @@ class PermissionWaitCheckpointStore:
         """
 
         path = self._record_path(boundary_id)
-        with cross_process_file_lock(self.paths.permission_waits_lock_path):
+        with session_mutation_guard(self.paths.session_dir), cross_process_file_lock(
+            self.paths.permission_waits_lock_path
+        ):
             record = self._read(path)
             if record is None:
                 raise ValueError("permission boundary not found")

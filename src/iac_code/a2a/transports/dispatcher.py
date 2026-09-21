@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import json
 import logging
+import uuid
 from contextlib import AsyncExitStack, nullcontext, suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +49,7 @@ from starlette.routing import Route
 from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
 from iac_code.a2a.app import normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
+from iac_code.a2a.backup import SessionBackupCoordinator
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.execution_control import (
     NaturalCompletionGenerationCarrier,
@@ -104,6 +106,7 @@ from iac_code.a2a.request_scoped_active_task import (
     RequestScopedActiveTask,
     RequestScopedActiveTaskRegistry,
 )
+from iac_code.a2a.resource_selector import parse_resource_selection_response
 from iac_code.a2a.runtime_registry import A2ARuntimeOwner, A2ARuntimeRegistration, register_runtime_owner
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.i18n import _
@@ -308,10 +311,15 @@ class A2ARuntimeComponents:
     runtime_registration: A2ARuntimeRegistration | None = None
     backup_staging_process: SessionBackupStagingProcess | None = None
     execution_control_service: Any | None = None
+    backup_coordinator: SessionBackupCoordinator | None = None
 
-    def start_background_services(self) -> None:
+    async def start_background_services(self) -> None:
         if self.backup_staging_process is not None:
             self.backup_staging_process.start()
+        if self.backup_coordinator is not None:
+            # Crash recovery is an admission barrier: accepting a request before
+            # all local captures are durably handed off can select stale state.
+            await self.backup_coordinator.recover()
 
     async def aclose(self) -> None:
         if self.runtime_registration is not None:
@@ -348,6 +356,8 @@ class A2ARuntimeComponents:
                 if inspect.isawaitable(result):
                     await result
         await self._exit_stack.aclose()
+        if self.backup_coordinator is not None:
+            await self.backup_coordinator.aclose()
         if self.backup_staging_process is not None:
             self.backup_staging_process.close()
 
@@ -406,9 +416,15 @@ def create_runtime_components(
     task_store = A2ATaskStore(metrics=metrics, persistence=persistence, backup_service=backup_service)
     from iac_code.a2a.execution_control import ExecutionControlService
 
+    backup_coordinator = SessionBackupCoordinator(
+        backup_service,
+        state_root=Path(persistence.root) if persistence is not None else None,
+        metrics=metrics,
+    )
     execution_control_service = ExecutionControlService(
         persistence_root=Path(persistence.root) if persistence is not None else None,
         backup_service=backup_service,
+        backup_coordinator=backup_coordinator,
     )
     set_execution_control_provider = getattr(task_store, "set_execution_control_provider", None)
     if callable(set_execution_control_provider):
@@ -511,6 +527,7 @@ def create_runtime_components(
         runtime_registration=runtime_registration,
         backup_staging_process=backup_staging_process,
         execution_control_service=execution_control_service,
+        backup_coordinator=backup_coordinator,
     )
 
 
@@ -718,7 +735,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     await self._finalize_natural_execution(params, context)
                     refreshed = await self.task_store.get(permission_response.task_id, context)
                     return refreshed or task
-        await self._hydrate_recoverable_pipeline_task_id(params)
+        await self._hydrate_pipeline_task_id_for_request(params, context)
         admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
         self._stage_recoverable_input_admission(context, admission)
         try:
@@ -753,7 +770,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                         yield ack
                         return
         if permission_response is None:
-            await self._hydrate_recoverable_pipeline_task_id(params)
+            await self._hydrate_pipeline_task_id_for_request(params, context)
             admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
         else:
             admission = None
@@ -1134,13 +1151,17 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             raise InvalidParamsError("Pipeline continuation is not ready; retry the same request.")
         return admission
 
-    async def _hydrate_recoverable_pipeline_task_id(self, params: SendMessageRequest) -> None:
+    async def _hydrate_recoverable_pipeline_task_id(self, params: SendMessageRequest, context: Any = None) -> None:
         if resolve_request_run_mode(params.message) is not RunMode.PIPELINE or not isinstance(
             self.task_store, A2ATaskStore
         ):
             return
         message = getattr(params, "message", None)
         if message is None:
+            return
+        # Correlated control messages must keep their explicit boundary identity;
+        # they are never ordinary business turns eligible for a successor.
+        if parse_permission_response(message) is not None or parse_resource_selection_response(message) is not None:
             return
         if getattr(message, "task_id", None):
             return
@@ -1149,20 +1170,56 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             return
         try:
             context_record = await self.task_store.get_context_record(context_id)
+        except ValueError:
+            # A context supplied for a brand-new business turn is created by
+            # the normal SDK/executor path; there is nothing to hydrate yet.
+            return
+        try:
             if not SessionStorage().exists(context_record.cwd, context_record.session_id):
                 reconcile = getattr(self.agent_executor, "_reconcile_session_before_route", None)
                 if callable(reconcile):
                     await reconcile(context_id=context_id, cwd=context_record.cwd)
-            task_id = recoverable_task_id_from_sidecar(
-                cwd=context_record.cwd,
-                session_id=context_record.session_id,
+            resolve = getattr(self.agent_executor, "resolve_omitted_pipeline_task_id", None)
+            if not callable(resolve):
+                return
+            invocation_id = getattr(message, "message_id", None) or "dispatch-" + uuid.uuid4().hex
+            task_id = await resolve(
                 context_id=context_id,
+                cwd=context_record.cwd,
+                invocation_id=invocation_id,
             )
         except Exception:
             logger.debug("Failed to hydrate A2A pipeline task id for context %s", context_id, exc_info=True)
-            return
+            raise
         if task_id:
+            try:
+                existing_record = await self.task_store.get_task_record(task_id)
+            except ValueError:
+                existing_record = None
+            request_owner = self.task_store.owner_for_context(context)
+            if existing_record is not None and existing_record.owner and existing_record.owner != request_owner:
+                # Preserve SDK owner isolation: binding the id is sufficient;
+                # the scoped store must surface TaskNotFound to this caller.
+                message.task_id = task_id
+                return
+            await self.task_store.get_or_create_task(task_id=task_id, context_id=context_id, restore_interrupted=False)
+            if await self.task_store.get(task_id, context) is None:
+                await self.task_store.save(
+                    Task(
+                        id=task_id,
+                        context_id=context_id,
+                        status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED),
+                    ),
+                    context,
+                )
             message.task_id = task_id
+
+    async def _hydrate_pipeline_task_id_for_request(self, params: SendMessageRequest, context: Any) -> None:
+        hydrate = self._hydrate_recoverable_pipeline_task_id
+        if len(inspect.signature(hydrate).parameters) == 1:
+            await hydrate(params)
+            return
+        await hydrate(params, context)
 
     async def _reconcile_recoverable_pipeline_task(self, params: SendMessageRequest, context) -> str | None:
         if resolve_request_run_mode(params.message) is not RunMode.PIPELINE or not isinstance(

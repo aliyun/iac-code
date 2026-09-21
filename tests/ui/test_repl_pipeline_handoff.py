@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from io import StringIO
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call
@@ -23,6 +25,7 @@ from iac_code.pipeline.engine.cleanup import (
 )
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.user_input import PipelineUserInput
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
 
 
@@ -433,6 +436,7 @@ async def test_normal_resume_continues_existing_cleanup_prompt_without_duplicate
     repl.renderer._last_streaming_errors = []
     repl.store = MagicMock()
     repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._original_cwd = "/workspace"
     repl._session_id = "session-1"
     repl.current_git_branch = MagicMock(return_value="main")
@@ -488,6 +492,72 @@ async def test_normal_resume_continues_existing_cleanup_prompt_without_duplicate
     assert ledger.cleanup_resources()[0].cleanup_status == "completed"
 
 
+@pytest.mark.parametrize("source", ["prompt", "explicit", "candidate"])
+@pytest.mark.parametrize("separate_pipeline_cwd", [False, True])
+def test_normal_chat_cleanup_factory_writes_wait_for_session_snapshot(
+    tmp_path, monkeypatch, source, separate_pipeline_cwd
+):
+    from iac_code.ui.repl import InlineREPL
+
+    root = tmp_path / "session"
+    path = root / "pipeline" / "cleanup.yaml"
+    ledger = CleanupLedger(path, session_root=root)
+    ledger.mark_cleanup_required(
+        [CleanupResource(provider="ros", resource_type="stack", resource_id="stack-1")],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/workspace"
+    repl._session_id = "session-1"
+    repl._session_storage = MagicMock()
+    pipeline_cwd = "/pipeline" if separate_pipeline_cwd else "/workspace"
+    repl._session_storage.session_dir.side_effect = (
+        lambda cwd, sid: root if cwd == pipeline_cwd else tmp_path / "original-session"
+    )
+    repl._cleanup_ledger_path_from_active_prompt = lambda: path if source == "prompt" else None
+    repl._cleanup_prompt_exists_anywhere = lambda: False
+    if source == "explicit":
+        repl._pipeline_cleanup_ledger_path = str(path)
+    monkeypatch.setattr("iac_code.pipeline.config.get_working_directory", lambda: pipeline_cwd)
+    restored = repl._cleanup_ledger_for_normal_chat()
+    assert restored is not None
+    started = threading.Event()
+
+    def write():
+        started.set()
+        return restored.record_observed(
+            ObservedResource(provider="ros", resource_type="stack", resource_id="stack-2")
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with session_mutation_guard(root):
+            future = pool.submit(write)
+            assert started.wait(5)
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.2)
+            assert all(item.resource_id != "stack-2" for item in ledger.observed_resources())
+        assert future.result(timeout=5).written
+    assert any(item.resource_id == "stack-2" for item in ledger.observed_resources())
+
+
+def test_normal_chat_cleanup_rejects_ledger_owned_by_another_session(tmp_path, monkeypatch):
+    from iac_code.ui.repl import InlineREPL
+
+    foreign_path = tmp_path / "foreign-session" / "pipeline" / "cleanup.yaml"
+    repl = InlineREPL.__new__(InlineREPL)
+    repl._original_cwd = "/workspace"
+    repl._session_id = "session-1"
+    repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path / "current-session"
+    repl._cleanup_ledger_path_from_active_prompt = lambda: foreign_path
+    monkeypatch.setattr("iac_code.pipeline.config.get_working_directory", lambda: "/workspace")
+
+    with pytest.raises(ValueError, match="not owned by the current session"):
+        repl._cleanup_ledger_for_normal_chat()
+    assert not foreign_path.exists()
+
+
 def test_normal_chat_finds_cleanup_ledger_from_prompt_metadata(tmp_path: Path):
     from iac_code.ui.repl import InlineREPL
 
@@ -514,6 +584,7 @@ def test_normal_chat_finds_cleanup_ledger_from_prompt_metadata(tmp_path: Path):
 
     repl = InlineREPL.__new__(InlineREPL)
     repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._session_storage.load.return_value = [cleanup_message]
     repl._original_cwd = "/workspace"
     repl._session_id = "session-1"
@@ -574,6 +645,7 @@ def test_normal_chat_ignores_observed_only_explicit_cleanup_ledger(tmp_path: Pat
     repl = InlineREPL.__new__(InlineREPL)
     repl._pipeline_cleanup_ledger_path = ledger.path
     repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._session_storage.load.return_value = []
     repl._original_cwd = "/workspace"
     repl._session_id = "session-1"
@@ -773,6 +845,10 @@ async def test_normal_startup_prunes_completed_cleanup_prompt(tmp_path: Path):
     )
 
     repl = InlineREPL.__new__(InlineREPL)
+    repl._session_id = "session-1"
+    repl._original_cwd = "/workspace"
+    repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._runtime_mode = RunMode.NORMAL
     repl._pipeline_cleanup_ledger_path = ledger.path
     repl._agent_loop = MagicMock()
@@ -812,6 +888,10 @@ async def test_normal_startup_replays_completed_cleanup_history_before_pruning(t
     )
 
     repl = InlineREPL.__new__(InlineREPL)
+    repl._session_id = "session-1"
+    repl._original_cwd = "/workspace"
+    repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._runtime_mode = RunMode.NORMAL
     repl._pipeline_cleanup_ledger_path = ledger.path
     repl.renderer = MagicMock()
@@ -1030,7 +1110,9 @@ async def test_completed_cleanup_marks_session_prompt_completed(tmp_path: Path):
 
     cwd = str(tmp_path / "workspace")
     session_id = "session-1"
-    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    storage = SessionStorage(projects_dir=tmp_path / "projects")
+    session_root = storage.session_dir(cwd, session_id)
+    ledger = CleanupLedger(session_root / "pipeline" / "cleanup.yaml", session_root=session_root)
     ledger.mark_cleanup_required(
         [
             CleanupResource(
@@ -1050,7 +1132,6 @@ async def test_completed_cleanup_marks_session_prompt_completed(tmp_path: Path):
         cleanup_ledger_path=ledger.path,
         cleanup_status="pending",
     )
-    storage = SessionStorage(projects_dir=tmp_path / "projects")
     storage.append(cwd, session_id, cleanup_prompt, git_branch="main")
     runtime_prompt = create_cleanup_prompt_message(
         "cleanup prompt for stack-123",
@@ -1087,6 +1168,10 @@ async def test_normal_startup_keeps_cleanup_prompt_when_cleanup_ledger_is_corrup
     ledger = CleanupLedger(path)
 
     repl = InlineREPL.__new__(InlineREPL)
+    repl._session_id = "session-1"
+    repl._original_cwd = "/workspace"
+    repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._runtime_mode = RunMode.NORMAL
     repl._pipeline_cleanup_ledger_path = ledger.path
     repl.renderer = MagicMock()
@@ -1146,6 +1231,10 @@ async def test_normal_chat_blocks_agent_execution_when_cleanup_ledger_is_corrupt
     cleanup_message = create_cleanup_prompt_message("cleanup prompt for stack-123")
 
     repl = InlineREPL.__new__(InlineREPL)
+    repl._session_id = "session-1"
+    repl._original_cwd = "/workspace"
+    repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._runtime_mode = RunMode.NORMAL
     repl._pipeline_cleanup_ledger_path = path
     repl.renderer = MagicMock()
@@ -1173,6 +1262,7 @@ async def test_normal_chat_blocks_agent_execution_when_cleanup_ledger_is_missing
     repl.renderer = MagicMock()
     repl.renderer.print_system_message = MagicMock()
     repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._session_storage.load.return_value = [cleanup_message]
     repl._original_cwd = "/workspace"
     repl._session_id = "session-1"
@@ -1222,6 +1312,7 @@ async def test_normal_chat_runs_pending_cleanup_before_user_prompt(tmp_path: Pat
     repl.renderer._last_streaming_errors = []
     repl.store = MagicMock()
     repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._session_storage.load.return_value = []
     repl._original_cwd = "/workspace"
     repl._session_id = "session-1"
@@ -1385,6 +1476,7 @@ async def test_normal_chat_preserves_user_prompt_when_cleanup_remains_pending(tm
     repl.renderer._last_streaming_errors = []
     repl.store = MagicMock()
     repl._session_storage = MagicMock()
+    repl._session_storage.session_dir.return_value = tmp_path
     repl._session_storage.load.return_value = []
     repl._original_cwd = "/workspace"
     repl._session_id = "session-1"

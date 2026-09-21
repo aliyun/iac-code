@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -29,11 +29,15 @@ from iac_code.services.session_backup import (
 )
 from iac_code.services.session_backup_state import BackupPublicationProof, SessionBackupState
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.file_security import ensure_private_dir
+from iac_code.utils.state_io import atomic_write_json, cross_process_append_lock
 
 BACKUP_TMP_ENV_VAR = "IAC_CODE_CONFIG_BACKUP_TMP_DIR"
 _COPYING_SUFFIX = ".copying"
+_COPYING_OWNER_MARKER_FILENAME = ".copying-owner-v1.lock"
+_COPYING_LOCK_ROOT_SUFFIX = ".copying-locks"
 _DEFAULT_MAX_CONCURRENT_SESSIONS = 4
 _SNAPSHOT_VERSION_PATTERN = re.compile(r"^(?P<session_id>.+)_v(?P<generation>[1-9][0-9]*)$")
 
@@ -50,6 +54,58 @@ class StagedSessionSnapshot:
 class A2ASessionBackupRuntime:
     service: SessionBackupService
     staging_process: SessionBackupStagingProcess | None
+
+
+class _CopyingSnapshotOwnerLock:
+    """Cross-process ownership proof for one in-progress staged snapshot."""
+
+    def __init__(self, service: SessionBackupService, path: Path) -> None:
+        self._service = service
+        self.path = path
+
+    @contextmanager
+    def acquire(self, *, blocking: bool):
+        ensure_private_dir(self.path.parent)
+        fd = self._service._open_no_follow_fd(self.path, os.O_RDWR | os.O_CREAT, 0o600)
+        lock_file = os.fdopen(fd, "a+b")
+        acquired = False
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                mode = msvcrt.LK_LOCK if blocking else msvcrt.LK_NBLCK
+                try:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), mode, 1)
+                    acquired = True
+                except OSError:
+                    if blocking:
+                        raise
+            else:
+                import fcntl
+
+                mode = fcntl.LOCK_EX if blocking else fcntl.LOCK_EX | fcntl.LOCK_NB
+                try:
+                    fcntl.flock(lock_file.fileno(), mode)
+                    acquired = True
+                except BlockingIOError:
+                    if blocking:
+                        raise
+            yield acquired
+        finally:
+            if acquired:
+                if os.name == "nt":
+                    import msvcrt
+
+                    with suppress(OSError):
+                        lock_file.seek(0)
+                        msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    with suppress(OSError):
+                        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            lock_file.close()
 
 
 class StagedSessionBackupService(SessionBackupService):
@@ -78,12 +134,17 @@ class StagedSessionBackupService(SessionBackupService):
         reason: BackupReason,
         critical: bool,
         publication_proofs: Mapping[str, BackupPublicationProof] | None = None,
+        operation_commit_id: str | None = None,
     ) -> BackupResult:
         if not self._backup_enabled():
             return BackupResult(enabled=False)
         self._validate_session_id(session_id)
         requested_proofs = dict(publication_proofs or {})
-        operation_commit_id = str(uuid.uuid4())
+        requested_operation_commit_id = operation_commit_id
+        if operation_commit_id is None:
+            operation_commit_id = str(uuid.uuid4())
+        elif not isinstance(operation_commit_id, str) or not operation_commit_id.strip():
+            raise SessionBackupError("backup operation commit id must be a non-empty string")
 
         try:
             source = self._source_for_backup(cwd, session_id)
@@ -114,7 +175,7 @@ class StagedSessionBackupService(SessionBackupService):
             try:
                 self._resolve_real_source(source)
                 source_verified = True
-                with self._session_backup_lock(source):
+                with session_mutation_guard(source), self._session_backup_lock(source):
                     try:
                         base_state = self._read_state(source, session_id=session_id, missing_ok=True)
                         if base_state is None:
@@ -124,6 +185,15 @@ class StagedSessionBackupService(SessionBackupService):
                         if base_state.status == "failed":
                             if base_state.attempt_commit_id is None:
                                 raise SessionBackupError("failed staged backup is missing attempt commit id")
+                            if (
+                                requested_operation_commit_id is not None
+                                and base_state.attempt_commit_id != requested_operation_commit_id
+                            ):
+                                raise SessionBackupConflict(
+                                    "staged session backup has a different pending operation",
+                                    local_generation=base_state.generation,
+                                    shared_generation=base_state.generation,
+                                )
                             operation_commit_id = base_state.attempt_commit_id
                             effective_reason = BackupReason(base_state.reason)
                             attempt_proofs = dict(base_state.attempt_publication_proofs)
@@ -144,37 +214,50 @@ class StagedSessionBackupService(SessionBackupService):
                         )
                         destination = self._snapshot_path(source, session_id, committed_state.generation)
                         copying = destination.with_name(destination.name + _COPYING_SUFFIX)
+                        copying_owner_lock = _copying_owner_lock_path(self._staging_root, copying)
                         self._validate_mirror_paths(source, destination, self._staging_root)
 
-                        existing = self._read_existing_snapshot_state(destination, session_id)
-                        if existing is not None:
-                            completed_next = (
-                                base_state.status == "succeeded"
-                                and existing.parent_generation == base_state.generation
-                            )
-                            if not completed_next and not existing.same_lineage(committed_state):
-                                raise SessionBackupConflict(
-                                    "staged session backup generation conflict",
-                                    local_generation=base_state.generation,
-                                    shared_generation=existing.generation,
+                        copying_lease = _CopyingSnapshotOwnerLock(self, copying_owner_lock)
+                        with copying_lease.acquire(blocking=True) as acquired:
+                            assert acquired
+                            existing = self._read_existing_snapshot_state(destination, session_id)
+                            if existing is not None:
+                                completed_next = (
+                                    base_state.status == "succeeded"
+                                    and existing.parent_generation == base_state.generation
                                 )
-                            self._write_state(source, existing)
-                            return BackupResult(
-                                enabled=True,
-                                source=source,
-                                destination=destination,
-                                retry_count=attempt,
-                                generation=existing.generation,
-                                commit_id=existing.commit_id,
-                                staged_committed=True,
-                            )
+                                if not completed_next and not existing.same_lineage(committed_state):
+                                    raise SessionBackupConflict(
+                                        "staged session backup generation conflict",
+                                        local_generation=base_state.generation,
+                                        shared_generation=existing.generation,
+                                )
+                                self._write_state(source, existing)
+                                return BackupResult(
+                                    enabled=True,
+                                    source=source,
+                                    destination=destination,
+                                    retry_count=attempt,
+                                    generation=existing.generation,
+                                    commit_id=existing.commit_id,
+                                    staged_committed=True,
+                                )
 
-                        self._remove_copying_snapshot(copying)
-                        result = self._mirror(source, copying)
-                        self._write_state(copying, committed_state)
-                        os.replace(copying, destination)
-                        self._fsync_parent_dir(destination)
-                        self._write_state(source, committed_state)
+                            self._remove_copying_snapshot(copying)
+                            ensure_private_dir(copying)
+                            atomic_write_json(
+                                copying / _COPYING_OWNER_MARKER_FILENAME,
+                                {"version": 1},
+                                durable=True,
+                            )
+                            transcript = source / "session.jsonl"
+                            with cross_process_append_lock(transcript):
+                                result = self._mirror(source, copying)
+                            self._write_state(copying, committed_state)
+                            self._remove_copying_owner_marker(copying)
+                            os.replace(copying, destination)
+                            self._fsync_parent_dir(destination)
+                            self._write_state(source, committed_state)
                     except Exception as exc:
                         if copying is not None:
                             self._remove_copying_snapshot(copying)
@@ -293,9 +376,7 @@ class StagedSessionBackupService(SessionBackupService):
         minimum_generation: int | None = None,
     ) -> SessionReconcileResult:
         if minimum_generation is not None and (
-            isinstance(minimum_generation, bool)
-            or not isinstance(minimum_generation, int)
-            or minimum_generation <= 0
+            isinstance(minimum_generation, bool) or not isinstance(minimum_generation, int) or minimum_generation <= 0
         ):
             raise ValueError("minimum_generation must be a positive integer")
         if not self._backup_enabled():
@@ -441,6 +522,12 @@ class StagedSessionBackupService(SessionBackupService):
             self._rmtree(path)
         self._fsync_parent_dir(path)
 
+    def _remove_copying_owner_marker(self, copying: Path) -> None:
+        path = copying / _COPYING_OWNER_MARKER_FILENAME
+        with suppress(FileNotFoundError):
+            path.unlink()
+            self._fsync_parent_dir(path)
+
 
 class SessionBackupStagingWorker:
     """Publish complete staged snapshots to the configured shared backup root."""
@@ -471,17 +558,52 @@ class SessionBackupStagingWorker:
         return service
 
     def cleanup_incomplete_snapshots(self) -> int:
-        removed = 0
+        """Recover or discard only copies whose owner lock proves the writer exited."""
+
+        retained = 0
+        recovered = 0
         projects_root = self.staging_root / "projects"
-        if not projects_root.is_dir():
-            return removed
-        for path in sorted(projects_root.glob("*/*{}".format(_COPYING_SUFFIX))):
-            if not path.name.endswith(_COPYING_SUFFIX):
-                continue
-            self._remove_snapshot(path)
-            removed += 1
+        if projects_root.is_dir():
+            for path in sorted(projects_root.glob("*/*{}".format(_COPYING_SUFFIX))):
+                owner_marker = path / _COPYING_OWNER_MARKER_FILENAME
+                if not owner_marker.is_file():
+                    retained += 1
+                    continue
+                owner_lock = _copying_owner_lock_path(self.staging_root, path)
+                lease = _CopyingSnapshotOwnerLock(self._service, owner_lock)
+                with lease.acquire(blocking=False) as acquired:
+                    if not acquired:
+                        retained += 1
+                        continue
+                    parsed = parse_staged_snapshot_name(path.name[: -len(_COPYING_SUFFIX)])
+                    if parsed is None:
+                        retained += 1
+                        continue
+                    session_id, generation = parsed
+                    try:
+                        state = self._service._read_state(path, session_id=session_id, shared=True)
+                    except SessionBackupError:
+                        state = None
+                    if state is None or state.generation != generation:
+                        self._remove_snapshot(path)
+                        continue
+                    destination = path.with_name(path.name[: -len(_COPYING_SUFFIX)])
+                    if destination.exists():
+                        existing = self._service._read_state(destination, session_id=session_id, shared=True)
+                        if existing is None or not existing.same_lineage(state):
+                            retained += 1
+                            continue
+                        self._remove_snapshot(path)
+                    else:
+                        owner_marker.unlink()
+                        self._service._fsync_parent_dir(owner_marker)
+                        os.replace(path, destination)
+                        self._service._fsync_parent_dir(destination)
+                    recovered += 1
+            if retained:
+                logger.info("Retaining incomplete staged session snapshots count={}", retained)
         self._prune_empty_staging_dirs()
-        return removed
+        return recovered
 
     def run_once(self) -> int:
         sessions: dict[tuple[str, str], list[StagedSessionSnapshot]] = {}
@@ -538,6 +660,14 @@ class SessionBackupStagingWorker:
         return sorted(snapshots, key=lambda item: (item.project, item.session_id, item.generation))
 
     def publish_snapshot(self, snapshot: StagedSessionSnapshot) -> None:
+        with self._service._shared_session_lock(
+            self.backup_root,
+            project=snapshot.project,
+            session_id=snapshot.session_id,
+        ):
+            self._publish_snapshot_locked(snapshot)
+
+    def _publish_snapshot_locked(self, snapshot: StagedSessionSnapshot) -> None:
         state = self._service._read_state(snapshot.path, session_id=snapshot.session_id, shared=True)
         if state is None or state.generation != snapshot.generation:
             raise SessionBackupError("staged session backup generation does not match its directory")
@@ -680,6 +810,12 @@ def parse_staged_snapshot_name(name: str) -> tuple[str, int] | None:
     except SessionBackupError:
         return None
     return session_id, int(match.group("generation"))
+
+
+def _copying_owner_lock_path(staging_root: Path, copying: Path) -> Path:
+    relative = copying.relative_to(staging_root)
+    lock_root = staging_root.with_name(".{}{}".format(staging_root.name, _COPYING_LOCK_ROOT_SUFFIX))
+    return lock_root / relative.parent / "{}.lock".format(copying.name)
 
 
 def run_staging_worker(

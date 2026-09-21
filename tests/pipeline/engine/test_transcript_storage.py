@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -18,6 +20,7 @@ from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorag
 from iac_code.services.permissions.pipeline import check_tool_permission
 from iac_code.services.session_layout import SessionPaths, UnsupportedSessionLayoutError
 from iac_code.services.session_metadata import SESSION_LAYOUT_VERSION_V2, SessionMetadata, write_session_metadata
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.session_usage import SessionUsageStore
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
@@ -103,6 +106,39 @@ def test_append_and_load_roundtrip(tmp_path: Path):
     assert [message.role for message in messages] == ["user", "assistant"]
     assert messages[0].content == "hello"
     assert messages[1].get_text() == "hi"
+
+
+@pytest.mark.parametrize("operation", ["append", "append_meta", "save"])
+def test_transcript_writer_waits_for_session_snapshot_barrier(tmp_path: Path, operation: str):
+    session_dir = tmp_path / "session"
+    write_session_metadata(
+        session_dir,
+        SessionMetadata(session_id="root", cwd="/repo", layout_version=SESSION_LAYOUT_VERSION_V2),
+    )
+    storage = PipelineTranscriptStorage(session_dir / "pipeline")
+    storage.append("/repo", "attempt", Message(role="user", content="before"))
+    path = storage.session_path("/repo", "attempt")
+    before = path.read_text(encoding="utf-8")
+    started = threading.Event()
+
+    def mutate():
+        started.set()
+        if operation == "append":
+            storage.append("/repo", "attempt", Message(role="assistant", content="after"))
+        elif operation == "append_meta":
+            storage.append_meta("/repo", "attempt", {"type": "boundary", "value": "after"})
+        else:
+            storage.save("/repo", "attempt", [Message(role="assistant", content="after")])
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with session_mutation_guard(session_dir):
+            future = pool.submit(mutate)
+            assert started.wait(timeout=5)
+            with pytest.raises(TimeoutError):
+                future.result(timeout=0.2)
+            assert path.read_text(encoding="utf-8") == before
+        future.result(timeout=5)
+    assert "after" in path.read_text(encoding="utf-8")
 
 
 def test_pipeline_transcript_round_trips_image_blocks(tmp_path: Path):

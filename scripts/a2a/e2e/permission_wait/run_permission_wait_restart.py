@@ -13,6 +13,7 @@ import sys
 import threading
 import time
 import uuid
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -786,22 +787,42 @@ def run_scenario(
             candidate = next((value for value in inputs if value.get("kind") == "candidate_selection"), None)
             if candidate is None:
                 raise AssertionError("initial stream did not expose candidate selection")
-            background = _BackgroundStream(
-                server.url,
-                _message_payload(
-                    workspace=workspace,
-                    prompt="0",
-                    context_id=str(candidate["contextId"]),
-                    task_id=str(candidate["requestTaskId"]),
-                ),
-                timeout=timeout,
+            continuation_payload = _message_payload(
+                workspace=workspace,
+                prompt="0",
+                context_id=str(candidate["contextId"]),
+                task_id=str(candidate["requestTaskId"]),
             )
-            background.start()
-            permission = background.wait_for_permission(timeout)
-            background.join(timeout)
-            initial_events = candidate_events + background.snapshot()
-            if background.error is not None:
-                raise RuntimeError("top-level Pipeline stream failed at the permission boundary") from background.error
+            continuation_events: list[dict[str, Any]] = []
+            deadline = time.monotonic() + timeout
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("timed out retrying the candidate selection response")
+                background = _BackgroundStream(server.url, continuation_payload, timeout=remaining)
+                background.start()
+                try:
+                    permission = background.wait_for_permission(remaining)
+                except RuntimeError:
+                    background.join(max(0, deadline - time.monotonic()))
+                    attempt_events = background.snapshot()
+                    continuation_events.extend(attempt_events)
+                    retry_requested = any(
+                        item.get("message")
+                        == "Pipeline continuation is already being recovered; retry the same request."
+                        for event in attempt_events
+                        for item in _walk_dicts(event)
+                    )
+                    if background.error is not None or not retry_requested:
+                        raise
+                    time.sleep(0.02)
+                    continue
+                background.join(max(0, deadline - time.monotonic()))
+                continuation_events.extend(background.snapshot())
+                if background.error is not None:
+                    raise RuntimeError("top-level Pipeline stream failed at the permission boundary") from background.error
+                break
+            initial_events = candidate_events + continuation_events
         elif mode == "pipeline":
             background = _BackgroundStream(server.url, initial_payload, timeout=timeout)
             background.start()
@@ -1005,6 +1026,9 @@ def run_scenario(
         }
     finally:
         server.stop()
+        if background is not None:
+            with suppress(TimeoutError):
+                background.join(10)
 
 
 def main() -> int:

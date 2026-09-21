@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ from iac_code.services.session_metadata import (
     SESSION_JSONL_FILENAME,
     session_metadata_entry_exists,
 )
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.types.stream_events import Usage
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.project_paths import get_projects_dir, project_dir_candidates
@@ -110,11 +112,14 @@ class SessionUsageStore:
             return False
 
         path = self.path_for(cwd, session_id)
-        _ensure_usage_parent(path)
-        row = _usage_to_row(usage, provider=provider, model=model, created_at=created_at)
-        with open_text_no_follow(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        ensure_private_file(path)
+        session_dir = _session_dir_from_usage_path(path)
+        guard = session_mutation_guard(session_dir) if session_dir is not None else nullcontext()
+        with guard:
+            _ensure_usage_parent(path)
+            row = _usage_to_row(usage, provider=provider, model=model, created_at=created_at)
+            with open_text_no_follow(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(row, ensure_ascii=False) + "\n")
+            ensure_private_file(path)
         return True
 
     def load(self, cwd: str, session_id: str) -> SessionUsageTotals:

@@ -18,6 +18,7 @@ from iac_code.services.session_layout import (
     ensure_session_owned_parent,
     require_supported_session_layout,
 )
+from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry import log_event
 from iac_code.services.telemetry.names import Events
@@ -726,16 +727,19 @@ def emit_permission_audit(record: PermissionAuditRecord, settings: PermissionAud
 
     try:
         log_path = _log_path(record)
-        _ensure_existing_audit_log_files_private(log_path, max_files=max_files)
-        append_jsonl_rotating_locked(
-            log_path,
-            [row],
-            max_file_bytes=audit_settings.max_file_bytes,
-            max_files=max_files,
-            durable=True,
-            create_mode=0o600,
-        )
-        _ensure_audit_log_files_private(log_path, max_files=max_files)
+        session_dir = _session_dir_from_direct_audit_log_path(log_path)
+        assert session_dir is not None
+        with session_mutation_guard(session_dir):
+            _ensure_existing_audit_log_files_private(log_path, max_files=max_files)
+            append_jsonl_rotating_locked(
+                log_path,
+                [row],
+                max_file_bytes=audit_settings.max_file_bytes,
+                max_files=max_files,
+                durable=True,
+                create_mode=0o600,
+            )
+            _ensure_audit_log_files_private(log_path, max_files=max_files)
         log_written = True
     except Exception as exc:  # pragma: no cover - defensive logging only
         logger.warning("Failed to write permission audit log (error_type={})", type(exc).__name__)

@@ -2914,7 +2914,7 @@ async def test_subscribe_to_active_task_yields_initial_task_then_updates(monkeyp
 
         execution_state = await components.execution_control_service.observe(
             context_id=result.context_id,
-            owner='',
+            owner="",
         )
         assert isinstance(first_event, Task)
         assert first_event.id == result.id
@@ -3603,6 +3603,57 @@ def test_execution_control_endpoints_pause_query_resume_and_recover(tmp_path) ->
         assert terminated.status_code == 202
         assert "inputHandoffReady" not in terminated.json()
         assert terminated.json()["phase"] == "terminating"
+
+
+def test_execution_state_answers_a_retired_natural_handoff_receipt_by_execution_id(tmp_path) -> None:
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "a2a",
+    )
+    service = app.state.a2a_components.execution_control_service
+
+    async def natural_turn(task_id: str) -> str:
+        control = await service.begin_execution(
+            context_id="ctx-1",
+            task_id=task_id,
+            owner="",
+            cwd=str(tmp_path),
+        )
+        current = asyncio.current_task()
+        assert current is not None
+        completion_generation = await control.detach_task(
+            current,
+            execution_status="input-required",
+            natural_completion=True,
+        )
+        assert completion_generation is not None
+        await control.finalize_natural_completion(task_id=task_id, completion_generation=completion_generation)
+        return control.execution_id
+
+    with TestClient(app) as client:
+        retired_execution_id = client.portal.call(natural_turn, "task-1")
+        current_execution_id = client.portal.call(natural_turn, "task-2")
+        assert retired_execution_id != current_execution_id
+        retired = client.get("/iac-code/execution/state?contextId=ctx-1&executionId=" + retired_execution_id)
+        current = client.get("/iac-code/execution/state?contextId=ctx-1&executionId=" + current_execution_id)
+        unknown = client.get("/iac-code/execution/state?contextId=ctx-1&executionId=exec-unknown")
+
+    assert retired.status_code == 200
+    assert retired.json()["executionId"] == retired_execution_id
+    assert retired.json()["phase"] == "retired"
+    receipt = retired.json()["naturalHandoff"]
+    assert receipt["version"] == "natural-handoff-v2"
+    assert receipt["executionId"] == retired_execution_id
+    assert receipt["businessDrained"] is True
+    assert receipt["backupDisabled"] is True
+    assert sorted(retired.json()) == ["executionId", "naturalHandoff", "phase"]
+    assert current.status_code == 200
+    assert current.json()["executionId"] == current_execution_id
+    assert current.json()["naturalHandoff"]["executionId"] == current_execution_id
+    assert unknown.status_code == 409
 
 
 def test_execution_state_reads_persisted_terminal_snapshot_after_cold_restart(tmp_path) -> None:

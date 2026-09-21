@@ -11,6 +11,7 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 from google.protobuf.struct_pb2 import Value
 
+from iac_code.a2a.backup import SessionBackupHandoff
 from iac_code.a2a.events import publish_stream_event
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.input_required import (
@@ -1035,6 +1036,98 @@ async def test_concurrent_duplicate_normal_answers_claim_live_continuation_once(
     assert continuation_calls == 1
     assert checkpoint_store.load(record["boundaryId"])["decision"]["status"] == "applied"
     await registry.complete(pending)
+
+
+@pytest.mark.asyncio
+async def test_normal_answer_delivers_without_awaiting_the_staging_backup_copy(monkeypatch, tmp_path) -> None:
+    registry = PermissionInputRegistry()
+    coordinator = PermissionWaitCoordinator(PermissionWaitPolicy())
+    registry.set_permission_wait_coordinator(coordinator)
+
+    slow_copy_started = threading.Event()
+
+    class NeverFinishingBackupService:
+        # Stands in for the slow staging->backup publish. Delivering a permission
+        # decision must never synchronously wait for this copy to finish.
+        def backup_session(self, *_args, **_kwargs):
+            slow_copy_started.set()
+            threading.Event().wait(30)
+            raise AssertionError("permission delivery must not await the staging->backup copy")
+
+    class NonBlockingBackupCoordinator:
+        enabled = True
+
+        def __init__(self) -> None:
+            self.register_calls = 0
+
+        async def register_boundary(self, **_kwargs):
+            self.register_calls += 1
+
+            async def never_completes() -> None:
+                await asyncio.Event().wait()
+
+            task = asyncio.ensure_future(never_completes())
+            self._task = task
+            return SessionBackupHandoff(business_revision=1, job_id="job-1")
+
+    backup_coordinator = NonBlockingBackupCoordinator()
+    registry.set_backup_coordinator(backup_coordinator)
+
+    future = pending_future()
+    request = PermissionRequestEvent(
+        tool_name="aliyun_api",
+        tool_input={"product": "ros", "action": "CreateStack"},
+        tool_use_id="tool-1",
+        response_future=future,
+    )
+    pending = await registry.register(request, task_id="task-1", context_id="ctx-1", scope="normal")
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), "session-1")
+    checkpoint_store = PermissionWaitCheckpointStore(str(tmp_path), "session-1")
+    record = checkpoint_store.create(
+        build_permission_checkpoint(
+            session_id="session-1",
+            task_id="task-1",
+            context_id="ctx-1",
+            input_id=pending.input_id,
+            tool_use_id="tool-1",
+            tool_name="aliyun_api",
+            tool_input=request.tool_input,
+            permission_class="normal",
+            continuation_frame={
+                "assistantMessageRef": "session.jsonl:0",
+                "assistantMessageDigest": "a" * 64,
+                "orderedToolUseIds": ["tool-1"],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
+            },
+            policy=PermissionWaitPolicy(),
+        )
+    )
+    pending.boundary_id = record["boundaryId"]
+    pending.checkpoint_store = checkpoint_store
+    pending.backup_cwd = str(tmp_path)
+    pending.backup_session_id = "session-1"
+    pending.backup_service = NeverFinishingBackupService()
+    registry.activate_durable_boundary(pending, record)
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_a, **_k: True)
+
+    response = PermissionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        request_task_id="task-1",
+        input_id=pending.input_id,
+        tool_use_id="tool-1",
+        decision="deny",
+    )
+
+    approved = await asyncio.wait_for(registry.answer(response), timeout=2)
+
+    # The decision resolves promptly by delegating the copy to the background
+    # coordinator instead of running a synchronous critical staging->backup copy.
+    assert approved is False
+    assert backup_coordinator.register_calls == 1
+    assert slow_copy_started.is_set() is False
+    assert checkpoint_store.load(record["boundaryId"])["decision"]["status"] == "applied"
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,7 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
 from iac_code.a2a.artifacts import A2AArtifactStore
+from iac_code.a2a.backup import SessionBackupHandoff, SessionBackupHandoffError
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.input_required import PermissionResponse
 from iac_code.a2a.metrics import NoOpA2AMetrics
@@ -237,6 +238,7 @@ async def test_pipeline_permission_backup_records_staged_generation_before_publi
     task_store = MagicMock()
     task_store.record_expected_permission_backup_generation = AsyncMock()
     permission_registry = MagicMock()
+    permission_registry.backup_coordinator = None
     permission_registry.backup_durable_boundary = AsyncMock(
         return_value=BackupResult(
             enabled=True,
@@ -271,6 +273,59 @@ async def test_pipeline_permission_backup_records_staged_generation_before_publi
 
     task_store.record_expected_permission_backup_generation.assert_awaited_once_with("task-1", 6)
     permission_registry.backup_durable_boundary.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_delegated_permission_backup_records_generation_only_after_staging() -> None:
+    task_store = MagicMock()
+    task_store.record_expected_permission_backup_generation = AsyncMock()
+    staged_callbacks = []
+
+    async def register(pending, cwd, session_id, *, backup_service, metrics, on_staged):
+        staged_callbacks.append(on_staged)
+        return SessionBackupHandoff(business_revision=3, job_id="job-1")
+
+    permission_registry = MagicMock()
+    permission_registry.backup_coordinator = SimpleNamespace(enabled=True)
+    permission_registry.backup_durable_boundary = register
+    executor = IacCodeA2APipelineExecutor(
+        task_store=task_store,
+        model="qwen3.6-plus",
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        permission_input_registry=permission_registry,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    await executor._backup_pipeline_publication(
+        {"eventType": "input_required", "status": "input_required"},
+        publisher=SimpleNamespace(pending_durable_permission=object()),
+        pipeline=object(),
+        cwd="/workspace",
+        session_id="session-1",
+        task=SimpleNamespace(task_id="task-1"),
+        ctx=object(),
+        reason=BackupReason.INPUT_REQUIRED,
+    )
+
+    # The publication proceeds on the durable job alone; no generation exists yet.
+    task_store.record_expected_permission_backup_generation.assert_not_awaited()
+    assert len(staged_callbacks) == 1
+    await staged_callbacks[0](6, "commit-6")
+    task_store.record_expected_permission_backup_generation.assert_awaited_once_with("task-1", 6)
+
+
+@pytest.mark.asyncio
+async def test_delegated_pipeline_publication_reports_local_job_failure_as_blocked() -> None:
+    async def register() -> None:
+        raise SessionBackupHandoffError("session backup job could not be persisted: OSError")
+
+    # A local job/checkpoint persistence failure must never look like a success.
+    with pytest.raises(SessionBackupBlocked):
+        await IacCodeA2APipelineExecutor._delegate_or_backup(register())
 
 
 @pytest.mark.asyncio
