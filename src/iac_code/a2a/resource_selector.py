@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
 
-from a2a.types import Message
+from a2a.types import Message, Role
 from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import MessageToDict
 
@@ -22,6 +23,7 @@ from iac_code.utils.file_security import ensure_private_file
 from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
 
 RESOURCE_SELECTION_SCHEMA_VERSION = 1
+RESOURCE_SELECTION_QUERY_PREFIX = "IAC_CODE_RESOURCE_SELECTION:"
 _INPUT_ID = re.compile(r"^resource-[0-9a-f]{32}$")
 
 
@@ -266,7 +268,6 @@ def resource_selection_input_envelope(
             "outputKind": event.output_kind,
             "associationPropertyMetadata": event.association_property_metadata,
             "source": event.source,
-            "profileHash": event.profile_hash,
         },
     }
 
@@ -292,18 +293,89 @@ def checkpoint_record(pending: PendingResourceSelection) -> dict[str, Any]:
 
 
 def parse_resource_selection_response(message: Message | None) -> ResourceSelectionResponse | None:
-    if message is None:
+    if not isinstance(message, Message):
         return None
+    payload, text_transport = _resource_selection_payload(message)
+    if payload is None:
+        return None
+    if message.role != Role.ROLE_USER:
+        raise InvalidParamsError("resource_selection_resume_invalid: response must use ROLE_USER")
+    if text_transport:
+        expected = {
+            "schemaVersion",
+            "kind",
+            "status",
+            "requestTaskId",
+            "contextId",
+            "inputId",
+            "toolUseId",
+        }
+        if payload.get("status") == "selected":
+            expected.update(("selectorId", "value"))
+            optional = {"label", "source"}
+        else:
+            optional = {"optionsEmpty"}
+        if not expected.issubset(payload) or set(payload) - expected - optional:
+            raise InvalidParamsError("resource_selection_resume_invalid: payload fields do not match schema")
+        outer_context_id = message.context_id
+        if not isinstance(outer_context_id, str) or payload.get("contextId") != outer_context_id:
+            raise InvalidParamsError("resource_selection_resume_invalid: contextId mismatch")
+        if message.task_id and payload.get("requestTaskId") != message.task_id:
+            raise InvalidParamsError("resource_selection_resume_invalid: requestTaskId mismatch")
+    return _parse_resource_selection_payload(payload)
+
+
+def _resource_selection_payload(message: Message) -> tuple[Mapping[str, Any] | None, bool]:
+    text_parts: list[str] = []
+    for part in message.parts:
+        try:
+            has_text = part.HasField("text")
+        except (AttributeError, ValueError):
+            has_text = False
+        text = getattr(part, "text", None)
+        if has_text and isinstance(text, str) and text.startswith(RESOURCE_SELECTION_QUERY_PREFIX):
+            text_parts.append(text)
+    if text_parts:
+        if len(message.parts) != 1 or len(text_parts) != 1:
+            raise InvalidParamsError(
+                "resource_selection_resume_invalid: response must contain exactly one JSON TextPart"
+            )
+        payload_text = text_parts[0][len(RESOURCE_SELECTION_QUERY_PREFIX) :]
+        if not payload_text or payload_text != payload_text.lstrip():
+            # The wire prefix is exact and directly followed by one JSON object.
+            raise InvalidParamsError("resource_selection_resume_invalid: malformed JSON payload")
+        try:
+            payload = json.loads(payload_text)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise InvalidParamsError("resource_selection_resume_invalid: malformed JSON payload") from exc
+        if not isinstance(payload, dict):
+            raise InvalidParamsError("resource_selection_resume_invalid: payload must be a JSON object")
+        if payload.get("kind") != "cloud_resource_selection":
+            raise InvalidParamsError("resource_selection_resume_invalid: kind is invalid")
+        return payload, True
+
     metadata: Any = getattr(message, "metadata", None)
     if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
         metadata = MessageToDict(metadata, preserving_proto_field_name=False)
     if not isinstance(metadata, Mapping):
-        return None
+        return None, False
     iac_code = metadata.get("iac_code")
     payload = iac_code.get("inputResponse") if isinstance(iac_code, Mapping) else None
     if not isinstance(payload, Mapping) or payload.get("kind") != "cloud_resource_selection":
-        return None
-    if payload.get("schemaVersion") != RESOURCE_SELECTION_SCHEMA_VERSION:
+        return None, False
+    return payload, False
+
+
+def _parse_resource_selection_payload(payload: Mapping[str, Any]) -> ResourceSelectionResponse:
+    schema_version = payload.get("schemaVersion")
+    # protobuf Struct numbers become floats after MessageToDict, while JSON
+    # booleans must not be accepted as version 1 through Python's bool/int
+    # equality.
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, (int, float))
+        or schema_version != RESOURCE_SELECTION_SCHEMA_VERSION
+    ):
         raise InvalidParamsError("resource_selection_resume_invalid: unsupported schema version")
     status = payload.get("status")
     if status not in {"selected", "canceled"}:

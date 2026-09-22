@@ -144,7 +144,9 @@ PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先
 - 每条硬约束只提交 `constraint_id`、LLM 独立判断的 `status`、语义 `actual_value/actual_unit`、相关最终 `parameter_values` 和可用的 evidence locator，不复制 constraint。
 - `type: tool` 证据提交真实 ordered record 的 `record_id` 与 `result_path`，可带 `tool_name`；`type: context` 提交受限 `context_path`；`type: template` 提交 `template_path` 或最终参数 `parameter_name` 二选一。这里的 `template_path` 是最终 ROS YAML **内部字段的点路径**（例如 `Resources.VSwitch.Properties.CidrBlock`），绝不是模板文件路径；模板参数值优先用 `parameter_name`。不要提交 evidence summary 或 evidence actual，Python 会从权威来源读取。
 - 工具已真实尝试但响应没有可定位的结果字段时，`evidence` 提交空数组，不得编造 `record_id`、`result_path` 或工具返回值。Python 会核对可用 locator、实际值、参数子集、operator/value/unit，并生成完整公共 hard_constraint_checks。接受规则保持兼容：LLM `status=satisfied` 或 Python code verification 通过任一成立即放行；只有二者都不通过才阻止确认。
-- VpcId、VSwitchId、SecurityGroupId、KeyPairName 等已有资源参数通过约束或只读 API 求解；多个候选时用名称、CIDR、地域/可用区等可读信息让用户选择，不要求手工输入 ID，也不归为 `user_required`。
+- VpcId、VSwitchId、SecurityGroupId、KeyPairName、BucketName、KeyId 等已有资源或派生值参数不归为 `user_required`。当前选择器能力支持该资源类型时，先按需调用 `resolve_cloud_resource_selector` 获取契约，再单独调用 `select_cloud_resource`，由宿主界面用名称、CIDR、地域/可用区等可读信息让用户选择；不得先用 `aliyun_api`/约束 API 枚举后把候选塞进 `ask_user_question`，也不得要求手工输入 ID。只有选择器明确不支持且参数仍可由库存约束唯一、确定地求解时，才使用约束或只读 API 自动求值。
+- **本步骤就是 Step 1 所说的“下一步专用资源选择器”所在步骤。** 当选中候选含 `use_existing`/`reference`，模板需要具体资源或派生值，而上下文尚无该值时，必须先完成专用资源选择，再写入模板、执行 Preview/询价并进入部署确认。把 Default/参数写成空字符串或占位值、把该值列为 `auto_solvable` 缺口、声称“部署阶段/后续步骤再选择”都不满足用户需求；`deploying` 只允许在已选值经真实校验证明不可用时重新选择。
+- 用户取消后尊重取消结果，不要自动重复弹出同一选择器；当前账号列表为空时，根据返回的 `options_empty` 调整方案或说明缺少资源。
 - 只能在合法候选内筛选或排序，不得编造 API 未返回的库存值；LicenseKey、Token、证书、真实域名等外部输入不得编造。不要仅因参数名是 VpcId、VSwitchId、SecurityGroupId 或 KeyPairName 就跳过参数推荐并直接停止询价。
 - 对可生成参数要主动补齐：普通密码等应生成合规随机值，并让同一真实值贯穿 Preview 与最后一次询价的 `parameters`；Python 直接以该询价 input 作为最终参数锚点。不得写入占位值。
 - `PreviewStack` 因候选组合不可行失败时，按 reference 的回溯规则更换候选值；因不可查询的外部输入缺失失败时，记录缺口，不用占位值伪造。
@@ -155,7 +157,7 @@ PreviewStack 必须传 StackName；调用 `ros_preview_template` 前，必须先
 
 把仍未解出的参数写入 `missing_deployment_parameters`，并逐项标注 `classification`：
 
-- `auto_solvable`：可继续用 `ros_get_template_parameter_constraints`、产品只读 API、可读候选选择或规则生成解出的参数（已有云资源 ID、库存规格、可用区、普通密码、名称、CIDR 等）。这类缺口应尽量在本步骤解掉，不要过早列入缺口。
+- `auto_solvable`：可继续用资源选择器、`ros_get_template_parameter_constraints`、产品只读 API 或规则生成解出的参数（已有云资源 ID、库存规格、可用区、普通密码、名称、CIDR 等）。已有资源身份优先使用专用资源选择器；约束/只读 API 用于选择器不支持时的唯一确定值或库存规格，不能把资源清单改装成 `ask_user_question` 选项。这类缺口必须在本步骤继续求解，不能带着未执行的“后续资源选择器”进入部署确认。
 - `user_required`：只能由用户提供且无法从云账号只读查询的外部输入（LicenseKey、Token、证书、真实域名、第三方账号等）。这类缺口同时写入 `user_required_missing_parameters`。
 
 **部署确认之前必须补齐所有 `user_required` 参数**：用 `ask_user_question` 一次只问一个，说明用途和格式。收齐后 `user_required_missing_parameters` 必须是空数组，否则不得提交 `status: confirmed`。

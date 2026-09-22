@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "generatedFrom": {
-    "bundleSha256": "8e3452fbf0480beffe8ae3b6aff045a6ebd4f14f90146d5bc16e314074f82e6c",
-    "profileHash": "sha256:9a0b5ea612c96be97a62bd06167b0308f6e8066dde64533edc4d27664837f193"
+    "bundleSha256": "351f78a7db34df60b1c739de13cd9db6e9f4a1b54c99dbddab5af3e4cadd37fc",
+    "profileHash": "sha256:85c511b22967c6208c5bfcdfecde7ebacc60b6c2c93a473b71931d49cff7968b"
   },
   "fixtures": {
     "ecs.instance.ecs.instance.list.success": {

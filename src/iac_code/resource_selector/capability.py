@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -46,13 +45,6 @@ class ResourceSelectorCapability:
         if surface == "a2a":
             if not env_enabled(os.environ.get(A2A_RESOURCE_SELECTOR_ENV)):
                 return cls(False, surface, reason="a2a_feature_disabled")
-            advertised = request_capability(request_metadata)
-            if advertised is None:
-                return cls(False, surface, reason="client_capability_missing")
-            if advertised.get("schemaVersion") != 1 or advertised.get("queryMode") != "ros_api_json":
-                return cls(False, surface, reason="client_capability_incompatible")
-            if advertised.get("profileHash") != PROFILE_HASH:
-                return cls(False, surface, reason="profile_hash_mismatch")
             return cls(True, surface)
 
         root = artifact_root or static_root()
@@ -66,20 +58,3 @@ class ResourceSelectorCapability:
         if manifest.get("sha256") != digest or manifest.get("profileHash") != PROFILE_HASH:
             return cls(False, surface, reason="bundle_manifest_mismatch")
         return cls(True, surface)
-
-
-def request_capability(metadata: Any) -> dict[str, Any] | None:
-    if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
-        from google.protobuf.json_format import MessageToDict
-
-        metadata = MessageToDict(metadata, preserving_proto_field_name=False)
-    if not isinstance(metadata, Mapping):
-        return None
-    iac_code = metadata.get("iac_code")
-    if not isinstance(iac_code, Mapping):
-        return None
-    capabilities = iac_code.get("capabilities")
-    if not isinstance(capabilities, Mapping):
-        return None
-    value = capabilities.get("resourceSelector")
-    return dict(value) if isinstance(value, Mapping) else None

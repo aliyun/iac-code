@@ -76,6 +76,22 @@ msgid ""
 msgstr "清理状态不可用。请手动检查会话文件和云资源。"
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot could not be persisted."
+msgstr "无法持久化普通对话资源选择恢复快照。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot is already resolved."
+msgstr "普通对话资源选择恢复快照已处理。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore response conflicts with the snapshot."
+msgstr "普通对话资源选择恢复响应与快照冲突。"
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot identity is incomplete."
+msgstr "普通对话资源选择恢复快照标识不完整。"
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot could not be persisted."
 msgstr "无法持久化普通对话权限恢复快照。"
 

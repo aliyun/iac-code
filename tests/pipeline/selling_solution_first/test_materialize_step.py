@@ -253,7 +253,14 @@ class _NamedTool(Tool):
 def _registry_for_step(loaded, step) -> ToolRegistry:
     base_registry = ToolRegistry()
     base_registry.register_default_tools()
-    for name in ("ros_stack", "ros_stack_instances", "write_memory", "aliyun_api"):
+    for name in (
+        "ros_stack",
+        "ros_stack_instances",
+        "write_memory",
+        "aliyun_api",
+        "resolve_cloud_resource_selector",
+        "select_cloud_resource",
+    ):
         base_registry.register(_NamedTool(name))
     executor = StepExecutor(
         provider_manager=MagicMock(),
@@ -731,6 +738,8 @@ class TestStepToolScope:
             assert registry.get(expected) is not None, expected
         for blocked in ("write_file", "edit_file", "bash", "ros_deploy", "ros_estimate_template_cost"):
             assert registry.get(blocked) is None, blocked
+        for selector_tool in ("resolve_cloud_resource_selector", "select_cloud_resource"):
+            assert registry.get(selector_tool) is None, selector_tool
 
     def test_materialize_step_has_no_stack_write_entry(self, loaded, step):
         registry = _registry_for_step(loaded, step)
@@ -752,6 +761,8 @@ class TestStepToolScope:
             "ros_get_template_parameter_constraints",
             "ros_preview_template",
             "ros_estimate_template_cost",
+            "resolve_cloud_resource_selector",
+            "select_cloud_resource",
             "complete_step",
         ):
             assert registry.get(expected) is not None, expected
@@ -767,9 +778,23 @@ class TestStepToolScope:
         assert registry.get("ros_stack") is None
         assert registry.get("ros_stack_instances") is None
         assert registry.get("write_file") is None
+        assert registry.get("resolve_cloud_resource_selector") is not None
+        assert registry.get("select_cloud_resource") is not None
 
 
 class TestPromptContract:
+    def test_resource_selector_guidance_is_progressive_and_respects_cancel(self, prompt_text, skill_text):
+        # The prompt keeps the trigger condition; the skill owns the call order and
+        # the cancel/empty-list outcomes so they exist exactly once.
+        assert "确实需要一个现有云资源或其派生值" in prompt_text
+        assert "判据以技能为准" in prompt_text
+        assert "先按需调用 `resolve_cloud_resource_selector`" in skill_text
+        assert "再单独调用 `select_cloud_resource`" in skill_text
+        assert "不要自动重复弹出同一选择器" in skill_text
+        assert "options_empty" in skill_text
+        for contract in ("resolve_cloud_resource_selector", "select_cloud_resource"):
+            assert contract not in prompt_text
+
     def test_single_template_url_is_reused_across_validate_preview_and_pricing(self, prompt_text):
         assert "{solution_selection.selected_candidate.output_path}" in prompt_text
         assert prompt_text.count("ros_validate_template") >= 1
@@ -809,11 +834,26 @@ class TestPromptContract:
         assert "user_required_missing_parameters" in skill_text
         assert "ask_user_question" in skill_text
 
-    def test_existing_resource_ids_are_queried_or_selected_readably(self, skill_text):
-        assert "通过约束或只读 API 求解" in skill_text
-        assert "多个候选时用名称、CIDR、地域/可用区等可读信息" in skill_text
-        assert "不要求手工输入 ID" in skill_text
+    def test_existing_resource_ids_use_the_dedicated_selector_when_supported(self, prompt_text, skill_text):
+        assert "先按需调用 `resolve_cloud_resource_selector`" in skill_text
+        assert "再单独调用 `select_cloud_resource`" in skill_text
+        assert "不得先用 `aliyun_api`/约束 API 枚举后把候选塞进 `ask_user_question`" in skill_text
+        assert "已有资源身份不得用 `aliyun_api` 或约束 API 枚举后塞进 `ask_user_question`" not in prompt_text
+        assert "不得要求手工输入 ID" in skill_text
         assert "不归为 `user_required`" in skill_text
+
+    def test_existing_resource_selection_cannot_be_deferred_beyond_materialization(self, prompt_text, skill_text):
+        assert "本步骤" in skill_text and "下一步专用资源选择器" in skill_text
+        for text in (prompt_text, skill_text):
+            assert "Preview" in text
+        # The hard ordering lives in both places because each step states it in its
+        # own terms, while the gap classification stays with the skill.
+        assert "auto_solvable" in skill_text
+        assert "auto_solvable" not in prompt_text
+        assert "deploying" in skill_text
+        assert "deploying" not in prompt_text
+        assert "必须在写模板" in prompt_text
+        assert "必须先完成专用资源选择" in skill_text
 
     def test_quota_blocked_creation_asks_direction_and_replans_lifecycle(self, skill_text):
         assert "新建资源受限时先确认解决方向" in skill_text

@@ -387,6 +387,7 @@ class SubPipelineExecutor:
         sub_step_attempt_allocator: Callable[[dict[str, Any]], dict[str, Any]] | None = None,
         sub_step_state_callback: Callable[[dict[str, Any]], Any] | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
+        resource_selection_checkpoint: dict[str, Any] | None = None,
     ) -> AsyncGenerator[PipelineEvent | SubPipelineStreamEvent, None]:
         """Execute sub-pipeline yielding all events in real-time for UI rendering."""
         self._observability.session_id = session_id
@@ -640,6 +641,9 @@ class SubPipelineExecutor:
 
                         step_msg = user_message if is_first_step else None
                         step_precompleted_tools = precompleted_tools if is_first_step else None
+                        step_resource_selection_checkpoint = (
+                            resource_selection_checkpoint if is_first_step else None
+                        )
                         attempt_resume_messages = attempt_info.get("resume_messages")
                         if not isinstance(attempt_resume_messages, list):
                             attempt_resume_messages = []
@@ -663,6 +667,7 @@ class SubPipelineExecutor:
                                 "transcript_id": attempt_info.get("transcript_id"),
                                 "resume_messages": step_resume_messages,
                                 "precompleted_tools": step_precompleted_tools,
+                                "resource_selection_checkpoint": step_resource_selection_checkpoint,
                                 "rollback_targets": state_machine.completed_non_future_rollback_targets(),
                                 "rollback_count": state_machine.rollback_count,
                                 "max_rollbacks": state_machine.max_rollbacks,

@@ -25,7 +25,7 @@ def test_web_desktop_artifact_handshake_and_unsupported_surfaces(tmp_path) -> No
     assert ResourceSelectorCapability.for_surface("web", artifact_root=tmp_path).reason == "bundle_manifest_mismatch"
 
 
-def test_a2a_requires_env_and_exact_client_handshake(monkeypatch) -> None:
+def test_a2a_requires_only_server_env_gate(monkeypatch) -> None:
     metadata = {
         "iac_code": {
             "capabilities": {
@@ -41,7 +41,13 @@ def test_a2a_requires_env_and_exact_client_handshake(monkeypatch) -> None:
     assert ResourceSelectorCapability.for_surface("a2a", request_metadata=metadata).reason == "a2a_feature_disabled"
     monkeypatch.setenv("IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED", "true")
     assert ResourceSelectorCapability.for_surface("a2a", request_metadata=metadata).enabled
-    assert not ResourceSelectorCapability.for_surface("a2a", request_metadata={}).enabled
+    assert ResourceSelectorCapability.for_surface("a2a", request_metadata={}).enabled
+    metadata["iac_code"]["capabilities"]["resourceSelector"] = {
+        "schemaVersion": 999,
+        "queryMode": "unsupported",
+        "profileHash": "sha256:legacy-client-value-is-ignored",
+    }
+    assert ResourceSelectorCapability.for_surface("a2a", request_metadata=metadata).enabled
     assert env_enabled("ON") and not env_enabled("invalid")
 
 

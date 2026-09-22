@@ -140,10 +140,10 @@
         ],
         "hard_constraints": []
       },
-      "expected_behavior": "通过参数约束或只读 API 获取 KeyPairName 和 VpcId 候选；只有一个兼容候选时采用，多个候选时用可读信息让用户选择，不要求用户手工输入资源 ID",
+      "expected_behavior": "按需解析并分别调用专用资源选择器获取 KeyPairName 和 VpcId；宿主界面用可读信息让用户选择，不用 aliyun_api/约束 API 枚举后改装成 ask_user_question，也不要求用户手工输入资源 ID",
       "assertions": [
-        {"name": "queries_existing_resources", "check": "先调用 ros_get_template_parameter_constraints 或产品只读 API 获取 KeyPairName 和 VpcId 候选"},
-        {"name": "readable_candidate_choice", "check": "多个候选时 ask_user_question 展示资源名称、CIDR、地域/可用区等可读信息，而不是自由输入资源 ID"},
+        {"name": "resolves_existing_resource_selector", "check": "不确定 selector 契约时先调用 resolve_cloud_resource_selector，并为每个具体值单独调用 select_cloud_resource"},
+        {"name": "readable_candidate_choice", "check": "专用资源选择界面展示资源名称、CIDR、地域/可用区等可读信息，不用 ask_user_question 展示资源清单"},
         {"name": "ids_are_auto_solvable", "check": "已有资源 ID 不归入 user_required；可查询时按 auto_solvable 处理"},
         {"name": "no_fabricated_external_input", "check": "不编造 KeyPairName、VpcId 等外部输入，也不使用占位值"},
         {"name": "no_manual_resource_id_question", "check": "不要求用户手工查找或输入 vpc-...、vsw-...、sg-... 等资源 ID"}

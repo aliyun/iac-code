@@ -1504,7 +1504,6 @@ def _cloud_resource_selection_data(event: CloudResourceSelectionEvent) -> dict[s
             "outputKind": event.output_kind,
             "associationPropertyMetadata": copy.deepcopy(event.association_property_metadata),
             "source": copy.deepcopy(event.source),
-            "profileHash": event.profile_hash,
         },
     }
 

@@ -6,7 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from a2a.types import Message, Role, TaskState
+from a2a.types import Message, Part, Role
 from a2a.utils.errors import InvalidParamsError
 
 from iac_code.a2a.executor import IacCodeA2AExecutor
@@ -14,17 +14,19 @@ from iac_code.a2a.metrics import NoOpA2AMetrics
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_stream import _unified_input_projection
 from iac_code.a2a.resource_selector import (
+    RESOURCE_SELECTION_QUERY_PREFIX,
     PendingResourceSelection,
     ResourceSelectionCheckpointStore,
     ResourceSelectionInputRegistry,
     ResourceSelectionResponse,
     checkpoint_record,
     parse_resource_selection_response,
+    resource_selection_input_envelope,
 )
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.resource_selector.profiles import PROFILE_HASH, get_profile
-from iac_code.resource_selector.tools import SelectCloudResourceTool
+from iac_code.resource_selector.tools import SelectCloudResourceTool, resumed_selection_result
 from iac_code.services.session_backup import BackupReason
 from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import ToolContext
@@ -81,7 +83,41 @@ def response(*, value="i-test123") -> ResourceSelectionResponse:
     )
 
 
-def test_parser_only_accepts_structured_metadata_and_never_text() -> None:
+def test_private_resume_result_preserves_empty_cancel_without_registered_tool() -> None:
+    result = resumed_selection_result(
+        tool_use_id="tool-1",
+        input_id="resource-" + "a" * 32,
+        selector_id="ecs.instance",
+        profile_hash=PROFILE_HASH,
+        selector={
+            "id": "ecs.instance",
+            "associationProperty": "ALIYUN::ECS::Instance::InstanceId",
+            "outputKind": "resource_id",
+            "associationPropertyMetadata": {"RegionId": "cn-hangzhou"},
+            "source": None,
+        },
+        prompt="请选择 ECS 实例",
+        response={
+            "status": "canceled",
+            "input_id": "resource-" + "a" * 32,
+            "selector_id": "ecs.instance",
+            "options_empty": True,
+        },
+    )
+
+    assert result.is_error is False
+    assert json.loads(result.content) == {
+        "kind": "cloud_resource_selection",
+        "options_empty": True,
+        "reason": "user_canceled",
+        "schema_version": 1,
+        "selector_id": "ecs.instance",
+        "should_retry": False,
+        "status": "canceled",
+    }
+
+
+def test_parser_accepts_structured_metadata_and_ignores_ordinary_text() -> None:
     plain = Message(message_id="m-1", role=Role.ROLE_USER)
     assert parse_resource_selection_response(plain) is None
 
@@ -106,6 +142,147 @@ def test_parser_only_accepts_structured_metadata_and_never_text() -> None:
     parsed = parse_resource_selection_response(message)
     assert parsed is not None
     assert parsed.value == "i-test123"
+
+
+def _text_selection_message(payload: object, *, context_id: str = "ctx-1", task_id: str | None = None) -> Message:
+    return Message(
+        message_id="m-text",
+        task_id=task_id,
+        context_id=context_id,
+        role=Role.ROLE_USER,
+        parts=[Part(text=RESOURCE_SELECTION_QUERY_PREFIX + json.dumps(payload, separators=(",", ":")))],
+    )
+
+
+def test_text_protocol_parses_selected_and_canceled_responses() -> None:
+    selected_payload = {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "status": "selected",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "tool-1",
+        "selectorId": "ecs.instance",
+        "value": "i-test123",
+        "label": "app-server",
+        "source": None,
+    }
+    parsed = parse_resource_selection_response(_text_selection_message(selected_payload))
+    assert parsed == ResourceSelectionResponse(
+        task_id="task-1",
+        context_id="ctx-1",
+        input_id="resource-" + "a" * 32,
+        tool_use_id="tool-1",
+        status="selected",
+        selector_id="ecs.instance",
+        value="i-test123",
+        label="app-server",
+    )
+
+    canceled_payload = {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "status": "canceled",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "tool-1",
+        "optionsEmpty": True,
+    }
+    canceled = parse_resource_selection_response(_text_selection_message(canceled_payload))
+    assert canceled is not None
+    assert canceled.status == "canceled"
+    assert canceled.options_empty is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "ordinary chat IAC_CODE_RESOURCE_SELECTION:{}",
+        "please use IAC_CODE_RESOURCE_SELECTION:{} later",
+    ],
+)
+def test_text_protocol_does_not_claim_non_prefixed_natural_language(text: str) -> None:
+    message = Message(message_id="m-natural", role=Role.ROLE_USER, parts=[Part(text=text)])
+    assert parse_resource_selection_response(message) is None
+
+
+@pytest.mark.parametrize(
+    ("payload_text", "error"),
+    [
+        ("", "malformed JSON"),
+        (" {}", "malformed JSON"),
+        ("not-json", "malformed JSON"),
+        ("[]", "JSON object"),
+        ("{} trailing", "malformed JSON"),
+    ],
+)
+def test_text_protocol_rejects_malformed_payload(payload_text: str, error: str) -> None:
+    message = Message(
+        message_id="m-invalid",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text=RESOURCE_SELECTION_QUERY_PREFIX + payload_text)],
+    )
+    with pytest.raises(InvalidParamsError, match=error):
+        parse_resource_selection_response(message)
+
+
+def test_text_protocol_rejects_extra_fields_and_correlation_mismatch() -> None:
+    payload = {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "status": "canceled",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "tool-1",
+        "profileHash": "client-must-not-send-this",
+    }
+    with pytest.raises(InvalidParamsError, match="payload fields"):
+        parse_resource_selection_response(_text_selection_message(payload))
+    payload.pop("profileHash")
+    with pytest.raises(InvalidParamsError, match="contextId mismatch"):
+        parse_resource_selection_response(_text_selection_message(payload, context_id="ctx-other"))
+    with pytest.raises(InvalidParamsError, match="requestTaskId mismatch"):
+        parse_resource_selection_response(_text_selection_message(payload, task_id="task-other"))
+
+
+def test_text_protocol_rejects_boolean_schema_version() -> None:
+    payload = {
+        "schemaVersion": True,
+        "kind": "cloud_resource_selection",
+        "status": "canceled",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "tool-1",
+    }
+    with pytest.raises(InvalidParamsError, match="unsupported schema version"):
+        parse_resource_selection_response(_text_selection_message(payload))
+
+
+def test_structured_metadata_rejects_boolean_schema_version() -> None:
+    message = Message(message_id="m-invalid-version", role=Role.ROLE_USER)
+    message.metadata.update(
+        {
+            "iac_code": {
+                "inputResponse": {
+                    "schemaVersion": True,
+                    "kind": "cloud_resource_selection",
+                    "status": "canceled",
+                    "requestTaskId": "task-1",
+                    "contextId": "ctx-1",
+                    "inputId": "resource-" + "a" * 32,
+                    "toolUseId": "tool-1",
+                }
+            }
+        }
+    )
+
+    with pytest.raises(InvalidParamsError, match="unsupported schema version"):
+        parse_resource_selection_response(message)
 
 
 def test_canceled_response_preserves_empty_options_signal() -> None:
@@ -263,12 +440,13 @@ async def test_executor_resource_answer_commits_and_activates_session_headers_be
 
 
 @pytest.mark.asyncio
-async def test_live_resource_selection_can_be_answered_while_input_required_is_published(
+async def test_normal_resource_selection_closes_original_stream_and_resumes_from_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     event = selection_event(future=asyncio.get_running_loop().create_future())
+    original_stream_closed = asyncio.Event()
     resumed = asyncio.Event()
 
     class RecordingBackup:
@@ -282,69 +460,89 @@ async def test_live_resource_selection_can_be_answered_while_input_required_is_p
     backup = RecordingBackup()
     monkeypatch.setattr("iac_code.a2a.executor.backup_session_async", backup.backup)
 
-    class ImmediateAnswerLoop:
+    class OriginalLoop:
         async def run_streaming(self, _prompt):
-            yield event
+            owner = asyncio.current_task()
+            try:
+                yield event
+                raise AssertionError("the original stream must not continue after the selection boundary")
+            finally:
+                assert asyncio.current_task() is owner
+                original_stream_closed.set()
+
+    class RecoveryLoop:
+        async def resume_resource_selection_boundary(self, *_args, **_kwargs):
             resumed.set()
             yield MessageStartEvent(message_id="after-selection")
             yield TextDeltaEvent(text="selection accepted")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 
-    runtime = FakeRuntime(agent_loop=ImmediateAnswerLoop(), session_id="session-1")
-    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
+        async def run_streaming(self, _prompt):
+            yield MessageStartEvent(message_id="next-turn")
+            yield TextDeltaEvent(text="next turn accepted")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    class RecoveryRuntime(FakeRuntime):
+        def set_resource_selector_enabled(self, enabled: bool) -> None:
+            self.resource_selector_enabled = enabled
+
+    runtimes = [
+        FakeRuntime(agent_loop=OriginalLoop(), session_id="session-1"),
+        RecoveryRuntime(agent_loop=RecoveryLoop(), session_id="session-1"),
+    ]
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtimes.pop(0))
     executor = IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus")
     queue = FakeEventQueue()
-    original_publish_status = executor._publish_status
-    answer_task: asyncio.Task[None] | None = None
-
-    async def publish_status(target_queue, **kwargs):
-        nonlocal answer_task
-        await original_publish_status(target_queue, **kwargs)
-        metadata = kwargs.get("metadata")
-        iac_code = metadata.get("iac_code") if isinstance(metadata, dict) else None
-        if kwargs.get("state") == TaskState.TASK_STATE_INPUT_REQUIRED and isinstance(iac_code, dict):
-            if isinstance(iac_code.get("inputRequired"), dict):
-                answer_task = asyncio.create_task(
-                    executor._answer_resource_selection(
-                        SimpleNamespace(call_context=None),
-                        queue,
-                        response=response(),
-                    )
-                )
-                # Observe answer delivery without waiting for the continuation,
-                # which needs execute() to release the context lock first.
-                await asyncio.shield(event.response_future)
-
-    monkeypatch.setattr(executor, "_publish_status", publish_status)
 
     try:
         await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
-        assert answer_task is not None
-        await asyncio.shield(answer_task)
+        assert original_stream_closed.is_set()
+        assert not event.response_future.done()
 
-        assert event.response_future.done()
+        await executor._answer_resource_selection(
+            SimpleNamespace(call_context=None),
+            queue,
+            response=response(),
+        )
+
         assert resumed.is_set()
+        assert not runtimes
         assert not await executor._resource_selection_registry.has_pending_task("task-1")
         record = await executor._task_store.get_task_record("task-1")
         assert "selection accepted" in record.output_text
         assert (BackupReason.NORMAL_TURN_END, False) in backup.calls
+
+        await executor.execute(
+            FakeRequestContext(
+                task_id="task-2",
+                context_id="ctx-1",
+                text="select another resource",
+                metadata={"iac_code": {"cwd": str(tmp_path)}},
+            ),
+            queue,
+        )
+        next_record = await executor._task_store.get_task_record("task-2")
+        assert "next turn accepted" in next_record.output_text
     finally:
-        if answer_task is not None:
-            if not answer_task.done():
-                answer_task.cancel()
-            await asyncio.gather(answer_task, return_exceptions=True)
         await executor._resource_selection_registry.cancel_task("task-1")
         await executor._task_store.stop_cleanup_loop()
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("feature_enabled", [False, True])
 async def test_persisted_resource_selection_recovery_reuses_request_scoped_runtime_overrides(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    feature_enabled: bool,
 ) -> None:
     from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
     from iac_code.services.providers.aliyun import AliyunCredentials
     from iac_code.services.telemetry import get_user_id
+
+    if feature_enabled:
+        monkeypatch.setenv("IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED", "true")
+    else:
+        monkeypatch.delenv("IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED", raising=False)
 
     observations: list[tuple[str, str | None, str | None]] = []
 
@@ -446,6 +644,8 @@ async def test_persisted_resource_selection_recovery_reuses_request_scoped_runti
 
     assert runtime_options[0][0].model == "request-model"
     assert runtime_options[0][1] == "request-ak"
+    assert runtime_options[0][0].resource_selector_enabled is feature_enabled
+    assert configured[0][0].resource_selector_enabled is feature_enabled
     assert configured[0][1] == "request-model"
     assert configured[0][2]["from_metadata"] is True
     assert configured[0][2]["metadata_api_key"] == "request-key"
@@ -455,6 +655,81 @@ async def test_persisted_resource_selection_recovery_reuses_request_scoped_runti
     assert policy.thinking_budget == 1024
     assert refreshed == [("ja", "request-ak")]
     assert observations == [("request-user", "ja", "request-ak")]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("feature_enabled", [False, True])
+async def test_persisted_pipeline_resource_selection_recomputes_server_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    feature_enabled: bool,
+) -> None:
+    if feature_enabled:
+        monkeypatch.setenv("IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED", "true")
+    else:
+        monkeypatch.delenv("IAC_CODE_A2A_RESOURCE_SELECTOR_ENABLED", raising=False)
+
+    task_store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    context_record = await task_store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+    )
+    await task_store.discard_context_runtime("ctx-1")
+    await task_store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    event = selection_event(future=asyncio.get_running_loop().create_future())
+    assert event.continuation_frame is not None
+    event.continuation_frame["assistantMessageRef"] = "pipeline/transcripts/step.jsonl:1"
+    checkpoint_store = ResourceSelectionCheckpointStore(str(tmp_path), context_record.session_id)
+    pending = PendingResourceSelection(
+        task_id="task-1",
+        context_id="ctx-1",
+        session_id=context_record.session_id,
+        cwd=str(tmp_path),
+        event=event,
+        store=checkpoint_store,
+    )
+    checkpoint_store.create(checkpoint_record(pending))
+    observed: list[tuple[bool, object, dict]] = []
+
+    class RecoveryPipelineExecutor:
+        def __init__(self, **kwargs):
+            self._kwargs = kwargs
+
+        async def execute(self, **kwargs):
+            observed.append(
+                (
+                    self._kwargs["resource_selector_enabled"],
+                    self._kwargs["aliyun_credential"],
+                    kwargs["resource_selection_checkpoint"],
+                )
+            )
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", RecoveryPipelineExecutor)
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
+    monkeypatch.setattr(
+        "iac_code.services.providers.aliyun.AliyunCredentials._load_from_aliyun_cli",
+        lambda config_path=None: None,
+    )
+    for name in (
+        "ALIBABA_CLOUD_ACCESS_KEY_ID",
+        "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+        "ALIBABA_CLOUD_SECURITY_TOKEN",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    executor = IacCodeA2AExecutor(task_store=task_store, model="server-model")
+    await executor._answer_resource_selection(
+        SimpleNamespace(call_context=None, metadata={"iac_code": {}}, message=None),
+        FakeEventQueue(),
+        response=response(),
+    )
+
+    assert len(observed) == 1
+    assert observed[0][0] is feature_enabled
+    assert observed[0][1] is None
+    assert observed[0][2]["inputId"] == event.input_id
+    assert checkpoint_store.load(event.input_id)["state"] == "resolved"
 
 
 @pytest.mark.asyncio
@@ -612,10 +887,14 @@ def test_pipeline_event_projects_authoritative_custom_input_required() -> None:
             "outputKind": "resource_id",
             "associationPropertyMetadata": {"RegionId": "cn-hangzhou"},
             "source": None,
-            "profileHash": PROFILE_HASH,
         },
+        "pipelineName": "selling",
+        "pipelineRunId": "run-1",
+        "scope": "pipeline",
         "options": [],
     }
+    direct = resource_selection_input_envelope(selection_event(), task_id="task-1", context_id="ctx-1")
+    assert "profileHash" not in direct["selector"]
 
 
 @pytest.mark.asyncio

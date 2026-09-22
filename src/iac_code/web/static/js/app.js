@@ -3,7 +3,7 @@ import { createComposerController } from "./components/composer.js?v=session-mod
 import {
   destroyResourceSelectionPanels,
   renderBlockingPanels,
-} from "./components/blocking.js?v=blocking-keys-v8";
+} from "./components/blocking.js?v=blocking-keys-v13";
 import {
   deploymentConfirmationKey,
   renderDeploymentConfirmationPanel,

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import contextvars
 import json
 import re
 import uuid
-from collections.abc import Callable
-from contextlib import contextmanager
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
@@ -23,20 +21,6 @@ from .profiles import (
     iter_profiles,
 )
 from .validation import normalize_metadata, validate_answer_value, validate_source
-
-_resume_answers: contextvars.ContextVar[dict[str, dict[str, Any]] | None] = contextvars.ContextVar(
-    "iac_code_resource_selector_resume_answers",
-    default=None,
-)
-
-
-@contextmanager
-def resource_selection_resume_scope(answers: dict[str, dict[str, Any]]):
-    token = _resume_answers.set(answers)
-    try:
-        yield
-    finally:
-        _resume_answers.reset(token)
 
 
 def json_result(value: dict[str, Any], *, error: bool = False) -> ToolResult:
@@ -148,6 +132,15 @@ def normalized_search_text(value: object) -> str:
     return " ".join(part for part in re.split(r"[^\w]+", str(value).lower()) if part)
 
 
+_GENERIC_QUERY_SELECTOR_PREFERENCES = {
+    "vswitch": "vpc.vswitch",
+    "vswitch id": "vpc.vswitch",
+    "virtual switch": "vpc.vswitch",
+    "virtual switch id": "vpc.vswitch",
+    "交换机": "vpc.vswitch",
+}
+
+
 def profile_search_score(profile: SelectorProfile, query: str) -> int:
     terms = (
         profile.selector_id,
@@ -160,6 +153,16 @@ def profile_search_score(profile: SelectorProfile, query: str) -> int:
     if query in normalized_terms:
         return 10_000
     query_tokens = set(query.split())
+    preferred_terms = (profile.title, *profile.search_terms)
+    contained_terms = []
+    for term in preferred_terms:
+        normalized_term = normalized_search_text(term)
+        term_tokens = set(normalized_term.split())
+        if term_tokens and term_tokens <= query_tokens:
+            contained_terms.append((len(term_tokens), len(normalized_term)))
+    if contained_terms:
+        token_count, term_length = max(contained_terms)
+        return 5_000 + token_count * 100 + term_length
     haystack_tokens = set(" ".join(normalized_terms).split())
     overlap = query_tokens & haystack_tokens
     if not overlap:
@@ -201,6 +204,9 @@ class ResolveCloudResourceSelectorTool(Tool):
             "Prefer this flow when the user explicitly wants to choose one existing Alibaba Cloud resource or "
             "derived value themselves. "
             "Use this before select_cloud_resource when the current contract is not already known. "
+            "Pass association_property only when its exact official value is known; do not guess it. "
+            "Otherwise omit association_property and use query with a concise English resource keyword such as "
+            "VPC, ECS Instance, OSS Bucket, KMS Key, or OOS Template, not a sentence. "
             "Do not pre-list candidates with Alibaba Cloud APIs; fall back to them only when this resolver reports "
             "that the selector is unavailable, or when the user asked to list, inspect, or analyze resources. "
             "The default response is compact; request detail_level=full only when optional metadata fields are needed."
@@ -212,8 +218,19 @@ class ResolveCloudResourceSelectorTool(Tool):
             "type": "object",
             "additionalProperties": False,
             "properties": {
-                "association_property": {"type": "string", "maxLength": 256},
-                "query": {"type": "string", "maxLength": 100},
+                "association_property": {
+                    "type": "string",
+                    "maxLength": 256,
+                    "description": "Exact official AssociationProperty value. Omit this field rather than guessing.",
+                },
+                "query": {
+                    "type": "string",
+                    "maxLength": 100,
+                    "description": (
+                        "Concise English resource keyword, not a natural-language sentence; for example VPC, "
+                        "ECS Instance, OSS Bucket, KMS Key, or OOS Template."
+                    ),
+                },
                 "product": {"type": "string", "maxLength": 32},
                 "association_property_metadata": {"type": "object", "maxProperties": 32},
                 "detail_level": {"type": "string", "enum": ["auto", "full"], "default": "auto"},
@@ -229,21 +246,34 @@ class ResolveCloudResourceSelectorTool(Tool):
         association_property = tool_input.get("association_property")
         if isinstance(association_property, str):
             profile = get_profile_by_association_property(association_property, include_aliases=True)
-            if profile is None:
-                return json_result({"status": "not_found", "association_property": association_property})
-            return json_result(
-                self._resolve_profile(
-                    profile,
-                    association_property=association_property,
-                    metadata=tool_input.get("association_property_metadata"),
-                    detail_level=tool_input.get("detail_level"),
+            if profile is not None:
+                return json_result(
+                    self._resolve_profile(
+                        profile,
+                        association_property=association_property,
+                        metadata=tool_input.get("association_property_metadata"),
+                        detail_level=tool_input.get("detail_level"),
+                    )
                 )
-            )
+            if not normalized_search_text(tool_input.get("query") or ""):
+                return json_result({"status": "not_found", "association_property": association_property})
 
         query = normalized_search_text(tool_input.get("query") or "")
         product = normalized_search_text(tool_input.get("product") or "")
         if not query:
             return json_result({"status": "not_found", "query": query})
+        preferred_selector_id = _GENERIC_QUERY_SELECTOR_PREFERENCES.get(query)
+        if preferred_selector_id is not None and product in {"", "vpc"}:
+            preferred_profile = get_profile(preferred_selector_id)
+            if preferred_profile is not None:
+                return json_result(
+                    self._resolve_profile(
+                        preferred_profile,
+                        association_property=preferred_profile.association_property,
+                        metadata=tool_input.get("association_property_metadata"),
+                        detail_level=tool_input.get("detail_level"),
+                    )
+                )
         matches: list[tuple[int, SelectorProfile]] = []
         for profile in iter_profiles():
             score = profile_search_score(profile, query)
@@ -281,7 +311,7 @@ class ResolveCloudResourceSelectorTool(Tool):
         resolution_pool = compatible_matches or matches
         best_score = resolution_pool[0][0]
         best_matches = [profile for score, profile in resolution_pool if score == best_score]
-        if len(best_matches) == 1 and (best_score == 10_000 or len(resolution_pool) == 1):
+        if len(best_matches) == 1 and (best_score >= 5_000 or len(resolution_pool) == 1):
             profile = best_matches[0]
             return json_result(
                 self._resolve_profile(
@@ -470,26 +500,6 @@ class SelectCloudResourceTool(Tool):
                 if repair:
                     result["repair"] = repair
             return json_result(result, error=True)
-        resume = (_resume_answers.get() or {}).get(context.tool_use_id or "")
-        if resume is not None:
-            if resume.get("selector_id") != profile.selector_id or resume.get("profile_hash") != PROFILE_HASH:
-                return json_result(
-                    {"status": "selector_profile_mismatch", "selector_id": profile.selector_id},
-                    error=True,
-                )
-            resumed_event = CloudResourceSelectionEvent(
-                tool_use_id=context.tool_use_id or "",
-                input_id=str(resume.get("input_id") or ""),
-                question=str(tool_input["question"]),
-                selector_id=profile.selector_id,
-                association_property=profile.association_property,
-                output_kind=profile_output_kind(profile, validation.normalized),
-                association_property_metadata=validation.normalized,
-                source=source,
-                profile_hash=PROFILE_HASH,
-            )
-            response = resume.get("response")
-            return selection_result(profile, resumed_event, response if isinstance(response, dict) else None)
         if context.event_queue is None:
             return json_result(
                 {
@@ -546,8 +556,9 @@ def selection_result(
             "reason": "user_canceled" if response is not None else "selection_interrupted",
             "should_retry": False,
         }
-        if response is not None and response.get("options_empty") is True:
-            result["options_empty"] = True
+        options_empty = response.get("options_empty") if response is not None else None
+        if isinstance(options_empty, bool):
+            result["options_empty"] = options_empty
         return json_result(result)
     if response.get("input_id") != event.input_id or response.get("selector_id") != profile.selector_id:
         return json_result({"status": "selector_profile_mismatch", "selector_id": profile.selector_id}, error=True)
@@ -575,6 +586,64 @@ def selection_result(
     if event.source:
         result["source"] = {"selector_id": event.source["selector_id"], "value": event.source["value"]}
     return json_result(result)
+
+
+def resumed_selection_result(
+    *,
+    tool_use_id: str,
+    input_id: str,
+    selector_id: str,
+    profile_hash: str,
+    selector: Mapping[str, Any],
+    prompt: str,
+    response: dict[str, Any],
+) -> ToolResult:
+    """Materialize one already-validated durable answer without registering the tool.
+
+    A selector can be disabled after its card was published (for example when the
+    A2A feature flag or the effective credential disappears).  The checkpointed
+    answer still has to finish that exact tool call, but the tool must stay absent
+    from the registry so the model cannot start a new selection.  Rebuild the
+    original event from the private checkpoint and reuse the normal result
+    projection instead of invoking a public tool by name.
+    """
+
+    profile = get_profile(selector_id)
+    metadata = selector.get("associationPropertyMetadata")
+    source = selector.get("source")
+    association_property = selector.get("associationProperty")
+    output_kind = selector.get("outputKind")
+    normalized_metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    normalized_source, source_error = validate_source(
+        profile,
+        dict(source) if isinstance(source, Mapping) else source,
+        target_metadata=normalized_metadata,
+    ) if profile is not None else (None, "selector_source_mismatch")
+    if (
+        profile is None
+        or profile_hash != PROFILE_HASH
+        or selector.get("id") != selector_id
+        or not isinstance(association_property, str)
+        or association_property != profile.association_property
+        or not isinstance(output_kind, str)
+        or output_kind != profile_output_kind(profile, normalized_metadata)
+        or not isinstance(metadata, Mapping)
+        or (source is not None and not isinstance(source, Mapping))
+        or source_error is not None
+    ):
+        return json_result({"status": "selector_profile_mismatch", "selector_id": selector_id}, error=True)
+    event = CloudResourceSelectionEvent(
+        tool_use_id=tool_use_id,
+        input_id=input_id,
+        question=prompt,
+        selector_id=selector_id,
+        association_property=association_property,
+        output_kind=output_kind,
+        association_property_metadata=normalized_metadata,
+        source=normalized_source,
+        profile_hash=profile_hash,
+    )
+    return selection_result(profile, event, response)
 
 
 def register_resource_selector_tools(

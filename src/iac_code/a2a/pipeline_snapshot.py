@@ -553,10 +553,12 @@ class _PipelineSnapshotReducer:
                 self._snapshot["pendingNormalHandoff"] = None
                 self._snapshot["pendingTerminal"] = None
             self._snapshot["pendingInput"] = self._pending_input(event)
-            self._snapshot["status"] = "waiting_input"
+            if not self._is_post_handoff_normal_input(event):
+                self._snapshot["status"] = "waiting_input"
         elif event_type == "input_received":
             self._snapshot["pendingInput"] = None
-            self._snapshot["status"] = "working"
+            if not self._is_post_handoff_normal_input(event):
+                self._snapshot["status"] = "working"
             self._advance_message_round(event)
             self._apply_candidate_selection(data)
         elif event_type == "interrupt_received":
@@ -585,6 +587,11 @@ class _PipelineSnapshotReducer:
             )
         ):
             self._apply_event_status(event)
+
+    def _is_post_handoff_normal_input(self, event: dict[str, Any]) -> bool:
+        """Keep Normal-chat interactions from reopening a completed Pipeline."""
+
+        return event.get("scope") == "normal" and isinstance(self._snapshot.get("normalHandoff"), dict)
 
     def _merge_pipeline_identity(self, event: dict[str, Any]) -> None:
         for key in ("pipelineRunId", "taskId", "contextId", "pipelineName"):

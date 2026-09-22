@@ -61,6 +61,60 @@ uv run pytest -q tests/a2a_e2e/test_execution_control_scenarios.py \
 recovery 换轮用例另存 `recovery-conflict.json`、`recovery-after-rollover.json` 和换轮前状态时间线，
 通过 `fixture-lifecycle.jsonl` 确认实际调用了生产换轮逻辑。三个用例均不访问真实云资源。
 
+## 真实 A2A 云资源选择矩阵
+
+`resource_selector/run_live_resource_selector.py` 启动真实 HTTP A2A server，使用当前 iac-code 配置中的
+真实 LLM 和阿里云凭证验证资源选择的完整暂停/回调/续聊链路。模型必须实际调用
+`resolve_cloud_resource_selector` 和 `select_cloud_resource`；runner 再根据 A2A `input_required` 中的
+权威 selector 契约，通过 `ResourceSelectorQueryService` 调用杭州 VPC/VSwitch 只读查询，从真实候选中
+选择并回传 `IAC_CODE_RESOURCE_SELECTION` 结构化结果。
+
+该测试不会创建、修改或删除云资源。隔离配置会禁止模型直接调用 `aliyun_api` 及 ROS 资源操作工具，
+真实云调用仅由 runner 执行固定的 VPC/VSwitch 只读操作。测试结束后会删除隔离配置，并用已加载的密钥值再次清洗
+日志和证据文件。账号在目标地域没有 VPC 时，测试会明确报告前置资源不足，不会使用假 ID 继续执行。
+
+八个场景覆盖正常选择后续聊、等待选择期间进程重启、真实非空列表取消、真实 API 成功返回确定性空列表并
+回传 `optionsEmpty=true`、VPC→VSwitch 连续选择、重复回复幂等与冲突回复拒绝、Pipeline handoff 到 Normal
+后选择，以及 Pipeline step 内选择并恢复完成。两个 Pipeline 场景只使用最小化测试 Pipeline 定义；A2A
+Pipeline executor、真实 Agent runtime、真实模型、选择器工具、checkpoint、handoff 和 transport 都走生产实现。
+
+```bash
+uv run python scripts/a2a/e2e/resource_selector/run_live_resource_selector.py \
+  --allow-real-cloud \
+  --scenario selected-next-turn \
+  --region cn-hangzhou \
+  --run-dir /tmp/iac-selector-live-selected
+
+uv run python scripts/a2a/e2e/resource_selector/run_live_resource_selector.py \
+  --allow-real-cloud \
+  --scenario restart-before-answer \
+  --region cn-hangzhou \
+  --run-dir /tmp/iac-selector-live-restart
+
+uv run python scripts/a2a/e2e/resource_selector/run_live_resource_selector.py \
+  --allow-real-cloud \
+  --scenario canceled-next-turn \
+  --region cn-hangzhou \
+  --run-dir /tmp/iac-selector-live-canceled
+```
+
+其余场景名为 `empty-list-canceled-next-turn`、`sequential-vpc-vswitch`、`duplicate-and-conflict`、
+`pipeline-handoff-normal` 和 `pipeline-stage-selection`，调用方式相同。
+
+默认读取 `~/.iac-code`。可用 `--source-config-dir` 指定其他配置目录。OAuth 模式会先通过正常的
+iac-code 凭证刷新逻辑刷新源配置，再复制到本次运行的隔离目录，避免轮换后的 refresh token 只留在一次性副本。
+
+pytest 入口默认跳过，只有显式启用才真实消耗模型额度并访问云账号：
+
+```bash
+IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_E2E=1 \
+uv run pytest -q tests/a2a_e2e/test_live_resource_selector.py
+```
+
+可通过 `IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_SCENARIOS=selected-next-turn` 只执行一个场景，通过
+`IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_CONFIG_DIR` 指定配置目录。每次运行会保存有界 SSE、请求、server 日志、
+非敏感 readiness、server 生命周期和 `summary.json`；摘要只保存所选 VPC ID 的 SHA-256，不保存凭证明文。
+
 ## 真实 StartChat 权限等待矩阵
 
 `run_start_chat_permission_wait.py` 是本功能可重复执行、受凭证开关保护的真实链路：Qoder 真实 LLM

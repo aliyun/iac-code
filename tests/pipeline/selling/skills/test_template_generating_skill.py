@@ -185,6 +185,23 @@ class TestSkillPromptRendering:
         assert "查询可用区、实例规格" not in body
         assert "对用户未指定的参数直接使用合理默认值" not in body
 
+    def test_prompt_uses_selector_for_missing_existing_resource_identity(self):
+        prompt = TEMPLATE_PROMPT_MD.read_text(encoding="utf-8")
+        skill = SKILL_MD.read_text(encoding="utf-8")
+
+        # The skill owns the selector contract; the step prompt keeps the trigger
+        # condition and the no-fabrication guard without restating the contract.
+        for body in (prompt, skill):
+            assert "不要改用 `ask_user_question` 索要 ID" in body
+        for contract in (
+            "resolve_cloud_resource_selector",
+            "select_cloud_resource",
+            "options_empty",
+        ):
+            assert contract in skill
+            assert contract not in prompt
+        assert "按技能的资源选择器规则" in prompt
+
     def test_full_prompt_includes_skill_base_directory(self, tmp_path):
         from iac_code.pipeline.engine.context import PipelineContext
         from iac_code.pipeline.engine.loader import load_pipeline_dir

@@ -56,7 +56,7 @@ from iac_code.a2a.execution_control import (
     RecoverableInputAdmissionCarrier,
     RecoverableInputAdmissionLease,
 )
-from iac_code.a2a.executor import IacCodeA2AExecutor
+from iac_code.a2a.executor import IacCodeA2AExecutor, InputResponseExecutionControlConflictError
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
 from iac_code.a2a.input_required import parse_permission_response
 from iac_code.a2a.jsonrpc_passthrough import (
@@ -713,9 +713,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
         permission_response = parse_permission_response(params.message)
+        resource_selection_response = parse_resource_selection_response(params.message)
+        input_response = permission_response or resource_selection_response
+        if input_response is not None and not params.message.task_id:
+            params.message.task_id = input_response.task_id
         if permission_response is not None:
-            if not params.message.task_id:
-                params.message.task_id = permission_response.task_id
             resolve = getattr(getattr(self, "agent_executor", None), "resolve_sideband_permission", None)
             if callable(resolve):
                 ack = await resolve(permission_response, metadata=params.message)
@@ -726,7 +728,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             ):
                 task = await self.task_store.get(permission_response.task_id, context)
                 if task is not None:
-                    async for _event in self._on_inactive_permission_send_stream(
+                    async for _event in self._on_inactive_input_response_send_stream(
                         params,
                         context,
                         task=task,
@@ -735,11 +737,31 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     await self._finalize_natural_execution(params, context)
                     refreshed = await self.task_store.get(permission_response.task_id, context)
                     return refreshed or task
+        elif resource_selection_response is not None and isinstance(self.task_store, A2ATaskStore):
+            if not await self.task_store.is_task_active(resource_selection_response.task_id):
+                task = await self.task_store.get(resource_selection_response.task_id, context)
+                if task is not None:
+                    async for _event in self._on_inactive_input_response_send_stream(
+                        params,
+                        context,
+                        task=task,
+                    ):
+                        pass
+                    await self._finalize_natural_execution(params, context)
+                    refreshed = await self.task_store.get(resource_selection_response.task_id, context)
+                    return refreshed or task
         await self._hydrate_pipeline_task_id_for_request(params, context)
         admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
         self._stage_recoverable_input_admission(context, admission)
         try:
-            result = await super().on_message_send(params, context)
+            try:
+                result = await super().on_message_send(params, context)
+            except InputResponseExecutionControlConflictError:
+                if resolve_request_run_mode(params.message) is not RunMode.PIPELINE:
+                    raise
+                admission = await self._wait_for_direct_pipeline_recovery(params, context)
+                self._stage_recoverable_input_admission(context, admission)
+                result = await super().on_message_send(params, context)
             result = await self._settle_nonstream_input_required_result(
                 result,
                 params,
@@ -754,9 +776,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
         permission_response = parse_permission_response(params.message)
+        resource_selection_response = parse_resource_selection_response(params.message)
+        input_response = permission_response or resource_selection_response
+        if input_response is not None and not params.message.task_id:
+            params.message.task_id = input_response.task_id
         if permission_response is not None:
-            if not params.message.task_id:
-                params.message.task_id = permission_response.task_id
             task_active = False
             task_id_for_check = params.message.task_id
             task_store = getattr(self, "task_store", None)
@@ -769,7 +793,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     if ack is not None:
                         yield ack
                         return
-        if permission_response is None:
+        if input_response is None:
             await self._hydrate_pipeline_task_id_for_request(params, context)
             admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
         else:
@@ -784,11 +808,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     task is not None
                     and active_task is not None
                     and task.status.state not in TERMINAL_TASK_STATES
-                    and (task.status.state not in INTERRUPTED_TASK_STATES or permission_response is not None)
+                    and (task.status.state not in INTERRUPTED_TASK_STATES or input_response is not None)
                 ):
                     route_gate = (
                         DirectPipelineRouteGate()
-                        if permission_response is None and resolve_request_run_mode(params.message) is RunMode.PIPELINE
+                        if input_response is None and resolve_request_run_mode(params.message) is RunMode.PIPELINE
                         else None
                     )
                     active_stream = self._on_active_message_send_stream(
@@ -803,7 +827,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                         try:
                             async for event in active_stream:
                                 yield event
-                        except DirectPipelineRecoveryRequiredError:
+                        except (DirectPipelineRecoveryRequiredError, InputResponseExecutionControlConflictError):
                             recovery_required = True
                     finally:
                         await active_stream.aclose()
@@ -812,10 +836,10 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                         return
                     admission = await self._wait_for_direct_pipeline_recovery(params, context)
                     self._stage_recoverable_input_admission(context, admission)
-            if permission_response is not None and isinstance(self.task_store, A2ATaskStore):
-                task = await self.task_store.get(permission_response.task_id, context)
+            if input_response is not None and isinstance(self.task_store, A2ATaskStore):
+                task = await self.task_store.get(input_response.task_id, context)
                 if task is not None:
-                    direct_stream = self._on_inactive_permission_send_stream(params, context, task=task)
+                    direct_stream = self._on_inactive_input_response_send_stream(params, context, task=task)
                     try:
                         async for event in direct_stream:
                             yield event
@@ -823,42 +847,67 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                         await direct_stream.aclose()
                     await self._finalize_natural_execution(params, context)
                     return
-            base_stream = super().on_message_send_stream(params, context)
             pipeline_mode = resolve_request_run_mode(params.message) is RunMode.PIPELINE
-            tracked_stream = (
-                base_stream
-                if pipeline_mode
-                else _iterate_with_pipeline_transport_tracking(
-                    base_stream,
-                    task_id=getattr(params.message, "task_id", None) or None,
-                    context_id=getattr(params.message, "context_id", None) or None,
-                )
-            )
             natural_boundary_delivered = False
             stream_exhausted = False
             close_after_natural_boundary = False
+            base_event_delivered = False
             try:
-                async for event in tracked_stream:
-                    mark_pipeline_transport_delivery_dequeued(event)
-                    event_state = _task_event_state(event)
-                    natural_boundary_delivered = not pipeline_mode and (
-                        event_state in TERMINAL_TASK_STATES or event_state == TaskState.TASK_STATE_INPUT_REQUIRED
+                for attempt in range(2):
+                    base_stream = super().on_message_send_stream(params, context)
+                    tracked_stream = (
+                        base_stream
+                        if pipeline_mode
+                        else _iterate_with_pipeline_transport_tracking(
+                            base_stream,
+                            task_id=getattr(params.message, "task_id", None) or None,
+                            context_id=getattr(params.message, "context_id", None) or None,
+                        )
                     )
-                    yield event
-                    acknowledge_pipeline_transport_delivery(event)
-                stream_exhausted = True
-            except GeneratorExit:
-                close_after_natural_boundary = natural_boundary_delivered
-                raise
+                    try:
+                        async for event in tracked_stream:
+                            mark_pipeline_transport_delivery_dequeued(event)
+                            event_state = _task_event_state(event)
+                            natural_boundary_delivered = not pipeline_mode and (
+                                event_state in TERMINAL_TASK_STATES
+                                or event_state == TaskState.TASK_STATE_INPUT_REQUIRED
+                            )
+                            yield event
+                            base_event_delivered = True
+                            acknowledge_pipeline_transport_delivery(event)
+                        stream_exhausted = True
+                        break
+                    except InputResponseExecutionControlConflictError:
+                        if not pipeline_mode or attempt != 0 or base_event_delivered:
+                            raise
+                        admission = await self._wait_for_direct_pipeline_recovery(params, context)
+                        self._stage_recoverable_input_admission(context, admission)
+                    except GeneratorExit:
+                        close_after_natural_boundary = natural_boundary_delivered
+                        raise
+                    finally:
+                        await tracked_stream.aclose()
             finally:
-                await tracked_stream.aclose()
                 if stream_exhausted or close_after_natural_boundary:
                     await self._finalize_natural_execution(params, context)
         finally:
             await self._release_untransferred_recovery(params, context)
 
-    async def _on_inactive_permission_send_stream(self, params: SendMessageRequest, context, *, task: Task):
+    async def _on_inactive_input_response_send_stream(self, params: SendMessageRequest, context, *, task: Task):
         """Resume an existing input boundary without asking the SDK to recreate its task."""
+
+        a2a_task_store = self.task_store if isinstance(self.task_store, A2ATaskStore) else None
+        if resolve_request_run_mode(params.message) is RunMode.PIPELINE:
+            wait = getattr(self.agent_executor, "wait_until_recoverable_pipeline_input", None)
+            if callable(wait):
+                await wait(context_id=task.context_id, task_id=task.id)
+            if a2a_task_store is not None:
+                try:
+                    await a2a_task_store.wait_until_task_inactive(task.id, timeout=30)
+                except TimeoutError as exc:
+                    raise InvalidParamsError(
+                        "Pipeline continuation is still finalizing; retry the same request."
+                    ) from exc
 
         request_context = await self._request_context_builder.build(
             params=params,
@@ -867,12 +916,51 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             task=task,
             context=context,
         )
+        admission = self._peek_recoverable_input_admission(context)
+        if admission is not None and a2a_task_store is not None:
+            lease = RecoverableInputAdmissionLease(
+                admission,
+                acknowledge_enqueue=lambda token: self._acknowledge_recoverable_input_enqueue(context, token),
+                release=a2a_task_store.release_recoverable_input_admission,
+            )
+            RecoverableInputAdmissionCarrier.attach(request_context, lease)
         completed = object()
         queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=1024)
 
         async def run_permission_response() -> None:
+            nonlocal request_context
             try:
-                await self.agent_executor.execute(request_context, _DetachedPermissionEventQueue(queue))
+                event_queue = _DetachedPermissionEventQueue(queue)
+                RecoverableInputAdmissionCarrier.acknowledge_enqueued(request_context, asyncio.current_task())
+                try:
+                    await self.agent_executor.execute(request_context, event_queue)
+                except InputResponseExecutionControlConflictError:
+                    if resolve_request_run_mode(params.message) is not RunMode.PIPELINE:
+                        raise
+                    if a2a_task_store is None:
+                        raise
+                    wait = getattr(self.agent_executor, "wait_until_recoverable_pipeline_input", None)
+                    if callable(wait):
+                        await wait(context_id=task.context_id, task_id=task.id)
+                    admission = await self._reconcile_and_replace_recovered_sdk_task(params, context)
+                    if admission is None:
+                        raise
+                    self._stage_recoverable_input_admission(context, admission)
+                    request_context = await self._request_context_builder.build(
+                        params=params,
+                        task_id=task.id,
+                        context_id=params.message.context_id,
+                        task=task,
+                        context=context,
+                    )
+                    lease = RecoverableInputAdmissionLease(
+                        admission,
+                        acknowledge_enqueue=lambda token: self._acknowledge_recoverable_input_enqueue(context, token),
+                        release=a2a_task_store.release_recoverable_input_admission,
+                    )
+                    RecoverableInputAdmissionCarrier.attach(request_context, lease)
+                    RecoverableInputAdmissionCarrier.acknowledge_enqueued(request_context, asyncio.current_task())
+                    await self.agent_executor.execute(request_context, event_queue)
             except BaseException as exc:
                 await queue.put(exc)
             finally:
@@ -915,6 +1003,12 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 producer.cancel()
                 with suppress(asyncio.CancelledError):
                     await producer
+
+    async def _on_inactive_permission_send_stream(self, params: SendMessageRequest, context, *, task: Task):
+        """Backward-compatible alias for the generic input-required resume path."""
+
+        async for event in self._on_inactive_input_response_send_stream(params, context, task=task):
+            yield event
 
     async def _drain_inactive_permission_response(
         self,
@@ -1029,10 +1123,11 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                     finally:
                         tapped_queue.task_done()
                     acknowledge_pipeline_transport_delivery(event)
+            assert producer_task is not None
+            completed_producer = producer_task
+            producer_task = None
+            await completed_producer
             if route_gate is not None:
-                assert producer_task is not None
-                await producer_task
-                producer_task = None
                 if route_gate.outcome is DirectPipelineRouteOutcome.RECOVERY_REQUIRED:
                     raise DirectPipelineRecoveryRequiredError
                 if route_gate.outcome is DirectPipelineRouteOutcome.PENDING:
@@ -1138,7 +1233,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         context_id = params.message.context_id
         if not task_id or not context_id:
             raise InvalidParamsError("Pipeline recovery requires task and context ids")
-        wait = getattr(self.agent_executor, "wait_until_recoverable_pipeline_input", None)
+        wait = getattr(getattr(self, "agent_executor", None), "wait_until_recoverable_pipeline_input", None)
         if callable(wait):
             await wait(context_id=context_id, task_id=task_id)
         if isinstance(self.task_store, A2ATaskStore):
@@ -1264,6 +1359,12 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             task.status.timestamp.GetCurrentTime()
         if self.task_store.can_continue_local_input_required_task(context_id=context_id, task_id=task_id):
             return None
+        can_continue_live = getattr(getattr(self, "agent_executor", None), "can_continue_live_pipeline_input", None)
+        if callable(can_continue_live) and can_continue_live(context_id=context_id, task_id=task_id):
+            return None
+        wait = getattr(getattr(self, "agent_executor", None), "wait_until_recoverable_pipeline_input", None)
+        if callable(wait):
+            await wait(context_id=context_id, task_id=task_id)
         admission = await self.task_store.reconcile_recoverable_input_required_task(task, context_record, context)
         if admission is None:
             raise InvalidParamsError("Pipeline continuation is already being recovered; retry the same request.")

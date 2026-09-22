@@ -1922,6 +1922,16 @@ def _unified_input_projection(
         if not isinstance(selector, dict):
             return None
         projected["selector"] = to_json_safe(selector)
+        # The input projection is the durable recovery fallback when the full
+        # Pipeline envelope is missing from a transport/status snapshot.  Keep
+        # the authoritative envelope coordinates here rather than asking the
+        # client to infer a parent from the selector payload.
+        for key in ("pipelineName", "pipelineRunId", "scope", "step", "candidate", "candidateStep"):
+            value = envelope.get(key)
+            if isinstance(value, str) and value:
+                projected[key] = value
+            elif isinstance(value, dict):
+                projected[key] = to_json_safe(value)
     raw_options = raw_input.get("options")
     options: list[dict[str, Any]] = []
     if isinstance(raw_options, list):

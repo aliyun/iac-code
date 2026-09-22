@@ -84,6 +84,30 @@ msgstr ""
 "sessão e os recursos de nuvem."
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot could not be persisted."
+msgstr ""
+"Não foi possível persistir o snapshot de restauração da seleção do "
+"recurso do chat normal."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot is already resolved."
+msgstr ""
+"O snapshot de restauração da seleção do recurso do chat normal já foi "
+"resolvido."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore response conflicts with the snapshot."
+msgstr ""
+"A resposta de restauração da seleção do recurso do chat normal entra em "
+"conflito com o snapshot."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot identity is incomplete."
+msgstr ""
+"A identidade do snapshot de restauração da seleção do recurso do chat "
+"normal está incompleta."
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot could not be persisted."
 msgstr ""
 "Não foi possível persistir o snapshot de restauração da permissão do chat"

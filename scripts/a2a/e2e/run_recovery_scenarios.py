@@ -1228,15 +1228,29 @@ def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
             delay_elapsed is not None and delay_elapsed >= BACKUP_DELAY_SECONDS
         )
         h.checks["selection stayed on pipeline task"] = selection.task_id == h.pipeline_task_id
-        h.checks["selection was consumed as candidate input"] = _selection_advanced_past_waiting_step(selection)
-        observed_event_types = set(selection.pipeline_event_types)
-        for stream in initial_streams:
-            observed_event_types.update(stream.summary.pipeline_event_types)
+        # The queued selection is consumed by the pipeline turn that is already
+        # streaming on the initial request, so its lifecycle events and the
+        # final completion land on the initial stream instead of the selection
+        # response. Evaluate the pipeline task across both streams of the same
+        # task, exactly as the interrupt-routing check below already does.
+        combined = StreamSummary(name="01+02-combined", prompt=selection.prompt)
+        combined.task_id = selection.task_id
+        combined.context_id = selection.context_id
+        combined.pipeline_event_types = [
+            *selection.pipeline_event_types,
+            *[event for stream in initial_streams for event in stream.summary.pipeline_event_types],
+        ]
+        combined.status_states = [
+            *selection.status_states,
+            *[state for stream in initial_streams for state in stream.summary.status_states],
+        ]
+        h.checks["selection was consumed as candidate input"] = _selection_advanced_past_waiting_step(combined)
+        observed_event_types = set(combined.pipeline_event_types)
         h.checks["selection did not enter interrupt routing"] = not {
             "interrupt_received",
             "interrupt_classified",
         }.intersection(observed_event_types)
-        h.checks["selection completed pipeline"] = _pipeline_completed(selection)
+        h.checks["selection completed pipeline"] = _pipeline_completed(combined)
         h.checks["VSwitch evidence found"] = _has_any_marker(_all_evidence(h), VSWITCH_MARKERS)
 
     return _run_with_harness(args, scenario, callback)

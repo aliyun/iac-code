@@ -36,7 +36,7 @@ from iac_code.a2a.execution_control import (
     RecoverableInputAdmissionCarrier,
     RecoverableInputAdmissionLease,
 )
-from iac_code.a2a.executor import IacCodeA2AExecutor
+from iac_code.a2a.executor import IacCodeA2AExecutor, InputResponseExecutionControlConflictError
 from iac_code.a2a.input_required import PERMISSION_QUERY_PREFIX
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_journal import A2APipelineJournal
@@ -56,6 +56,7 @@ from iac_code.a2a.request_scoped_active_task import (
     RequestScopedActiveTask,
     RequestScopedActiveTaskRegistry,
 )
+from iac_code.a2a.resource_selector import RESOURCE_SELECTION_QUERY_PREFIX
 from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import (
     A2AJsonRpcDispatcher,
@@ -2326,6 +2327,406 @@ async def test_detached_permission_response_finalizes_after_terminal_producer_dr
 
 
 @pytest.mark.asyncio
+async def test_inactive_pipeline_input_retries_attach_race_after_release() -> None:
+    call_context = ServerCallContext()
+    request_context = SimpleNamespace(call_context=call_context)
+
+    class RequestContextBuilder:
+        async def build(self, **_kwargs):
+            return request_context
+
+    class Executor:
+        def __init__(self) -> None:
+            self.execute_calls = 0
+            self.wait_calls = 0
+
+        async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
+            assert (context_id, task_id) == ("ctx-1", "task-1")
+            self.wait_calls += 1
+
+        async def execute(self, _request_context, event_queue) -> None:
+            self.execute_calls += 1
+            if self.execute_calls == 1:
+                raise InputResponseExecutionControlConflictError("Execution is terminating")
+            assert RecoverableInputAdmissionCarrier.read(_request_context) == "recovery-1"
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-1",
+                    context_id="ctx-1",
+                    status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+                )
+            )
+
+    store = A2ATaskStore()
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+    )
+    await store.save(task, call_context)
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text="continue")],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline"}}, message.metadata)
+    params = SimpleNamespace(message=message, configuration=None)
+    executor = Executor()
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = executor
+    handler._request_context_builder = RequestContextBuilder()
+    handler._detached_message_producers = set()
+
+    async def reconcile(_params, _context) -> str:
+        return "recovery-1"
+
+    handler._reconcile_and_replace_recovered_sdk_task = reconcile
+
+    events = await _collect_async(handler._on_inactive_input_response_send_stream(params, call_context, task=task))
+
+    assert len(events) == 1
+    assert events[0].status.state == TaskState.TASK_STATE_WORKING
+    assert executor.execute_calls == 2
+    assert executor.wait_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_pipeline_ask_user_question_base_stream_retries_attach_race(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    stream_calls = 0
+
+    async def sdk_stream(_handler, _params, observed_context):
+        nonlocal stream_calls
+        stream_calls += 1
+        if stream_calls == 1:
+            raise InputResponseExecutionControlConflictError("Execution is terminating")
+        assert IacCodeRequestHandler._take_recoverable_input_admission(observed_context) == "recovery-1"
+        yield update
+
+    class Executor:
+        def __init__(self) -> None:
+            self.wait_calls = 0
+
+        async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
+            assert (context_id, task_id) == ("ctx-1", "task-1")
+            self.wait_calls += 1
+
+    executor = Executor()
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = executor
+    handler._active_task_registry = SimpleNamespace(get=lambda _task_id: None)
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+
+    async def hydrate(_params) -> None:
+        return None
+
+    reconcile_calls = 0
+
+    async def reconcile(_params, _context) -> str | None:
+        nonlocal reconcile_calls
+        reconcile_calls += 1
+        return None if reconcile_calls == 1 else "recovery-1"
+
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_and_replace_recovered_sdk_task = reconcile
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text='{"answer":"continue"}')],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline"}}, message.metadata)
+
+    events = await _collect_async(
+        handler.on_message_send_stream(SimpleNamespace(message=message, configuration=None), call_context)
+    )
+
+    assert events == [update]
+    assert stream_calls == 2
+    assert executor.wait_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_nonstream_pipeline_input_retries_attach_race(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    expected = Message(message_id="result", role=Role.ROLE_AGENT, parts=[Part(text="continued")])
+    send_calls = 0
+
+    async def sdk_send(_handler, _params, observed_context):
+        nonlocal send_calls
+        send_calls += 1
+        if send_calls == 1:
+            raise InputResponseExecutionControlConflictError("Execution is terminating")
+        assert IacCodeRequestHandler._take_recoverable_input_admission(observed_context) == "recovery-1"
+        return expected
+
+    class Executor:
+        def __init__(self) -> None:
+            self.wait_calls = 0
+
+        async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
+            assert (context_id, task_id) == ("ctx-1", "task-1")
+            self.wait_calls += 1
+
+    executor = Executor()
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = executor
+    handler._active_task_registry = SimpleNamespace()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+
+    async def hydrate(_params) -> None:
+        return None
+
+    reconcile_calls = 0
+
+    async def reconcile(_params, _context) -> str | None:
+        nonlocal reconcile_calls
+        reconcile_calls += 1
+        return None if reconcile_calls == 1 else "recovery-1"
+
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_and_replace_recovered_sdk_task = reconcile
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send", sdk_send)
+    message = Message(
+        message_id="message-1",
+        task_id="task-1",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text='{"answer":"continue"}')],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline"}}, message.metadata)
+
+    result = await handler.on_message_send(SimpleNamespace(message=message, configuration=None), call_context)
+
+    assert result is expected
+    assert send_calls == 2
+    assert executor.wait_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "resumed_state",
+    [
+        TaskState.TASK_STATE_COMPLETED,
+        TaskState.TASK_STATE_CANCELED,
+        TaskState.TASK_STATE_INPUT_REQUIRED,
+    ],
+)
+async def test_nonstream_inactive_resource_selection_finalizes_natural_execution_once(resumed_state) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+    )
+    await store.save(task, call_context)
+    await store.get_or_create_task(task_id=task.id, context_id=task.context_id)
+    finalized = 0
+
+    response = {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "status": "selected",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "tool-1",
+        "selectorId": "ecs.instance",
+        "value": "i-test123",
+    }
+    message = Message(
+        message_id="resource-response",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text=RESOURCE_SELECTION_QUERY_PREFIX + json.dumps(response, separators=(",", ":")))],
+    )
+
+    async def resume_stream(_params, context, *, task):
+        await store.save(
+            Task(
+                id=task.id,
+                context_id=task.context_id,
+                status=TaskStatus(state=resumed_state),
+            ),
+            context,
+        )
+        if False:
+            yield None
+
+    async def finalize(_params, _context) -> None:
+        nonlocal finalized
+        finalized += 1
+
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._on_inactive_input_response_send_stream = resume_stream
+    handler._finalize_natural_execution = finalize
+
+    result = await handler.on_message_send(
+        SimpleNamespace(message=message, configuration=None),
+        call_context,
+    )
+
+    assert result.status.state == resumed_state
+    assert finalized == 1
+
+
+@pytest.mark.asyncio
+async def test_active_structured_pipeline_input_recovers_attach_race_in_same_request() -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    task = Task(
+        id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+    )
+    await store.save(task, call_context)
+    record = await store.get_or_create_task(task_id=task.id, context_id=task.context_id)
+    record.active_task = asyncio.current_task()
+    subscribers = EventQueueSource(create_default_sink=False)
+
+    class ForwardingAgentQueue:
+        async def enqueue_event(self, event) -> None:
+            await subscribers.enqueue_event((event, task))
+
+        async def test_only_join_incoming_queue(self) -> None:
+            await subscribers.test_only_join_incoming_queue()
+
+    class ActiveTask:
+        def __init__(self) -> None:
+            self.task_id = task.id
+            self.direct_message_lock = asyncio.Lock()
+            self._lock = asyncio.Lock()
+            self._is_finished = asyncio.Event()
+            self._reference_count = 0
+            self._event_queue_agent = ForwardingAgentQueue()
+            self._event_queue_subscribers = subscribers
+
+        async def _maybe_cleanup(self) -> None:
+            return None
+
+    active_task = ActiveTask()
+
+    class ActiveTaskRegistry:
+        async def get(self, _task_id):
+            return active_task
+
+        async def cancel_recovery_reservation(self, _task_id: str, _admission: str) -> None:
+            return None
+
+    class RequestContextBuilder:
+        async def build(self, **kwargs):
+            return SimpleNamespace(call_context=kwargs["context"])
+
+    update = TaskStatusUpdateEvent(
+        task_id=task.id,
+        context_id=task.context_id,
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+
+    class Executor:
+        def __init__(self) -> None:
+            self.execute_calls = 0
+            self.wait_calls = 0
+
+        async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
+            assert (context_id, task_id) == ("ctx-1", "task-1")
+            self.wait_calls += 1
+            record.active_task = None
+
+        async def execute(self, request_context, event_queue) -> None:
+            self.execute_calls += 1
+            if self.execute_calls == 1:
+                raise InputResponseExecutionControlConflictError("Execution is terminating")
+            assert RecoverableInputAdmissionCarrier.read(request_context) == "recovery-1"
+            try:
+                await event_queue.enqueue_event(update)
+            finally:
+                await RecoverableInputAdmissionCarrier.release(request_context)
+
+    executor = Executor()
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = executor
+    handler._request_context_builder = RequestContextBuilder()
+    handler._active_task_registry = ActiveTaskRegistry()
+    handler._detached_message_producers = set()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+
+    async def reconcile(_params, _context) -> str:
+        return "recovery-1"
+
+    handler._reconcile_and_replace_recovered_sdk_task = reconcile
+    response = {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "status": "selected",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "tool-1",
+        "selectorId": "ecs.instance",
+        "value": "i-test123",
+    }
+    message = Message(
+        message_id="message-resource-selection",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text=RESOURCE_SELECTION_QUERY_PREFIX + json.dumps(response, separators=(",", ":")))],
+    )
+    ParseDict({"iac_code": {"run_mode": "pipeline"}}, message.metadata)
+
+    try:
+        events = await _collect_async(
+            handler.on_message_send_stream(SimpleNamespace(message=message, configuration=None), call_context)
+        )
+    finally:
+        await subscribers.close(immediate=True)
+
+    assert events == [update]
+    assert executor.execute_calls == 2
+    assert executor.wait_calls == 2
+    assert active_task._reference_count == 0
+    assert not active_task.direct_message_lock.locked()
+
+
+@pytest.mark.asyncio
 async def test_detached_permission_disconnect_without_terminal_generation_does_not_finalize() -> None:
     call_context = ServerCallContext()
     request_context = SimpleNamespace(call_context=call_context)
@@ -2771,6 +3172,77 @@ async def test_message_stream_routes_permission_response_to_active_input_require
     handler._validate_pipeline_message_request = lambda _params: None
     handler._hydrate_recoverable_pipeline_task_id = hydrate
     handler._reconcile_recoverable_pipeline_task = reconcile
+    handler._on_active_message_send_stream = active_stream
+
+    events = await _collect_async(handler.on_message_send_stream(SimpleNamespace(message=message), call_context))
+
+    assert events == [update]
+    assert active_stream_called is True
+    assert message.task_id == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_message_stream_routes_resource_selection_text_to_active_input_required_task(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(
+            id="task-1",
+            context_id="ctx-1",
+            status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+        ),
+        call_context,
+    )
+    record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
+    record.active_task = asyncio.current_task()
+    update = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+    )
+    response = {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "status": "selected",
+        "requestTaskId": "task-1",
+        "contextId": "ctx-1",
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "tool-1",
+        "selectorId": "ecs.instance",
+        "value": "i-test123",
+    }
+    message = Message(
+        message_id="message-resource-selection",
+        context_id="ctx-1",
+        role=Role.ROLE_USER,
+        parts=[Part(text=RESOURCE_SELECTION_QUERY_PREFIX + json.dumps(response, separators=(",", ":")))],
+    )
+    active_stream_called = False
+
+    async def fail_recovery(*_args, **_kwargs) -> None:
+        raise AssertionError("resource selection input must not enter ordinary follow-up recovery")
+
+    class ActiveTaskRegistry:
+        async def get(self, _task_id):
+            return object()
+
+    async def active_stream(*_args, **_kwargs):
+        nonlocal active_stream_called
+        active_stream_called = True
+        yield update
+
+    async def fail_sdk_stream(*_args, **_kwargs):
+        raise AssertionError("resource selection response must not wait in the SDK task queue")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", fail_sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler._active_task_registry = ActiveTaskRegistry()
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = fail_recovery
+    handler._reconcile_and_replace_recovered_sdk_task = fail_recovery
     handler._on_active_message_send_stream = active_stream
 
     events = await _collect_async(handler.on_message_send_stream(SimpleNamespace(message=message), call_context))

@@ -156,7 +156,7 @@ default = true
 timeout = 30
 markers = [
     "integration: process-level integration tests that use local services only",
-    "resource_selector_live: explicit read-only Alibaba Cloud selector API contract smoke tests",
+    "resource_selector_live: explicit live LLM and/or read-only Alibaba Cloud selector tests",
 ]
 
 [tool.coverage.run]

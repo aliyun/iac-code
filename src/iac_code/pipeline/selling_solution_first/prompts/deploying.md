@@ -29,6 +29,12 @@
 {solution_selection}
 ```
 
+## 已有云资源选择
+
+- 只有真实校验或部署错误证明已有选择不可用、确实需要替换时，才重新使用资源选择器；不要主动重复确认仍然有效的选择。
+- 需要替换时优先让用户选择，不要编造资源 ID；不确定 selector ID 或参数时先调用 `resolve_cloud_resource_selector`，并单独调用 `select_cloud_resource`。
+- 用户取消后不要自动重复弹出同一选择器；当前账号列表为空时，根据返回的 `options_empty` 调整恢复方案或说明缺少资源。
+
 ## 完成与回滚
 
 - 部署成功后只提交 `{"conclusion":{"status":"success"}}`；Python 从最新真实 `CREATE_COMPLETE` 记录注入 stack_id 和 outputs。

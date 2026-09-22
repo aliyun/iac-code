@@ -72,7 +72,7 @@ export function resourceSelectionLabel(label, value) {
 
 function loadResourceSelectorBundle() {
   if (!resourceSelectorBundlePromise) {
-    resourceSelectorBundlePromise = import("../vendor/ore-resource-selector.min.js?v=16").catch((error) => {
+    resourceSelectorBundlePromise = import("../vendor/ore-resource-selector.min.js?v=23").catch((error) => {
       resourceSelectorBundlePromise = undefined;
       throw error;
     });

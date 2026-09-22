@@ -59,6 +59,20 @@ def test_intent_prompt_guides_optional_memory_lookup_without_overriding_current_
     assert "不要因为没有相关记忆而阻塞" in body
 
 
+def test_intent_prompt_defers_existing_resource_identity_to_selector_step():
+    prompt = PROMPT_FILE.read_text(encoding="utf-8")
+    skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+
+    # The skill owns the rule text; the step prompt only states the deferral and
+    # points at the skill, so the two are never maintained as duplicate copies.
+    for body in (prompt, skill):
+        assert "已有云资源的具体 ID、名称或派生值不属于意图澄清" in body
+        assert "后续模板生成步骤的资源选择器补齐" in body
+    assert "禁止用 `ask_user_question` 索要资源 ID/名称" in skill
+    assert "禁止用 `ask_user_question` 索要资源 ID/名称" not in prompt
+    assert "判据与禁止项以技能为准" in prompt
+
+
 def test_intent_prompt_pins_extremely_vague_launch_to_detail_request():
     body = PROMPT_FILE.read_text(encoding="utf-8")
 

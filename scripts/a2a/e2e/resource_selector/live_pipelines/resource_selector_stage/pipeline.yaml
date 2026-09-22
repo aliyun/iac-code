@@ -1,0 +1,30 @@
+name: resource_selector_stage
+
+on_complete:
+  action: switch_to_normal
+  apply_on: [completed]
+  handoff_context:
+    include: [selection]
+
+context_dependencies:
+  selection: []
+
+max_rollbacks: 0
+
+steps:
+  - id: select_existing_vpc
+    conclusion_field: selection
+    forward: null
+    prompt: prompts/select_existing_vpc.md
+    max_agent_turns: 12
+    tools:
+      include: [resolve_cloud_resource_selector, select_cloud_resource]
+      exclude: []
+    conclusion_schema:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: selected

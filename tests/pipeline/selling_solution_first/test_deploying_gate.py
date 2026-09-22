@@ -69,6 +69,16 @@ class TestDeployingPromptContract:
         assert "materialize_selected_candidate" in text
         assert "solution_planning_and_selection" in text
 
+    def test_prompt_only_reselects_a_resource_after_real_failure(self):
+        text = (_pipeline_dir() / "prompts" / "deploying.md").read_text(encoding="utf-8")
+
+        assert "真实校验或部署错误证明已有选择不可用" in text
+        assert "不要主动重复确认仍然有效的选择" in text
+        assert "resolve_cloud_resource_selector" in text
+        assert "`select_cloud_resource`" in text
+        assert "不要自动重复弹出同一选择器" in text
+        assert "options_empty" in text
+
     def test_skill_separates_environment_errors_from_template_errors(self):
         text = (_pipeline_dir() / "skills" / "iac-aliyun-deploying" / "SKILL.md").read_text(encoding="utf-8")
 

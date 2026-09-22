@@ -84,6 +84,30 @@ msgstr ""
 "Cloud-Ressourcen manuell."
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot could not be persisted."
+msgstr ""
+"Der Wiederherstellungs-Snapshot für die Ressourcenauswahl des normalen "
+"Chats konnte nicht gespeichert werden."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot is already resolved."
+msgstr ""
+"Der Wiederherstellungs-Snapshot für die Ressourcenauswahl des normalen "
+"Chats wurde bereits verarbeitet."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore response conflicts with the snapshot."
+msgstr ""
+"Die Wiederherstellungsantwort für die Ressourcenauswahl des normalen "
+"Chats steht im Konflikt mit dem Snapshot."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot identity is incomplete."
+msgstr ""
+"Die Identität des Wiederherstellungs-Snapshots für die Ressourcenauswahl "
+"des normalen Chats ist unvollständig."
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot could not be persisted."
 msgstr ""
 "Der Wiederherstellungs-Snapshot für die Berechtigung des normalen Chats "

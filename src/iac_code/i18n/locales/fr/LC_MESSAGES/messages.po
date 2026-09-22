@@ -85,6 +85,30 @@ msgstr ""
 "session et les ressources cloud."
 
 #: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot could not be persisted."
+msgstr ""
+"L’instantané de restauration de la sélection de la ressource du chat "
+"normal n’a pas pu être enregistré."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot is already resolved."
+msgstr ""
+"L’instantané de restauration de la sélection de la ressource du chat "
+"normal est déjà résolu."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore response conflicts with the snapshot."
+msgstr ""
+"La réponse de restauration de la sélection de la ressource du chat normal"
+" est en conflit avec l’instantané."
+
+#: src/iac_code/a2a/executor.py
+msgid "Normal resource selection restore snapshot identity is incomplete."
+msgstr ""
+"L’identité de l’instantané de restauration de la sélection de la "
+"ressource du chat normal est incomplète."
+
+#: src/iac_code/a2a/executor.py
 msgid "Normal permission restore snapshot could not be persisted."
 msgstr ""
 "L’instantané de restauration d’autorisation du chat normal n’a pas pu "
