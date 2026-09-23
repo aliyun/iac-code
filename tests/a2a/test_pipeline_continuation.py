@@ -598,6 +598,65 @@ async def test_quiescent_canceled_owner_without_proof_fails_closed(tmp_path) -> 
 
 
 @pytest.mark.asyncio
+async def test_canceled_owner_handed_off_to_normal_does_not_demand_release_proof(tmp_path) -> None:
+    """A canceled Pipeline that already handed off to normal is not a continuation.
+
+    The selling pipeline completes with ``on_complete: switch_to_normal``, so after a
+    cancel the durable snapshot carries a committed ``normalHandoff``.  The next turn
+    is ordinary normal chat: it must not be routed through the canceled owner and
+    rejected for a release proof that a naturally finalized owner never publishes.
+    """
+
+    cwd = tmp_path / "workspace"
+    pipeline_dir, canceled_event, _ = _canceled_sidecar(cwd, "session-1")
+    handoff_event = {
+        "schemaVersion": "1.0",
+        "eventId": "evt-handoff",
+        "sequence": 2,
+        "eventType": "pipeline_handoff_ready",
+        "pipelineRunId": "ctx-1",
+        "taskId": "task-old",
+        "contextId": "ctx-1",
+        "scope": "pipeline",
+        "status": "canceled",
+        "data": {
+            "action": "switch_to_normal",
+            "targetMode": "normal",
+            "outcome": "canceled",
+            "summary": "[Pipeline Handoff Context]\nOutcome: canceled",
+        },
+    }
+    journal = A2APipelineJournal(pipeline_dir)
+    journal.append(handoff_event)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events([canceled_event, handoff_event]))
+
+    persistence = A2APersistenceStore(tmp_path / "a2a-state")
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id="session-1", cwd=str(cwd)))
+    task_store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
+    await task_store.get_or_create_context(context_id="ctx-1", cwd=str(cwd), runtime_factory=lambda _sid: object())
+    owner = await task_store.get_or_create_task(task_id="task-old", context_id="ctx-1")
+    owner.state = "canceled"
+    owner.active_task = None
+    task_store.mirror_task(owner)
+    executor = object.__new__(IacCodeA2AExecutor)
+    executor._task_store = task_store
+
+    snapshot = A2APipelineSnapshotStore(pipeline_dir).load()
+    assert snapshot is not None
+    assert snapshot["normalHandoff"]["action"] == "switch_to_normal"
+    assert (await task_store.canceled_task_release_proof(context_id="ctx-1", task_id="task-old")) is None
+
+    resolved = await executor.resolve_omitted_pipeline_task_id(
+        context_id="ctx-1",
+        cwd=str(cwd),
+        invocation_id="request-2",
+    )
+
+    assert resolved is None
+    assert not (pipeline_dir / "continuation-intent.json").exists()
+
+
+@pytest.mark.asyncio
 async def test_live_canceled_writer_without_proof_still_fails_finalizing(tmp_path) -> None:
     cwd = tmp_path / "workspace"
     _canceled_sidecar(cwd, "session-1")

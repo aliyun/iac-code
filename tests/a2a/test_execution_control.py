@@ -3312,6 +3312,80 @@ async def test_restart_admits_backup_disabled_natural_handoff_before_release_rea
 
 
 @pytest.mark.asyncio
+async def test_restart_admits_backup_disabled_handoff_overwritten_by_legacy_committed_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A handoff that registered no snapshot job still runs the legacy directory
+    # backup, and ``_perform_backup`` then overwrites the ``disabled`` marker with
+    # its own committed result.  That durable outcome must admit replacement across
+    # a restart, exactly like the marker it replaced.
+    persisted_path, persisted = await _persist_natural_handoff_before_release_ready(tmp_path, monkeypatch)
+    _set_canonical_backup_disabled_handoff(persisted)
+    persisted["backup"] = {"status": "shared_committed", "generation": 3, "commitId": "commit-3", "error": None}
+    execution_control_module.atomic_write_json(persisted_path, persisted)
+
+    restarted = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        replacement = await restarted.begin_execution(
+            context_id="ctx-1",
+            task_id="task-2",
+            owner="owner-1",
+            cwd="/repo",
+        )
+        assert replacement.execution_id != persisted["executionId"]
+        current = asyncio.current_task()
+        assert current is not None
+        await replacement.detach_task(current, execution_status="input-required")
+    finally:
+        await restarted.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "legacy_backup",
+    [
+        pytest.param(
+            {"status": "blocked", "generation": None, "commitId": None, "error": "backup failed"},
+            id="blocked",
+        ),
+        pytest.param(
+            {"status": "shared_committed", "generation": 3, "commitId": "commit-3", "error": "partial"},
+            id="committed-with-error",
+        ),
+    ],
+)
+async def test_restart_rejects_backup_disabled_handoff_with_uncommitted_legacy_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    legacy_backup: dict,
+) -> None:
+    persisted_path, persisted = await _persist_natural_handoff_before_release_ready(tmp_path, monkeypatch)
+    _set_canonical_backup_disabled_handoff(persisted)
+    persisted["backup"] = legacy_backup
+    execution_control_module.atomic_write_json(persisted_path, persisted)
+
+    restarted = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+
+    async def begin_replacement() -> None:
+        replacement = await restarted.begin_execution(
+            context_id="ctx-1",
+            task_id="task-2",
+            owner="owner-1",
+            cwd="/repo",
+        )
+        current = asyncio.current_task()
+        assert current is not None
+        await replacement.detach_task(current, execution_status="input-required")
+
+    try:
+        with pytest.raises(ExecutionControlConflictError, match="active in another process"):
+            await asyncio.create_task(begin_replacement())
+    finally:
+        await restarted.close()
+
+
+@pytest.mark.asyncio
 async def test_restart_admits_backup_disabled_natural_handoff_with_registered_job(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -3974,3 +4048,198 @@ async def test_retired_natural_handoff_receipt_is_never_answered_with_a_newer_ex
     assert first_receipt["ownerGeneration"] < second_receipt["ownerGeneration"]
     assert service.natural_handoff_receipt("exec-unknown") is None
     await service.close()
+
+
+def _persist_dead_owner_claim_remnant(tmp_path: Path, *, revision: int = 0) -> dict:
+    """Persist the running claim remnant a killed publisher leaves behind."""
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
+    control_path.parent.mkdir(parents=True, exist_ok=True)
+    document = {
+        "contextId": "ctx-1",
+        "taskId": "task-1",
+        "executionId": "exec-1",
+        "owner": "owner-1",
+        "ownerGeneration": 1,
+        "serverInstanceId": "instance-1",
+        "ownerPid": 999999,
+        "pauseId": None,
+        "pauseReason": None,
+        "connectionEpoch": -1,
+        "revision": revision,
+        "persistedRevision": revision,
+        "phase": "running",
+        "pauseComplete": False,
+        "executionStatus": "working",
+        "streamAvailable": True,
+        "blockers": [{"kind": "execution", "count": 1}],
+        "expiresAt": None,
+        "terminationReason": None,
+        "commitError": None,
+        "backup": {"status": "not_requested"},
+        "externalOperations": [],
+        "releaseReady": False,
+        "naturalHandoff": None,
+        "inputHandoffReady": False,
+        "localInputContinuationReady": False,
+    }
+    execution_control_module.atomic_write_json(control_path, document)
+    return document
+
+
+@pytest.mark.asyncio
+async def test_recovery_admits_terminated_natural_handoff_before_release_ready(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A killed natural finalization still durably proves its input wait may be recovered.
+
+    The receipt is committed before the release marker, so recovery must accept it
+    exactly like replacement does; otherwise the context is permanently unusable.
+    """
+
+    persisted_path, persisted = await _persist_natural_handoff_before_release_ready(tmp_path, monkeypatch)
+    _set_canonical_backup_disabled_handoff(persisted)
+    execution_control_module.atomic_write_json(persisted_path, persisted)
+
+    recovering = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        admission = await recovering.reserve_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+        )
+        assert admission is not None
+        recovered = await recovering.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd="/repo",
+            continue_input_required=True,
+            recoverable_input_admission=admission,
+        )
+        assert recovered.phase == "running"
+        current = asyncio.current_task()
+        assert current is not None
+        await recovered.detach_task(current, execution_status="input-required")
+    finally:
+        await recovering.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revision", [0, 1], ids=["revision-zero", "revision-one"])
+async def test_recovery_admits_claim_remnant_whose_owner_process_is_gone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    revision: int,
+) -> None:
+    _persist_dead_owner_claim_remnant(tmp_path, revision=revision)
+    monkeypatch.setattr(execution_control_module, "_pid_alive", lambda pid: False)
+
+    recovering = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        admission = await recovering.reserve_recoverable_input_continuation(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+        )
+        assert admission is not None
+        recovered = await recovering.begin_execution(
+            context_id="ctx-1",
+            task_id="task-1",
+            owner="owner-1",
+            cwd="/repo",
+            continue_input_required=True,
+            recoverable_input_admission=admission,
+        )
+        assert recovered.phase == "running"
+        current = asyncio.current_task()
+        assert current is not None
+        await recovered.detach_task(current, execution_status="input-required")
+    finally:
+        await recovering.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_rejects_claim_remnant_whose_owner_process_is_alive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _persist_dead_owner_claim_remnant(tmp_path)
+    monkeypatch.setattr(execution_control_module, "_pid_alive", lambda pid: True)
+
+    recovering = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        assert (
+            await recovering.reserve_recoverable_input_continuation(
+                context_id="ctx-1",
+                task_id="task-1",
+                owner="owner-1",
+            )
+            is None
+        )
+    finally:
+        await recovering.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    [
+        pytest.param("drop-owner-pid", None, id="missing-owner-pid"),
+        pytest.param("revision-mismatch", 1, id="persisted-revision-lagging"),
+        pytest.param("phase", "terminating", id="phase-terminating"),
+    ],
+)
+async def test_recovery_rejects_claim_remnant_without_dead_owner_proof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    value: object,
+) -> None:
+    document = _persist_dead_owner_claim_remnant(tmp_path)
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
+    if mutation == "drop-owner-pid":
+        document.pop("ownerPid")
+    elif mutation == "revision-mismatch":
+        document["revision"] = value
+    else:
+        document["phase"] = value
+    execution_control_module.atomic_write_json(control_path, document)
+    monkeypatch.setattr(execution_control_module, "_pid_alive", lambda pid: False)
+
+    recovering = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        assert (
+            await recovering.reserve_recoverable_input_continuation(
+                context_id="ctx-1",
+                task_id="task-1",
+                owner="owner-1",
+            )
+            is None
+        )
+    finally:
+        await recovering.close()
+
+
+@pytest.mark.asyncio
+async def test_recovery_rejects_terminated_control_without_release_or_handoff_proof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persisted_path, persisted = await _persist_natural_handoff_before_release_ready(tmp_path, monkeypatch)
+    persisted["naturalHandoff"] = None
+    persisted["terminationReason"] = None
+    execution_control_module.atomic_write_json(persisted_path, persisted)
+
+    recovering = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        assert (
+            await recovering.reserve_recoverable_input_continuation(
+                context_id="ctx-1",
+                task_id="task-1",
+                owner="owner-1",
+            )
+            is None
+        )
+    finally:
+        await recovering.close()
