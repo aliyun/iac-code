@@ -26,6 +26,7 @@ from iac_code.a2a.execution_control import (
     ExecutionController,
     current_execution_control,
     current_execution_termination_reason,
+    persisted_natural_handoff_admits_input_recovery,
 )
 from iac_code.a2a.metadata_redaction import strip_llm_headers_from_metadata
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
@@ -184,7 +185,12 @@ class A2ATaskStore(TaskStore):
                     backup = control.get("backup")
                     backup_status = backup.get("status") if isinstance(backup, Mapping) else None
                     terminated_recovery = phase == "terminated" and (
-                        control.get("releaseReady", False) or backup_status == "blocked"
+                        control.get("releaseReady", False)
+                        or backup_status == "blocked"
+                        # A natural finalization commits its handoff receipt before
+                        # the release marker, so a killed process can leave a
+                        # terminated document that the receipt already proves.
+                        or persisted_natural_handoff_admits_input_recovery(control, context_id)
                     )
                     if not terminated_recovery and control.get("inputHandoffReady") is not True:
                         return None

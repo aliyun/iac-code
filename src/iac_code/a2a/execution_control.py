@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import time
 import uuid
 from collections.abc import Awaitable, Callable
@@ -54,6 +55,107 @@ _CURRENT_CONTROL: ContextVar[Any] = ContextVar("a2a_execution_control", default=
 _CURRENT_ACTIVITY_IDS: ContextVar[tuple[str, ...]] = ContextVar("a2a_execution_activity_ids", default=())
 _CURRENT_PARTICIPANT_IDS: ContextVar[tuple[str, ...]] = ContextVar("a2a_execution_participant_ids", default=())
 _T = TypeVar("_T")
+
+
+def _pid_alive(pid: int) -> bool:
+    """Report whether ``pid`` still exists, without signalling it.
+
+    Windows cannot use ``os.kill(pid, 0)`` because that terminates the target,
+    so it opens a query-only handle instead.  Any inconclusive answer is
+    reported as alive so callers keep the fail-closed behaviour.
+    """
+
+    if pid <= 0:
+        return True
+    if os.name == "nt":
+        import ctypes
+        from ctypes import wintypes
+
+        process_query_limited_information = 0x1000
+        error_invalid_parameter = 87
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+        kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
+        handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
+        if handle:
+            kernel32.CloseHandle(handle)
+            return True
+        # Only a missing process proves death; access/resource/query failures
+        # must not allow another worker to steal a still-live execution.
+        return ctypes.get_last_error() != error_invalid_parameter
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return True
+    return True
+
+
+def _claim_remnant_admits_input_recovery(document: dict[str, Any]) -> bool:
+    """Admit a dead publisher's remnant only for a sidecar-proven input wait.
+
+    The caller must already have proved the durable input wait. A dead parent
+    may leave live tool subprocesses, so this is not a general replacement rule
+    for an interrupted execution.
+
+    ``claim_begin_without_admission`` publishes the next running owner before
+    any state transition, so a process killed mid-turn leaves a ``running``
+    document that no terminal or natural-handoff rule can admit.  The remnant
+    carries revision zero for a fresh claim and a later revision when the killed
+    publisher had already activated one continuation.  Shape alone cannot tell
+    that remnant apart from a claim another worker published moments ago, so
+    input recovery additionally requires a fully persisted publication and a
+    recorded owner process that is not this process and no longer exists.  A
+    document without a usable ``ownerPid`` keeps the fail-closed behaviour.
+    """
+
+    owner_pid = document.get("ownerPid")
+    if not isinstance(owner_pid, int) or isinstance(owner_pid, bool) or owner_pid <= 0:
+        return False
+    if owner_pid == os.getpid() or _pid_alive(owner_pid):
+        return False
+    if document.get("phase") != "running" or document.get("releaseReady") is not False:
+        return False
+    if document.get("inputHandoffReady") is not False:
+        return False
+    if document.get("executionStatus") not in {"working", "input-required"}:
+        return False
+    if document.get("terminationReason") is not None or document.get("naturalHandoff") is not None:
+        return False
+    if document.get("pauseId") is not None or document.get("externalOperations"):
+        return False
+    revisions = (document.get("revision"), document.get("persistedRevision"))
+    if any(
+        not isinstance(revision, int) or isinstance(revision, bool) or revision < 0 for revision in revisions
+    ):
+        return False
+    if revisions[0] != revisions[1]:
+        # Only a fully persisted publication is a settled remnant.
+        return False
+    backup = document.get("backup")
+    if backup is None:
+        return True
+    return isinstance(backup, dict) and backup.get("status") in {None, "not_requested", "disabled"}
+
+
+def persisted_natural_handoff_admits_input_recovery(document: Any, context_id: str) -> bool:
+    """Report whether a persisted control proves its input wait may be recovered.
+
+    A naturally finalized execution commits its ``naturalHandoff`` receipt before
+    it can publish ``releaseReady``, so a process killed in between leaves a
+    terminated document whose durable receipt already proves the same thing the
+    release marker would.  Recovery of a sidecar-proven input wait must accept
+    that receipt exactly like replacement does, or the context stays unusable.
+    """
+
+    if not isinstance(document, dict):
+        return False
+    return _RecoverableInputAdmissionStore._validate_natural_handoff(document, context_id)
 
 
 class ExecutionControlError(RuntimeError):
@@ -316,11 +418,7 @@ class _RecoverableInputAdmissionStore:
         )
 
     @staticmethod
-    def _persisted_natural_handoff_admits_replacement(
-        document: dict[str, Any],
-        context_id: str,
-    ) -> bool:
-        """Validate a durable natural handoff without trusting process-local state."""
+    def _validate_natural_handoff(document: dict[str, Any], context_id: str) -> bool:
         receipt = document.get("naturalHandoff")
         revision = document.get("revision")
         persisted_revision = document.get("persistedRevision")
@@ -370,8 +468,20 @@ class _RecoverableInputAdmissionStore:
         business_revision = receipt.get("businessRevision")
         backup_business_revision = backup.get("businessRevision")
         if receipt.get("backupDisabled") is True:
+            # A handoff that registered no snapshot job still runs the legacy
+            # directory backup, and ``_perform_backup`` then overwrites ``backup``
+            # with its own committed result.  Accept that exact result shape, whose
+            # durable outcome proves at least as much as the ``disabled`` marker the
+            # receipt was written with.  Any other residue keeps the document
+            # rejected: ``pending``/``blocked`` are not durable, and fields grafted
+            # onto a ``disabled`` marker mean the receipt and document disagree.
+            legacy_backup_committed = (
+                set(backup) == {"status", "generation", "commitId", "error"}
+                and backup.get("status") in _BACKUP_RELEASE_STATUSES
+                and backup.get("error") is None
+            )
             disabled_without_job = bool(
-                backup == {"status": "disabled"}
+                (backup == {"status": "disabled"} or legacy_backup_committed)
                 and isinstance(business_revision, int)
                 and not isinstance(business_revision, bool)
                 and business_revision == 0
@@ -476,14 +586,25 @@ class _RecoverableInputAdmissionStore:
             return True
         if input_handoff_ready is not False:
             return False
-        if document.get("phase") != "terminated":
+        phase = document.get("phase")
+        if phase == "running":
+            # Only the sidecar-proven input recovery path may reclaim this
+            # remnant; a dead parent alone cannot admit ordinary replacement.
+            return _claim_remnant_admits_input_recovery(document)
+        if phase != "terminated":
             return False
         backup = document.get("backup")
         backup_status = backup.get("status") if isinstance(backup, dict) else None
         release_ready = document.get("releaseReady")
         if not isinstance(release_ready, bool):
             return False
-        return release_ready or backup_status == "blocked"
+        if release_ready or backup_status == "blocked":
+            return True
+        # A natural finalization commits its handoff receipt before it can
+        # publish the release marker, so a process killed in between leaves a
+        # terminated document that still durably proves the wait may be taken
+        # over.  Accept exactly the receipt replacement already accepts.
+        return self._validate_natural_handoff(document, admission.context_id)
 
     def _remember(self, admission: _RecoverableInputAdmission) -> None:
         self._by_token[admission.token] = admission
@@ -505,6 +626,10 @@ class _RecoverableInputAdmissionStore:
     @staticmethod
     def _lock_path_for_control(control_path: Path) -> Path:
         return control_path.with_name(f".{control_path.stem}.recoverable-input.lock")
+
+    @staticmethod
+    def _persisted_natural_handoff_admits_replacement(document: dict[str, Any], context_id: str) -> bool:
+        return _RecoverableInputAdmissionStore._validate_natural_handoff(document, context_id)
 
     @staticmethod
     def _load_document(path: Path) -> dict[str, Any] | None:
@@ -1383,6 +1508,7 @@ class ExecutionController:
             "owner": self.owner,
             "ownerGeneration": self.owner_generation,
             "serverInstanceId": self.server_instance_id,
+            "ownerPid": os.getpid(),
             "pauseId": self.pause_id,
             "pauseReason": self.pause_reason,
             "connectionEpoch": self.connection_epoch,
@@ -1411,6 +1537,7 @@ class ExecutionController:
         public_snapshot = dict(snapshot)
         public_snapshot.pop("owner", None)
         public_snapshot.pop("ownerGeneration", None)
+        public_snapshot.pop("ownerPid", None)
         public_snapshot.pop("inputHandoffReady", None)
         public_snapshot.pop("localInputContinuationReady", None)
         return public_snapshot

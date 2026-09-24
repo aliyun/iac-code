@@ -34,6 +34,16 @@ def _live_scenarios() -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
+# tests/conftest.py's autouse ``_isolate_iac_home`` fixture repoints ``HOME`` at an
+# empty per-test directory so ordinary tests can never touch the developer's real
+# configuration.  The live runner is started as a subprocess and inherits that
+# environment, so its default ``--source-config-dir`` of ``~/.iac-code`` would
+# resolve to the empty directory and the readiness gate would report missing LLM
+# and cloud credentials.  Capture the real home here, while the module is being
+# imported and before any test fixture has run.
+_REAL_HOME = Path(os.path.expanduser("~"))
+
+
 def test_resource_selection_event_extraction_deduplicates_input_projections(tmp_path: Path) -> None:
     pending = {
         "schemaVersion": 1,
@@ -142,9 +152,8 @@ def test_real_llm_and_cloud_resource_selector_a2a_flow(tmp_path: Path, scenario:
         "--run-dir",
         str(tmp_path / scenario),
     ]
-    source_config = os.environ.get("IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_CONFIG_DIR")
-    if source_config:
-        command.extend(("--source-config-dir", source_config))
+    source_config = os.environ.get("IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_CONFIG_DIR") or str(_REAL_HOME / ".iac-code")
+    command.extend(("--source-config-dir", source_config))
     completed = subprocess.run(
         command,
         cwd=repo_root,

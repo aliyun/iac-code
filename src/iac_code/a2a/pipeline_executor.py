@@ -5528,13 +5528,40 @@ def recoverable_task_id_from_sidecar(
 
 
 def current_pipeline_task_id_from_sidecar(*, cwd: str, session_id: str, context_id: str) -> str | None:
+    """Report the durable Pipeline owner that a continuation may supersede.
+
+    A handoff to normal chat ends the Pipeline conversation, so the owner it
+    names is no longer a continuation candidate.  Reporting it here would make
+    an ordinary post-handoff turn demand a cancellation release proof that a
+    naturally finalized owner can never publish.
+    """
+
     pipeline_dir = existing_a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+    snapshot_store = A2APipelineSnapshotStore(pipeline_dir)
+    journal = A2APipelineJournal(pipeline_dir)
     owner = _current_sidecar_owner_from_stores(
-        snapshot_store=A2APipelineSnapshotStore(pipeline_dir),
-        journal=A2APipelineJournal(pipeline_dir),
+        snapshot_store=snapshot_store,
+        journal=journal,
         context_id=context_id,
     )
-    return owner.task_id if owner is not None else None
+    if owner is None:
+        return None
+    authoritative_snapshot = _authoritative_snapshot_for_task(
+        snapshot_store=snapshot_store,
+        journal=journal,
+        task_id=owner.task_id,
+        context_id=context_id,
+    )
+    normal_handoff = (
+        authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
+    )
+    if (
+        isinstance(normal_handoff, dict)
+        and normal_handoff.get("action") == "switch_to_normal"
+        and normal_handoff.get("targetMode") == "normal"
+    ):
+        return None
+    return owner.task_id
 
 
 def successor_task_id_from_sidecar(
