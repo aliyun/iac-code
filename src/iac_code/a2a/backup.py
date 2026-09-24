@@ -7,7 +7,7 @@ import logging
 import stat
 import uuid
 from collections.abc import Awaitable, Callable, Mapping
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, ParamSpec, TypeVar, cast
@@ -748,57 +748,63 @@ class SessionBackupCoordinator:
         if backup_service is None or staging_root is None or not job.capture_commit_id:
             return None
 
-        project_dir = staging_root / "projects" / job.project
-        if project_dir.is_dir():
-            for path in sorted(project_dir.glob("{}_v*".format(job.session_id))):
-                if path.is_symlink() or not path.is_dir():
-                    continue
-                try:
-                    state = backup_service._read_state(path, session_id=job.session_id, shared=True)
-                except Exception as exc:
-                    if path.name.endswith(".copying"):
-                        raise SessionBackupHandoffError(
-                            "session backup has an unreadable in-progress copying snapshot"
-                        ) from exc
-                    raise
-                if path.name.endswith(".copying"):
-                    if state is not None and state.commit_id == job.capture_commit_id:
-                        raise SessionBackupHandoffError(
-                            "session backup capture identity is still in an uncommitted copying snapshot"
-                        )
-                    raise SessionBackupHandoffError("session backup has a different in-progress copying snapshot")
-                if state is not None and state.commit_id == job.capture_commit_id:
-                    return BackupResult(
-                        enabled=True,
-                        destination=path,
-                        generation=state.generation,
-                        commit_id=state.commit_id,
-                        staged_committed=True,
-                    )
-
         backup_root_resolver = getattr(backup_service, "_backup_root", None)
-        if not callable(backup_root_resolver):
-            return None
-        backup_root = backup_root_resolver()
-        if backup_root is None:
-            return None
-        destination = Path(backup_root) / "projects" / job.project / job.session_id
-        state = backup_service._read_state(
-            destination,
-            session_id=job.session_id,
-            shared=True,
-            missing_ok=True,
+        backup_root = backup_root_resolver() if callable(backup_root_resolver) else None
+        # The publisher removes a staged snapshot and refreshes the shared
+        # marker under this cross-process lock. Read both locations together.
+        publication_lock = (
+            backup_service._shared_session_lock(backup_root, project=job.project, session_id=job.session_id)
+            if backup_root is not None
+            else nullcontext()
         )
-        if state is None or state.commit_id != job.capture_commit_id:
-            return None
-        return BackupResult(
-            enabled=True,
-            destination=destination,
-            generation=state.generation,
-            commit_id=state.commit_id,
-            shared_committed=True,
-            staged_committed=True,
-        )
+        with publication_lock:
+            project_dir = staging_root / "projects" / job.project
+            if project_dir.is_dir():
+                for path in sorted(project_dir.glob("{}_v*".format(job.session_id))):
+                    if path.is_symlink() or not path.is_dir():
+                        continue
+                    try:
+                        state = backup_service._read_state(path, session_id=job.session_id, shared=True)
+                    except Exception as exc:
+                        if path.name.endswith(".copying"):
+                            raise SessionBackupHandoffError(
+                                "session backup has an unreadable in-progress copying snapshot"
+                            ) from exc
+                        raise
+                    if path.name.endswith(".copying"):
+                        if state is not None and state.commit_id == job.capture_commit_id:
+                            raise SessionBackupHandoffError(
+                                "session backup capture identity is still in an uncommitted copying snapshot"
+                            )
+                        raise SessionBackupHandoffError("session backup has a different in-progress copying snapshot")
+                    if state is not None and state.commit_id == job.capture_commit_id:
+                        return BackupResult(
+                            enabled=True,
+                            destination=path,
+                            generation=state.generation,
+                            commit_id=state.commit_id,
+                            staged_committed=True,
+                        )
+
+            if backup_root is None:
+                return None
+            destination = Path(backup_root) / "projects" / job.project / job.session_id
+            state = backup_service._read_state(
+                destination,
+                session_id=job.session_id,
+                shared=True,
+                missing_ok=True,
+            )
+            if state is None or state.commit_id != job.capture_commit_id:
+                return None
+            return BackupResult(
+                enabled=True,
+                destination=destination,
+                generation=state.generation,
+                commit_id=state.commit_id,
+                shared_committed=True,
+                staged_committed=True,
+            )
 
     def _next_counters(self, state_dir: Path) -> tuple[int, int]:
         counter_path = state_dir / _COORDINATOR_COUNTER_FILENAME

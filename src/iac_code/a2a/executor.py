@@ -31,6 +31,7 @@ from iac_code.a2a.events import (
 )
 from iac_code.a2a.execution_control import (
     ExecutionControlConflictError,
+    ExecutionController,
     ExecutionControlService,
     NaturalCompletionGenerationCarrier,
     RecoverableInputAdmissionCarrier,
@@ -1536,24 +1537,50 @@ class IacCodeA2AExecutor(AgentExecutor):
         task_id: str,
         owner: str,
         completion_generation: int,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         """Finalize a delivered response without canceling its business task."""
 
         if self._execution_control_service is None:
-            return
+            return None
 
         async def release_reversible_permission_closes() -> None:
             closing_tokens = await self._permission_input_registry.reversible_closing_tokens(task_id)
             for closing_token in closing_tokens:
                 await self._permission_input_registry.reopen_task(closing_token)
 
-        await self._execution_control_service.finalize_natural_completion(
+        return await self._execution_control_service.finalize_natural_completion(
             context_id=context_id,
             task_id=task_id,
             owner=owner,
             completion_generation=completion_generation,
             finalized_cleanup=release_reversible_permission_closes,
         )
+
+    async def _is_natural_completion_boundary(
+        self,
+        control: ExecutionController,
+        execution_status: str,
+    ) -> bool:
+        if execution_status not in {
+            TASK_STATE_INPUT_REQUIRED,
+            TASK_STATE_COMPLETED,
+            TASK_STATE_FAILED,
+            TASK_STATE_CANCELED,
+        }:
+            return False
+        if await self._permission_input_registry.has_pending_task(control.task_id):
+            return False
+        if execution_status != TASK_STATE_INPUT_REQUIRED or control.execution_mode == "normal":
+            return True
+        if control.session_id is None:
+            return False
+        waiting_task_id = await run_sync_fenced(
+            sandbox_release_recoverable_task_id_from_sidecar,
+            cwd=control.cwd,
+            session_id=control.session_id,
+            context_id=control.context_id,
+        )
+        return waiting_task_id == control.task_id
 
     async def resolve_sideband_permission(
         self, response: PermissionResponse, *, metadata: Any = None
@@ -1671,12 +1698,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 try:
                     record = await self._task_store.get_task_record(control.task_id)
                     execution_status = record.state
-                    natural_completion = execution_status in {
-                        TASK_STATE_INPUT_REQUIRED,
-                        TASK_STATE_COMPLETED,
-                        TASK_STATE_FAILED,
-                        TASK_STATE_CANCELED,
-                    } and not await self._permission_input_registry.has_pending_task(control.task_id)
+                    natural_completion = await self._is_natural_completion_boundary(control, execution_status)
                 except ValueError:
                     pass
                 current_task = asyncio.current_task()

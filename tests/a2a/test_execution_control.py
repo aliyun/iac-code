@@ -20,6 +20,7 @@ from iac_code.a2a.backup import (
     run_sync_fenced_with_cancel_completion,
 )
 from iac_code.a2a.execution_control import (
+    NATURAL_COMPLETION_FINALIZED_GENERATION,
     ExecutionControlConflictError,
     ExecutionController,
     ExecutionControlNotFoundError,
@@ -28,10 +29,11 @@ from iac_code.a2a.execution_control import (
     execution_activity,
     execution_checkpoint,
     execution_non_advancing_wait,
+    natural_completion_durable_receipt,
     reset_execution_control,
     run_with_execution_budget,
 )
-from iac_code.services.session_backup import BackupReason, BackupResult
+from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupService
 from iac_code.services.session_storage import SessionStorage
 
 
@@ -195,6 +197,88 @@ async def test_natural_business_boundary_self_finalizes_without_terminate_reques
 
 
 @pytest.mark.asyncio
+async def test_input_required_boundary_with_managed_work_remains_available_for_rollover(tmp_path: Path) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    blocker = await control.begin_activity("background-agent", check_gate=False)
+
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+
+    assert completion_generation is None
+    assert control.phase == "running"
+    assert control.execution_status == "input-required"
+    assert control.stream_available is False
+    await control.end_activity(blocker.activity_id)
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_waits_for_resume_commit(tmp_path: Path, monkeypatch) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    pause = await control.pause(
+        task_id="task-1",
+        expected_execution_id="exec-1",
+        request_id="request-pause",
+        connection_epoch=1,
+        reason="client_disconnected",
+        reconnect_timeout_seconds=10,
+    )
+
+    resume_commit_started = asyncio.Event()
+    release_resume_commit = asyncio.Event()
+    persist_snapshot = control._persist_snapshot
+
+    async def blocking_persist(snapshot: dict) -> None:
+        if snapshot["phase"] == "running":
+            resume_commit_started.set()
+            await release_resume_commit.wait()
+        await persist_snapshot(snapshot)
+
+    monkeypatch.setattr(control, "_persist_snapshot", blocking_persist)
+    resumed = await control.resume(
+        execution_id="exec-1",
+        pause_id=pause["pauseId"],
+        request_id="request-resume",
+        connection_epoch=2,
+    )
+    assert resumed["phase"] == "resuming"
+    await asyncio.wait_for(resume_commit_started.wait(), timeout=1)
+
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="input-required",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    finalizing = asyncio.create_task(
+        control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+    )
+    try:
+        await asyncio.sleep(0)
+        assert not finalizing.done()
+        release_resume_commit.set()
+        finalized = await asyncio.wait_for(finalizing, timeout=1)
+        assert finalized["phase"] == "terminated"
+        assert finalized["naturalHandoff"]["completionGeneration"] == completion_generation
+    finally:
+        release_resume_commit.set()
+        await asyncio.gather(finalizing, return_exceptions=True)
+        await control.close()
+
+
+@pytest.mark.asyncio
 async def test_new_execution_waits_for_natural_finalized_cleanup(tmp_path: Path) -> None:
     service = ExecutionControlService(persistence_root=None, backup_service=None)
     control = await service.begin_execution(
@@ -338,8 +422,9 @@ async def test_explicit_termination_preempts_inflight_natural_cleanup(tmp_path: 
         connection_epoch=1,
         reason="stop_chat",
     )
+    superseded = await asyncio.wait_for(natural, timeout=1)
+    assert superseded[NATURAL_COMPLETION_FINALIZED_GENERATION] is None
     release_cleanup.set()
-    await natural
     await _wait_for_condition(lambda: control.release_ready)
     retried = await control.terminate(
         execution_id="exec-1",
@@ -552,6 +637,63 @@ async def test_natural_business_boundary_requires_critical_shared_backup(tmp_pat
     assert calls == [(BackupReason.TERMINAL, True)]
     assert control.release_ready is True
     assert control.backup["status"] == "shared_committed"
+    await control.close()
+
+
+@pytest.mark.asyncio
+async def test_direct_shared_natural_completion_returns_durable_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    cwd = tmp_path / "workspace"
+    session_id = "session-1"
+    storage = SessionStorage(projects_dir=tmp_path / "local" / "projects")
+    storage.save(str(cwd), session_id, [])
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    backup_service = SessionBackupService(storage, retry_delays=())
+    backup_service.initialize_session(str(cwd), session_id)
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(cwd),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=backup_service,
+        execution_id="exec-1",
+    )
+    control.bind_session(session_id)
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="completed",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+
+    finalized = await control.finalize_natural_completion(
+        task_id="task-1",
+        completion_generation=completion_generation,
+    )
+
+    assert finalized[NATURAL_COMPLETION_FINALIZED_GENERATION] == completion_generation
+    assert finalized["backup"]["status"] == "shared_committed"
+    receipt = finalized["naturalHandoff"]
+    assert receipt["backupDisabled"] is False
+    assert receipt["pendingJobId"] is None
+    assert receipt["snapshotGeneration"] == finalized["backup"]["generation"]
+    assert receipt["snapshotCommitId"] == finalized["backup"]["commitId"]
+    assert (
+        natural_completion_durable_receipt(
+            finalized,
+            context_id="ctx-1",
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+        == receipt
+    )
     await control.close()
 
 
@@ -2846,6 +2988,84 @@ class _BlockingCoordinatorBackupService:
             staged_committed=True,
             shared_committed=False,
         )
+
+
+@pytest.mark.asyncio
+async def test_natural_completion_finalize_waits_for_managed_work_and_joins(tmp_path: Path) -> None:
+    backup_service = _BlockingCoordinatorBackupService(tmp_path / "staging")
+    coordinator = SessionBackupCoordinator(backup_service, state_root=tmp_path / "state", retry_delays=())
+    control = ExecutionController(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner="owner-1",
+        cwd=str(tmp_path),
+        server_instance_id="instance-1",
+        persistence_path=tmp_path / "control.json",
+        backup_service=backup_service,
+        execution_id="exec-1",
+        backup_coordinator=coordinator,
+    )
+    control.bind_session("session-1")
+    current = asyncio.current_task()
+    assert current is not None
+    await control.attach_task(current)
+    blocker = await control.begin_activity("late-sidecar", check_gate=False)
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="completed",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    finalization = asyncio.create_task(
+        control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+    )
+    try:
+        await asyncio.sleep(0)
+        assert finalization.done() is False
+        await control.end_activity(blocker.activity_id)
+        assert await asyncio.to_thread(backup_service.started.wait, 5)
+        finalization.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await finalization
+
+        joined_finalization = asyncio.create_task(
+            control.finalize_natural_completion(
+                task_id="task-1",
+                completion_generation=completion_generation,
+            )
+        )
+        await asyncio.sleep(0)
+        assert joined_finalization.done() is False
+        backup_service.release.set()
+        observed = await asyncio.wait_for(joined_finalization, 5)
+
+        handoff = observed["naturalHandoff"]
+        assert handoff == control.natural_handoff_receipt()
+        assert handoff == {
+            "version": NATURAL_HANDOFF_VERSION,
+            "contextId": "ctx-1",
+            "taskId": "task-1",
+            "executionId": "exec-1",
+            "completionGeneration": completion_generation,
+            "ownerGeneration": 1,
+            "businessRevision": 1,
+            "pendingJobId": handoff["pendingJobId"],
+            "backupDisabled": False,
+            "stagedCommitted": True,
+            "snapshotGeneration": 1,
+            "snapshotCommitId": handoff["snapshotCommitId"],
+            "businessDrained": True,
+        }
+        assert handoff["pendingJobId"]
+        assert handoff["snapshotCommitId"]
+        assert backup_service.copies == 1
+    finally:
+        backup_service.release.set()
+        await coordinator.aclose()
+        await control.close()
 
 
 @pytest.mark.asyncio
