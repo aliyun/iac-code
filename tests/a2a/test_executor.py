@@ -2965,6 +2965,10 @@ async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
 
     class Control:
         task_id = "task-1"
+        context_id = "ctx-1"
+        execution_mode = "pipeline"
+        session_id = "session-1"
+        cwd = str(tmp_path)
 
         async def checkpoint(self) -> None:
             observed["checkpointed"] = True
@@ -3002,6 +3006,10 @@ async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
             return True
 
     monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", SpyPipelineExecutor)
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.sandbox_release_recoverable_task_id_from_sidecar",
+        lambda **_kwargs: "task-1",
+    )
 
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")

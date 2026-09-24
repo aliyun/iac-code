@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import threading
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from iac_code.a2a.backup import (
     PENDING_JOBS_DIRNAME,
     SessionBackupCoordinator,
     SessionBackupHandoffError,
+    SessionBackupJob,
     backup_session_async,
 )
 from iac_code.a2a.input_required import PermissionInputRegistry
@@ -151,6 +153,50 @@ async def _register(coordinator: SessionBackupCoordinator, *, execution_id: str 
         boundary="natural_completion",
         reason=BackupReason.TERMINAL,
     )
+
+
+@pytest.mark.asyncio
+async def test_committed_capture_waits_for_shared_snapshot_publication(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    coordinator, service, session_dir, _staging_root, _state_root = _staged_coordinator(monkeypatch, tmp_path)
+    (session_dir / "session.jsonl").write_text("v1\n", encoding="utf-8")
+    snapshot = service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+    assert snapshot.destination is not None and snapshot.commit_id is not None
+    state = service._read_state(snapshot.destination, session_id="s1", shared=True)
+    assert state is not None
+    backup_root = service._backup_root()
+    assert backup_root is not None
+    project = session_dir.parent.name
+    shared = backup_root / "projects" / project / "s1"
+    shared.mkdir(parents=True)
+    job = SessionBackupJob(
+        job_id="job-1",
+        project=project,
+        session_id="s1",
+        cwd="/repo",
+        context_id="ctx-1",
+        execution_id="exec-1",
+        boundary="natural_completion",
+        reason=BackupReason.TERMINAL.value,
+        business_revision=1,
+        fence=1,
+        capture_commit_id=snapshot.commit_id,
+    )
+    try:
+        with service._shared_session_lock(backup_root, project=project, session_id="s1"):
+            shutil.rmtree(snapshot.destination)
+            lookup = asyncio.create_task(asyncio.to_thread(coordinator._find_committed_capture, job))
+            await asyncio.sleep(0.05)
+            assert not lookup.done()
+            service._write_state(shared, state)
+        captured = await asyncio.wait_for(lookup, 5)
+        assert captured is not None
+        assert captured.commit_id == snapshot.commit_id
+        assert captured.shared_committed is True
+    finally:
+        await coordinator.aclose()
 
 
 @pytest.mark.asyncio

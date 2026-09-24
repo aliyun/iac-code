@@ -30,7 +30,9 @@ from a2a.utils.errors import InvalidParamsError
 from google.protobuf.json_format import ParseDict
 from google.protobuf.struct_pb2 import Value
 
+from iac_code.a2a.backup import NATURAL_HANDOFF_VERSION, SessionBackupHandoff
 from iac_code.a2a.execution_control import (
+    NATURAL_COMPLETION_FINALIZED_GENERATION,
     ExecutionControlService,
     NaturalCompletionGenerationCarrier,
     RecoverableInputAdmissionCarrier,
@@ -73,6 +75,43 @@ from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
 from .fakes import FakeAgentLoop, FakeEventQueue, FakeRuntime, pending_future
 
 _STREAM_TEST_TIMEOUT = 5
+
+
+def _durable_natural_finalization(
+    completion_generation: int,
+    *,
+    context_id: str = "ctx-1",
+    task_id: str = "task-1",
+    execution_id: str = "exec-1",
+) -> dict:
+    receipt = {
+        "version": NATURAL_HANDOFF_VERSION,
+        "contextId": context_id,
+        "taskId": task_id,
+        "executionId": execution_id,
+        "completionGeneration": completion_generation,
+        "ownerGeneration": 1,
+        "businessRevision": 0,
+        "pendingJobId": None,
+        "backupDisabled": True,
+        "stagedCommitted": False,
+        "snapshotGeneration": None,
+        "snapshotCommitId": None,
+        "businessDrained": True,
+    }
+    return {
+        "contextId": context_id,
+        "taskId": task_id,
+        "executionId": execution_id,
+        "ownerGeneration": 1,
+        "revision": 1,
+        "persistedRevision": 1,
+        "phase": "terminated",
+        "terminationReason": "natural_completion",
+        "backup": {"status": "disabled"},
+        "naturalHandoff": receipt,
+        NATURAL_COMPLETION_FINALIZED_GENERATION: completion_generation,
+    }
 
 
 @pytest.mark.asyncio
@@ -2055,9 +2094,10 @@ async def test_message_stream_finalizes_natural_execution_only_after_stream_exha
         order.append("exhausted")
 
     class Executor:
-        async def finalize_natural_execution(self, **kwargs) -> None:
+        async def finalize_natural_execution(self, **kwargs) -> dict:
             assert kwargs["completion_generation"] == 7
             order.append("finalized")
+            return _durable_natural_finalization(kwargs["completion_generation"])
 
     async def hydrate(_params) -> None:
         return None
@@ -2083,6 +2123,264 @@ async def test_message_stream_finalizes_natural_execution_only_after_stream_exha
         await anext(stream)
 
     assert order == ["yield", "exhausted", "finalized"]
+
+
+@pytest.mark.asyncio
+async def test_message_stream_waits_for_staged_natural_handoff_before_eof(monkeypatch, tmp_path) -> None:
+    capture_started = asyncio.Event()
+    release_capture = asyncio.Event()
+
+    class BlockingCoordinator:
+        enabled = True
+
+        async def register_boundary(self, **_kwargs) -> SessionBackupHandoff:
+            capture_started.set()
+            await release_capture.wait()
+            return SessionBackupHandoff(
+                business_revision=1,
+                job_id="job-1",
+                staged_committed=True,
+                snapshot_generation=1,
+                snapshot_commit_id="commit-1",
+            )
+
+    class PermissionRegistry:
+        async def reversible_closing_tokens(self, _task_id: str) -> tuple[object, ...]:
+            return ()
+
+        async def reopen_task(self, _closing_token) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    owner = store.owner_for_context(call_context)
+    service = ExecutionControlService(
+        persistence_root=tmp_path,
+        backup_service=None,
+        backup_coordinator=BlockingCoordinator(),
+    )
+    control = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner=owner,
+        cwd=str(tmp_path),
+    )
+    control.bind_session("session-1")
+    blocker = await control.begin_activity("late-sidecar", check_gate=False)
+    current = asyncio.current_task()
+    assert current is not None
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="completed",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    finalization = asyncio.create_task(
+        control.finalize_natural_completion(
+            task_id="task-1",
+            completion_generation=completion_generation,
+        )
+    )
+    await asyncio.sleep(0)
+    assert finalization.done() is False
+    await control.end_activity(blocker.activity_id)
+    await asyncio.wait_for(capture_started.wait(), timeout=1)
+
+    terminal = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+    )
+
+    async def sdk_stream(_handler, _params, context):
+        NaturalCompletionGenerationCarrier.attach(SimpleNamespace(call_context=context), completion_generation)
+        yield terminal
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    executor = IacCodeA2AExecutor.__new__(IacCodeA2AExecutor)
+    executor._execution_control_service = service
+    executor._permission_input_registry = PermissionRegistry()
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = executor
+    handler._active_task_registry = None
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    params = SimpleNamespace(message=SimpleNamespace(task_id="task-1", context_id="ctx-1"))
+
+    stream = handler.on_message_send_stream(params, call_context)
+    eof = None
+    try:
+        assert await anext(stream) is terminal
+        eof = asyncio.create_task(anext(stream))
+        await asyncio.sleep(0)
+        assert eof.done() is False
+
+        release_capture.set()
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(eof, timeout=1)
+        await asyncio.wait_for(finalization, timeout=1)
+        receipt = control.natural_handoff_receipt()
+        assert receipt is not None
+        assert receipt["stagedCommitted"] is True
+        assert receipt["snapshotGeneration"] == 1
+        assert receipt["snapshotCommitId"] == "commit-1"
+    finally:
+        release_capture.set()
+        if eof is not None:
+            await asyncio.gather(eof, return_exceptions=True)
+        await service.close()
+
+
+@pytest.mark.asyncio
+async def test_message_stream_allows_clean_eof_after_direct_shared_natural_handoff(monkeypatch, tmp_path) -> None:
+    cwd = tmp_path / "workspace"
+    session_id = "session-1"
+    storage = SessionStorage(projects_dir=tmp_path / "local" / "projects")
+    storage.save(str(cwd), session_id, [])
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    backup_service = SessionBackupService(storage, retry_delays=())
+    backup_service.initialize_session(str(cwd), session_id)
+
+    class PermissionRegistry:
+        async def reversible_closing_tokens(self, _task_id: str) -> tuple[object, ...]:
+            return ()
+
+        async def reopen_task(self, _closing_token) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    owner = store.owner_for_context(call_context)
+    service = ExecutionControlService(
+        persistence_root=tmp_path / "state",
+        backup_service=backup_service,
+    )
+    control = await service.begin_execution(
+        context_id="ctx-1",
+        task_id="task-1",
+        owner=owner,
+        cwd=str(cwd),
+    )
+    control.bind_session(session_id)
+    current = asyncio.current_task()
+    assert current is not None
+    completion_generation = await control.detach_task(
+        current,
+        execution_status="completed",
+        natural_completion=True,
+    )
+    assert completion_generation is not None
+    terminal = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+    )
+
+    async def sdk_stream(_handler, _params, context):
+        NaturalCompletionGenerationCarrier.attach(SimpleNamespace(call_context=context), completion_generation)
+        yield terminal
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    executor = IacCodeA2AExecutor.__new__(IacCodeA2AExecutor)
+    executor._execution_control_service = service
+    executor._permission_input_registry = PermissionRegistry()
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = executor
+    handler._active_task_registry = None
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    params = SimpleNamespace(message=SimpleNamespace(task_id="task-1", context_id="ctx-1"))
+
+    stream = handler.on_message_send_stream(params, call_context)
+    try:
+        assert await anext(stream) is terminal
+        with pytest.raises(StopAsyncIteration):
+            await anext(stream)
+        receipt = control.natural_handoff_receipt()
+        assert receipt is not None
+        assert receipt["backupDisabled"] is False
+        assert receipt["snapshotGeneration"] == control.backup["generation"]
+        assert receipt["snapshotCommitId"] == control.backup["commitId"]
+    finally:
+        await stream.aclose()
+        await service.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finalization_failure", ["blocked", "timeout"])
+async def test_message_stream_natural_finalization_failure_is_not_clean_eof(
+    monkeypatch,
+    finalization_failure: str,
+) -> None:
+    call_context = ServerCallContext()
+    terminal = TaskStatusUpdateEvent(
+        task_id="task-1",
+        context_id="ctx-1",
+        status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+    )
+
+    async def sdk_stream(_handler, _params, context):
+        NaturalCompletionGenerationCarrier.attach(SimpleNamespace(call_context=context), 7)
+        yield terminal
+
+    class Executor:
+        async def finalize_natural_execution(self, **_kwargs):
+            if finalization_failure == "timeout":
+                raise TimeoutError("natural finalization timed out")
+            return {
+                "contextId": "ctx-1",
+                "taskId": "task-1",
+                "executionId": "exec-1",
+                "ownerGeneration": 1,
+                "revision": 1,
+                "persistedRevision": 1,
+                "phase": "terminated",
+                "terminationReason": "natural_completion",
+                "backup": {"status": "blocked", "error": "capture failed"},
+                "naturalHandoff": None,
+                NATURAL_COMPLETION_FINALIZED_GENERATION: None,
+            }
+
+    async def hydrate(_params) -> None:
+        return None
+
+    async def reconcile(_params, _context) -> None:
+        return None
+
+    monkeypatch.setattr(DefaultRequestHandler, "on_message_send_stream", sdk_stream)
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = A2ATaskStore()
+    handler.agent_executor = Executor()
+    handler._active_task_registry = None
+    handler._validate_extensions = lambda _context: None
+    handler._validate_pipeline_message_request = lambda _params: None
+    handler._hydrate_recoverable_pipeline_task_id = hydrate
+    handler._reconcile_recoverable_pipeline_task = reconcile
+    params = SimpleNamespace(message=SimpleNamespace(task_id="task-1", context_id="ctx-1"))
+
+    stream = handler.on_message_send_stream(params, call_context)
+    assert await anext(stream) is terminal
+    expected_error = TimeoutError if finalization_failure == "timeout" else RuntimeError
+    with pytest.raises(expected_error):
+        await anext(stream)
 
 
 @pytest.mark.asyncio
@@ -2149,8 +2447,9 @@ async def test_message_stream_boundary_aclose_finalizes_after_executor_detaches(
     finalized: list[int] = []
 
     class Executor:
-        async def finalize_natural_execution(self, **kwargs) -> None:
+        async def finalize_natural_execution(self, **kwargs) -> dict:
             finalized.append(kwargs["completion_generation"])
+            return _durable_natural_finalization(kwargs["completion_generation"])
 
     executor = Executor()
 
@@ -2205,8 +2504,9 @@ async def test_message_stream_boundary_aclose_finalizes_generation_attached_befo
         yield boundary
 
     class Executor:
-        async def finalize_natural_execution(self, **kwargs) -> None:
+        async def finalize_natural_execution(self, **kwargs) -> dict:
             finalized.append(kwargs["completion_generation"])
+            return _durable_natural_finalization(kwargs["completion_generation"])
 
     async def hydrate(_params) -> None:
         return None
@@ -2300,9 +2600,10 @@ async def test_detached_permission_response_finalizes_after_terminal_producer_dr
             await producer_can_finish.wait()
             NaturalCompletionGenerationCarrier.attach(request_context, 7)
 
-        async def finalize_natural_execution(self, **kwargs) -> None:
+        async def finalize_natural_execution(self, **kwargs) -> dict:
             assert kwargs["completion_generation"] == 7
             finalized.set()
+            return _durable_natural_finalization(kwargs["completion_generation"])
 
     handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
     handler.task_store = A2ATaskStore()

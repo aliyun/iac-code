@@ -405,9 +405,28 @@ class _RecoverableInputAdmissionStore:
             return disabled_without_job or disabled_with_job
         snapshot_generation = receipt.get("snapshotGeneration")
         backup_generation = backup.get("generation")
-        return bool(
-            receipt.get("backupDisabled") is False
-            and backup.get("status") == "staged_committed"
+        snapshot_matches = bool(
+            isinstance(snapshot_generation, int)
+            and not isinstance(snapshot_generation, bool)
+            and snapshot_generation > 0
+            and isinstance(backup_generation, int)
+            and not isinstance(backup_generation, bool)
+            and backup_generation == snapshot_generation
+            and isinstance(receipt.get("snapshotCommitId"), str)
+            and receipt.get("snapshotCommitId")
+            and backup.get("commitId") == receipt.get("snapshotCommitId")
+        )
+        direct_shared = bool(
+            backup.get("status") == "shared_committed"
+            and isinstance(business_revision, int)
+            and not isinstance(business_revision, bool)
+            and business_revision == 0
+            and receipt.get("pendingJobId") is None
+            and isinstance(receipt.get("stagedCommitted"), bool)
+            and snapshot_matches
+        )
+        staged = bool(
+            backup.get("status") == "staged_committed"
             and isinstance(receipt.get("pendingJobId"), str)
             and receipt.get("pendingJobId")
             and backup.get("jobId") == receipt.get("pendingJobId")
@@ -419,17 +438,9 @@ class _RecoverableInputAdmissionStore:
             and backup_business_revision > 0
             and backup_business_revision == business_revision
             and receipt.get("stagedCommitted") is True
-            and isinstance(snapshot_generation, int)
-            and not isinstance(snapshot_generation, bool)
-            and snapshot_generation > 0
-            and isinstance(backup_generation, int)
-            and not isinstance(backup_generation, bool)
-            and backup_generation > 0
-            and backup_generation == snapshot_generation
-            and isinstance(receipt.get("snapshotCommitId"), str)
-            and receipt.get("snapshotCommitId")
-            and backup.get("commitId") == receipt.get("snapshotCommitId")
+            and snapshot_matches
         )
+        return receipt.get("backupDisabled") is False and (direct_shared or staged)
 
     def has_active(self, context_id: str) -> bool:
         if self._root is None:
@@ -529,6 +540,29 @@ class _RecoverableInputAdmissionStore:
             and document.get("taskId") == admission.task_id
             and document.get("owner") == admission.owner
         )
+
+
+def natural_completion_durable_receipt(
+    state: dict[str, Any] | None,
+    *,
+    context_id: str,
+    task_id: str,
+    completion_generation: int,
+) -> dict[str, Any] | None:
+    """Return the exact durable handoff receipt for one delivered completion."""
+
+    if (
+        not isinstance(state, dict)
+        or state.get(NATURAL_COMPLETION_FINALIZED_GENERATION) != completion_generation
+        or state.get("contextId") != context_id
+        or state.get("taskId") != task_id
+        or not _RecoverableInputAdmissionStore._persisted_natural_handoff_admits_replacement(state, context_id)
+    ):
+        return None
+    receipt = state.get("naturalHandoff")
+    if not isinstance(receipt, dict) or receipt.get("completionGeneration") != completion_generation:
+        return None
+    return dict(receipt)
 
 
 class RecoverableInputAdmissionLease:
@@ -668,6 +702,14 @@ class _Participant:
     safe: bool = False
 
 
+@dataclass
+class _NaturalCompletionFinalizationSlot:
+    completion_generation: int
+    termination_generation: int
+    result: asyncio.Future[dict[str, Any]]
+    task: asyncio.Task[Any] | None = None
+
+
 @dataclass(frozen=True)
 class ActivityHandle:
     controller: ExecutionController
@@ -776,6 +818,7 @@ class ExecutionController:
         self._natural_completion_generation: int | None = None
         self._natural_completion_delivered_generation: int | None = None
         self._claimed_natural_completion_generation: int | None = None
+        self._natural_completion_finalizations: dict[int, _NaturalCompletionFinalizationSlot] = {}
         self._pending_explicit_termination_reason: str | None = None
         self._termination_generation = 0
 
@@ -930,6 +973,7 @@ class ExecutionController:
     ) -> int | None:
         handoff_snapshot: dict[str, Any] | None = None
         handoff_commit = self._input_handoff_commit
+        natural_completion_generation: int | None = None
         async with self._condition:
             generation = self._turn_generation_by_task.pop(task, None)
             self._execution_tasks.discard(task)
@@ -943,9 +987,14 @@ class ExecutionController:
                 and execution_status in _TERMINAL_TASK_STATES
                 and generation is not None
                 and generation == self._turn_generation
+                # Input boundaries may retain background work for rollover
+                # into the next request, so they are not a natural release
+                # boundary until that work drains.
+                and (execution_status != "input-required" or not self.has_managed_work())
             ):
                 self._natural_completion_generation = generation
                 self._natural_completion_delivered_generation = None
+                natural_completion_generation = generation
             self._condition.notify_all()
             self._schedule_pause_commit_locked()
             self._maybe_mark_release_ready_locked()
@@ -954,27 +1003,24 @@ class ExecutionController:
                 handoff_snapshot = self.snapshot()
         if handoff_snapshot is not None and handoff_commit is not None:
             await handoff_commit(self, handoff_snapshot)
-        return generation if natural_completion else None
+        return natural_completion_generation
 
     async def observe_state(self) -> dict[str, Any]:
         """Observe state and retry a durable finalization that previously stopped short."""
 
-        claimed_snapshot: dict[str, Any] | None = None
-        termination_generation: int | None = None
         async with self._condition:
             if self._can_claim_natural_completion_locked():
+                completion_generation = self._natural_completion_generation
+                assert completion_generation is not None
                 termination_generation = self._claim_natural_completion_locked()
-                claimed_snapshot = self.snapshot()
+                self._ensure_natural_completion_finalization_locked(
+                    completion_generation=completion_generation,
+                    termination_generation=termination_generation,
+                    claimed_snapshot=self.snapshot(),
+                )
             snapshot = self.snapshot()
             self._retry_termination_if_needed_locked()
-        if claimed_snapshot is not None:
-            await self._persist_natural_completion_claim(claimed_snapshot)
-            assert termination_generation is not None
-            self._spawn(
-                self._finish_natural_completion(termination_generation),
-                "natural-completion",
-            )
-        return snapshot
+            return snapshot
 
     async def finalize_natural_completion(
         self,
@@ -984,31 +1030,115 @@ class ExecutionController:
     ) -> dict[str, Any]:
         """Finalize a drained business turn after its response stream has been delivered."""
 
-        claimed_snapshot: dict[str, Any] | None = None
-        termination_generation: int | None = None
-        async with self._condition:
-            if task_id != self.task_id:
-                raise ExecutionControlConflictError("Execution identity does not match the current execution")
-            if completion_generation != self._natural_completion_generation:
-                snapshot = self.snapshot()
-                snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
-                return snapshot
-            self._natural_completion_delivered_generation = completion_generation
-            if self._can_claim_natural_completion_locked():
-                termination_generation = self._claim_natural_completion_locked()
-                claimed_snapshot = self.snapshot()
-            elif self.phase != "terminating" or self.termination_reason != "natural_completion":
-                snapshot = self.snapshot()
-                snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
-                return snapshot
-        if claimed_snapshot is not None:
+        deadline = asyncio.get_running_loop().time() + self.NATURAL_HANDOFF_SETTLE_TIMEOUT_SECONDS
+        while True:
+            async with self._condition:
+                if task_id != self.task_id:
+                    raise ExecutionControlConflictError("Execution identity does not match the current execution")
+                slot = self._natural_completion_finalizations.get(completion_generation)
+                if slot is not None:
+                    break
+                if completion_generation != self._natural_completion_generation:
+                    snapshot = self.snapshot()
+                    snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
+                    return snapshot
+                self._natural_completion_delivered_generation = completion_generation
+                if self._can_claim_natural_completion_locked():
+                    termination_generation = self._claim_natural_completion_locked()
+                    slot = self._ensure_natural_completion_finalization_locked(
+                        completion_generation=completion_generation,
+                        termination_generation=termination_generation,
+                        claimed_snapshot=self.snapshot(),
+                    )
+                    break
+                waiting_for_transient = self.phase == "resuming" or (
+                    self.phase == "running" and self.has_managed_work()
+                )
+                if not waiting_for_transient or self._commit_error is not None:
+                    snapshot = self.snapshot()
+                    snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
+                    return snapshot
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    snapshot = self.snapshot()
+                    snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
+                    return snapshot
+                try:
+                    await asyncio.wait_for(self._condition.wait(), timeout=remaining)
+                except TimeoutError:
+                    snapshot = self.snapshot()
+                    snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
+                    return snapshot
+        return await asyncio.shield(slot.result)
+
+    def _ensure_natural_completion_finalization_locked(
+        self,
+        *,
+        completion_generation: int,
+        termination_generation: int,
+        claimed_snapshot: dict[str, Any],
+    ) -> _NaturalCompletionFinalizationSlot:
+        slot = self._natural_completion_finalizations.get(completion_generation)
+        if slot is not None:
+            return slot
+        result: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
+        result.add_done_callback(self._consume_natural_finalization_result)
+        slot = _NaturalCompletionFinalizationSlot(
+            completion_generation=completion_generation,
+            termination_generation=termination_generation,
+            result=result,
+        )
+        self._natural_completion_finalizations[completion_generation] = slot
+        slot.task = self._spawn(
+            self._run_natural_completion_finalization(slot, claimed_snapshot),
+            f"natural-completion-{completion_generation}",
+        )
+        slot.task.add_done_callback(lambda done: self._complete_cancelled_natural_finalization(slot, done))
+        return slot
+
+    @staticmethod
+    def _consume_natural_finalization_result(result: asyncio.Future[dict[str, Any]]) -> None:
+        if not result.cancelled():
+            with suppress(BaseException):
+                result.exception()
+
+    def _complete_cancelled_natural_finalization(
+        self,
+        slot: _NaturalCompletionFinalizationSlot,
+        task: asyncio.Task[Any],
+    ) -> None:
+        if task.cancelled() and not slot.result.done():
+            slot.result.cancel()
+
+    async def _run_natural_completion_finalization(
+        self,
+        slot: _NaturalCompletionFinalizationSlot,
+        claimed_snapshot: dict[str, Any],
+    ) -> None:
+        try:
             await self._persist_natural_completion_claim(claimed_snapshot)
-            assert termination_generation is not None
-            await await_fenced(self._finish_natural_completion(termination_generation))
-        async with self._condition:
-            snapshot = self.snapshot()
-            snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = completion_generation
-            return snapshot
+            await self._finish_natural_completion(slot.termination_generation)
+            async with self._condition:
+                snapshot = self.snapshot()
+                snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = slot.completion_generation
+                if (
+                    natural_completion_durable_receipt(
+                        snapshot,
+                        context_id=self.context_id,
+                        task_id=self.task_id,
+                        completion_generation=slot.completion_generation,
+                    )
+                    is None
+                ):
+                    snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
+                if not slot.result.done():
+                    slot.result.set_result(snapshot)
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            if not slot.result.done():
+                slot.result.set_exception(exc)
+            raise
 
     async def _persist_natural_completion_claim(self, snapshot: dict[str, Any]) -> None:
         try:
@@ -1211,6 +1341,9 @@ class ExecutionController:
                     # hands ownership over before publishing its backup.
                     if self._pending_explicit_termination_reason is None:
                         self._pending_explicit_termination_reason = reason
+                    self._resolve_natural_finalization_waiter_locked(
+                        self._claimed_natural_completion_generation
+                    )
                 return self.snapshot()
             termination_generation = self._claim_termination_locked(reason)
             snapshot = self.snapshot()
@@ -1449,19 +1582,13 @@ class ExecutionController:
             and receipt.get("executionId") == self.execution_id
             and receipt.get("ownerGeneration") == self.owner_generation
             and receipt.get("businessDrained") is True
-            and (
-                receipt.get("backupDisabled") is True
-                or (
-                    isinstance(receipt.get("businessRevision"), int)
-                    and receipt.get("businessRevision", 0) > 0
-                    and isinstance(receipt.get("pendingJobId"), str)
-                    and bool(receipt.get("pendingJobId"))
-                    and receipt.get("stagedCommitted") is True
-                    and isinstance(receipt.get("snapshotGeneration"), int)
-                    and receipt.get("snapshotGeneration", 0) > 0
-                    and isinstance(receipt.get("snapshotCommitId"), str)
-                    and bool(receipt.get("snapshotCommitId"))
-                )
+            and _RecoverableInputAdmissionStore._persisted_natural_handoff_admits_replacement(
+                {
+                    **self.snapshot(),
+                    "revision": handoff_revision,
+                    "persistedRevision": handoff_revision,
+                },
+                self.context_id,
             )
             and self.termination_reason == "natural_completion"
             and self.phase in {"terminating", "terminated"}
@@ -1819,7 +1946,18 @@ class ExecutionController:
             termination_generation = self._claim_termination_locked("disconnect_timeout")
         await self._finish_termination(termination_generation)
 
+    def _resolve_natural_finalization_waiter_locked(self, completion_generation: int | None) -> None:
+        if completion_generation is None:
+            return
+        slot = self._natural_completion_finalizations.get(completion_generation)
+        if slot is None or slot.result.done():
+            return
+        snapshot = self.snapshot()
+        snapshot[NATURAL_COMPLETION_FINALIZED_GENERATION] = None
+        slot.result.set_result(snapshot)
+
     def _claim_termination_locked(self, reason: str) -> int:
+        self._resolve_natural_finalization_waiter_locked(self._claimed_natural_completion_generation)
         self._natural_completion_generation = None
         self._natural_completion_delivered_generation = None
         self._claimed_natural_completion_generation = None
@@ -2072,47 +2210,37 @@ class ExecutionController:
         """Delegate the directory copy, then publish the business handoff receipt."""
 
         coordinator = self._backup_coordinator
-        requires_legacy_backup = (
-            coordinator is None or not getattr(coordinator, "enabled", False) or self.session_id is None
-        )
-        if requires_legacy_backup:
-            business_revision = 0
-            job_id = None
-            backup_disabled = True
-            staged_committed = False
-            snapshot_generation = None
-            snapshot_commit_id = None
-        else:
-            try:
-                handoff = await coordinator.register_boundary(
-                    cwd=self.cwd,
-                    session_id=self.session_id,
-                    context_id=self.context_id,
-                    execution_id=self.execution_id,
-                    boundary="natural_completion",
-                    reason=BackupReason.TERMINAL,
-                    completion_generation=completion_generation,
-                )
-            except SessionBackupHandoffError as exc:
-                await self._commit_blocked_backup_state(
-                    "session backup job could not be persisted",
-                    exc,
-                    generation=generation,
-                )
-                return
-            business_revision = handoff.business_revision
-            job_id = handoff.job_id
-            backup_disabled = handoff.backup_disabled
-            staged_committed = handoff.staged_committed
-            snapshot_generation = handoff.snapshot_generation
-            snapshot_commit_id = handoff.snapshot_commit_id
+        if coordinator is None or not getattr(coordinator, "enabled", False) or self.session_id is None:
+            await self._perform_backup(generation)
+            return
+        try:
+            handoff = await coordinator.register_boundary(
+                cwd=self.cwd,
+                session_id=self.session_id,
+                context_id=self.context_id,
+                execution_id=self.execution_id,
+                boundary="natural_completion",
+                reason=BackupReason.TERMINAL,
+                completion_generation=completion_generation,
+            )
+        except SessionBackupHandoffError as exc:
+            await self._commit_blocked_backup_state(
+                "session backup job could not be persisted",
+                exc,
+                generation=generation,
+            )
+            return
+        business_revision = handoff.business_revision
+        job_id = handoff.job_id
+        backup_disabled = handoff.backup_disabled
+        staged_committed = handoff.staged_committed
+        snapshot_generation = handoff.snapshot_generation
+        snapshot_commit_id = handoff.snapshot_commit_id
         async with self._condition:
             if not self._owns_termination_locked(generation):
                 return
             self.backup = (
-                {"status": "pending"}
-                if requires_legacy_backup
-                else {"status": "disabled"}
+                {"status": "disabled"}
                 if backup_disabled and job_id is None
                 else {
                     "status": "disabled" if backup_disabled else "staged_committed",
@@ -2132,7 +2260,7 @@ class ExecutionController:
                 staged_committed=staged_committed,
                 snapshot_generation=snapshot_generation,
                 snapshot_commit_id=snapshot_commit_id,
-                requires_backup=requires_legacy_backup,
+                requires_backup=False,
             )
             snapshot = self.snapshot()
             snapshot["naturalHandoff"] = dict(receipt)
@@ -2150,9 +2278,8 @@ class ExecutionController:
             ):
                 return
             self._commit_error = None
-            if not requires_legacy_backup:
-                self._backup_state_committed = True
-                self._maybe_mark_release_ready_locked()
+            self._backup_state_committed = True
+            self._maybe_mark_release_ready_locked()
             logger.info(
                 "A2A execution natural handoff committed context_id=%s task_id=%s execution_id=%s "
                 "business_revision=%s job_id=%s",
@@ -2162,8 +2289,6 @@ class ExecutionController:
                 business_revision,
                 sanitize_strict_text(job_id or "none"),
             )
-        if requires_legacy_backup:
-            await self._perform_backup(generation)
 
     def _prepare_natural_handoff_locked(
         self,
@@ -2197,6 +2322,37 @@ class ExecutionController:
         self._pending_natural_handoff_revision = self.revision
         self._pending_natural_handoff_requires_backup = requires_backup
         return receipt, self.revision
+
+    def _prepare_direct_natural_handoff_locked(
+        self,
+        result: BackupResult,
+    ) -> tuple[dict[str, Any], int] | None:
+        completion_generation = self._claimed_natural_completion_generation
+        if self.termination_reason != "natural_completion" or completion_generation is None:
+            return None
+        if not result.enabled:
+            return self._prepare_natural_handoff_locked(
+                completion_generation=completion_generation,
+                business_revision=0,
+                job_id=None,
+                backup_disabled=True,
+                staged_committed=False,
+                snapshot_generation=None,
+                snapshot_commit_id=None,
+                requires_backup=False,
+            )
+        if not result.succeeded or not result.shared_committed:
+            return None
+        return self._prepare_natural_handoff_locked(
+            completion_generation=completion_generation,
+            business_revision=0,
+            job_id=None,
+            backup_disabled=False,
+            staged_committed=result.staged_committed,
+            snapshot_generation=result.generation,
+            snapshot_commit_id=result.commit_id,
+            requires_backup=False,
+        )
 
     def _promote_natural_handoff_locked(self, receipt_revision: int) -> bool:
         receipt = self._pending_natural_handoff
@@ -2284,14 +2440,23 @@ class ExecutionController:
                 return
             termination_reason = self.termination_reason
         if self._backup_service is None or self.session_id is None:
+            disabled_result = BackupResult(enabled=False)
             async with self._condition:
                 if not self._owns_termination_locked(generation):
                     return
                 self.backup = {"status": "disabled"}
                 self._backup_state_committed = False
                 self.release_ready = False
-                self.revision += 1
+                prepared_handoff = self._prepare_direct_natural_handoff_locked(disabled_result)
+                if prepared_handoff is None:
+                    receipt = None
+                    receipt_revision = None
+                    self.revision += 1
+                else:
+                    receipt, receipt_revision = prepared_handoff
                 snapshot = self.snapshot()
+                if receipt is not None:
+                    snapshot["naturalHandoff"] = dict(receipt)
                 snapshot["commitError"] = None
             try:
                 await self._persist_snapshot(snapshot)
@@ -2302,6 +2467,8 @@ class ExecutionController:
                 return
             async with self._condition:
                 if not self._owns_termination_locked(generation):
+                    return
+                if receipt_revision is not None and not self._promote_natural_handoff_locked(receipt_revision):
                     return
                 self._commit_error = None
                 self._backup_state_committed = True
@@ -2322,26 +2489,32 @@ class ExecutionController:
                     ),
                     critical=True,
                 )
-            if result.enabled and result.staged_committed and not result.shared_committed:
-                if result.generation is None or result.commit_id is None:
-                    raise RuntimeError("Staged backup cannot prove a durable local snapshot")
+            if result.enabled and (result.shared_committed or result.staged_committed):
+                if (
+                    not isinstance(result.generation, int)
+                    or isinstance(result.generation, bool)
+                    or result.generation <= 0
+                    or not isinstance(result.commit_id, str)
+                    or not result.commit_id
+                ):
+                    raise RuntimeError("Committed backup cannot prove a durable snapshot")
             succeeded = (not result.enabled) or (
                 result.succeeded and (result.shared_committed or result.staged_committed)
             )
-            backup = {
-                "status": (
-                    "disabled"
-                    if not result.enabled
-                    else (
+            backup = (
+                {"status": "disabled"}
+                if not result.enabled
+                else {
+                    "status": (
                         ("shared_committed" if result.shared_committed else "staged_committed")
                         if succeeded
                         else "blocked"
-                    )
-                ),
-                "generation": result.generation,
-                "commitId": result.commit_id,
-                "error": result.error,
-            }
+                    ),
+                    "generation": result.generation,
+                    "commitId": result.commit_id,
+                    "error": result.error,
+                }
+            )
         except Exception as exc:
             succeeded = False
             backup = {"status": "blocked", "error": str(exc)}
@@ -2354,8 +2527,18 @@ class ExecutionController:
             self.backup = backup
             self._backup_state_committed = False
             self.release_ready = False
-            self.revision += 1
+            prepared_handoff = (
+                self._prepare_direct_natural_handoff_locked(result) if succeeded and result is not None else None
+            )
+            if prepared_handoff is None:
+                receipt = None
+                receipt_revision = None
+                self.revision += 1
+            else:
+                receipt, receipt_revision = prepared_handoff
             snapshot = self.snapshot()
+            if receipt is not None:
+                snapshot["naturalHandoff"] = dict(receipt)
             snapshot["commitError"] = None
         try:
             await self._persist_snapshot(snapshot)
@@ -2367,6 +2550,8 @@ class ExecutionController:
         if succeeded:
             async with self._condition:
                 if not self._owns_termination_locked(generation):
+                    return
+                if receipt_revision is not None and not self._promote_natural_handoff_locked(receipt_revision):
                     return
                 self._commit_error = None
                 self._backup_state_committed = True

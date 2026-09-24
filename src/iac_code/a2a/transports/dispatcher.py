@@ -55,6 +55,7 @@ from iac_code.a2a.execution_control import (
     NaturalCompletionGenerationCarrier,
     RecoverableInputAdmissionCarrier,
     RecoverableInputAdmissionLease,
+    natural_completion_durable_receipt,
 )
 from iac_code.a2a.executor import IacCodeA2AExecutor, InputResponseExecutionControlConflictError
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
@@ -677,12 +678,22 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             or not isinstance(self.task_store, A2ATaskStore)
         ):
             return
-        await finalize(
+        finalized_state = await finalize(
             context_id=context_id,
             task_id=task_id,
             owner=self.task_store.owner_for_context(context),
             completion_generation=completion_generation,
         )
+        if (
+            natural_completion_durable_receipt(
+                finalized_state,
+                context_id=context_id,
+                task_id=task_id,
+                completion_generation=completion_generation,
+            )
+            is None
+        ):
+            raise RuntimeError("Natural completion did not produce an exact durable handoff receipt")
 
     async def _settle_nonstream_input_required_result(
         self,
