@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import ctypes
 import json
 import threading
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -59,6 +62,47 @@ def _controller(tmp_path: Path, *, backup_service=None) -> ExecutionController:
         backup_service=backup_service,
         execution_id="exec-1",
     )
+
+
+@pytest.mark.parametrize(
+    ("handle", "error", "expected_alive"),
+    [
+        pytest.param(None, 87, False, id="process-not-found"),
+        pytest.param(None, 5, True, id="access-denied"),
+        pytest.param(None, 8, True, id="out-of-memory"),
+        pytest.param(None, 0, True, id="missing-error"),
+        pytest.param(None, 123, True, id="unexpected-error"),
+        pytest.param(0x123456789, 0, True, id="live-process"),
+    ],
+)
+def test_pid_alive_windows_fails_closed_except_missing_process(
+    monkeypatch: pytest.MonkeyPatch,
+    handle: int | None,
+    error: int,
+    expected_alive: bool,
+) -> None:
+    from ctypes import wintypes
+
+    kernel32 = SimpleNamespace(OpenProcess=Mock(return_value=handle), CloseHandle=Mock(return_value=True))
+    win_dll = Mock(return_value=kernel32)
+    get_last_error = Mock(return_value=error)
+    # Replace this module's os reference, not the process-wide os.name: pytest's
+    # own pathlib calls must keep using the actual platform on non-Windows hosts.
+    monkeypatch.setattr(execution_control_module, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(ctypes, "WinDLL", win_dll, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", get_last_error, raising=False)
+
+    assert execution_control_module._pid_alive(12345) is expected_alive
+    win_dll.assert_called_once_with("kernel32", use_last_error=True)
+    kernel32.OpenProcess.assert_called_once_with(0x1000, False, 12345)
+    if handle:
+        kernel32.CloseHandle.assert_called_once_with(handle)
+        assert kernel32.CloseHandle.argtypes == [wintypes.HANDLE]
+        assert kernel32.CloseHandle.restype is wintypes.BOOL
+        get_last_error.assert_not_called()
+    else:
+        kernel32.CloseHandle.assert_not_called()
+        get_last_error.assert_called_once_with()
 
 
 @pytest.mark.asyncio
@@ -4084,6 +4128,51 @@ def _persist_dead_owner_claim_remnant(tmp_path: Path, *, revision: int = 0) -> d
     }
     execution_control_module.atomic_write_json(control_path, document)
     return document
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("revision", [0, 1], ids=["revision-zero", "revision-one"])
+@pytest.mark.parametrize(
+    ("task_id", "continue_input_required"),
+    [
+        pytest.param("task-2", False, id="new-task"),
+        pytest.param("task-1", False, id="same-task"),
+        pytest.param("task-1", True, id="continuation-without-admission"),
+    ],
+)
+async def test_dead_owner_claim_cannot_be_replaced_without_input_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    revision: int,
+    task_id: str,
+    continue_input_required: bool,
+) -> None:
+    # A dead publisher can leave live Bash children behind. The durable claim
+    # does not prove quiescence; only sidecar-proven input recovery may reclaim it.
+    document = _persist_dead_owner_claim_remnant(tmp_path, revision=revision)
+    monkeypatch.setattr(execution_control_module, "_pid_alive", lambda pid: False)
+    recovering = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+
+    async def begin_without_admission() -> None:
+        control = await recovering.begin_execution(
+            context_id="ctx-1",
+            task_id=task_id,
+            owner="owner-1",
+            cwd=str(tmp_path),
+            continue_input_required=continue_input_required,
+        )
+        current = asyncio.current_task()
+        assert current is not None
+        await control.detach_task(current, execution_status="input-required")
+
+    try:
+        with pytest.raises(ExecutionControlConflictError, match="active in another process"):
+            await asyncio.create_task(begin_without_admission())
+        control_path = tmp_path / "execution-control" / "ctx-1.json"
+        assert json.loads(control_path.read_text(encoding="utf-8")) == document
+        assert recovering.snapshot_for_context("ctx-1") is None
+    finally:
+        await recovering.close()
 
 
 @pytest.mark.asyncio

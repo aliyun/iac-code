@@ -72,15 +72,19 @@ def _pid_alive(pid: int) -> bool:
         from ctypes import wintypes
 
         process_query_limited_information = 0x1000
-        error_access_denied = 5
+        error_invalid_parameter = 87
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
         kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
         kernel32.OpenProcess.restype = wintypes.HANDLE
+        kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel32.CloseHandle.restype = wintypes.BOOL
         handle = kernel32.OpenProcess(process_query_limited_information, False, pid)
         if handle:
             kernel32.CloseHandle(handle)
             return True
-        return ctypes.get_last_error() == error_access_denied
+        # Only a missing process proves death; access/resource/query failures
+        # must not allow another worker to steal a still-live execution.
+        return ctypes.get_last_error() != error_invalid_parameter
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -92,8 +96,12 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _claim_remnant_admits_replacement(document: dict[str, Any]) -> bool:
-    """Admit a claim remnant whose publishing process is provably gone.
+def _claim_remnant_admits_input_recovery(document: dict[str, Any]) -> bool:
+    """Admit a dead publisher's remnant only for a sidecar-proven input wait.
+
+    The caller must already have proved the durable input wait. A dead parent
+    may leave live tool subprocesses, so this is not a general replacement rule
+    for an interrupted execution.
 
     ``claim_begin_without_admission`` publishes the next running owner before
     any state transition, so a process killed mid-turn leaves a ``running``
@@ -101,7 +109,7 @@ def _claim_remnant_admits_replacement(document: dict[str, Any]) -> bool:
     carries revision zero for a fresh claim and a later revision when the killed
     publisher had already activated one continuation.  Shape alone cannot tell
     that remnant apart from a claim another worker published moments ago, so
-    replacement additionally requires a fully persisted publication and a
+    input recovery additionally requires a fully persisted publication and a
     recorded owner process that is not this process and no longer exists.  A
     document without a usable ``ownerPid`` keeps the fail-closed behaviour.
     """
@@ -407,12 +415,7 @@ class _RecoverableInputAdmissionStore:
         return bool(
             (control.get("phase") == "terminated" and release_ready)
             or self._persisted_natural_handoff_admits_replacement(control, context_id)
-            or self._persisted_claim_remnant_admits_replacement(control)
         )
-
-    @staticmethod
-    def _persisted_claim_remnant_admits_replacement(document: dict[str, Any]) -> bool:
-        return _claim_remnant_admits_replacement(document)
 
     @staticmethod
     def _validate_natural_handoff(document: dict[str, Any], context_id: str) -> bool:
@@ -585,10 +588,9 @@ class _RecoverableInputAdmissionStore:
             return False
         phase = document.get("phase")
         if phase == "running":
-            # A claim remnant left by a killed publisher is not a live owner, so
-            # the sidecar-proven input wait may take over exactly as a
-            # replacement would.
-            return _claim_remnant_admits_replacement(document)
+            # Only the sidecar-proven input recovery path may reclaim this
+            # remnant; a dead parent alone cannot admit ordinary replacement.
+            return _claim_remnant_admits_input_recovery(document)
         if phase != "terminated":
             return False
         backup = document.get("backup")
