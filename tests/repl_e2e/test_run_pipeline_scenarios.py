@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import sys
 from pathlib import Path
@@ -3049,8 +3050,10 @@ def test_explicit_source_config_is_copied_to_isolated_repl_config(tmp_path: Path
 
     for name in names:
         assert (destination / name).read_text(encoding="utf-8") == "fixture"
-        assert (destination / name).stat().st_mode & 0o777 == 0o600
-    assert destination.stat().st_mode & 0o777 == 0o700
+        if os.name != "nt":
+            assert (destination / name).stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert destination.stat().st_mode & 0o777 == 0o700
 
 
 def test_cleanup_ledger_lookup_uses_case_isolated_config_dir(monkeypatch, tmp_path: Path) -> None:
