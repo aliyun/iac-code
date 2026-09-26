@@ -23,7 +23,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite live --jobs 4 \
   --allow-cloud-write
 ```
 
-凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 69 个：42 个 selling flow A2A/REPL 场景、8 个只读资源选择、16 个 REPL 旧场景、2 个只读 A2A 恢复场景、1 个只读云 API canary。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety` 或 `live-repl`，也可用 `--case` 指定单个用例。创建资源的现有场景脚本负责按测试归属清理；报告显示清理结果。selling 和 REPL 旧用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组；其他真实用例的界限较短。硬超时不代表清理成功，需检查报告和测试账号残留资源。
+凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 69 个：42 个 selling flow A2A/REPL 场景、8 个只读资源选择、16 个 REPL 旧场景、2 个只读 A2A 恢复场景、1 个只读云 API canary。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety` 或 `live-repl`，也可用 `--case` 指定单个用例。并行 selling 场景各用独立的 `10.250.0.0/16` 子网池，避免独立进程重复预留同一 VSwitch CIDR；原 runner 单独运行仍沿用原池。创建资源的现有场景脚本负责按测试归属清理；报告显示清理结果。selling 和 REPL 旧用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组；其他真实用例的界限较短。硬超时不代表清理成功，需检查报告和测试账号残留资源。
 
 ## CI 接入
 

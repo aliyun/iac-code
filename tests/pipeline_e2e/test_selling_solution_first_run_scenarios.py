@@ -78,7 +78,9 @@ def test_selection_deduplicates_and_keeps_registry_order(runner: ModuleType) -> 
 def test_parser_defaults_to_concurrency_three_and_smoke(runner: ModuleType) -> None:
     args = runner.parse_args([])
     assert args.concurrency == 3
+    assert args.cidr_pool == ""
     assert [item.case_id for item in runner.select_scenarios(args.scenario, args.suite)] == ["A01", "R01", "W01"]
+    assert runner.parse_args(["--cidr-pool", "10.250.4.0/22"]).cidr_pool == "10.250.4.0/22"
     with pytest.raises(SystemExit):
         runner.parse_args(["--concurrency", "0"])
 

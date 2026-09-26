@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import ipaddress
 import json
 import os
 import shutil
@@ -113,6 +114,9 @@ PERMISSION_CASES = (
 )
 CASES = FAST_CASES + EXECUTION_CASES + PERMISSION_CASES
 LIVE_SCRIPT = "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py"
+SELLING_CIDR_POOLS = tuple(str(pool) for pool in ipaddress.IPv4Network("10.250.0.0/16").subnets(new_prefix=22))
+if len(SELLING_SCENARIOS) > len(SELLING_CIDR_POOLS):
+    raise ValueError("selling E2E scenario count exceeds isolated CIDR pool count")
 
 
 def _selling_group(spec: Any) -> str:
@@ -124,11 +128,12 @@ def _selling_group(spec: Any) -> str:
 
 LIVE_CASES = tuple(
     Case(
-        "ssf-" + spec.name, LIVE_SCRIPT, ("--scenario", spec.name), 2700, "live",
+        "ssf-" + spec.name, LIVE_SCRIPT,
+        ("--scenario", spec.name, "--cidr-pool", SELLING_CIDR_POOLS[index]), 2700, "live",
         cloud_write=spec.cloud_write, cleanup_grace=900,
         resource_lock=spec.resource_lock, group=_selling_group(spec),
     )
-    for spec in SELLING_SCENARIOS
+    for index, spec in enumerate(SELLING_SCENARIOS)
     if spec.surface.value not in {"web", "desktop"}
 ) + tuple(
     Case(

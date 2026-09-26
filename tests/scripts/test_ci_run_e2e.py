@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import sys
@@ -34,7 +35,11 @@ def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> No
     assert len(unsupported) == 3
     assert not unsupported.intersection(case.name for case in live)
     assert all(case.script != "scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py" for case in live)
-    assert len([case for case in live if case.name.startswith("ssf-")]) == 42
+    selling = [case for case in live if case.name.startswith("ssf-")]
+    assert len(selling) == 42
+    pools = [ipaddress.IPv4Network(case.args[case.args.index("--cidr-pool") + 1]) for case in selling]
+    assert len(set(pools)) == len(selling)
+    assert all(pool.subnet_of(ipaddress.IPv4Network("10.250.0.0/16")) for pool in pools)
 
 
 def test_missing_or_empty_stdout_summary_is_failure_data(tmp_path: Path) -> None:

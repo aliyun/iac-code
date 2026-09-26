@@ -405,6 +405,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cleanup-vpc-cidr", default="")
     parser.add_argument("--cleanup-zone-id", default="")
     parser.add_argument("--occupied-cidr", action="append", default=[])
+    parser.add_argument("--cidr-pool", default="", help="Override the CIDR pool reserved for this runner process.")
     return parser.parse_args(argv)
 
 
@@ -5310,7 +5311,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else []
     )
     occupied_cidrs = [*args.occupied_cidr, *inherited_occupied]
-    services = RunnerServices(cidrs=CidrAllocator(occupied_cidrs, args.cleanup_vpc_cidr or "10.250.0.0/16"))
+    cidr_pool = args.cidr_pool or args.cleanup_vpc_cidr or "10.250.0.0/16"
+    services = RunnerServices(cidrs=CidrAllocator(occupied_cidrs, cidr_pool))
     interrupted = False
     previous_handlers: dict[int, Any] = {}
 
