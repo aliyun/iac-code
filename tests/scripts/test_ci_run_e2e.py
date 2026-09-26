@@ -90,7 +90,8 @@ def test_summary_failure_keeps_failed_checks_and_log_links(tmp_path: Path, monke
     script.write_text(
         "import json, pathlib, sys\n"
         "d = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
-        "(d / 'summary.json').write_text(json.dumps({'passed': False, 'checks': {'step one': False}}), encoding='utf-8')\n"
+        "summary = {'passed': False, 'checks': {'step one': False}}\n"
+        "(d / 'summary.json').write_text(json.dumps(summary), encoding='utf-8')\n"
         "print('fixture failure')\n",
         encoding="utf-8",
     )
