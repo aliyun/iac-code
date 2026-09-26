@@ -7,7 +7,7 @@
 在 iac-code 仓库根目录：
 
 ```bash
-uv sync --locked --extra a2a --group dev
+uv sync --locked --extra a2a --extra agui --group dev
 uv run --no-sync python scripts/ci/run_e2e.py --suite fast --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --suite full --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --list --suite all

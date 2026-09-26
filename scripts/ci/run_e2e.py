@@ -170,7 +170,7 @@ EXCLUDED = (
     ),
     (
         "A2A legacy cloud-write recovery (except two read-only step4 cases)",
-        "old runner lacks bounded ownership teardown; its rollback cleanup cases deliberately retain a second ROS Stack",
+        "old runner lacks ownership teardown; rollback cleanup cases deliberately retain a second ROS Stack",
     ),
     ("StartChat permission and Qoder reconnect", "real cloud/LLM, Qoder installation and mutable local state"),
     ("Web browser contract", "requires provisioned Chrome and playwright-core; API coverage is listed separately"),
@@ -441,7 +441,7 @@ def _reason(result: dict[str, Any]) -> str:
         first_lines = [str(note).splitlines()[0] for note in result["notes"][:3]]
         reason = "；".join(first_lines)[:240]
     elif result["summary"] is None:
-        reason = "未生成有效的 summary.json；查看 stdout/stderr 和服务日志"
+        reason = "未生成有效场景摘要；" + ("查看 CI 作业日志" if result["live"] else "查看 stdout/stderr 和服务日志")
     else:
         reason = "退出码 {}；查看详细日志".format(result["returnCode"])
     if result["live"] and result["cleanupStatus"] == "unverified":
