@@ -156,6 +156,30 @@ def test_default_recovery_prompt_targets_previous_real_user_question() -> None:
     assert "更早的方案选择消息" in runner.DEFAULT_RECOVERY_PROMPT
 
 
+def test_ci_recovery_records_run_owned_stacks_and_constrains_create_prompt(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--scenario", "scenario1", "--run-dir", str(tmp_path), "--ci-teardown"])
+    harness = runner.ScenarioHarness(args, scenario="scenario1")
+    manifest = json.loads((tmp_path / "owned-stacks.json").read_text(encoding="utf-8"))
+
+    assert manifest["stackNames"] == harness.owned_stack_names
+    assert manifest["stackNames"] == ["iac-e2e-" + manifest["runId"] + "-main"]
+    assert manifest["stackNames"][0] in harness._ci_owned_prompt(args.initial_prompt)
+    assert harness._ci_owned_prompt(args.recovery_prompt) == args.recovery_prompt
+
+
+def test_ci_rollback_cleanup_tracks_both_stack_names(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args([
+        "--scenario", "rollback-step5-cleanup", "--run-dir", str(tmp_path), "--ci-teardown",
+    ])
+    harness = runner.ScenarioHarness(args, scenario="rollback-step5-cleanup")
+
+    assert len(harness.owned_stack_names) == 2
+    assert harness.owned_stack_names[0].endswith("-first")
+    assert harness.owned_stack_names[1].endswith("-second")
+
+
 def test_iac_code_web_2c4g_evidence_requires_structured_cpu_and_memory() -> None:
     runner = _load_runner()
 

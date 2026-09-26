@@ -14,8 +14,10 @@ Prerequisites:
     - LLM credentials configured
 """
 
+import argparse
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -23,14 +25,16 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 PASS = "[PASS]"
 FAIL = "[FAIL]"
 INFO = "[INFO]"
 
 A2A_HOST = "127.0.0.1"
-A2A_PORT = 41299  # Use non-default port to avoid conflicts
+A2A_PORT = 41299
 A2A_URL = f"http://{A2A_HOST}:{A2A_PORT}"
+A2A_WORKSPACE = "."
 TIMEOUT_SECONDS = 300
 
 
@@ -104,13 +108,13 @@ def start_a2a_server(config_path: str) -> subprocess.Popen:
     return proc
 
 
-def run_a2a_client_call(prompt: str, *, stream: bool = False, cwd: str = ".") -> subprocess.CompletedProcess:
+def run_a2a_client_call(prompt: str, *, stream: bool = False, cwd: str | None = None) -> subprocess.CompletedProcess:
     cmd = [
         sys.executable, "-m", "iac_code.cli.main",
         "a2a-client", "call",
         "--url", A2A_URL,
         "--prompt", prompt,
-        "--cwd", cwd,
+        "--cwd", cwd or A2A_WORKSPACE,
         "--timeout", str(TIMEOUT_SECONDS),
     ]
     if stream:
@@ -236,12 +240,25 @@ def test_call_stream(checks: dict[str, bool]) -> bool:
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-dir", type=Path)
+    args = parser.parse_args()
+    global A2A_PORT, A2A_URL, A2A_WORKSPACE
+    if args.run_dir is not None:
+        args.run_dir.mkdir(parents=True, exist_ok=True)
+        workspace = args.run_dir / "workspace"
+        workspace.mkdir(exist_ok=True)
+        A2A_WORKSPACE = str(workspace)
+    with socket.socket() as port_socket:
+        port_socket.bind((A2A_HOST, 0))
+        A2A_PORT = port_socket.getsockname()[1]
+    A2A_URL = f"http://{A2A_HOST}:{A2A_PORT}"
     print("=" * 60)
     print("  iac-code A2A Mode Windows Compatibility Test")
     print("=" * 60)
 
-    # Create A2A config file (enable auto-approve to avoid permission blocking)
-    config_content = "auto-approve-permissions: true\n"
+    # A template-only smoke must not auto-approve cloud tool use.
+    config_content = "auto-approve-permissions: false\n"
     config_fd, config_path = tempfile.mkstemp(suffix=".yml", prefix="a2a_test_")
     os.write(config_fd, config_content.encode("utf-8"))
     os.close(config_fd)
@@ -314,6 +331,11 @@ def main():
     else:
         print(f"{FAIL} Some tests failed, check output above")
 
+    if args.run_dir is not None:
+        (args.run_dir / "summary.json").write_text(
+            json.dumps({"passed": all_pass, "checks": checks}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     sys.exit(0 if all_pass else 1)
 
 

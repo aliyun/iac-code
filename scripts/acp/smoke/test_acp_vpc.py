@@ -14,18 +14,21 @@ Prerequisites:
     - LLM credentials configured
 """
 
+import argparse
 import json
 import os
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 PASS = "[PASS]"
 FAIL = "[FAIL]"
 INFO = "[INFO]"
 
 TIMEOUT_SECONDS = 300
+ACP_WORKSPACE = "."
 
 
 def make_jsonrpc(method: str, params: dict, id: int) -> str:
@@ -48,6 +51,7 @@ class ACPStdioClient:
         self.notifications: list[dict] = []
         self._reader_thread: threading.Thread | None = None
         self._stop = False
+        self.permission_requests = 0
 
     def start(self):
         cmd = [sys.executable, "-m", "iac_code.cli.main", "acp"]
@@ -88,21 +92,22 @@ class ACPStdioClient:
                 break
 
     def _handle_server_request(self, msg: dict):
-        """Auto-approve permission requests and other server-to-client requests."""
+        """Deny permission requests; this smoke must only generate a template."""
         method = msg["method"]
         request_id = msg["id"]
         if method == "session/request_permission":
+            self.permission_requests += 1
             params = msg.get("params", {})
             tool_call = params.get("toolCall", params.get("tool_call", {}))
             title = tool_call.get("title", "unknown")
-            print(f"{INFO} [Permission request] id={request_id}, tool={title} -> auto-approved")
+            print(f"{INFO} [Permission request] id={request_id}, tool={title} -> denied for template-only smoke")
             response = json.dumps({
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "result": {
                     "outcome": {
                         "outcome": "selected",
-                        "optionId": "allow_once",
+                        "optionId": "deny",
                     }
                 },
             })
@@ -188,7 +193,7 @@ def test_acp_lifecycle():
 
         # 2. new_session
         print(f"\n{INFO} Step 2: Send new_session request")
-        cwd = os.path.abspath(".")
+        cwd = os.path.abspath(ACP_WORKSPACE)
         client.send(make_jsonrpc("session/new", {"cwd": cwd, "mcpServers": []}, id=2))
 
         session_resp = client.wait_response(2, timeout=30)
@@ -219,7 +224,12 @@ def test_acp_lifecycle():
         client.notifications.clear()
         client.send(make_jsonrpc("session/prompt", {
             "sessionId": session_id,
-            "prompt": [{"type": "text", "text": "帮我生成一个创建VPC的ROS模板，VPC名称为test-vpc，CIDR为172.16.0.0/12，只输出JSON模板"}],
+            "prompt": [
+                {
+                    "type": "text",
+                    "text": "帮我生成一个创建VPC的ROS模板，VPC名称为test-vpc，CIDR为172.16.0.0/12，只输出JSON模板",
+                }
+            ],
         }, id=3))
 
         prompt_resp = client.wait_response(3, timeout=TIMEOUT_SECONDS)
@@ -261,6 +271,7 @@ def test_acp_lifecycle():
         checks["text contains VPC-related content"] = any(
             kw in combined_text.upper() for kw in ["VPC", "TEMPLATE", "CIDR"]
         )
+        checks["no tool permission requested"] = client.permission_requests == 0
 
         # 4. close_session
         print(f"\n{INFO} Step 4: Close session")
@@ -283,7 +294,7 @@ def test_acp_lifecycle():
             print(f"  {stderr[:3000]}")
 
     # Summary
-    print(f"\n--- Check Items ---")
+    print("\n--- Check Items ---")
     all_pass = True
     for desc, ok in checks.items():
         print(f"  {'✓' if ok else '✗'} {desc}")
@@ -295,6 +306,14 @@ def test_acp_lifecycle():
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-dir", type=Path)
+    args = parser.parse_args()
+    if args.run_dir is not None:
+        args.run_dir.mkdir(parents=True, exist_ok=True)
+        global ACP_WORKSPACE
+        ACP_WORKSPACE = str(args.run_dir / "workspace")
+        Path(ACP_WORKSPACE).mkdir(exist_ok=True)
     print("=" * 60)
     print("  iac-code ACP Mode Windows Compatibility Test")
     print("=" * 60)
@@ -307,6 +326,12 @@ def main():
     else:
         print(f"{FAIL} ACP test failed, check output above")
 
+    if args.run_dir is not None:
+        (args.run_dir / "summary.json").write_text(
+            json.dumps({"passed": passed, "checks": {"ACP lifecycle": passed}}, ensure_ascii=False, indent=2)
+            + "\n",
+            encoding="utf-8",
+        )
     sys.exit(0 if passed else 1)
 
 

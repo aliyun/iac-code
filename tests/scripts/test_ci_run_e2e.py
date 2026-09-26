@@ -25,9 +25,18 @@ def test_default_selection_is_allowlisted_and_credential_free() -> None:
 def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> None:
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
-    assert len(full) == 41
-    assert len(live) == 69
-    assert len(run_e2e.CASES) == 110
+    assert len(full) == 42
+    assert len(live) == 103
+    assert len(run_e2e.CASES) == 145
+    assert {case.name for case in live if case.live_runner.startswith("legacy_a2a")} == {
+        "a2a-recovery-" + name for name in run_e2e.A2A_RECOVERY_SCENARIOS
+    }
+    assert {case.name for case in live if case.live_runner == "smoke"} == {
+        "smoke-a2a-vpc", "smoke-acp-vpc", "smoke-headless-vpc"
+    }
+    fault = next(case for case in live if case.name == "a2a-recovery-fault-after-snapshot")
+    assert "--deterministic" in fault.args
+    assert all("--ci-teardown" in case.args for case in live if case.live_runner == "legacy_a2a")
     unsupported = {
         "ssf-" + spec.name for spec in run_e2e.SELLING_SCENARIOS
         if spec.surface.value in {"web", "desktop"}
@@ -55,6 +64,10 @@ def test_live_cleanup_status_is_reported_from_teardown_checks() -> None:
     assert run_e2e._live_cleanup_status(case, {"checks": {"teardown: stacks deleted": True}}) == "completed"
     assert run_e2e._live_cleanup_status(case, {"checks": {"teardown: stacks deleted": False}}) == "failed"
     assert run_e2e._live_cleanup_status(case, None) == "unverified"
+    legacy = next(case for case in run_e2e.LIVE_CASES if case.live_runner == "legacy_a2a")
+    assert run_e2e._live_cleanup_status(legacy, {"cleanup_status": "completed"}) == "completed"
+    smoke = next(case for case in run_e2e.LIVE_CASES if case.live_runner == "smoke")
+    assert run_e2e._live_cleanup_status(smoke, None) == "not-needed"
 
 
 def test_live_requires_complete_credential_source_and_write_opt_in(tmp_path: Path) -> None:
@@ -191,3 +204,72 @@ def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
     assert result["command"] == [case.name]
     assert "fixture-secret" not in json.dumps(result)
     assert (tmp_path / "report" / "runs" / case.name / "config" / ".credentials.yml").is_file()
+
+
+def test_smoke_adapter_has_model_config_but_no_cloud_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "smoke.py"
+    script.write_text(
+        "import json, os, sys\n"
+        "from pathlib import Path\n"
+        "run_dir = Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
+        "config = Path(os.environ['IAC_CODE_CONFIG_DIR'])\n"
+        "assert (config / '.credentials.yml').read_text() == 'model-fixture'\n"
+        "assert (config / 'settings.yml').is_file()\n"
+        "assert not (config / '.cloud-credentials.yml').exists()\n"
+        "assert Path(os.environ['HOME']).is_relative_to(run_dir)\n"
+        "assert Path(os.environ['USERPROFILE']).is_relative_to(run_dir)\n"
+        "assert '--allow-real-cloud' not in sys.argv\n"
+        "(run_dir / 'summary.json').write_text(json.dumps({'passed': True, 'checks': {'ok': True}}))\n",
+        encoding="utf-8",
+    )
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / ".credentials.yml").write_text("model-fixture", encoding="utf-8")
+    (source / ".cloud-credentials.yml").write_text("cloud-fixture", encoding="utf-8")
+    (source / "settings.yml").write_text("settings-fixture", encoding="utf-8")
+    monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
+    case = run_e2e.Case("smoke-vpc-fixture", "smoke.py", (), 5, "live", live_runner="smoke")
+
+    result = run_e2e.run_case(case, tmp_path / "report", source)
+
+    assert result["status"] == "passed"
+    assert result["cleanupStatus"] == "not-needed"
+    assert "cloud-fixture" not in json.dumps(result)
+
+
+def test_legacy_a2a_hard_timeout_starts_independent_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "hang_with_stack.py"
+    script.write_text(
+        "import pathlib, sys, time\n"
+        "run_dir = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
+        "(run_dir / 'owned-stacks.json').write_text('fixture')\n"
+        "time.sleep(60)\n",
+        encoding="utf-8",
+    )
+    cleanup = tmp_path / "scripts" / "a2a" / "e2e" / "cleanup_owned_stacks.py"
+    cleanup.parent.mkdir(parents=True)
+    cleanup.write_text(
+        "import pathlib, sys\n"
+        "run_dir = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
+        "(run_dir / 'cleanup-called').write_text('yes')\n",
+        encoding="utf-8",
+    )
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in (".credentials.yml", ".cloud-credentials.yml", "settings.yml"):
+        (source / name).write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
+    case = run_e2e.Case(
+        "legacy-timeout", "hang_with_stack.py", (), 1, "live", cloud_write=True,
+        cleanup_grace=0, live_runner="legacy_a2a",
+    )
+
+    result = run_e2e.run_case(case, tmp_path / "report", source)
+
+    assert result["status"] == "timeout"
+    assert result["cleanupStatus"] == "completed"
+    assert (tmp_path / "report" / "runs" / case.name / "cleanup-called").read_text() == "yes"

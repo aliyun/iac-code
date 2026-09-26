@@ -27,6 +27,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.a2a.e2e.execution_control.run_execution_control_scenarios import SCENARIO_MODES  # noqa: E402
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import SCENARIOS as SELECTOR_SCENARIOS  # noqa: E402
+from scripts.a2a.e2e.run_recovery_scenarios import _SCENARIOS as A2A_RECOVERY_SCENARIOS  # noqa: E402
 from scripts.pipeline.e2e.selling_solution_first.run_scenarios import SCENARIOS as SELLING_SCENARIOS  # noqa: E402
 from scripts.repl.e2e.run_pipeline_scenarios import _SCENARIOS as REPL_PIPELINE_SCENARIOS  # noqa: E402
 
@@ -47,6 +48,7 @@ class Case:
 
 
 FAST_CASES = (
+    Case("a2a-recovery-contract", "scripts/a2a/e2e/run_contract_scenarios.py", ("--scenario", "e3a-recovery"), 480),
     Case("a2a-success-contract", "scripts/a2a/e2e/run_contract_scenarios.py", ("--scenario", "e3b-success"), 480),
     Case("a2a-cancel-contract", "scripts/a2a/e2e/run_contract_scenarios.py", ("--scenario", "e3b-cancel"), 480),
     Case("repl-normal-contract", "scripts/repl/e2e/run_contract_scenarios.py", (), 360),
@@ -157,29 +159,38 @@ LIVE_CASES = tuple(
         live_runner="legacy_a2a_readonly", group="readonly",
     )
     for scenario in ("redaction-step4", "iac-code-web-2c4g-step4")
+) + tuple(
+    Case(
+        "a2a-recovery-" + scenario, "scripts/a2a/e2e/run_recovery_scenarios.py",
+        ("--scenario", scenario, "--ci-teardown") +
+        (("--deterministic",) if scenario == "fault-after-snapshot" else ()),
+        2700, "live", cloud_write=True,
+        cleanup_grace=900, live_runner="legacy_a2a", group="legacy",
+    )
+    for scenario in A2A_RECOVERY_SCENARIOS
+    if scenario not in {"redaction-step4", "iac-code-web-2c4g-step4"}
 ) + (
     Case(
         "repl-aliyun-readonly-canary", "scripts/repl/e2e/run_real_aliyun_contract_canary.py",
         (), 900, "live", cleanup_grace=60, live_runner="canary", group="readonly",
     ),
+) + (
+    Case("smoke-a2a-vpc", "scripts/a2a/smoke/test_a2a_vpc.py", (), 800, "live", live_runner="smoke", group="smoke"),
+    Case("smoke-acp-vpc", "scripts/acp/smoke/test_acp_vpc.py", (), 450, "live", live_runner="smoke", group="smoke"),
+    Case(
+        "smoke-headless-vpc", "scripts/headless/smoke/test_headless_vpc.py",
+        (), 1050, "live", live_runner="smoke", group="smoke",
+    ),
 )
 CASES += LIVE_CASES
 EXCLUDED = (
     (
-        "A2A e3a-recovery deterministic contract",
-        "isolated local runs consistently lack the expected persisted aliyun_api ToolResult; repair fixture before CI",
-    ),
-    (
         "selling_solution_first Web and Desktop cases (W01, W02, D01)",
         "require provisioned Chrome or a native Desktop package and display host",
     ),
-    (
-        "A2A legacy cloud-write recovery (except two read-only step4 cases)",
-        "old runner lacks ownership teardown; rollback cleanup cases deliberately retain a second ROS Stack",
-    ),
-    ("StartChat permission and Qoder reconnect", "real cloud/LLM, Qoder installation and mutable local state"),
+    ("StartChat permission wait", "depends on an external StartChat endpoint and mutable permission state"),
+    ("Qoder MCP reconnect", "requires a Qoder installation and its local MCP state"),
     ("Web browser contract", "requires provisioned Chrome and playwright-core; API coverage is listed separately"),
-    ("ACP/headless/VPC smoke scripts", "lack run-dir summaries and bounded cleanup for unattended CI"),
 )
 
 
@@ -189,7 +200,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--suite",
         choices=(
             "fast", "full", "live", "live-core", "live-recovery", "live-multimodal",
-            "live-readonly", "live-legacy", "live-safety", "live-repl", "all",
+            "live-readonly", "live-legacy", "live-safety", "live-repl", "live-smoke", "all",
         ),
         default="fast",
     )
@@ -286,10 +297,12 @@ def _read_summary(case_dir: Path, source: str) -> dict[str, Any] | None:
 
 
 def _live_cleanup_status(case: Case, summary: dict[str, Any] | None) -> str:
-    if case.live_runner in {"selector", "canary", "legacy_a2a_readonly"}:
+    if case.live_runner in {"selector", "canary", "legacy_a2a_readonly", "smoke"}:
         return "not-needed"
     if summary is None:
         return "unverified"
+    if case.live_runner == "legacy_a2a":
+        return str(summary.get("cleanup_status") or "unverified")
     if case.live_runner == "repl":
         checks = summary.get("checks")
         if isinstance(checks, dict):
@@ -358,11 +371,16 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
             raise ValueError("live case requires credential source directory")
         config_dir = case_dir / "config"
         config_dir.mkdir(mode=0o700, exist_ok=True)
-        for filename in (".credentials.yml", ".cloud-credentials.yml", "settings.yml"):
+        filenames = (
+            (".credentials.yml", "settings.yml") if case.live_runner == "smoke"
+            else (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
+        )
+        for filename in filenames:
             destination = config_dir / filename
             shutil.copyfile(credential_source_dir / filename, destination)
             destination.chmod(0o600)
-        command.append("--allow-real-cloud")
+        if case.live_runner != "smoke":
+            command.append("--allow-real-cloud")
         if case.live_runner == "selling":
             command.extend(
                 ("--concurrency", "1", "--inherit-settings", "--credential-source-dir", str(credential_source_dir))
@@ -375,8 +393,15 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
             command.extend(("--source-config-dir", str(credential_source_dir)))
         elif case.live_runner == "repl":
             command.extend(("--source-config-dir", str(config_dir)))
-    if case in FAST_CASES or case.suite == "live":
+    if case in FAST_CASES or (case.suite == "live" and case.live_runner != "smoke"):
         command.extend(("--python", sys.executable))
+    case_env = _case_env(case_dir)
+    if case.live_runner == "smoke":
+        isolated_home = case_dir / "home"
+        isolated_home.mkdir(mode=0o700, exist_ok=True)
+        case_env["HOME"] = str(isolated_home)
+        case_env["USERPROFILE"] = str(isolated_home)
+        case_env["XDG_CONFIG_HOME"] = str(isolated_home / ".config")
     started = time.monotonic()
     timed_out = False
     error = ""
@@ -386,7 +411,7 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
             process = subprocess.Popen(
                 command,
                 cwd=REPO_ROOT,
-                env=_case_env(case_dir),
+                env=case_env,
                 stdout=stdout,
                 stderr=stderr,
                 start_new_session=os.name != "nt",
@@ -401,13 +426,33 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
                 return_code = process.returncode
     except (OSError, subprocess.SubprocessError) as exc:
         error = "{}: {}".format(type(exc).__name__, exc)
+    fallback_cleanup_status: str | None = None
+    if timed_out and case.live_runner == "legacy_a2a" and (script_dir / "owned-stacks.json").is_file():
+        cleanup_command = [
+            sys.executable, str(REPO_ROOT / "scripts/a2a/e2e/cleanup_owned_stacks.py"),
+            "--run-dir", str(script_dir), "--timeout", "840",
+        ]
+        try:
+            with (case_dir / "cleanup.stdout.log").open("wb") as stdout, (
+                case_dir / "cleanup.stderr.log"
+            ).open("wb") as stderr:
+                cleanup_process = subprocess.run(
+                    cleanup_command, cwd=REPO_ROOT, env=_case_env(case_dir),
+                    stdout=stdout, stderr=stderr, timeout=900, check=False,
+                )
+            fallback_cleanup_status = "completed" if cleanup_process.returncode == 0 else "failed"
+        except (OSError, subprocess.SubprocessError):
+            fallback_cleanup_status = "failed"
     source = "stdout.log" if case.result_source == "stdout" else case.result_source
     if script_dir != case_dir and source != "stdout.log":
         source = str(script_dir.relative_to(case_dir) / source)
     summary = _read_summary(case_dir, source)
     summary_passed = summary is not None and (summary.get("passed") is True or summary.get("status") == "passed")
     passed = return_code == 0 and summary_passed and not timed_out and not error
-    cleanup_status = _live_cleanup_status(case, summary) if case.suite == "live" else None
+    cleanup_status = (
+        fallback_cleanup_status or _live_cleanup_status(case, summary)
+        if case.suite == "live" else None
+    )
     if case.suite == "live":
         summary = _public_live_summary(summary, cleanup_status)
         error = "" if not error else "runner failed to start; inspect CI job log"

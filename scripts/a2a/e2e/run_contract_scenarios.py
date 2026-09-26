@@ -33,7 +33,10 @@ from scripts.repl.e2e.deterministic_openai_server import (  # noqa: E402
 HEADER_SENTINEL = "e2e-internal-header-value"
 TELEMETRY_MODEL = "other"
 SCENARIOS = {
-    "e3a-recovery": "fault-after-snapshot",
+    # A crash in the first running snapshot is deliberately fenced by execution
+    # control. Recover after a completed turn instead, where the persisted task
+    # has a safe handoff and the Aliyun tool result is available to audit.
+    "e3a-recovery": "scenario1",
     "e3b-success": "contract-graceful-success",
     "e3b-cancel": "contract-graceful-cancel",
 }

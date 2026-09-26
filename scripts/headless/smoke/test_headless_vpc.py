@@ -14,17 +14,20 @@ Prerequisites:
     - LLM credentials configured (ran iac-code and executed /auth, or set env vars)
 """
 
+import argparse
 import json
 import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 PROMPT = "帮我生成一个创建VPC的ROS模板，VPC名称为test-vpc，CIDR为172.16.0.0/12，只输出JSON模板内容，不要解释"
 
 PASS = "[PASS]"
 FAIL = "[FAIL]"
 INFO = "[INFO]"
+HEADLESS_WORKSPACE = "."
 
 
 def run_headless(output_format: str, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
@@ -33,7 +36,7 @@ def run_headless(output_format: str, extra_args: list[str] | None = None) -> sub
         "-p", PROMPT,
         "--output-format", output_format,
         "--max-turns", "20",
-        "--permission-mode", "bypass_permissions",
+        "--permission-mode", "dont_ask",
     ]
     if extra_args:
         cmd.extend(extra_args)
@@ -45,6 +48,7 @@ def run_headless(output_format: str, extra_args: list[str] | None = None) -> sub
     start = time.time()
     result = subprocess.run(
         cmd,
+        cwd=HEADLESS_WORKSPACE,
         capture_output=True,
         text=True,
         timeout=300,
@@ -77,7 +81,9 @@ def test_text_output():
 
     checks = {
         "has output content": len(stdout) > 10,
-        "contains VPC-related content": any(kw in stdout.upper() for kw in ["VPC", "VPCNAME", "CIDRBLOCK", "ROSTEMPLATE"]),
+        "contains VPC-related content": any(
+            kw in stdout.upper() for kw in ["VPC", "VPCNAME", "CIDRBLOCK", "ROSTEMPLATE"]
+        ),
     }
 
     all_pass = True
@@ -150,7 +156,7 @@ def test_stream_json_output():
         print(f"{FAIL} stdout is empty")
         return False
 
-    lines = [l for l in stdout.split("\n") if l.strip()]
+    lines = [line for line in stdout.split("\n") if line.strip()]
     print(f"{INFO} Total {len(lines)} NDJSON lines")
 
     parsed_count = 0
@@ -184,6 +190,14 @@ def test_stream_json_output():
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--run-dir", type=Path)
+    args = parser.parse_args()
+    if args.run_dir is not None:
+        args.run_dir.mkdir(parents=True, exist_ok=True)
+        global HEADLESS_WORKSPACE
+        HEADLESS_WORKSPACE = str(args.run_dir / "workspace")
+        Path(HEADLESS_WORKSPACE).mkdir(exist_ok=True)
     print("=" * 60)
     print("  iac-code Headless Mode Windows Compatibility Test")
     print("=" * 60)
@@ -210,6 +224,11 @@ def main():
     else:
         print(f"{FAIL} Some tests failed, check output above")
 
+    if args.run_dir is not None:
+        (args.run_dir / "summary.json").write_text(
+            json.dumps({"passed": all_pass, "checks": results}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     sys.exit(0 if all_pass else 1)
 
 

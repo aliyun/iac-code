@@ -529,6 +529,17 @@ class ScenarioHarness:
         self.server_cwd = str(Path(args.server_cwd).expanduser().resolve())
         self.run_dir = _scenario_run_dir(args, scenario)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_id = uuid.uuid4().hex[:12]
+        self.owned_stack_names = (
+            [_cleanup_stack_name(self, label) for label in ("first", "second")]
+            if scenario in {"rollback-step5-cleanup", "rollback-step5-cleanup-recovery"}
+            else [_cleanup_stack_name(self, "main")]
+        )
+        if getattr(args, "ci_teardown", False):
+            _write_json(
+                self.run_dir / "owned-stacks.json",
+                {"runId": self.run_id, "stackNames": self.owned_stack_names},
+            )
         self.notes: list[str] = []
         self.backup_root: Path | None = None
         self.image_fixtures = TextImageFixtureStore(self.run_dir / "image-fixtures")
@@ -590,6 +601,7 @@ class ScenarioHarness:
         self.context_id = ""
         self.pipeline_task_id = ""
         self.checks: dict[str, bool] = {}
+        self.cleanup_status = "not-needed"
         self.summaries: dict[str, Any] = {}
         self.snapshots: dict[str, Any] = {}
 
@@ -643,6 +655,7 @@ class ScenarioHarness:
         task_id: str | None = None,
         images: list[dict[str, Any]] | None = None,
     ) -> StreamSummary:
+        prompt = self._ci_owned_prompt(prompt)
         summary = stream_message(
             server_url=self.server_url,
             cwd=self.cwd,
@@ -687,6 +700,7 @@ class ScenarioHarness:
         images: list[dict[str, Any]] | None = None,
         wait_for_identity: bool = True,
     ) -> BackgroundStream:
+        prompt = self._ci_owned_prompt(prompt)
         stream = BackgroundStream(
             server_url=self.server_url,
             cwd=self.cwd,
@@ -710,6 +724,22 @@ class ScenarioHarness:
             self._remember_identity(stream.summary)
         self.summaries[name] = stream.summary
         return stream
+
+    def _ci_owned_prompt(self, prompt: str) -> str:
+        if not getattr(self.args, "ci_teardown", False) or self.scenario in {
+            "rollback-step5-cleanup", "rollback-step5-cleanup-recovery",
+        }:
+            return prompt
+        if prompt not in {
+            self.args.initial_prompt, self.args.selection_prompt, ASK_TRIGGER_PROMPT,
+            ASK_FIRST_ANSWER, ASK_SECOND_ANSWER, ROLLBACK_PROMPT, IMAGE_TEXT_PROMPT,
+        }:
+            return prompt
+        stack_name = self.owned_stack_names[0]
+        return (
+            prompt + "\n\nE2E 资源归属约束：如果本轮创建 ROS Stack，StackName 必须精确等于 `"
+            + stack_name + "`；不得复用已有 Stack。"
+        )
 
     def start_stream_image_text(
         self,
@@ -837,6 +867,7 @@ class ScenarioHarness:
         )
         payload = {
             **asdict(result),
+            "cleanup_status": self.cleanup_status,
             "streams": {name: asdict(summary) for name, summary in self.summaries.items()},
             "snapshots": self.snapshots,
         }
@@ -888,6 +919,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Named deterministic fault point, for example after_a2a_pipeline_snapshot_saved.",
     )
     parser.add_argument("--allow-real-cloud", action="store_true")
+    parser.add_argument(
+        "--ci-teardown", action="store_true", help="Use run-scoped Stack names and verified final teardown."
+    )
     parser.add_argument("--skip-preflight", action="store_true")
     parser.add_argument("--preflight-timeout", type=float, default=60.0)
     parser.add_argument("--server-timeout", type=float, default=45.0)
@@ -930,16 +964,34 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callable[[ScenarioHarness], None]) -> int:
     harness = ScenarioHarness(args, scenario=scenario)
+    passed: bool | None = None
+    abort_reason = ""
     try:
         harness.preflight()
         harness.start_server()
         callback(harness)
-        return harness.finish()
     except Exception as exc:
         harness.notes.append(f"exception: {type(exc).__name__}: {exc}")
-        return harness.finish(passed=False, abort_reason=str(exc))
+        passed = False
+        abort_reason = str(exc)
     finally:
-        harness.terminate()
+        try:
+            harness.terminate()
+        except Exception as exc:
+            harness.notes.append("server teardown: " + type(exc).__name__)
+            harness.checks["server stopped"] = False
+        if getattr(args, "ci_teardown", False):
+            try:
+                from cleanup_owned_stacks import cleanup_owned_stacks
+
+                cleanup = cleanup_owned_stacks(harness.run_dir)
+                harness.cleanup_status = cleanup["status"]
+                harness.checks["test-owned ROS Stacks cleaned"] = cleanup["status"] == "completed"
+            except Exception as exc:
+                harness.cleanup_status = "failed"
+                harness.checks["test-owned ROS Stacks cleaned"] = False
+                harness.notes.append("teardown: " + type(exc).__name__)
+    return harness.finish(passed=passed, abort_reason=abort_reason)
 
 
 def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
@@ -3206,7 +3258,7 @@ def _cleanup_intent_prompt(base_prompt: str, stack_name: str) -> str:
 
 
 def _cleanup_stack_name(h: ScenarioHarness, label: str) -> str:
-    suffix = Path(getattr(h, "run_dir", "")).name.rsplit("-", maxsplit=1)[-1] or "stack"
+    suffix = getattr(h, "run_id", "") or Path(getattr(h, "run_dir", "")).name.rsplit("-", maxsplit=1)[-1]
     safe_label = "".join(ch if ch.isalnum() else "-" for ch in label.lower()).strip("-") or "stack"
     return f"iac-e2e-{suffix[:12]}-{safe_label}"[:128]
 
