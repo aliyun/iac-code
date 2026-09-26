@@ -172,8 +172,9 @@ def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
         "args, _ = p.parse_known_args()\n"
         "if args.run_dir.name.startswith('scenario-'):\n"
         "    args.run_dir.mkdir(parents=True, exist_ok=False)\n"
-        "assert (args.source_config_dir / '.credentials.yml').read_text() == 'fixture-secret'\n"
-        "(args.run_dir / 'summary.json').write_text(json.dumps({'passed': True, 'checks': {'ok': True}}))\n",
+        "assert (args.source_config_dir / '.credentials.yml').read_text(encoding='utf-8') == 'fixture-secret'\n"
+        "(args.run_dir / 'summary.json').write_text("
+        "json.dumps({'passed': True, 'checks': {'ok': True}}), encoding='utf-8')\n",
         encoding="utf-8",
     )
     source = tmp_path / "source"
