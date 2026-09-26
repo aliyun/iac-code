@@ -15,6 +15,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
 import tempfile
 import time
@@ -257,6 +258,19 @@ class ScenarioRuntimePaths:
         return isolated
 
 
+def _copy_runtime_config(source: Path, destination: Path) -> None:
+    source = source.expanduser().resolve()
+    required = (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
+    if any(not (source / name).is_file() or (source / name).is_symlink() for name in required):
+        raise ValueError("source config must contain three regular test configuration files")
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination.chmod(0o700)
+    for name in required:
+        target = destination / name
+        shutil.copyfile(source / name, target)
+        target.chmod(0o600)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run interactive REPL pipeline E2E scenarios.")
     parser.add_argument(
@@ -269,6 +283,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cwd", default="", help="Child process cwd. Defaults to <run-dir>/workspace.")
     parser.add_argument("--run-root", default=str(Path(tempfile.gettempdir()) / RUN_LOG_ROOT_NAME))
     parser.add_argument("--run-dir", default="", help="Explicit run dir. Only valid with one scenario.")
+    parser.add_argument("--source-config-dir", default="", help="Copy test configuration into each isolated REPL run.")
     parser.add_argument("--python", default="uv run python")
     parser.add_argument("--provider", default="")
     parser.add_argument(
@@ -751,10 +766,11 @@ def _run_with_pty(
     workspace_dir = Path(args.cwd).expanduser().resolve() if args.cwd else run_dir / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     shared_env = _build_child_env(args, scenario)
-    env = ScenarioRuntimePaths.for_run(
+    runtime_paths = ScenarioRuntimePaths.for_run(
         run_dir,
         environment=shared_env,
-    ).apply(shared_env)
+    )
+    env = runtime_paths.apply(shared_env)
     pty = ReplPty(args=args, run_dir=run_dir, cwd=workspace_dir, env=env)
     checks: dict[str, bool] = {}
     notes: list[str] = []
@@ -764,6 +780,8 @@ def _run_with_pty(
     teardown_applied = False
 
     try:
+        if args.source_config_dir:
+            _copy_runtime_config(Path(args.source_config_dir), runtime_paths.config_dir)
         pty.spawn()
         callback(pty, checks)
         _apply_acceptance_checks(scenario, args, pty, checks)

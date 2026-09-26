@@ -3036,6 +3036,23 @@ def test_scenario_runtime_paths_override_shared_sandbox_state(tmp_path: Path) ->
     assert environment["IAC_CODE_CONFIG_BACKUP_DIR"] == str(paths.backup_dir)
 
 
+def test_explicit_source_config_is_copied_to_isolated_repl_config(tmp_path: Path) -> None:
+    runner = _load_runner()
+    source = tmp_path / "source"
+    source.mkdir()
+    names = (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
+    for name in names:
+        (source / name).write_text("fixture", encoding="utf-8")
+    destination = tmp_path / "isolated" / "config"
+
+    runner._copy_runtime_config(source, destination)
+
+    for name in names:
+        assert (destination / name).read_text(encoding="utf-8") == "fixture"
+        assert (destination / name).stat().st_mode & 0o777 == 0o600
+    assert destination.stat().st_mode & 0o777 == 0o700
+
+
 def test_cleanup_ledger_lookup_uses_case_isolated_config_dir(monkeypatch, tmp_path: Path) -> None:
     runner = _load_runner()
     from iac_code.services.session_storage import SessionStorage

@@ -7,10 +7,13 @@ import argparse
 import html
 import json
 import os
+import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
+import uuid
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -22,6 +25,9 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts.a2a.e2e.execution_control.run_execution_control_scenarios import SCENARIO_MODES  # noqa: E402
+from scripts.a2a.e2e.resource_selector.run_live_resource_selector import SCENARIOS as SELECTOR_SCENARIOS  # noqa: E402
+from scripts.pipeline.e2e.selling_solution_first.run_scenarios import SCENARIOS as SELLING_SCENARIOS  # noqa: E402
+from scripts.repl.e2e.run_pipeline_scenarios import _SCENARIOS as REPL_PIPELINE_SCENARIOS  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -33,6 +39,10 @@ class Case:
     suite: str = "fast"
     cloud_write: bool = False
     cleanup_grace: int = 5
+    result_source: str = "summary.json"
+    live_runner: str = "selling"
+    resource_lock: str = ""
+    group: str = ""
 
 
 FAST_CASES = (
@@ -54,35 +64,98 @@ EXECUTION_CASES = tuple(
     for scenario, modes in SCENARIO_MODES.items()
     for mode in modes
 )
-CASES = FAST_CASES + EXECUTION_CASES
+PERMISSION_SCRIPT = "scripts/a2a/e2e/permission_wait/run_permission_wait_restart.py"
+PERMISSION_CASES = (
+    Case(
+        "permission-agui-generation-fence",
+        "scripts/a2a/e2e/permission_wait/run_agui_generation_fence.py",
+        ("--timeout", "25"), 120, "full", result_source="stdout",
+    ),
+    Case(
+        "permission-staged-generation-fence", PERMISSION_SCRIPT,
+        ("--decision", "allow_once", "--staged-backup-generation-fence", "--timeout", "20"),
+        90, "full", result_source="stdout",
+    ),
+    Case(
+        "permission-sub-pipeline-timeout",
+        "scripts/a2a/e2e/permission_wait/run_sub_pipeline_permission_timeout.py",
+        ("--timeout-seconds", "1"), 90, "full", result_source="result.json",
+    ),
+) + tuple(
+    Case(
+        "permission-{}-{}".format(mode, decision), PERMISSION_SCRIPT,
+        ("--decision", decision, "--mode", mode, "--timeout", "20"),
+        90, "full", result_source="stdout",
+    )
+    for mode in ("normal", "pipeline")
+    for decision in ("allow_once", "deny")
+) + (
+    Case(
+        "permission-pipeline-candidate-first", PERMISSION_SCRIPT,
+        ("--decision", "allow_once", "--mode", "pipeline", "--candidate-first", "--timeout", "20"),
+        90, "full", result_source="stdout",
+    ),
+) + tuple(
+    Case(
+        "permission-{}-{}".format(step, decision), PERMISSION_SCRIPT,
+        ("--decision", decision, "--mode", "pipeline", "--pipeline-step-id", step, "--timeout", "20"),
+        90, "full", result_source="stdout",
+    )
+    for step in ("solution_planning_and_selection", "materialize_selected_candidate", "deploying")
+    for decision in ("allow_once", "deny")
+) + tuple(
+    Case(
+        "permission-handoff-{}".format(decision), PERMISSION_SCRIPT,
+        ("--decision", decision, "--mode", "pipeline", "--handoff-first", "--timeout", "20"),
+        90, "full", result_source="stdout",
+    )
+    for decision in ("allow_once", "deny")
+)
+CASES = FAST_CASES + EXECUTION_CASES + PERMISSION_CASES
 LIVE_SCRIPT = "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py"
-LIVE_CASES = (
+
+
+def _selling_group(spec: Any) -> str:
+    for group in ("core", "recovery", "multimodal", "legacy", "safety"):
+        if group in spec.suites:
+            return group
+    raise ValueError("unclassified selling E2E scenario: " + spec.name)
+
+
+LIVE_CASES = tuple(
     Case(
-        "ssf-a2a-happy-multi-plan",
-        LIVE_SCRIPT,
-        ("--scenario", "a2a-happy-multi-plan"),
-        2700,
-        "live",
-        cloud_write=True,
-        cleanup_grace=900,
-    ),
+        "ssf-" + spec.name, LIVE_SCRIPT, ("--scenario", spec.name), 2700, "live",
+        cloud_write=spec.cloud_write, cleanup_grace=900,
+        resource_lock=spec.resource_lock, group=_selling_group(spec),
+    )
+    for spec in SELLING_SCENARIOS
+    if spec.surface.value not in {"web", "desktop"}
+) + tuple(
     Case(
-        "ssf-a2a-safe-quote-cancel",
-        LIVE_SCRIPT,
-        ("--scenario", "a2a-safe-quote-cancel"),
-        2700,
-        "live",
-        cleanup_grace=900,
-    ),
-    Case("ssf-a2a-step1-clarify", LIVE_SCRIPT, ("--scenario", "a2a-step1-clarify"), 2700, "live", cleanup_grace=900),
+        "selector-" + scenario, "scripts/a2a/e2e/resource_selector/run_live_resource_selector.py",
+        ("--scenario", scenario), 1800, "live", cleanup_grace=60,
+        live_runner="selector", group="readonly",
+    )
+    for scenario in SELECTOR_SCENARIOS
+) + tuple(
     Case(
-        "ssf-repl-single-plan-happy",
-        LIVE_SCRIPT,
-        ("--scenario", "repl-single-plan-happy"),
-        2700,
-        "live",
-        cloud_write=True,
-        cleanup_grace=900,
+        "repl-pipeline-" + scenario, "scripts/repl/e2e/run_pipeline_scenarios.py",
+        ("--scenario", scenario), 2700, "live", cloud_write=True,
+        cleanup_grace=900, live_runner="repl", group="repl",
+        resource_lock="rollback-stack-cleanup" if "cleanup" in scenario else "",
+    )
+    for scenario in REPL_PIPELINE_SCENARIOS
+) + tuple(
+    Case(
+        "a2a-recovery-" + scenario, "scripts/a2a/e2e/run_recovery_scenarios.py",
+        ("--scenario", scenario), 2700, "live", cleanup_grace=60,
+        live_runner="legacy_a2a_readonly", group="readonly",
+    )
+    for scenario in ("redaction-step4", "iac-code-web-2c4g-step4")
+) + (
+    Case(
+        "repl-aliyun-readonly-canary", "scripts/repl/e2e/run_real_aliyun_contract_canary.py",
+        (), 900, "live", cleanup_grace=60, live_runner="canary", group="readonly",
     ),
 )
 CASES += LIVE_CASES
@@ -92,20 +165,29 @@ EXCLUDED = (
         "isolated local runs consistently lack the expected persisted aliyun_api ToolResult; repair fixture before CI",
     ),
     (
-        "selling_solution_first remaining 41 cases",
-        "not yet qualified for unattended CI; recovery/write cases need longer cleanup validation",
+        "selling_solution_first Web and Desktop cases (W01, W02, D01)",
+        "require provisioned Chrome or a native Desktop package and display host",
     ),
-    ("A2A recovery and REPL pipeline real runners", "default path calls configured LLM and can access cloud"),
-    ("resource_selector live runner", "real LLM and Alibaba Cloud inventory"),
+    (
+        "A2A legacy cloud-write recovery (except two read-only step4 cases)",
+        "old runner lacks bounded ownership teardown; its rollback cleanup cases deliberately retain a second ROS Stack",
+    ),
     ("StartChat permission and Qoder reconnect", "real cloud/LLM, Qoder installation and mutable local state"),
     ("Web browser contract", "requires provisioned Chrome and playwright-core; API coverage is listed separately"),
-    ("ACP/headless/VPC smoke scripts", "use configured LLM or cloud identity"),
+    ("ACP/headless/VPC smoke scripts", "lack run-dir summaries and bounded cleanup for unattended CI"),
 )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--suite", choices=("fast", "full", "live", "all"), default="fast")
+    parser.add_argument(
+        "--suite",
+        choices=(
+            "fast", "full", "live", "live-core", "live-recovery", "live-multimodal",
+            "live-readonly", "live-legacy", "live-safety", "live-repl", "all",
+        ),
+        default="fast",
+    )
     parser.add_argument("--case", action="append", choices=sorted(case.name for case in CASES))
     parser.add_argument("--jobs", type=int, default=3, help="Maximum simultaneously running cases")
     parser.add_argument("--run-dir", type=Path, default=REPO_ROOT / "ci-e2e-report")
@@ -138,9 +220,11 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
     if args.suite == "fast":
         return list(FAST_CASES)
     if args.suite == "full":
-        return list(FAST_CASES + EXECUTION_CASES)
+        return list(FAST_CASES + EXECUTION_CASES + PERMISSION_CASES)
     if args.suite == "live":
         return list(LIVE_CASES)
+    if args.suite.startswith("live-"):
+        return [case for case in LIVE_CASES if case.group == args.suite.removeprefix("live-")]
     return list(CASES)
 
 
@@ -179,18 +263,41 @@ def _stop_tree(process: subprocess.Popen[bytes], grace: int) -> None:
         pass
 
 
-def _read_summary(case_dir: Path) -> dict[str, Any] | None:
-    path = case_dir / "summary.json"
+def _read_summary(case_dir: Path, source: str) -> dict[str, Any] | None:
+    path = case_dir / source
     if not path.is_file():
         return None
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        content = path.read_text(encoding="utf-8")
+        if source == "stdout.log":
+            lines = content.splitlines()
+            if not lines:
+                return None
+            content = lines[-1]
+        value = json.loads(content)
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
     return value if isinstance(value, dict) else None
 
 
-def _public_live_summary(summary: dict[str, Any] | None) -> dict[str, Any] | None:
+def _live_cleanup_status(case: Case, summary: dict[str, Any] | None) -> str:
+    if case.live_runner in {"selector", "canary", "legacy_a2a_readonly"}:
+        return "not-needed"
+    if summary is None:
+        return "unverified"
+    if case.live_runner == "repl":
+        checks = summary.get("checks")
+        if isinstance(checks, dict):
+            teardown = [value for key, value in checks.items() if str(key).startswith("teardown:")]
+            if any(value is False for value in teardown):
+                return "failed"
+            if teardown and all(value is True for value in teardown):
+                return "completed"
+        return "unverified"
+    return str(summary.get("cleanup_status") or "unverified")
+
+
+def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | None = None) -> dict[str, Any] | None:
     if summary is None:
         return None
     # Live runner notes, errors, and filesystem paths can contain provider data.
@@ -199,8 +306,8 @@ def _public_live_summary(summary: dict[str, Any] | None) -> dict[str, Any] | Non
     return {
         "case_id": summary.get("case_id"),
         "scenario": summary.get("scenario"),
-        "status": summary.get("status"),
-        "cleanup_status": summary.get("cleanup_status"),
+        "status": summary.get("status") or ("passed" if summary.get("passed") is True else "failed"),
+        "cleanup_status": cleanup_status or summary.get("cleanup_status"),
         "checks": {str(key): value for key, value in checks.items() if isinstance(value, bool)}
         if isinstance(checks, dict)
         else {},
@@ -236,18 +343,33 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
     case_dir = run_dir / "runs" / case.name
     case_dir.mkdir(parents=True, exist_ok=True)
     (case_dir / "summary.json").unlink(missing_ok=True)
-    command = [sys.executable, str(REPO_ROOT / case.script), "--run-dir", str(case_dir), *case.args]
+    # Permission scripts create their run directory with exist_ok=False. Keep their
+    # workspace below the case directory so the parent can hold process logs.
+    needs_fresh_dir = case.name.startswith("permission-") or case.live_runner == "selector"
+    script_dir = case_dir / ("scenario-" + uuid.uuid4().hex) if needs_fresh_dir else case_dir
+    command = [sys.executable, str(REPO_ROOT / case.script), "--run-dir", str(script_dir), *case.args]
     if case.suite == "live":
         if credential_source_dir is None:
             raise ValueError("live case requires credential source directory")
-        command.extend(
-            (
-                "--concurrency", "1", "--allow-real-cloud", "--inherit-settings",
-                "--credential-source-dir", str(credential_source_dir),
+        config_dir = case_dir / "config"
+        config_dir.mkdir(mode=0o700, exist_ok=True)
+        for filename in (".credentials.yml", ".cloud-credentials.yml", "settings.yml"):
+            destination = config_dir / filename
+            shutil.copyfile(credential_source_dir / filename, destination)
+            destination.chmod(0o600)
+        command.append("--allow-real-cloud")
+        if case.live_runner == "selling":
+            command.extend(
+                ("--concurrency", "1", "--inherit-settings", "--credential-source-dir", str(credential_source_dir))
             )
-        )
-        if case.cloud_write:
-            command.append("--allow-cloud-write")
+            if case.cloud_write:
+                command.append("--allow-cloud-write")
+        elif case.live_runner == "selector":
+            command.extend(("--source-config-dir", str(config_dir)))
+        elif case.live_runner == "canary":
+            command.extend(("--source-config-dir", str(credential_source_dir)))
+        elif case.live_runner == "repl":
+            command.extend(("--source-config-dir", str(config_dir)))
     if case in FAST_CASES or case.suite == "live":
         command.extend(("--python", sys.executable))
     started = time.monotonic()
@@ -274,11 +396,15 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
                 return_code = process.returncode
     except (OSError, subprocess.SubprocessError) as exc:
         error = "{}: {}".format(type(exc).__name__, exc)
-    summary = _read_summary(case_dir)
+    source = "stdout.log" if case.result_source == "stdout" else case.result_source
+    if script_dir != case_dir and source != "stdout.log":
+        source = str(script_dir.relative_to(case_dir) / source)
+    summary = _read_summary(case_dir, source)
     summary_passed = summary is not None and (summary.get("passed") is True or summary.get("status") == "passed")
     passed = return_code == 0 and summary_passed and not timed_out and not error
+    cleanup_status = _live_cleanup_status(case, summary) if case.suite == "live" else None
     if case.suite == "live":
-        summary = _public_live_summary(summary)
+        summary = _public_live_summary(summary, cleanup_status)
         error = "" if not error else "runner failed to start; inspect CI job log"
     failed_checks, notes = _failure_details(summary)
     result = {
@@ -291,7 +417,7 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
         "summary": summary,
         "failedChecks": failed_checks,
         "notes": notes,
-        "cleanupStatus": ((summary or {}).get("cleanup_status") or "unverified") if case.suite == "live" else None,
+        "cleanupStatus": cleanup_status,
         "error": error,
         "stdoutTail": "" if case.suite == "live" else _tail(case_dir / "stdout.log"),
         "stderrTail": "" if case.suite == "live" else _tail(case_dir / "stderr.log"),
@@ -427,13 +553,50 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     args.run_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
+    locks = {case.resource_lock: threading.Lock() for case in selected if case.resource_lock}
+
+    def run_with_lock(case: Case) -> dict[str, Any]:
+        lock = locks.get(case.resource_lock)
+        if lock is None:
+            return run_case(case, args.run_dir, args.credential_source_dir)
+        with lock:
+            return run_case(case, args.run_dir, args.credential_source_dir)
+
     with ThreadPoolExecutor(max_workers=min(args.jobs, len(selected))) as pool:
         futures = {
-            pool.submit(run_case, case, args.run_dir, args.credential_source_dir): case.name for case in selected
+            pool.submit(run_with_lock, case): case for case in selected
         }
         completed = {}
         for future in as_completed(futures):
-            result = future.result()
+            case = futures[future]
+            try:
+                result = future.result()
+            except Exception as exc:
+                error = "runner exception; inspect CI job log" if case.suite == "live" else "{}: {}".format(
+                    type(exc).__name__, exc
+                )
+                result = {
+                    "name": case.name,
+                    "status": "failed",
+                    "durationSeconds": 0,
+                    "timeoutSeconds": case.timeout,
+                    "returnCode": None,
+                    "command": [case.name],
+                    "summary": None,
+                    "failedChecks": [],
+                    "notes": [],
+                    "cleanupStatus": "unverified" if case.suite == "live" else None,
+                    "error": error,
+                    "stdoutTail": "",
+                    "stderrTail": "",
+                    "live": case.suite == "live",
+                    "artifacts": "runs/{}/".format(case.name),
+                }
+                case_dir = args.run_dir / result["artifacts"]
+                case_dir.mkdir(parents=True, exist_ok=True)
+                (case_dir / "ci-result.json").write_text(
+                    json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
             completed[result["name"]] = result
             print(
                 "{} {} ({:.1f}s)".format(result["status"].upper(), result["name"], result["durationSeconds"]),

@@ -13,17 +13,17 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite full --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --list --suite all
 ```
 
-`fast` 包含五个 A2A、REPL、Web API 确定性契约用例；`full` 增加 A2A 执行控制矩阵。Web 的浏览器 DOM 验收没有纳入，Web API 用例明确使用 `--skip-browser`。只跑一个用例可用 `--case a2a-success-contract`。`--jobs` 限定为 1–8，默认 3。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
+`fast` 包含 5 个 A2A、REPL、Web API 确定性契约用例；`full` 共 41 个，另含 A2A 执行控制与权限等待/恢复矩阵。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-success-contract`。`--jobs` 限定为 1–8，默认 3。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
 
 真实 LLM 与云资源用例显式运行：
 
 ```bash
-uv run --no-sync python scripts/ci/run_e2e.py --suite live --jobs 2 \
+uv run --no-sync python scripts/ci/run_e2e.py --suite live --jobs 4 \
   --credential-source-dir /path/to/test-only-config \
   --allow-cloud-write
 ```
 
-凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。该套件包含两个会创建 ROS 资源的场景，以及两个真实模型/云环境场景。已有场景脚本会在完成或收到 SIGTERM 后尝试删除带有测试专用前缀且可证实归属的 Stack。每个真实用例有 45 分钟硬超时，之后最多留 15 分钟清理，再强制结束进程组。若强制结束发生在清理期间，必须检查 `cleanup_status` 和测试账号中的残留资源；不能将硬超时视为自动清理成功。
+凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 69 个：42 个 selling flow A2A/REPL 场景、8 个只读资源选择、16 个 REPL 旧场景、2 个只读 A2A 恢复场景、1 个只读云 API canary。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety` 或 `live-repl`，也可用 `--case` 指定单个用例。创建资源的现有场景脚本负责按测试归属清理；报告显示清理结果。selling 和 REPL 旧用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组；其他真实用例的界限较短。硬超时不代表清理成功，需检查报告和测试账号残留资源。
 
 ## CI 接入
 
@@ -35,4 +35,4 @@ CI 调用同一个入口，并用 `--run-dir` 指定报告目录。`fast` 适合
 
 先按 `report.md` 找到失败用例与首次失败检查，再看对应的 `ci-result.json`、场景 `summary.json`、日志和源码。Agent 应做有界复现，明确归类为产品缺陷、用例/断言缺陷、环境/凭证故障、云资源清理故障或超时，并写出证据、受影响场景和建议修复。真实云用例不要为了复现自动再次创建资源；先核对残留资源与清理结果。报告里的“初步线索”只是索引，不能替代复盘结论。
 
-暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出。扩大真实云用例集前，应先验证对应脚本可无人值守运行、按规定超时退出、清理资源并产生可用报告。
+总入口目前登记 110 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Qoder、Desktop、浏览器 DOM 场景，以及会故意留下 ROS Stack 的旧恢复场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。

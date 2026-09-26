@@ -21,6 +21,37 @@ def test_default_selection_is_allowlisted_and_credential_free() -> None:
     assert len(run_e2e.select_cases(run_e2e.parse_args(["--suite", "full"]))) > len(selected)
 
 
+def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> None:
+    full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
+    live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
+    assert len(full) == 41
+    assert len(live) == 69
+    assert len(run_e2e.CASES) == 110
+    unsupported = {
+        "ssf-" + spec.name for spec in run_e2e.SELLING_SCENARIOS
+        if spec.surface.value in {"web", "desktop"}
+    }
+    assert len(unsupported) == 3
+    assert not unsupported.intersection(case.name for case in live)
+    assert all(case.script != "scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py" for case in live)
+    assert len([case for case in live if case.name.startswith("ssf-")]) == 42
+
+
+def test_missing_or_empty_stdout_summary_is_failure_data(tmp_path: Path) -> None:
+    assert run_e2e._read_summary(tmp_path, "stdout.log") is None
+    (tmp_path / "stdout.log").write_text("", encoding="utf-8")
+    assert run_e2e._read_summary(tmp_path, "stdout.log") is None
+    (tmp_path / "stdout.log").write_text('{"passed": true}\n', encoding="utf-8")
+    assert run_e2e._read_summary(tmp_path, "stdout.log") == {"passed": True}
+
+
+def test_live_cleanup_status_is_reported_from_teardown_checks() -> None:
+    case = next(case for case in run_e2e.LIVE_CASES if case.live_runner == "repl")
+    assert run_e2e._live_cleanup_status(case, {"checks": {"teardown: stacks deleted": True}}) == "completed"
+    assert run_e2e._live_cleanup_status(case, {"checks": {"teardown: stacks deleted": False}}) == "failed"
+    assert run_e2e._live_cleanup_status(case, None) == "unverified"
+
+
 def test_live_requires_complete_credential_source_and_write_opt_in(tmp_path: Path) -> None:
     with pytest.raises(SystemExit):
         run_e2e.parse_args(["--suite", "live", "--credential-source-dir", str(tmp_path)])
@@ -109,3 +140,48 @@ def test_summary_failure_keeps_failed_checks_and_log_links(tmp_path: Path, monke
     assert "step one" in page
     assert sys.executable in result["command"]
     assert os.path.isfile(tmp_path / "report" / "runs" / "failed" / "ci-result.json")
+
+
+def test_unexpected_case_exception_still_writes_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail(*_args: object) -> dict[str, object]:
+        raise ValueError("broken fixture")
+
+    monkeypatch.setattr(run_e2e, "run_case", fail)
+    assert run_e2e.main(["--suite", "fast", "--run-dir", str(tmp_path)]) == 1
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert summary["failedCount"] == len(run_e2e.FAST_CASES)
+    assert (tmp_path / "report.md").is_file()
+
+
+@pytest.mark.parametrize("runner", ["selector", "repl"])
+def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: str
+) -> None:
+    script = tmp_path / "fake_live.py"
+    script.write_text(
+        "import argparse, json\n"
+        "from pathlib import Path\n"
+        "p = argparse.ArgumentParser()\n"
+        "p.add_argument('--run-dir', type=Path, required=True)\n"
+        "p.add_argument('--source-config-dir', type=Path, required=True)\n"
+        "args, _ = p.parse_known_args()\n"
+        "if args.run_dir.name.startswith('scenario-'):\n"
+        "    args.run_dir.mkdir(parents=True, exist_ok=False)\n"
+        "assert (args.source_config_dir / '.credentials.yml').read_text() == 'fixture-secret'\n"
+        "(args.run_dir / 'summary.json').write_text(json.dumps({'passed': True, 'checks': {'ok': True}}))\n",
+        encoding="utf-8",
+    )
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in (".credentials.yml", ".cloud-credentials.yml", "settings.yml"):
+        (source / name).write_text("fixture-secret", encoding="utf-8")
+    monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
+    case = run_e2e.Case("selector-smoke" if runner == "selector" else "repl-smoke", "fake_live.py", (),
+                        5, "live", live_runner=runner)
+
+    result = run_e2e.run_case(case, tmp_path / "report", source)
+
+    assert result["status"] == "passed"
+    assert result["command"] == [case.name]
+    assert "fixture-secret" not in json.dumps(result)
+    assert (tmp_path / "report" / "runs" / case.name / "config" / ".credentials.yml").is_file()
