@@ -291,7 +291,7 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
         "summary": summary,
         "failedChecks": failed_checks,
         "notes": notes,
-        "cleanupStatus": (summary or {}).get("cleanup_status") if case.suite == "live" else None,
+        "cleanupStatus": ((summary or {}).get("cleanup_status") or "unverified") if case.suite == "live" else None,
         "error": error,
         "stdoutTail": "" if case.suite == "live" else _tail(case_dir / "stdout.log"),
         "stderrTail": "" if case.suite == "live" else _tail(case_dir / "stderr.log"),
@@ -304,19 +304,23 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
 
 def _reason(result: dict[str, Any]) -> str:
     if result["status"] == "timeout":
-        return "超过 {} 秒硬超时；进程组已终止".format(result["timeoutSeconds"])
-    if result["error"]:
-        return result["error"]
-    if result.get("cleanupStatus") == "failed":
-        return "测试资源清理失败；检查 CI 作业日志和云账号残留资源"
-    if result["failedChecks"]:
-        return "检查失败：" + ", ".join(result["failedChecks"])
-    if result["notes"]:
+        reason = "超过 {} 秒硬超时；进程组已终止".format(result["timeoutSeconds"])
+    elif result["error"]:
+        reason = result["error"]
+    elif result.get("cleanupStatus") == "failed":
+        reason = "测试资源清理失败；检查 CI 作业日志和云账号残留资源"
+    elif result["failedChecks"]:
+        reason = "检查失败：" + ", ".join(result["failedChecks"])
+    elif result["notes"]:
         first_lines = [str(note).splitlines()[0] for note in result["notes"][:3]]
-        return "；".join(first_lines)[:240]
-    if result["summary"] is None:
-        return "未生成有效的 summary.json；查看 stdout/stderr 和服务日志"
-    return "退出码 {}；查看详细日志".format(result["returnCode"])
+        reason = "；".join(first_lines)[:240]
+    elif result["summary"] is None:
+        reason = "未生成有效的 summary.json；查看 stdout/stderr 和服务日志"
+    else:
+        reason = "退出码 {}；查看详细日志".format(result["returnCode"])
+    if result["live"] and result["cleanupStatus"] == "unverified":
+        reason += "；清理结果未验证，需检查测试账号残留资源"
+    return reason
 
 
 def _write_junit(run_dir: Path, results: list[dict[str, Any]]) -> None:

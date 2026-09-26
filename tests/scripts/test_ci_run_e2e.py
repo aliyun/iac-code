@@ -83,6 +83,9 @@ def test_timeout_writes_failure_report_without_hanging(tmp_path: Path, monkeypat
     assert summary["failedCount"] == 1
     assert "硬超时" in (tmp_path / "report" / "report.md").read_text(encoding="utf-8")
     assert ET.parse(tmp_path / "report" / "junit.xml").find(".//failure") is not None
+    result["live"] = True
+    result["cleanupStatus"] = "unverified"
+    assert "清理结果未验证" in run_e2e._reason(result)
 
 
 def test_summary_failure_keeps_failed_checks_and_log_links(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
