@@ -189,5 +189,6 @@ src/iac_code/pipeline/engine/architecture_rules.json.backup-*
 # Super Powers
 .superpowers/
 .worktrees/
+ci-e2e-report/
 .agents/
 spec/
