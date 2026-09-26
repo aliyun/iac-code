@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
 import sys
 from pathlib import Path
@@ -3034,6 +3035,25 @@ def test_scenario_runtime_paths_override_shared_sandbox_state(tmp_path: Path) ->
     assert paths.backup_dir == Path("/home/iac_code_config_backup/.e2e-runs/case-run-1")
     assert environment["IAC_CODE_CONFIG_DIR"] == str(paths.config_dir)
     assert environment["IAC_CODE_CONFIG_BACKUP_DIR"] == str(paths.backup_dir)
+
+
+def test_explicit_source_config_is_copied_to_isolated_repl_config(tmp_path: Path) -> None:
+    runner = _load_runner()
+    source = tmp_path / "source"
+    source.mkdir()
+    names = (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
+    for name in names:
+        (source / name).write_text("fixture", encoding="utf-8")
+    destination = tmp_path / "isolated" / "config"
+
+    runner._copy_runtime_config(source, destination)
+
+    for name in names:
+        assert (destination / name).read_text(encoding="utf-8") == "fixture"
+        if os.name != "nt":
+            assert (destination / name).stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert destination.stat().st_mode & 0o777 == 0o700
 
 
 def test_cleanup_ledger_lookup_uses_case_isolated_config_dir(monkeypatch, tmp_path: Path) -> None:
