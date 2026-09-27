@@ -66,6 +66,7 @@ class StreamSummary:
     last_input_required_step_id: str = ""
     normal_handoff_ready: bool = False
     text: str = ""
+    terminal_status_text: str = ""
     event_count: int = 0
 
     @property
@@ -334,7 +335,10 @@ def _apply_event(summary: StreamSummary, payload: Any) -> None:
         if _is_normal_handoff(envelope):
             summary.normal_handoff_ready = True
 
-    for text in _status_message_texts(payload):
+    status_texts = _status_message_texts(payload)
+    if identity is not None and identity.get("state") in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
+        summary.terminal_status_text = "".join(status_texts)
+    for text in status_texts:
         summary.text += text
 
 

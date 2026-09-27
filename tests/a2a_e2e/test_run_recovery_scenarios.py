@@ -76,6 +76,7 @@ def test_top_level_task_status_message_is_preserved() -> None:
 
     assert summary.last_status_state == "TASK_STATE_FAILED"
     assert summary.text == "recovery failure fixture"
+    assert summary.terminal_status_text == "recovery failure fixture"
 
 
 def test_latest_input_required_kind_from_events_uses_latest_kind() -> None:

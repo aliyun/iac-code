@@ -1477,7 +1477,7 @@ def _raise_for_unexpected_a2a_terminal(summary: Any) -> None:
     state = str(getattr(summary, "last_status_state", "") or "")
     if state not in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
         return
-    detail = str(getattr(summary, "text", "") or "").strip()
+    detail = str(getattr(summary, "terminal_status_text", "") or "").strip()
     if len(detail) > 500:
         detail = detail[-500:]
     suffix = f": {detail}" if detail else ""

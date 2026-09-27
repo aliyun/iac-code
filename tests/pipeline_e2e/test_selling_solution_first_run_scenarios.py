@@ -453,10 +453,20 @@ def test_backup_delay_uses_artifact_directory_for_multiple_windows(
 
 @pytest.mark.parametrize("state", ["TASK_STATE_FAILED", "TASK_STATE_CANCELED"])
 def test_unexpected_a2a_terminal_state_fails_immediately(runner: ModuleType, state: str) -> None:
-    summary = argparse.Namespace(last_status_state=state, text="pipeline_identity_mismatch")
+    summary = argparse.Namespace(
+        last_status_state=state, text="prior model output", terminal_status_text="pipeline_identity_mismatch"
+    )
 
     with pytest.raises(RuntimeError, match=f"{state}.*pipeline_identity_mismatch"):
         runner._raise_for_unexpected_a2a_terminal(summary)
+
+
+def test_unexpected_a2a_terminal_omits_prior_model_output(runner: ModuleType) -> None:
+    summary = argparse.Namespace(last_status_state="TASK_STATE_FAILED", text="private prior model output")
+
+    with pytest.raises(RuntimeError, match="TASK_STATE_FAILED$") as failure:
+        runner._raise_for_unexpected_a2a_terminal(summary)
+    assert "private prior model output" not in str(failure.value)
 
 
 def test_repl_waits_for_initial_prompt_before_sending_scenario_input(
