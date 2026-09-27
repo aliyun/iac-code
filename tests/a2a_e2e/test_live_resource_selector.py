@@ -130,7 +130,7 @@ def test_selection_answer_uses_original_task_correlation() -> None:
 
 
 def test_restart_waits_for_durable_execution_release(tmp_path: Path) -> None:
-    control_path = tmp_path / "a2a" / "execution-control" / "ctx-1.json"
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
     control_path.parent.mkdir(parents=True)
     summary = StreamSummary(name="initial", prompt="", task_id="task-1", context_id="ctx-1")
     control = {

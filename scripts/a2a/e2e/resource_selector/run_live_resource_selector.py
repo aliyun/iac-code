@@ -447,12 +447,12 @@ class _DurableReleaseTimeoutError(AssertionError):
         self.state = state
 
 
-def _wait_for_released_execution(config_dir: Path, summary: StreamSummary, *, timeout: float) -> None:
+def _wait_for_released_execution(persistence_dir: Path, summary: StreamSummary, *, timeout: float) -> None:
     """Crash only after the input-required Task has a durable, safe handoff."""
     context_id = summary.context_id
     if not context_id or not all(char.isalnum() or char in "-_" for char in context_id):
         raise AssertionError("A2A context ID is invalid")
-    control_path = config_dir / "a2a" / "execution-control" / "{}.json".format(context_id)
+    control_path = persistence_dir / "execution-control" / "{}.json".format(context_id)
     deadline = time.monotonic() + timeout
     last_state: dict[str, Any] = {"present": False}
     while time.monotonic() < deadline:
@@ -728,7 +728,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             selected_value, selected_label, candidate_count, queried_values = asyncio.run(_query_real_vpc(pending))
 
         if args.scenario == "restart-before-answer":
-            _wait_for_released_execution(harness.config_dir, initial, timeout=args.server_timeout)
+            _wait_for_released_execution(harness.run_dir / "a2a-persistence", initial, timeout=args.server_timeout)
             harness.restart_after_crash()
         if args.scenario == "canceled-next-turn":
             response = _selection_response(pending, status="canceled", options_empty=False)
