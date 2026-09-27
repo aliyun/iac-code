@@ -202,13 +202,22 @@ def stream_message(
     try:
         with urlopen(request, timeout=timeout) as response:
             summary.response_content_type = response.headers.get_content_type()
-            for line in response:
-                summary.raw_line_count += 1
-                parsed = _parse_sse_data_line(line)
-                if parsed is None:
-                    continue
+            if summary.response_content_type == "application/json":
+                raw = response.read()
+                summary.raw_line_count = len(raw.splitlines())
+                parsed = json.loads(raw)
                 _append_jsonl(run_dir / f"{name}.events.jsonl", parsed, redaction_env)
+                if isinstance(parsed, dict) and parsed.get("error"):
+                    raise RuntimeError(f"{name} returned a JSON-RPC error")
                 _apply_event(summary, parsed)
+            else:
+                for line in response:
+                    summary.raw_line_count += 1
+                    parsed = _parse_sse_data_line(line)
+                    if parsed is None:
+                        continue
+                    _append_jsonl(run_dir / f"{name}.events.jsonl", parsed, redaction_env)
+                    _apply_event(summary, parsed)
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         redacted_body = _redact_sensitive_text(body, redaction_env)
