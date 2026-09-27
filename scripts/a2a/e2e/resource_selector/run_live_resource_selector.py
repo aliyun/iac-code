@@ -739,6 +739,10 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             summary=initial,
             region=args.region,
         )
+        # INPUT_REQUIRED can be published before the old execution has durably
+        # released its context. Answering in that window is rejected as an
+        # active execution, even though the stream has already returned.
+        _wait_for_released_execution(harness.run_dir / "a2a-persistence", initial, timeout=args.server_timeout)
 
         candidate_count = 0
         selected_value = ""
@@ -752,7 +756,6 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             selected_value, selected_label, candidate_count, queried_values = asyncio.run(_query_real_vpc(pending))
 
         if args.scenario == "restart-before-answer":
-            _wait_for_released_execution(harness.run_dir / "a2a-persistence", initial, timeout=args.server_timeout)
             harness.restart_after_crash()
         if args.scenario == "canceled-next-turn":
             response = _selection_response(pending, status="canceled", options_empty=False)
@@ -781,6 +784,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             if len(second_inputs) != 1:
                 raise AssertionError("expected exactly one VSwitch selection after the VPC answer")
             second_pending = second_inputs[0]
+            _wait_for_released_execution(harness.run_dir / "a2a-persistence", answer, timeout=args.server_timeout)
             selector = second_pending.get("selector")
             metadata = selector.get("associationPropertyMetadata") if isinstance(selector, Mapping) else None
             if (
