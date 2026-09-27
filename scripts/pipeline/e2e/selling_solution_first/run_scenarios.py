@@ -929,6 +929,7 @@ def _python_namespace(runtime: ScenarioRuntime) -> argparse.Namespace:
         server_timeout=args.timeout,
         stream_timeout=args.stream_timeout,
         event_timeout=args.timeout,
+        wait_diagnosis_after=120.0,
         leave_server_running=args.leave_running,
         no_auto_approve_permissions=False,
         initial_prompt="",

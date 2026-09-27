@@ -500,6 +500,18 @@ def test_backup_restore_response_omits_stale_task_id(
     assert observed == [""]
 
 
+def test_selling_repl_adapter_includes_wait_diagnosis_threshold(runner: ModuleType, tmp_path: Path) -> None:
+    runtime = argparse.Namespace(
+        args=runner.parse_args([]),
+        paths=argparse.Namespace(workspace_dir=tmp_path, run_dir=tmp_path),
+        port=12345, env={}, cidr="10.0.0.0/24",
+    )
+
+    adapted = runner._python_namespace(runtime)
+
+    assert adapted.wait_diagnosis_after == 120.0
+
+
 def test_repl_waits_for_initial_prompt_before_sending_scenario_input(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
