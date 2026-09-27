@@ -27,6 +27,11 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from scripts.repl.e2e.wait_diagnosis import diagnose_wait
+except ModuleNotFoundError:  # direct `python scripts/repl/e2e/run_pipeline_scenarios.py`
+    from wait_diagnosis import diagnose_wait
+
+try:
     import pexpect
 except ImportError:  # pragma: no cover - exercised manually when dependency missing
     pexpect = None  # type: ignore[assignment]
@@ -40,6 +45,11 @@ except ImportError:  # pragma: no cover - PyYAML is part of the project runtime
 RUN_LOG_ROOT_NAME = "iac-code-repl-e2e-runs"
 PTY_SEND_CHUNK_SIZE = 512
 PTY_SEND_CHUNK_DELAY_SECONDS = 0.01
+WAIT_POLL_SECONDS = 10.0
+WAIT_PROGRESS_SECONDS = 60.0
+WAIT_IDLE_SECONDS = 600.0
+WAIT_CLOUD_IDLE_SECONDS = 1500.0
+MAX_WAIT_DIAGNOSES = 2
 TEXT_IMAGE_FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "a2a" / "e2e" / "fixtures" / "text-images"
 TEXT_IMAGE_FIXTURE_FILENAMES = {
     "initial": "initial.png",
@@ -207,6 +217,7 @@ class ScenarioRunResult:
     elapsed_seconds: float
     abort_reason: str = ""
     notes: list[str] = field(default_factory=list)
+    watchdog: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -297,6 +308,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-base", default="")
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--stream-timeout", type=float, default=1800.0)
+    parser.add_argument("--wait-diagnosis-after", type=float, default=120.0)
     parser.add_argument("--terminal-width", type=int, default=140)
     parser.add_argument("--terminal-height", type=int, default=40)
     parser.add_argument("--candidate-selection-ready-timeout", type=float, default=30.0)
@@ -482,6 +494,8 @@ class ReplPty:
         self.raw_chunks: list[str] = []
         self.child: Any | None = None
         self._live_transcript = False
+        self._wait_diagnoses: list[dict[str, Any]] = []
+        self._last_output_at = time.monotonic()
 
     @property
     def transcript(self) -> str:
@@ -553,14 +567,46 @@ class ReplPty:
 
     def expect_any(self, patterns: tuple[str, ...], *, description: str, timeout: float) -> str:
         child = self._require_child()
-        deadline = time.monotonic() + timeout
+        started = time.monotonic()
+        deadline = started + timeout
+        transcript_offset = len(self.transcript)
+        diagnosed = False
+        last_progress = started
         all_patterns = list(patterns) + list(PERMISSION_PROMPT_PATTERNS)
         try:
             while True:
-                remaining = deadline - time.monotonic()
+                now = time.monotonic()
+                remaining = deadline - now
                 if remaining <= 0:
                     raise TimeoutError(f"timed out waiting for {description}")
-                index = child.expect(all_patterns, timeout=remaining)
+                recent_output = _normalize_transcript(self.transcript[-2000:])
+                cloud_wait = bool(re.search(
+                    r"(?i)Deploying\s*\(|CreateStack|ROS Deploy|CREATE_IN_PROGRESS|DELETE_IN_PROGRESS|回滚清理",
+                    recent_output,
+                ))
+                idle_limit = WAIT_CLOUD_IDLE_SECONDS if cloud_wait else WAIT_IDLE_SECONDS
+                if now - max(getattr(self, "_last_output_at", started), started) >= idle_limit:
+                    record = {
+                        "state": "no_output", "confidence": 1.0, "waitingFor": description,
+                        "elapsedSeconds": round(now - started, 1), "action": "early_abort",
+                    }
+                    diagnoses = getattr(self, "_wait_diagnoses", [])
+                    diagnoses.append(record)
+                    self._wait_diagnoses = diagnoses
+                    self.events.append({"type": "wait_diagnosis", **record, "at": _utc_now()})
+                    raise TimeoutError(
+                        f"no terminal output for {round(idle_limit)}s while waiting for {description}"
+                    )
+                if now - last_progress >= WAIT_PROGRESS_SECONDS:
+                    print(f"REPL E2E waiting for {description}: {round(now - started)}s", flush=True)
+                    last_progress = now
+                try:
+                    index = child.expect(all_patterns, timeout=min(remaining, WAIT_POLL_SECONDS))
+                except pexpect.TIMEOUT:
+                    elapsed = time.monotonic() - started
+                    if not diagnosed and elapsed >= self.args.wait_diagnosis_after:
+                        diagnosed = self._diagnose_wait(description, transcript_offset, elapsed)
+                    continue
                 self._capture_child_output(f"{child.before}{child.after}")
                 if index < len(patterns):
                     matched = patterns[index]
@@ -602,6 +648,46 @@ class ReplPty:
                 }
             )
             raise
+
+    def _diagnose_wait(self, description: str, transcript_offset: int, elapsed: float) -> bool:
+        diagnoses = getattr(self, "_wait_diagnoses", [])
+        if len(diagnoses) >= MAX_WAIT_DIAGNOSES:
+            return True
+        config_path = self.env.get("IAC_CODE_CONFIG_DIR")
+        if not config_path:
+            return True
+        recent_raw = self.transcript[transcript_offset:]
+        recent_text = _normalize_transcript(recent_raw)
+        diagnosis = diagnose_wait(
+            Path(config_path), expected=description,
+            transcript=recent_text or _normalize_transcript(self.transcript[-1200:]),
+        )
+        if diagnosis is None:
+            return False
+        state = str(diagnosis["state"])
+        confidence = float(diagnosis["confidence"])
+        interactive_cue = bool(
+            re.search(
+                r"●\s*Ask user question|Press number keys to select a candidate|Enter to confirm|按数字键.*候选",
+                recent_text,
+            )
+            or ("❯" in recent_text and "\x1b[>4;2m" in recent_raw)
+        )
+        early_abort = state == "waiting_for_input" and confidence >= 0.85 and interactive_cue
+        record = {
+            "state": state,
+            "confidence": confidence,
+            "waitingFor": description,
+            "elapsedSeconds": round(elapsed, 1),
+            "action": "early_abort" if early_abort else "observe",
+        }
+        diagnoses.append(record)
+        self._wait_diagnoses = diagnoses
+        self.events.append({"type": "wait_diagnosis", **record, "at": _utc_now()})
+        print(f"REPL E2E wait diagnosis: {state}; action={record['action']}", flush=True)
+        if early_abort:
+            raise RuntimeError(f"unexpected input while waiting for {description}; watchdog={state}")
+        return True
 
     def expect_optional(self, patterns: tuple[str, ...], *, description: str, timeout: float) -> bool:
         child = self._require_child()
@@ -680,10 +766,12 @@ class ReplPty:
     def _capture_child_output(self, text: str) -> None:
         if text and not self._live_transcript:
             self.raw_chunks.append(text)
+            self._last_output_at = time.monotonic()
 
     def _capture_child_output_force(self, text: str) -> None:
         if text:
             self.raw_chunks.append(text)
+            self._last_output_at = time.monotonic()
 
     def _require_child(self) -> Any:
         if self.child is None:
@@ -698,6 +786,7 @@ class _TranscriptCapture:
     def write(self, text: str) -> None:
         if text:
             self._pty.raw_chunks.append(text)
+            self._pty._last_output_at = time.monotonic()
 
     def flush(self) -> None:
         return None
@@ -831,6 +920,7 @@ def _run_with_pty(
             elapsed_seconds=round(time.monotonic() - started, 3),
             abort_reason=abort_reason,
             notes=notes,
+            watchdog=(getattr(pty, "_wait_diagnoses", []) or [None])[-1],
         )
         _write_run_artifacts(run_dir=run_dir, env=env, raw_transcript=pty.transcript, events=pty.events, result=result)
         _print_result(result)

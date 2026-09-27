@@ -134,6 +134,31 @@ def test_live_public_summary_drops_notes_error_and_paths() -> None:
     }
 
 
+def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
+    summary = {
+        "passed": False,
+        "watchdog": {
+            "state": "waiting_for_input", "confidence": 0.93,
+            "waitingFor": "pipeline completed", "elapsedSeconds": 125.33,
+            "action": "early_abort", "raw": "secret-fixture-value",
+        },
+    }
+
+    public = run_e2e._public_live_summary(summary)
+
+    assert public is not None
+    assert public["watchdog"] == {
+        "state": "waiting_for_input", "waitingFor": "pipeline completed",
+        "elapsedSeconds": 125.3, "action": "early_abort",
+    }
+    assert "secret-fixture-value" not in json.dumps(public)
+    assert run_e2e._public_live_summary({
+        "watchdog": {**summary["watchdog"], "waitingFor": "secret: sk-fixture"}
+    }) == {
+        "case_id": None, "scenario": None, "status": "failed", "cleanup_status": None, "checks": {},
+    }
+
+
 def test_live_audit_note_allowlist_excludes_provider_data() -> None:
     assert run_e2e.SAFE_LIVE_AUDIT_NOTE.fullmatch(
         "credential audit: source=cloud; location=logs; suffix=log"

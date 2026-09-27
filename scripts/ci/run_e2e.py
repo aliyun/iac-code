@@ -400,7 +400,30 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     # Live runner notes, errors, and filesystem paths can contain provider data.
     # Keep only fixed-schema status fields in CI artifacts and rendered reports.
     checks = summary.get("checks")
-    return {
+    raw_watchdog = summary.get("watchdog")
+    watchdog: dict[str, Any] | None = None
+    if isinstance(raw_watchdog, dict):
+        state = raw_watchdog.get("state")
+        action = raw_watchdog.get("action")
+        waiting_for = raw_watchdog.get("waitingFor")
+        elapsed = raw_watchdog.get("elapsedSeconds")
+        if (
+            isinstance(state, str)
+            and state in {
+                "waiting_for_input", "terminal_error", "normal_operation", "unknown", "unavailable", "no_output",
+            }
+            and isinstance(action, str)
+            and action in {"early_abort", "observe"}
+            and isinstance(waiting_for, str)
+            and re.fullmatch(r"[A-Za-z0-9 _()-]{1,100}", waiting_for)
+            and isinstance(elapsed, (int, float))
+            and not isinstance(elapsed, bool)
+        ):
+            watchdog = {
+                "state": state, "action": action, "waitingFor": waiting_for,
+                "elapsedSeconds": round(max(0.0, min(float(elapsed), 2700.0)), 1),
+            }
+    public = {
         "case_id": summary.get("case_id"),
         "scenario": summary.get("scenario"),
         "status": summary.get("status") or ("passed" if summary.get("passed") is True else "failed"),
@@ -409,6 +432,9 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         if isinstance(checks, dict)
         else {},
     }
+    if watchdog is not None:
+        public["watchdog"] = watchdog
+    return public
 
 
 def _tail(path: Path, limit: int = 4000) -> str:
@@ -620,6 +646,18 @@ def _reason(result: dict[str, Any]) -> str:
         reason = result["error"]
     elif result.get("cleanupStatus") == "failed":
         reason = "测试资源清理失败；检查 CI 作业日志和云账号残留资源"
+    elif isinstance(result.get("summary"), dict) and isinstance(result["summary"].get("watchdog"), dict) and (
+        result["summary"]["watchdog"].get("action") == "early_abort"
+    ):
+        watchdog = result["summary"]["watchdog"]
+        if watchdog["state"] == "no_output":
+            reason = "REPL 等待 {} 时终端长期无输出；{} 秒提前终止".format(
+                watchdog["waitingFor"], watchdog["elapsedSeconds"]
+            )
+        else:
+            reason = "REPL 交互偏离：等待 {} 时出现额外输入；{} 秒提前终止".format(
+                watchdog["waitingFor"], watchdog["elapsedSeconds"]
+            )
     elif result["failedChecks"]:
         reason = "检查失败：" + ", ".join(result["failedChecks"])
     elif result["notes"]:

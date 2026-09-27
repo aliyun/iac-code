@@ -6,6 +6,8 @@ import re
 import sys
 from pathlib import Path
 
+import pytest
+
 
 def _load_runner():
     path = Path(__file__).resolve().parents[2] / "scripts" / "repl" / "e2e" / "run_pipeline_scenarios.py"
@@ -671,6 +673,129 @@ def test_expect_any_auto_approves_permission_prompt(tmp_path: Path) -> None:
     assert child.sent == ["\x1b[5~\r"]
     assert any(event["type"] == "permission_prompt" for event in pty.events)
     assert any(event["type"] == "permission-prompt-response" for event in pty.events)
+
+
+def test_expect_any_diagnoses_and_aborts_unexpected_input(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--wait-diagnosis-after", "0"])
+    pty = _repl_pty_unit_instance(
+        runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={"IAC_CODE_CONFIG_DIR": str(tmp_path)}
+    )
+
+    class Child:
+        before = ""
+        after = ""
+
+        def expect(self, _patterns, timeout):
+            pty.raw_chunks.append("● Ask user question: choose a VPC\n")
+            raise runner.pexpect.TIMEOUT("waiting")
+
+    pty.child = Child()
+    monkeypatch.setattr(
+        runner, "diagnose_wait", lambda *_args, **_kwargs: {"state": "waiting_for_input", "confidence": 0.93}
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected input"):
+        pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=300)
+
+    assert pty._wait_diagnoses[-1]["action"] == "early_abort"
+    assert pty.events[-1]["type"] == "expect"
+    assert pty.events[-1]["passed"] is False
+
+
+def test_expect_any_keeps_waiting_when_model_cannot_confirm_input(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--wait-diagnosis-after", "0"])
+    pty = _repl_pty_unit_instance(
+        runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={"IAC_CODE_CONFIG_DIR": str(tmp_path)}
+    )
+
+    class Child:
+        before = ""
+        after = ""
+        calls = 0
+
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                pty.raw_chunks.append("Cloud resource creation is running\n")
+                raise runner.pexpect.TIMEOUT("waiting")
+            self.after = "Pipeline completed"
+            return 0
+
+    pty.child = Child()
+    monkeypatch.setattr(
+        runner, "diagnose_wait", lambda *_args, **_kwargs: {"state": "normal_operation", "confidence": 0.95}
+    )
+
+    matched = pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=300)
+
+    assert matched == "Pipeline completed"
+    assert pty._wait_diagnoses[-1]["action"] == "observe"
+
+
+def test_expect_any_aborts_silent_non_cloud_wait_before_stream_timeout(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+
+    class Child:
+        def expect(self, _patterns, timeout):
+            clock[0] += runner.WAIT_IDLE_SECONDS + 1
+            raise runner.pexpect.TIMEOUT("waiting")
+
+    pty.child = Child()
+    with pytest.raises(TimeoutError, match="no terminal output"):
+        pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=1800)
+    assert pty._wait_diagnoses[-1]["state"] == "no_output"
+
+
+def test_expect_any_allows_long_cloud_silence(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    pty.raw_chunks.append("● Deploying (5/5): CreateStack\n")
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+
+    class Child:
+        before = ""
+        after = "Pipeline completed"
+        calls = 0
+
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                clock[0] += runner.WAIT_IDLE_SECONDS + 1
+                raise runner.pexpect.TIMEOUT("waiting")
+            return 0
+
+    pty.child = Child()
+    assert pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=1800) == (
+        "Pipeline completed"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="pexpect PTY requires POSIX")
+def test_expect_any_preserves_partial_pty_output_across_poll_timeouts(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    monkeypatch.setattr(runner, "WAIT_POLL_SECONDS", 0.02)
+    child = runner.pexpect.spawn(
+        sys.executable,
+        ["-u", "-c", "import time; print('first', flush=True); time.sleep(0.15); print('second', flush=True)"],
+        encoding="utf-8",
+    )
+    pty.child = child
+    try:
+        assert pty.expect_any((r"first\s+second",), description="two chunks", timeout=1) == r"first\s+second"
+        assert "first" in pty.transcript
+        assert "second" in pty.transcript
+    finally:
+        child.close(force=True)
 
 
 def test_permission_prompt_response_sequence_supports_named_keys() -> None:
