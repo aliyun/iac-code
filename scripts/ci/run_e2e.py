@@ -459,6 +459,18 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         if isinstance(checks, dict)
         else {},
     }
+    cleanup_diagnostic = summary.get("cleanup_diagnostic")
+    if isinstance(cleanup_diagnostic, dict):
+        safe_cleanup_diagnostic: dict[str, Any] = {}
+        error_type = cleanup_diagnostic.get("error_type")
+        if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,59}", error_type):
+            safe_cleanup_diagnostic["error_type"] = error_type
+        for count_key in ("failure_count", "remaining_count"):
+            count = cleanup_diagnostic.get(count_key)
+            if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 100:
+                safe_cleanup_diagnostic[count_key] = count
+        if safe_cleanup_diagnostic:
+            public["cleanup_diagnostic"] = safe_cleanup_diagnostic
     error_type = summary.get("error_type")
     error_site = summary.get("error_site")
     if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,59}", error_type):

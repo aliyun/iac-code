@@ -602,6 +602,7 @@ class ScenarioHarness:
         self.pipeline_task_id = ""
         self.checks: dict[str, bool] = {}
         self.cleanup_status = "not-needed"
+        self.cleanup_diagnostic: dict[str, Any] = {}
         self.summaries: dict[str, Any] = {}
         self.snapshots: dict[str, Any] = {}
 
@@ -868,6 +869,7 @@ class ScenarioHarness:
         payload = {
             **asdict(result),
             "cleanup_status": self.cleanup_status,
+            "cleanup_diagnostic": self.cleanup_diagnostic,
             "streams": {name: asdict(summary) for name, summary in self.summaries.items()},
             "snapshots": self.snapshots,
         }
@@ -986,9 +988,14 @@ def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callabl
 
                 cleanup = cleanup_owned_stacks(harness.run_dir)
                 harness.cleanup_status = cleanup["status"]
+                harness.cleanup_diagnostic = {
+                    "failure_count": len(cleanup["failures"]),
+                    "remaining_count": len(cleanup["remainingStackIds"]),
+                }
                 harness.checks["test-owned ROS Stacks cleaned"] = cleanup["status"] == "completed"
             except Exception as exc:
                 harness.cleanup_status = "failed"
+                harness.cleanup_diagnostic = {"error_type": type(exc).__name__}
                 harness.checks["test-owned ROS Stacks cleaned"] = False
                 harness.notes.append("teardown: " + type(exc).__name__)
     return harness.finish(passed=passed, abort_reason=abort_reason)

@@ -943,6 +943,17 @@ def test_deploy_order_uses_confirm_action_not_later_cancel(runner: ModuleType, t
     assert runtime.checks["no deploy before confirmation"] is True
 
 
+def test_old_step_check_uses_structured_ids_not_llm_text(runner: ModuleType, tmp_path: Path) -> None:
+    runtime = _pipeline_check_runtime(runner, tmp_path, "backup_restore")
+    values = [{"eventType": "status_update", "data": {"text": "以前叫 architecture_planning"}}]
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["old step ids absent"] is True
+
+    values.append({"eventType": "step_started", "step": {"id": "architecture_planning"}})
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["old step ids absent"] is False
+
+
 def test_safe_cancel_requires_that_no_deployment_was_attempted(runner: ModuleType, tmp_path: Path) -> None:
     # A02 cancels instead of confirming, so ros_deploy must never be reached. Safe mode does not
     # restrict step tools, so an attempted deployment there would be a real cloud write.
@@ -1744,6 +1755,11 @@ def test_repl_confirmation_restart_waits_for_ready_hint_only_once(
         "_prepare_restored_repl_confirmation",
         lambda _pty, _runtime: calls.append("prepare-confirmation"),
     )
+    monkeypatch.setattr(
+        runner,
+        "_repl_wait_confirmation_after_optional_parameter_asks",
+        lambda _pty, _runtime: calls.append("wait-confirmation"),
+    )
     runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=9.0))
 
     runner._restart_repl_at_waiting(
@@ -1754,12 +1770,7 @@ def test_repl_confirmation_restart_waits_for_ready_hint_only_once(
     )
 
     assert calls == [
-        (
-            "expect",
-            runner.REPL_CONFIRMATION_PATTERNS,
-            "deployment confirmation before restart",
-            9.0,
-        ),
+        "wait-confirmation",
         ("terminate", True),
         ("spawn", ["--continue"]),
         "prepare-confirmation",
@@ -2317,16 +2328,16 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
     assert calls == [
         (
             "expect",
-            "post-rollback Step 2 ask or confirmation #1",
+            "Step 2 ask or confirmation #1",
             9.0,
             runner.REPL_ASK_INPUT_READY_PATTERNS + runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS,
         ),
         ("sleep", 0.25),
         "drain",
-        ("answer", "vpc-test", "post-rollback-parameter-answer-1"),
+        ("answer", "vpc-test", "step2-parameter-answer-1"),
         (
             "expect",
-            "post-rollback Step 2 ask or confirmation #2",
+            "Step 2 ask or confirmation #2",
             9.0,
             runner.REPL_ASK_INPUT_READY_PATTERNS + runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS,
         ),

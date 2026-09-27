@@ -1106,6 +1106,18 @@ def _started_steps(values: Sequence[Any]) -> list[tuple[int, str]]:
     return result
 
 
+def _observed_step_ids(values: Sequence[Any]) -> set[str]:
+    """Read structured step IDs without matching incidental text in LLM output."""
+    observed: set[str] = set()
+    for value in values:
+        for key, item in _walk(value):
+            if key in {"step_id", "stepId"} and isinstance(item, str):
+                observed.add(item)
+            elif key == "step" and isinstance(item, dict) and isinstance(item.get("id"), str):
+                observed.add(item["id"])
+    return observed
+
+
 def _has_unhandled_terminal_error(value: Any) -> bool:
     """Detect runner/transport terminal errors without treating handled tool failures as fatal."""
     if isinstance(value, dict):
@@ -1143,7 +1155,7 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
     if runtime.spec.surface is Surface.LEGACY:
         runtime.checks["legacy pipeline not rewritten"] = "selling_solution_first" not in text
         return
-    runtime.checks["old step ids absent"] = not any(step in text for step in OLD_ONLY_STEPS)
+    runtime.checks["old step ids absent"] = not bool(_observed_step_ids(values).intersection(OLD_ONLY_STEPS))
     started_steps = _started_steps(values)
     first_positions = [
         next((event_index for event_index, observed in started_steps if observed == step), -1) for step in NEW_STEPS
@@ -3015,7 +3027,7 @@ def _repl_wait_confirmation_after_optional_parameter_asks(pty: Any, runtime: Sce
     for ask_index in range(1, 4):
         matched = pty.expect_any(
             REPL_ASK_INPUT_READY_PATTERNS + REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-            description=f"post-rollback Step 2 ask or confirmation #{ask_index}",
+            description=f"Step 2 ask or confirmation #{ask_index}",
             timeout=runtime.args.stream_timeout,
         )
         if matched in REPL_CONFIRMATION_INPUT_READY_PATTERNS:
@@ -3026,8 +3038,8 @@ def _repl_wait_confirmation_after_optional_parameter_asks(pty: Any, runtime: Sce
         time.sleep(0.25)
         pty.drain_output()
         answer = runtime.args.cleanup_vpc_id or "请使用上面列出的第一个可用杭州 VPC"
-        _repl_submit_line_input(pty, answer, label=f"post-rollback-parameter-answer-{ask_index}")
-    raise RuntimeError("post-rollback Step 2 did not reach deployment confirmation after three parameter asks")
+        _repl_submit_line_input(pty, answer, label=f"step2-parameter-answer-{ask_index}")
+    raise RuntimeError("Step 2 did not reach deployment confirmation after three parameter asks")
 
 
 def _repl_wait_pipeline_completed(pty: Any, runtime: ScenarioRuntime) -> None:
@@ -3143,7 +3155,10 @@ def _restart_repl_at_waiting(pty: Any, patterns: tuple[str, ...], runtime: Scena
         pty.drain_output()
         record_restored()
         return
-    pty.expect_any(patterns, description=f"{label} before restart", timeout=runtime.args.stream_timeout)
+    if patterns == REPL_CONFIRMATION_PATTERNS:
+        _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+    else:
+        pty.expect_any(patterns, description=f"{label} before restart", timeout=runtime.args.stream_timeout)
     pty.terminate(force=True)
     pty.spawn(extra_args=["--continue"])
     if patterns == REPL_CONFIRMATION_PATTERNS:

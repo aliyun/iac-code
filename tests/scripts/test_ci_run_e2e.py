@@ -154,6 +154,23 @@ def test_live_public_summary_keeps_safe_failure_location_only() -> None:
     assert "error_site" not in unsafe
 
 
+def test_live_public_summary_keeps_only_safe_cleanup_diagnostic() -> None:
+    public = run_e2e._public_live_summary({
+        "cleanup_diagnostic": {
+            "error_type": "UnretryableError",
+            "failure_count": 1,
+            "remaining_count": 0,
+            "stack_id": "sensitive-stack-id",
+        },
+    })
+    assert public is not None
+    assert public["cleanup_diagnostic"] == {
+        "error_type": "UnretryableError",
+        "failure_count": 1,
+        "remaining_count": 0,
+    }
+
+
 def test_live_public_summary_keeps_only_known_a2a_states() -> None:
     public = run_e2e._public_live_summary({
         "a2a_states": ["TASK_STATE_WORKING", "TASK_STATE_FAILED", "TASK_STATE_PRIVATE_sk-fixture"],
