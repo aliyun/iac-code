@@ -161,6 +161,7 @@ def test_live_public_summary_keeps_only_known_a2a_states() -> None:
         "control_state": {
             "present": True, "task_matches": True, "phase": "running",
             "release_ready": False, "input_handoff_ready": False,
+            "execution_status": "working", "stream_available": True, "blocker_count": 2,
             "unsafe": "sk-fixture",
         },
     })
@@ -170,6 +171,7 @@ def test_live_public_summary_keeps_only_known_a2a_states() -> None:
     assert public["control_state"] == {
         "present": True, "task_matches": True, "phase": "running",
         "release_ready": False, "input_handoff_ready": False,
+        "execution_status": "working", "stream_available": True, "blocker_count": 2,
     }
     assert "sk-fixture" not in json.dumps(public)
 

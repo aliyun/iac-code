@@ -480,11 +480,18 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     if isinstance(control_state, dict):
         safe_control_state = {
             key: value for key, value in control_state.items()
-            if key in {"present", "task_matches", "release_ready", "input_handoff_ready"}
+            if key in {"present", "task_matches", "release_ready", "input_handoff_ready", "stream_available"}
             and (isinstance(value, bool) or value is None)
         }
         if control_state.get("phase") in {"running", "paused", "terminating", "terminated"}:
             safe_control_state["phase"] = control_state["phase"]
+        if control_state.get("execution_status") in {
+            "working", "input-required", "completed", "failed", "canceled",
+        }:
+            safe_control_state["execution_status"] = control_state["execution_status"]
+        blocker_count = control_state.get("blocker_count")
+        if isinstance(blocker_count, int) and not isinstance(blocker_count, bool) and 0 <= blocker_count <= 100:
+            safe_control_state["blocker_count"] = blocker_count
         public["control_state"] = safe_control_state
     raw_error = summary.get("error")
     if isinstance(raw_error, str) and "A2A task entered unexpected terminal state TASK_STATE_FAILED" in raw_error:

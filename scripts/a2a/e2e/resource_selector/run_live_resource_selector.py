@@ -466,6 +466,10 @@ def _wait_for_released_execution(persistence_dir: Path, summary: StreamSummary, 
             "phase": control.get("phase") if isinstance(control, dict) else None,
             "release_ready": control.get("releaseReady") if isinstance(control, dict) else None,
             "input_handoff_ready": control.get("inputHandoffReady") if isinstance(control, dict) else None,
+            "execution_status": control.get("executionStatus") if isinstance(control, dict) else None,
+            "stream_available": control.get("streamAvailable") if isinstance(control, dict) else None,
+            "blocker_count": len(control.get("blockers", []))
+            if isinstance(control, dict) and isinstance(control.get("blockers"), list) else None,
         }
         if (
             isinstance(control, dict)
