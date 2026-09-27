@@ -45,8 +45,15 @@ SAFE_TERMINAL_TERMS = (
     "task", "pipeline", "recovery", "restore", "backup", "session", "context", "identity",
     "credential", "provider", "model", "permission", "input", "state", "failed", "error",
     "unavailable", "missing", "invalid", "retry", "cancelled", "canceled", "concurrent",
+    "mismatch", "resume", "step", "active", "checkpoint", "journal", "lock", "conflict",
+    "runtime", "execution", "message", "transport", "stream", "closed", "delivery",
     "任务", "流水线", "恢复", "备份", "会话", "上下文", "身份", "凭证", "模型", "权限", "输入",
     "状态", "失败", "错误", "不可用", "不存在", "超时", "重试", "取消", "并发",
+)
+TERMINAL_FIXED_CODES = (
+    "pipeline_identity_mismatch", "input_response_mismatch", "permission_resume_invalid",
+    "resource_selection_resume_invalid", "cloud_execution_identity_changed", "state_commit_failed",
+    "external_operation_commit_failed", "pipeline_transport_delivery_required",
 )
 RESULT_LABELS = {
     "passed": "通过",
@@ -461,14 +468,20 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         public["error_site"] = error_site
     raw_error = summary.get("error")
     if isinstance(raw_error, str) and "A2A task entered unexpected terminal state TASK_STATE_FAILED" in raw_error:
-        terminal_text = raw_error.rsplit("TASK_STATE_FAILED", 1)[-1].lower()
+        terminal_message = raw_error.rsplit("TASK_STATE_FAILED", 1)[-1]
+        terminal_text = terminal_message.lower()
+        normalized_latin = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", terminal_message).replace("_", " ").lower()
         safe_terms = [
             term for term in SAFE_TERMINAL_TERMS
-            if term.isascii() and re.search(r"\b{}\b".format(term), terminal_text)
+            if term.isascii() and re.search(r"\b{}\b".format(term), normalized_latin)
         ]
         safe_terms.extend(term for term in SAFE_TERMINAL_TERMS if not term.isascii() and term in terminal_text)
         if safe_terms:
             public["terminal_terms"] = safe_terms[:12]
+        for code in TERMINAL_FIXED_CODES:
+            if code in terminal_text:
+                public["terminal_code"] = code
+                break
         public["terminal_message_present"] = bool(terminal_text.strip(" :"))
         public["terminal_category"] = next(
             (category for category, pattern in TERMINAL_CATEGORIES if re.search(pattern, terminal_text)), "other"

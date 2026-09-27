@@ -176,6 +176,17 @@ def test_live_public_summary_extracts_only_safe_chinese_terminal_terms() -> None
     assert "sk-fixture" not in json.dumps(public)
 
 
+def test_live_public_summary_recognizes_fixed_snake_case_code() -> None:
+    public = run_e2e._public_live_summary({
+        "error": "RuntimeError: A2A task entered unexpected terminal state TASK_STATE_FAILED: "
+        "pipeline_identity_mismatch; private value sk-fixture",
+    })
+    assert public is not None
+    assert public["terminal_code"] == "pipeline_identity_mismatch"
+    assert {"pipeline", "identity", "mismatch"} <= set(public["terminal_terms"])
+    assert "sk-fixture" not in json.dumps(public)
+
+
 def test_live_a2a_terminal_evidence_keeps_only_fixed_fields(tmp_path: Path) -> None:
     event = {
         "metadata": {"iac_code": {"pipeline": {
