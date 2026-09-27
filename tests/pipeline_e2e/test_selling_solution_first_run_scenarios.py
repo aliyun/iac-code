@@ -469,6 +469,18 @@ def test_unexpected_a2a_terminal_omits_prior_model_output(runner: ModuleType) ->
     assert "private prior model output" not in str(failure.value)
 
 
+def test_continue_to_pending_stops_on_terminal_failure(runner: ModuleType, tmp_path: Path) -> None:
+    runtime = argparse.Namespace(paths=argparse.Namespace(run_dir=tmp_path))
+    summary = argparse.Namespace(last_status_state="TASK_STATE_FAILED", terminal_status_text="execution conflict")
+    harness = argparse.Namespace(stream=lambda **_kwargs: pytest.fail("must not start another A2A turn"))
+
+    with pytest.raises(RuntimeError, match="execution conflict"):
+        runner._continue_a2a_to_pending(
+            runtime, harness, None, runner.A2AConversationPlan(), summary,
+            "candidate_selection", name_prefix="recovery",
+        )
+
+
 def test_backup_restore_response_omits_stale_task_id(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

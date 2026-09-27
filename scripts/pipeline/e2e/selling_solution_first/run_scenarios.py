@@ -1545,6 +1545,7 @@ def _advance_a2a_to_pending(
 ) -> Any:
     summary = _a2a_turn(runtime, harness, prompt=_initial_prompt(runtime), name=f"{name_prefix}-initial")
     for index in range(12):
+        _raise_for_unexpected_a2a_terminal(summary)
         kind = _pending_kind(a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl")
         step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         if kind and seen_waiting is not None:
@@ -1577,6 +1578,7 @@ def _continue_a2a_to_pending(
     name_prefix: str,
 ) -> Any:
     for index in range(12):
+        _raise_for_unexpected_a2a_terminal(summary)
         kind = _pending_kind(a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl")
         normalized_kind = "candidate_selection" if kind == "candidate_select" else kind
         normalized_target = "candidate_selection" if target_kind == "candidate_select" else target_kind
