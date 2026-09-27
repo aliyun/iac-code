@@ -140,7 +140,7 @@ def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
         "watchdog": {
             "state": "waiting_for_input", "confidence": 0.93,
             "waitingFor": "pipeline completed", "elapsedSeconds": 125.33,
-            "action": "early_abort", "raw": "secret-fixture-value",
+            "action": "early_abort", "cue": "ask_question", "raw": "secret-fixture-value",
         },
     }
 
@@ -149,7 +149,7 @@ def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
     assert public is not None
     assert public["watchdog"] == {
         "state": "waiting_for_input", "waitingFor": "pipeline completed",
-        "elapsedSeconds": 125.3, "action": "early_abort",
+        "elapsedSeconds": 125.3, "action": "early_abort", "cue": "ask_question",
     }
     assert "secret-fixture-value" not in json.dumps(public)
     assert run_e2e._public_live_summary({

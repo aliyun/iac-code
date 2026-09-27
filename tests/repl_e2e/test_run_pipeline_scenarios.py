@@ -699,6 +699,7 @@ def test_expect_any_diagnoses_and_aborts_unexpected_input(tmp_path: Path, monkey
         pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=300)
 
     assert pty._wait_diagnoses[-1]["action"] == "early_abort"
+    assert pty._wait_diagnoses[-1]["cue"] == "ask_question"
     assert pty.events[-1]["type"] == "expect"
     assert pty.events[-1]["passed"] is False
 
@@ -732,6 +733,7 @@ def test_expect_any_keeps_waiting_when_model_cannot_confirm_input(tmp_path: Path
 
     assert matched == "Pipeline completed"
     assert pty._wait_diagnoses[-1]["action"] == "observe"
+    assert pty._wait_diagnoses[-1]["cue"] == "none"
 
 
 def test_expect_any_aborts_silent_non_cloud_wait_before_stream_timeout(tmp_path: Path, monkeypatch) -> None:

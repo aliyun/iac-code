@@ -407,6 +407,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         action = raw_watchdog.get("action")
         waiting_for = raw_watchdog.get("waitingFor")
         elapsed = raw_watchdog.get("elapsedSeconds")
+        cue = raw_watchdog.get("cue")
         if (
             isinstance(state, str)
             and state in {
@@ -423,6 +424,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 "state": state, "action": action, "waitingFor": waiting_for,
                 "elapsedSeconds": round(max(0.0, min(float(elapsed), 2700.0)), 1),
             }
+            if isinstance(cue, str) and cue in {"ask_question", "candidate_controls", "repl_prompt", "none"}:
+                watchdog["cue"] = cue
     public = {
         "case_id": summary.get("case_id"),
         "scenario": summary.get("scenario"),

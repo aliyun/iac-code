@@ -588,7 +588,7 @@ class ReplPty:
                 if now - max(getattr(self, "_last_output_at", started), started) >= idle_limit:
                     record = {
                         "state": "no_output", "confidence": 1.0, "waitingFor": description,
-                        "elapsedSeconds": round(now - started, 1), "action": "early_abort",
+                        "elapsedSeconds": round(now - started, 1), "action": "early_abort", "cue": "none",
                     }
                     diagnoses = getattr(self, "_wait_diagnoses", [])
                     diagnoses.append(record)
@@ -666,17 +666,19 @@ class ReplPty:
             return False
         state = str(diagnosis["state"])
         confidence = float(diagnosis["confidence"])
-        interactive_cue = bool(
-            re.search(
-                r"●\s*Ask user question|Press number keys to select a candidate|Enter to confirm|按数字键.*候选",
-                recent_text,
-            )
-            or ("❯" in recent_text and "\x1b[>4;2m" in recent_raw)
-        )
-        early_abort = state == "waiting_for_input" and confidence >= 0.85 and interactive_cue
+        if re.search(r"●\s*Ask user question", recent_text):
+            cue = "ask_question"
+        elif re.search(r"Press number keys to select a candidate|Enter to confirm|按数字键.*候选", recent_text):
+            cue = "candidate_controls"
+        elif "❯" in recent_text and "\x1b[>4;2m" in recent_raw:
+            cue = "repl_prompt"
+        else:
+            cue = "none"
+        early_abort = state == "waiting_for_input" and confidence >= 0.85 and cue != "none"
         record = {
             "state": state,
             "confidence": confidence,
+            "cue": cue,
             "waitingFor": description,
             "elapsedSeconds": round(elapsed, 1),
             "action": "early_abort" if early_abort else "observe",
