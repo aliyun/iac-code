@@ -4350,6 +4350,73 @@ raise TimeoutError("timed out waiting for ROS Stack deletion")
 """
 
 
+_CLOUD_DISCOVERY_CODE = r"""
+import json, sys
+from alibabacloud_ros20190910 import models as ros_models
+from iac_code.services.cloud_credentials import CloudCredentials
+from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+
+names = json.load(open(sys.argv[1], encoding="utf-8"))
+credential = CloudCredentials().get_provider("aliyun")
+if credential is None:
+    raise RuntimeError("Aliyun credential is unavailable")
+region = credential.region_id
+client = RosClientFactory.create(credential, region)
+found = []
+for name in names:
+    page = 1
+    while True:
+        body = client.list_stacks(ros_models.ListStacksRequest(
+            region_id=region, stack_name=[name], page_number=page, page_size=50,
+        )).body
+        batch = body.stacks or []
+        for stack in batch:
+            if stack.stack_name == name and stack.status != "DELETE_COMPLETE" and stack.stack_id:
+                found.append({"provider": "ros", "resourceType": "stack", "stackId": stack.stack_id,
+                              "stackName": name, "regionId": region, "createdByCase": "true"})
+        if len(batch) < 50:
+            break
+        page += 1
+print(json.dumps(found))
+"""
+
+
+def discover_owned_cloud_resources(runtime: ScenarioRuntime) -> list[dict[str, str]]:
+    """Ask ROS for exact test-owned names, including Stacks missing from tool transcripts."""
+    names = sorted(name for name in runtime.owned_stack_names if name.startswith(STACK_PREFIX + "-"))
+    if len(names) != len(runtime.owned_stack_names):
+        raise ValueError("owned Stack name is outside the E2E namespace")
+    manifest = runtime.paths.artifacts_dir / "owned-stack-names.json"
+    write_json(manifest, names)
+    completed = subprocess.run(
+        [*shlex.split(runtime.args.python), "-c", _CLOUD_DISCOVERY_CODE, str(manifest)],
+        cwd=REPO_ROOT,
+        env=runtime.env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=min(120, runtime.args.stream_timeout),
+        check=False,
+    )
+    if completed.returncode:
+        raise RuntimeError(f"owned Stack discovery subprocess exited {completed.returncode}")
+    values = json.loads(completed.stdout)
+    if not isinstance(values, list):
+        raise ValueError("owned Stack discovery returned invalid data")
+    resources = []
+    for item in values:
+        if (
+            not isinstance(item, dict)
+            or item.get("stackName") not in runtime.owned_stack_names
+            or not isinstance(item.get("stackId"), str)
+            or not re.fullmatch(r"[A-Za-z0-9_-]{6,}", item["stackId"])
+        ):
+            raise ValueError("owned Stack discovery returned an unowned resource")
+        resources.append(item)
+    return resources
+
+
 def cleanup_cloud_resources(runtime: ScenarioRuntime) -> str:
     resources = discover_cloud_resources(runtime)
     if runtime.args.skip_final_teardown:
@@ -4358,6 +4425,14 @@ def cleanup_cloud_resources(runtime: ScenarioRuntime) -> str:
         return "skipped"
     failures: list[str] = []
     deleted: list[str] = []
+    if runtime.spec.cloud_write:
+        try:
+            listed = discover_owned_cloud_resources(runtime)
+            resources = list({item["stackId"]: item for item in (*resources, *listed)}.values())
+            runtime.cloud_resources = resources
+            write_json(runtime.paths.run_dir / "cloud-resources.json", resources)
+        except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as exc:
+            failures.append(f"owned Stack discovery failed: {type(exc).__name__}")
     for resource in resources:
         stack_id = resource.get("stackId", "")
         stack_name = resource.get("stackName", "")

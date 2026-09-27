@@ -6,6 +6,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import threading
 import time
@@ -227,6 +228,76 @@ def test_repl_cloud_discovery_reads_persisted_tool_transcript(runner: ModuleType
         }
     ]
     assert json.loads((tmp_path / "cloud-resources.json").read_text(encoding="utf-8")) == runtime.cloud_resources
+
+
+def test_cleanup_finds_owned_stack_even_without_tool_transcript(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owned_name = "iac-e2e-ssf-repl-single-plan-happy-abc12345"
+    stack_id = "test-stack-id-123456"
+    artifacts_dir = tmp_path / "artifacts"
+    logs_dir = tmp_path / "logs"
+    artifacts_dir.mkdir()
+    logs_dir.mkdir()
+    runtime = argparse.Namespace(
+        spec=argparse.Namespace(cloud_write=True),
+        args=argparse.Namespace(python=sys.executable, stream_timeout=30, skip_final_teardown=False),
+        paths=argparse.Namespace(run_dir=tmp_path, artifacts_dir=artifacts_dir, logs_dir=logs_dir),
+        env={"IAC_CODE_CONFIG_DIR": str(tmp_path / "config")},
+        owned_stack_names={owned_name},
+        cloud_resources=[],
+        checks={},
+    )
+    monkeypatch.setattr(runner, "discover_cloud_resources", lambda _: [])
+    calls: list[str] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command[2])
+        if command[2] == runner._CLOUD_DISCOVERY_CODE:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(
+                    [{"provider": "ros", "resourceType": "stack", "stackId": stack_id,
+                      "stackName": owned_name, "regionId": "cn-hangzhou", "createdByCase": "true"}]
+                ),
+                "",
+            )
+        assert command[2] == runner._CLOUD_CLEANUP_CODE
+        return subprocess.CompletedProcess(command, 0, '{"deleted": true}', "")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    assert runner.cleanup_cloud_resources(runtime) == "completed"
+    assert calls == [runner._CLOUD_DISCOVERY_CODE, runner._CLOUD_CLEANUP_CODE]
+    assert json.loads((tmp_path / "cleanup-result.json").read_text(encoding="utf-8"))["deletedStackIds"] == [stack_id]
+
+
+def test_cleanup_reports_failed_when_owned_stack_inventory_fails(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "artifacts").mkdir()
+    runtime = argparse.Namespace(
+        spec=argparse.Namespace(cloud_write=True),
+        args=argparse.Namespace(python=sys.executable, stream_timeout=30, skip_final_teardown=False),
+        paths=argparse.Namespace(run_dir=tmp_path, artifacts_dir=tmp_path / "artifacts"),
+        env={},
+        owned_stack_names={"iac-e2e-ssf-repl-single-plan-happy-abc12345"},
+        cloud_resources=[],
+        checks={},
+    )
+    monkeypatch.setattr(runner, "discover_cloud_resources", lambda _: [])
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "cloud API unavailable"),
+    )
+
+    assert runner.cleanup_cloud_resources(runtime) == "failed"
+    assert runtime.checks["test-owned stacks cleaned"] is False
+    assert json.loads((tmp_path / "cleanup-result.json").read_text(encoding="utf-8"))["failures"] == [
+        "owned Stack discovery failed: RuntimeError"
+    ]
 
 
 def test_runtime_defaults_follow_real_settings_shape(runner: ModuleType, tmp_path: Path) -> None:
