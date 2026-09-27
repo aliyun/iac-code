@@ -134,6 +134,26 @@ def test_live_public_summary_drops_notes_error_and_paths() -> None:
     }
 
 
+def test_live_public_summary_keeps_safe_failure_location_only() -> None:
+    public = run_e2e._public_live_summary({
+        "status": "failed",
+        "error": "RuntimeError: private provider response sk-fixture",
+        "error_type": "RuntimeError",
+        "error_site": "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py:1752",
+    })
+    assert public is not None
+    assert public["error_type"] == "RuntimeError"
+    assert public["error_site"] == "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py:1752"
+    assert "sk-fixture" not in json.dumps(public)
+    unsafe = run_e2e._public_live_summary({
+        "error_type": "RuntimeError: sk-fixture",
+        "error_site": "scripts/../../secrets.py:1",
+    })
+    assert unsafe is not None
+    assert "error_type" not in unsafe
+    assert "error_site" not in unsafe
+
+
 def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
     summary = {
         "passed": False,

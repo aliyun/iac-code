@@ -435,6 +435,13 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         if isinstance(checks, dict)
         else {},
     }
+    error_type = summary.get("error_type")
+    error_site = summary.get("error_site")
+    if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,59}", error_type):
+        public["error_type"] = error_type
+    safe_error_site = r"(?:scripts|src)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.py:[1-9][0-9]{0,5}"
+    if isinstance(error_site, str) and re.fullmatch(safe_error_site, error_site):
+        public["error_site"] = error_site
     if watchdog is not None:
         public["watchdog"] = watchdog
     return public
@@ -663,6 +670,10 @@ def _reason(result: dict[str, Any]) -> str:
             )
     elif result["failedChecks"]:
         reason = "检查失败：" + ", ".join(result["failedChecks"])
+    elif result["live"] and isinstance(result.get("summary"), dict) and result["summary"].get("error_type"):
+        reason = "异常：{}".format(result["summary"]["error_type"])
+        if result["summary"].get("error_site"):
+            reason += "（{}）".format(result["summary"]["error_site"])
     elif result["notes"]:
         first_lines = [str(note).splitlines()[0] for note in result["notes"][:3]]
         reason = "；".join(first_lines)[:240]

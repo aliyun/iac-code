@@ -682,6 +682,8 @@ class ScenarioResult:
     notes: list[str]
     cleanup_status: str
     error: str = ""
+    error_type: str = ""
+    error_site: str = ""
 
     @property
     def passed(self) -> bool:
@@ -4891,6 +4893,23 @@ def _write_case_summary(runtime: ScenarioRuntime, result: ScenarioResult) -> Non
         write_json(runtime.paths.run_dir / "cleanup-result.json", {"status": result.cleanup_status})
 
 
+def _exception_site(exc: BaseException) -> str:
+    """Keep only the last traceback location inside versioned application code."""
+    site = ""
+    traceback = exc.__traceback__
+    while traceback is not None:
+        filename = Path(traceback.tb_frame.f_code.co_filename)
+        try:
+            relative = filename.resolve().relative_to(REPO_ROOT)
+        except ValueError:
+            pass
+        else:
+            if relative.parts[0] in {"scripts", "src"} and relative.suffix == ".py":
+                site = f"{relative.as_posix()}:{traceback.tb_lineno}"
+        traceback = traceback.tb_next
+    return site
+
+
 def run_one_scenario(
     spec: ScenarioSpec,
     args: argparse.Namespace,
@@ -4902,6 +4921,8 @@ def run_one_scenario(
     started = time.monotonic()
     runtime: ScenarioRuntime | None = None
     error = ""
+    error_type = ""
+    error_site = ""
     cleanup_status = "not-needed"
     status_value = "failed"
     try:
@@ -4946,6 +4967,8 @@ def run_one_scenario(
         status_value = "canceled"
     except BaseException as exc:
         error = f"{type(exc).__name__}: {exc}"
+        error_type = type(exc).__name__
+        error_site = _exception_site(exc)
         status_value = "failed"
     if runtime is None:
         # Failure before runtime construction still receives a durable case directory.
@@ -4986,6 +5009,8 @@ def run_one_scenario(
         notes=notes,
         cleanup_status=cleanup_status,
         error=error,
+        error_type=error_type,
+        error_site=error_site,
     )
     if runtime is not None:
         services.unregister_runtime(runtime)
