@@ -4443,6 +4443,9 @@ def credential_values_absent_from_artifacts(runtime: ScenarioRuntime) -> bool:
         except OSError:
             continue
         if any(value in content for value in sensitive_values):
+            runtime.notes.append(
+                f"credential value found in case artifact: {path.relative_to(runtime.paths.run_dir)}"
+            )
             return False
     return True
 
@@ -4533,6 +4536,8 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         runtime.checks["Aliyun business body and public payload contract passed"] = False
     tools = [item["tool"].lower() for item in _tool_sequence(values)]
     runtime.checks["public events preserve Aliyun tool attribution"] = "aliyun_api" in tools
+    if "aliyun_api" not in tools:
+        runtime.notes.append("public tool attribution observed: " + ", ".join(sorted(set(tools))))
     if runtime.spec.case_id in {"A01", "W01"}:
         runtime.checks["deployed flow preserves ros_deploy attribution"] = "ros_deploy" in tools
 

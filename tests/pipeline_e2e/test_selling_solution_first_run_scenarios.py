@@ -1557,6 +1557,8 @@ def test_case_artifact_credential_audit_ignores_config_but_detects_log_leak(runn
     assert runner.credential_values_absent_from_artifacts(runtime)
     (runtime.paths.logs_dir / "leak.log").write_text("unit-secret-value", encoding="utf-8")
     assert not runner.credential_values_absent_from_artifacts(runtime)
+    assert runtime.notes[-1] == "credential value found in case artifact: logs/leak.log"
+    assert "unit-secret-value" not in runtime.notes[-1]
 
 
 def test_reused_web_browser_helper_accepts_optional_dom_artifacts(
