@@ -229,7 +229,10 @@ def test_acp_lifecycle(checks: dict[str, bool] | None = None):
             "prompt": [
                 {
                     "type": "text",
-                    "text": "帮我生成一个创建VPC的ROS模板，VPC名称为test-vpc，CIDR为172.16.0.0/12，只输出JSON模板",
+                    "text": (
+                        "帮我生成一个创建VPC的ROS模板，VPC名称为test-vpc，CIDR为172.16.0.0/12。"
+                        "直接在回复中输出JSON模板；不要调用工具、查询云资源或写入文件。"
+                    ),
                 }
             ],
         }, id=3))
