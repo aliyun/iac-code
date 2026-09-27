@@ -154,6 +154,17 @@ def test_live_public_summary_keeps_safe_failure_location_only() -> None:
     assert "error_site" not in unsafe
 
 
+def test_live_public_summary_classifies_a2a_terminal_without_text() -> None:
+    public = run_e2e._public_live_summary({
+        "error": "RuntimeError: A2A task entered unexpected terminal state TASK_STATE_FAILED: "
+        "ValueError: Rate limit exceeded for secret sk-fixture",
+    })
+    assert public is not None
+    assert public["terminal_category"] == "rate_limit"
+    assert public["terminal_exception"] == "ValueError"
+    assert "sk-fixture" not in json.dumps(public)
+
+
 def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
     summary = {
         "passed": False,

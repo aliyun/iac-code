@@ -442,6 +442,30 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     safe_error_site = r"(?:scripts|src)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.py:[1-9][0-9]{0,5}"
     if isinstance(error_site, str) and re.fullmatch(safe_error_site, error_site):
         public["error_site"] = error_site
+    raw_error = summary.get("error")
+    if isinstance(raw_error, str) and "A2A task entered unexpected terminal state TASK_STATE_FAILED" in raw_error:
+        terminal_text = raw_error.rsplit("TASK_STATE_FAILED", 1)[-1].lower()
+        terminal_categories = (
+            ("task_busy", r"already working|already running|task is busy"),
+            ("rate_limit", r"rate.?limit|throttl|\b429\b|quota"),
+            ("timeout", r"timed? out|timeout|deadline"),
+            ("authentication", r"unauthorized|invalid.{0,20}api.?key|\b401\b"),
+            ("permission", r"forbidden|permission denied|\b403\b"),
+            ("model_unavailable", r"model.{0,30}not found|\b404\b"),
+            ("network", r"connection|network|\b50[234]\b"),
+            ("model_context", r"context length|max(?:imum)? tokens?"),
+        )
+        public["terminal_category"] = next(
+            (category for category, pattern in terminal_categories if re.search(pattern, terminal_text)), "other"
+        )
+        known_exceptions = (
+            "AssertionError", "AttributeError", "ConnectionError", "FileNotFoundError", "KeyError",
+            "PermissionError", "RuntimeError", "TimeoutError", "TypeError", "ValueError",
+        )
+        for exception in known_exceptions:
+            if re.search(r"\b{}:".format(exception), terminal_text, re.IGNORECASE):
+                public["terminal_exception"] = exception
+                break
     if watchdog is not None:
         public["watchdog"] = watchdog
     return public
@@ -674,6 +698,10 @@ def _reason(result: dict[str, Any]) -> str:
         reason = "异常：{}".format(result["summary"]["error_type"])
         if result["summary"].get("error_site"):
             reason += "（{}）".format(result["summary"]["error_site"])
+        if result["summary"].get("terminal_category"):
+            reason += "；A2A 终态类别：{}".format(result["summary"]["terminal_category"])
+        if result["summary"].get("terminal_exception"):
+            reason += "；内部异常：{}".format(result["summary"]["terminal_exception"])
     elif result["notes"]:
         first_lines = [str(note).splitlines()[0] for note in result["notes"][:3]]
         reason = "；".join(first_lines)[:240]
