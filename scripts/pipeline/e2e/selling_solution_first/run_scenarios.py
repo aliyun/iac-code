@@ -2906,6 +2906,8 @@ def _wait_repl_display_event(
         if drain_output is not None and check_before_drain:
             drain_output()
         time.sleep(0.1)
+    runtime.checks[f"REPL display {event_type} occurrence {occurrence} observed"] = False
+    runtime.checks["REPL display matched at least once before timeout"] = latest_count > 0
     raise TimeoutError(
         f"timed out waiting for REPL display event {event_type!r} occurrence {occurrence}; observed {latest_count}"
     )

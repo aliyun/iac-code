@@ -439,6 +439,8 @@ class _TurnNotReadyError(AssertionError):
         self.states = [state for state in summary.status_states if state.startswith("TASK_STATE_")]
         self.event_count = summary.event_count
         self.text_present = bool(summary.text.strip())
+        self.raw_line_count = summary.raw_line_count
+        self.response_content_type = summary.response_content_type
         terminal = summary.terminal_status_text.casefold()
         self.terminal_markers = [
             marker for marker in (
@@ -933,6 +935,8 @@ def main() -> None:
             failure["a2a_phase"] = "next-turn" if exc.name == "next turn" else "answer"
             failure["a2a_event_count"] = exc.event_count
             failure["a2a_text_present"] = exc.text_present
+            failure["a2a_raw_line_count"] = exc.raw_line_count
+            failure["a2a_response_content_type"] = exc.response_content_type
             failure["terminal_markers"] = exc.terminal_markers
             failure["terminal_message_present"] = exc.terminal_message_present
         if isinstance(exc, _DurableReleaseTimeoutError):

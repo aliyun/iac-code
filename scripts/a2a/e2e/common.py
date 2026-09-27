@@ -68,6 +68,8 @@ class StreamSummary:
     text: str = ""
     terminal_status_text: str = ""
     event_count: int = 0
+    response_content_type: str = ""
+    raw_line_count: int = 0
 
     @property
     def last_status_state(self) -> str:
@@ -199,7 +201,9 @@ def stream_message(
     summary = StreamSummary(name=name, prompt=prompt, request_task_id=task_id)
     try:
         with urlopen(request, timeout=timeout) as response:
+            summary.response_content_type = response.headers.get_content_type()
             for line in response:
+                summary.raw_line_count += 1
                 parsed = _parse_sse_data_line(line)
                 if parsed is None:
                     continue
