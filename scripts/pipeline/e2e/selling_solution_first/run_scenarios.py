@@ -2058,6 +2058,14 @@ def _run_a2a_input_during_backup(
             )
             if not matched_target and not supplemental_ask:
                 raise RuntimeError(f"expected {expected_step}:{expected_kind}, got {observed_step}:{observed_kind}")
+            # The server can reach its next input_required backup as soon as it
+            # consumes this response. Arm that window before sending, so a
+            # fast turn cannot pass the fixture's bounded arm wait.
+            next_control = (
+                _arm_a2a_backup_delay(runtime, harness, a2a, control_index + 1)
+                if control_index < 12 and not (matched_target and index == len(expected))
+                else None
+            )
             unfinished_at_dispatch = not _backup_delay_marker(control, "finished").exists()
             response, image_key = _a2a_response_for_pending(runtime, observed_kind, plan)
             if observed_step == NEW_STEPS[1] and observed_kind == "ask_user_question":
@@ -2137,7 +2145,9 @@ def _run_a2a_input_during_backup(
             control_index += 1
             if control_index > 12:
                 raise RuntimeError("too many supplemental pending inputs during backup-window coverage")
-            control = _arm_a2a_backup_delay(runtime, harness, a2a, control_index)
+            if next_control is None:
+                raise RuntimeError("backup-window arm budget exhausted")
+            control = next_control
             with contextlib.suppress(Exception):
                 response_stream.join(timeout=5)
             if matched_target:
