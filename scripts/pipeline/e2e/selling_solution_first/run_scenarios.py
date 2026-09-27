@@ -2958,6 +2958,21 @@ def _is_repl_deployment_confirmation(event: dict[str, Any]) -> bool:
     )
 
 
+def _repl_confirmation_has_cost_lines(events: Sequence[dict[str, Any]]) -> bool:
+    for event in events:
+        if not _is_repl_deployment_confirmation(event):
+            continue
+        payload = event.get("payload")
+        cost = payload.get("cost") if isinstance(payload, dict) else None
+        resources = cost.get("resources") if isinstance(cost, dict) else None
+        if isinstance(resources, list) and any(
+            isinstance(item, dict) and any(item.get(key) for key in ("type", "spec", "cost"))
+            for item in resources
+        ):
+            return True
+    return False
+
+
 def _record_repl_confirmation_options(runtime: ScenarioRuntime, event: dict[str, Any]) -> None:
     payload = event.get("payload")
     options = payload.get("options") if isinstance(payload, dict) else None
@@ -4892,8 +4907,11 @@ def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
             require_all=spec.cloud_write,
         )
         if "询价概览" in transcript:
+            expected_headers = ["方案说明", "询价概览"]
+            if _repl_confirmation_has_cost_lines(display_events):
+                expected_headers.append("费用明细")
             runtime.checks["REPL confirmation focuses solution and quote"] = all(
-                marker in transcript for marker in ("方案说明", "询价概览", "费用明细")
+                marker in transcript for marker in expected_headers
             )
     if spec.surface is Surface.WEB:
         runtime.checks["Web API payload artifact captured"] = (

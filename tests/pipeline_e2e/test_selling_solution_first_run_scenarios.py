@@ -1777,6 +1777,17 @@ def test_repl_confirmation_restart_waits_for_ready_hint_only_once(
     ]
 
 
+def test_repl_confirmation_cost_details_only_expected_for_priced_resources(runner: ModuleType) -> None:
+    event = {
+        "type": "user_input_required",
+        "step_id": runner.NEW_STEPS[1],
+        "payload": {"kind": "deployment_confirmation", "cost": {"resources": []}},
+    }
+    assert runner._repl_confirmation_has_cost_lines([event]) is False
+    event["payload"]["cost"]["resources"] = [{"type": "VSwitch", "cost": "¥1/月"}]
+    assert runner._repl_confirmation_has_cost_lines([event]) is True
+
+
 def test_repl_step_started_wait_filters_by_target_step(runner: ModuleType, tmp_path: Path) -> None:
     display_path = tmp_path / "config" / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
     display_path.parent.mkdir(parents=True)
