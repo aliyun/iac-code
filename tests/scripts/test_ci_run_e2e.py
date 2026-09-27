@@ -134,6 +134,15 @@ def test_live_public_summary_drops_notes_error_and_paths() -> None:
     }
 
 
+def test_live_audit_note_allowlist_excludes_provider_data() -> None:
+    assert run_e2e.SAFE_LIVE_AUDIT_NOTE.fullmatch(
+        "credential audit: source=cloud; location=logs; suffix=log"
+    )
+    assert not run_e2e.SAFE_LIVE_AUDIT_NOTE.fullmatch(
+        "credential audit: source=cloud; location=logs; suffix=log; secret=unit-secret-value"
+    )
+
+
 def test_nested_contract_failure_details_are_reported() -> None:
     checks, notes = run_e2e._failure_details(
         {"passed": False, "scenarios": [{"checks": {"provider request observed": False}, "notes": ["missing request"]}]}

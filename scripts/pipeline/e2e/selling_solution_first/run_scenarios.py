@@ -4398,32 +4398,37 @@ def _event_type_count(values: Sequence[Any], event_type: str) -> int:
     return count
 
 
-def _copied_credential_values(runtime: ScenarioRuntime) -> list[str]:
-    values: list[str] = []
+def _copied_credential_entries(runtime: ScenarioRuntime) -> list[tuple[str, str]]:
+    values: list[tuple[str, str]] = []
 
-    def collect(value: Any, sensitive: bool = False) -> None:
+    def collect(value: Any, source: str, sensitive: bool = False) -> None:
         if isinstance(value, dict):
             for key, item in value.items():
                 upper = str(key).upper()
-                collect(item, sensitive or any(marker in upper for marker in ("KEY", "SECRET", "TOKEN", "PASSWORD")))
+                is_sensitive = sensitive or any(marker in upper for marker in ("KEY", "SECRET", "TOKEN", "PASSWORD"))
+                collect(item, source, is_sensitive)
         elif isinstance(value, list):
             for item in value:
-                collect(item, sensitive)
+                collect(item, source, sensitive)
         elif sensitive and isinstance(value, str) and len(value) >= 6:
-            values.append(value)
+            values.append((source, value))
 
     for name in CREDENTIAL_FILES:
         path = runtime.paths.config_dir / name
         if not path.is_file():
             continue
         with contextlib.suppress(OSError, ValueError):
-            collect(yaml.safe_load(path.read_text(encoding="utf-8")))
+            collect(yaml.safe_load(path.read_text(encoding="utf-8")), "llm" if name == ".credentials.yml" else "cloud")
     return values
 
 
+def _copied_credential_values(runtime: ScenarioRuntime) -> list[str]:
+    return [value for _, value in _copied_credential_entries(runtime)]
+
+
 def credential_values_absent_from_artifacts(runtime: ScenarioRuntime) -> bool:
-    sensitive_values = set(_copied_credential_values(runtime))
-    if not sensitive_values:
+    sensitive_entries = _copied_credential_entries(runtime)
+    if not sensitive_entries:
         return True
     excluded_roots = (
         runtime.paths.config_dir.resolve(),
@@ -4442,11 +4447,17 @@ def credential_values_absent_from_artifacts(runtime: ScenarioRuntime) -> bool:
             content = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if any(value in content for value in sensitive_values):
-            runtime.notes.append(
-                f"credential value found in case artifact: {path.relative_to(runtime.paths.run_dir)}"
-            )
-            return False
+        for source, value in sensitive_entries:
+            if value in content:
+                relative = path.relative_to(runtime.paths.run_dir)
+                location = relative.parts[0]
+                if location not in {"logs", "artifacts", "workspace", "templates"}:
+                    location = "other"
+                suffix = relative.suffix.lower().removeprefix(".")
+                if suffix not in {"json", "jsonl", "log", "txt", "yaml", "yml", "md"}:
+                    suffix = "other"
+                runtime.notes.append(f"credential audit: source={source}; location={location}; suffix={suffix}")
+                return False
     return True
 
 

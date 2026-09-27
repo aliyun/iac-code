@@ -8,6 +8,7 @@ import html
 import ipaddress
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -25,6 +26,11 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLOUD_REFRESH_SECONDS = 600
+SAFE_LIVE_AUDIT_NOTE = re.compile(
+    r"credential audit: source=(?:llm|cloud); "
+    r"location=(?:logs|artifacts|workspace|templates|other); "
+    r"suffix=(?:json|jsonl|log|txt|yaml|yml|md|other)\Z"
+)
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -562,10 +568,16 @@ def run_case(
         fallback_cleanup_status or _live_cleanup_status(case, summary)
         if case.suite == "live" else None
     )
+    safe_audit_notes = (
+        [note for note in summary.get("notes", []) if isinstance(note, str) and SAFE_LIVE_AUDIT_NOTE.fullmatch(note)]
+        if case.suite == "live" and isinstance(summary, dict) and isinstance(summary.get("notes"), list)
+        else []
+    )
     if case.suite == "live":
         summary = _public_live_summary(summary, cleanup_status)
         error = "" if not error else "runner failed to start; inspect CI job log"
     failed_checks, notes = _failure_details(summary)
+    notes.extend(safe_audit_notes)
     result = {
         "name": case.name,
         "status": "passed" if passed else "timeout" if timed_out else "failed",
