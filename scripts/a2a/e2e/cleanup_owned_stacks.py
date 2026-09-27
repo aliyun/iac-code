@@ -35,13 +35,14 @@ def _stack_body(client: Any, models: Any, stack_id: str, region: str) -> dict[st
 def _named_stacks(client: Any, models: Any, name: str, region: str) -> list[Any]:
     stacks: list[Any] = []
     page = 1
+    page_size = 50
     while True:
         response = client.list_stacks(
-            models.ListStacksRequest(region_id=region, stack_name=[name], page_number=page, page_size=100)
+            models.ListStacksRequest(region_id=region, stack_name=[name], page_number=page, page_size=page_size)
         ).body
         batch = response.stacks or []
         stacks.extend(item for item in batch if item.stack_name == name)
-        if len(batch) < 100:
+        if len(batch) < page_size:
             return stacks
         page += 1
 

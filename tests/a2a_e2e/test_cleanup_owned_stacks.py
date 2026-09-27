@@ -39,6 +39,7 @@ def test_cleanup_deletes_only_exact_named_stack(tmp_path: Path, monkeypatch: pyt
     class Client:
         def list_stacks(self, request):
             assert request.stack_name == [name]
+            assert request.page_size == 50
             return SimpleNamespace(body=SimpleNamespace(stacks=[
                 SimpleNamespace(stack_name=name, stack_id="owned-id"),
                 SimpleNamespace(stack_name="some-other-stack", stack_id="foreign-id"),
