@@ -32,14 +32,21 @@ SAFE_LIVE_AUDIT_NOTE = re.compile(
     r"suffix=(?:json|jsonl|log|txt|yaml|yml|md|other)\Z"
 )
 TERMINAL_CATEGORIES = (
-    ("task_busy", r"already working|already running|task is busy"),
-    ("rate_limit", r"rate.?limit|throttl|\b429\b|quota"),
-    ("timeout", r"timed? out|timeout|deadline"),
-    ("authentication", r"unauthorized|invalid.{0,20}api.?key|\b401\b"),
-    ("permission", r"forbidden|permission denied|\b403\b"),
-    ("model_unavailable", r"model.{0,30}not found|\b404\b"),
-    ("network", r"connection|network|\b50[234]\b"),
-    ("model_context", r"context length|max(?:imum)? tokens?"),
+    ("task_busy", r"already working|already running|task is busy|任务.{0,8}(?:运行|处理中)"),
+    ("rate_limit", r"rate.?limit|throttl|\b429\b|quota|限流|配额"),
+    ("timeout", r"timed? out|timeout|deadline|超时"),
+    ("authentication", r"unauthorized|invalid.{0,20}api.?key|\b401\b|认证失败|鉴权失败"),
+    ("permission", r"forbidden|permission denied|\b403\b|权限不足"),
+    ("model_unavailable", r"model.{0,30}not found|\b404\b|模型.{0,8}不存在"),
+    ("network", r"connection|network|\b50[234]\b|网络错误|连接失败"),
+    ("model_context", r"context length|max(?:imum)? tokens?|上下文长度"),
+)
+SAFE_TERMINAL_TERMS = (
+    "task", "pipeline", "recovery", "restore", "backup", "session", "context", "identity",
+    "credential", "provider", "model", "permission", "input", "state", "failed", "error",
+    "unavailable", "missing", "invalid", "retry", "cancelled", "canceled", "concurrent",
+    "任务", "流水线", "恢复", "备份", "会话", "上下文", "身份", "凭证", "模型", "权限", "输入",
+    "状态", "失败", "错误", "不可用", "不存在", "超时", "重试", "取消", "并发",
 )
 RESULT_LABELS = {
     "passed": "通过",
@@ -455,6 +462,14 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     raw_error = summary.get("error")
     if isinstance(raw_error, str) and "A2A task entered unexpected terminal state TASK_STATE_FAILED" in raw_error:
         terminal_text = raw_error.rsplit("TASK_STATE_FAILED", 1)[-1].lower()
+        safe_terms = [
+            term for term in SAFE_TERMINAL_TERMS
+            if term.isascii() and re.search(r"\b{}\b".format(term), terminal_text)
+        ]
+        safe_terms.extend(term for term in SAFE_TERMINAL_TERMS if not term.isascii() and term in terminal_text)
+        if safe_terms:
+            public["terminal_terms"] = safe_terms[:12]
+        public["terminal_message_present"] = bool(terminal_text.strip(" :"))
         public["terminal_category"] = next(
             (category for category, pattern in TERMINAL_CATEGORIES if re.search(pattern, terminal_text)), "other"
         )

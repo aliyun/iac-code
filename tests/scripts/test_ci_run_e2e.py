@@ -162,6 +162,17 @@ def test_live_public_summary_classifies_a2a_terminal_without_text() -> None:
     assert public is not None
     assert public["terminal_category"] == "rate_limit"
     assert public["terminal_exception"] == "ValueError"
+    assert public["terminal_message_present"] is True
+    assert "sk-fixture" not in json.dumps(public)
+
+
+def test_live_public_summary_extracts_only_safe_chinese_terminal_terms() -> None:
+    public = run_e2e._public_live_summary({
+        "error": "RuntimeError: A2A task entered unexpected terminal state TASK_STATE_FAILED: "
+        "恢复会话失败，凭证 sk-fixture 不可用",
+    })
+    assert public is not None
+    assert set(public["terminal_terms"]) == {"恢复", "会话", "失败", "凭证", "不可用"}
     assert "sk-fixture" not in json.dumps(public)
 
 
