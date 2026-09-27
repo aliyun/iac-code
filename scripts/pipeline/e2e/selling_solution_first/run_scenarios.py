@@ -1247,12 +1247,14 @@ def _a2a_turn(
     prompt: str,
     name: str,
     image_key: str = "",
+    task_id: str | None = None,
 ) -> Any:
     runtime.event("a2a-turn-started", name=name, image=bool(image_key))
+    identity = {"task_id": task_id} if task_id is not None else {}
     if image_key:
-        summary = harness.stream_image_text(text=prompt, image_key=image_key, name=name)
+        summary = harness.stream_image_text(text=prompt, image_key=image_key, name=name, **identity)
     else:
-        summary = harness.stream(prompt=prompt, name=name)
+        summary = harness.stream(prompt=prompt, name=name, **identity)
     runtime.event(
         "a2a-turn-finished",
         name=name,
@@ -1364,7 +1366,7 @@ def _drive_a2a_waiting(
     a2a: Any,
     plan: A2AConversationPlan,
     *,
-    before_response: Callable[[str, str, Any], None] | None = None,
+    before_response: Callable[[str, str, Any], bool] | None = None,
 ) -> Any:
     initial_image = runtime.spec.profile == "image_initial"
     summary = _a2a_turn(
@@ -1429,7 +1431,7 @@ def _continue_a2a_from_summary(
     plan: A2AConversationPlan,
     summary: Any,
     *,
-    before_response: Callable[[str, str, Any], None] | None = None,
+    before_response: Callable[[str, str, Any], bool] | None = None,
 ) -> Any:
     seen_waiting: list[str] = []
     for turn_index in range(1, 18):
@@ -1450,8 +1452,7 @@ def _continue_a2a_from_summary(
             response, image_key = _a2a_response_for_pending(runtime, kind, plan)
         if kind:
             seen_waiting.append(f"{step_id}:{kind}")
-        if before_response is not None and kind:
-            before_response(step_id, kind, summary)
+        omit_task_id = bool(before_response(step_id, kind, summary)) if before_response is not None and kind else False
         if not kind:
             image_key = ""
         summary = _a2a_turn(
@@ -1460,6 +1461,7 @@ def _continue_a2a_from_summary(
             prompt=response,
             name=f"turn-{turn_index:02d}-{kind}",
             image_key=image_key,
+            task_id="" if omit_task_id else None,
         )
     else:
         raise RuntimeError("A2A conversation exceeded the bounded 18-turn state machine")
@@ -1724,10 +1726,10 @@ def _run_a2a_rollback_recovery(
 
 def _backup_restore_hook(
     runtime: ScenarioRuntime, harness: Any, a2a: Any
-) -> tuple[Callable[[str, str, Any], None], set[str]]:
+) -> tuple[Callable[[str, str, Any], bool], set[str]]:
     restored: set[str] = set()
 
-    def restore(step_id: str, kind: str, _summary: Any) -> None:
+    def restore(step_id: str, kind: str, _summary: Any) -> bool:
         normalized = "candidate_selection" if kind == "candidate_select" else kind
         key = f"{step_id}:{normalized}"
         expected = {
@@ -1737,7 +1739,7 @@ def _backup_restore_hook(
             f"{NEW_STEPS[1]}:deployment_confirmation",
         }
         if key not in expected or key in restored:
-            return
+            return False
         snapshot = harness.fetch_state(f"backup-before-{len(restored) + 1}")
         write_json(runtime.paths.snapshots_dir / f"backup-before-{len(restored) + 1}.json", snapshot)
         cwd, session_id = a2a._pipeline_session_identity(harness)
@@ -1766,6 +1768,7 @@ def _backup_restore_hook(
         harness.start_server()
         restored.add(key)
         runtime.event("backup-restored", pending=key, sessionId=session_id)
+        return True
 
     return restore, restored
 

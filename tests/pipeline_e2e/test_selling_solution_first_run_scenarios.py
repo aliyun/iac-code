@@ -469,6 +469,37 @@ def test_unexpected_a2a_terminal_omits_prior_model_output(runner: ModuleType) ->
     assert "private prior model output" not in str(failure.value)
 
 
+def test_backup_restore_response_omits_stale_task_id(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = argparse.Namespace(
+        name="first", last_status_state="TASK_STATE_INPUT_REQUIRED", last_input_required_step_id="step1",
+        normal_handoff_ready=False,
+    )
+    finished = argparse.Namespace(name="done", last_status_state="TASK_STATE_COMPLETED", normal_handoff_ready=False)
+    runtime = argparse.Namespace(
+        cancel_event=threading.Event(), spec=argparse.Namespace(profile="backup_restore"),
+        paths=argparse.Namespace(run_dir=tmp_path, artifacts_dir=tmp_path), checks={},
+    )
+    harness = argparse.Namespace(context_id="context-1", pipeline_task_id="task-1")
+    a2a = argparse.Namespace(_pipeline_completed=lambda summary: summary is finished)
+    observed: list[str | None] = []
+    monkeypatch.setattr(runner, "_pending_kind", lambda *_args: "candidate_selection")
+    monkeypatch.setattr(runner, "_a2a_response_for_pending", lambda *_args: ("select", ""))
+
+    def turn(_runtime: object, _harness: object, **kwargs: object) -> object:
+        observed.append(kwargs.get("task_id"))
+        return finished
+
+    monkeypatch.setattr(runner, "_a2a_turn", turn)
+    runner._continue_a2a_from_summary(
+        runtime, harness, a2a, runner.A2AConversationPlan(), first,
+        before_response=lambda *_args: True,
+    )
+
+    assert observed == [""]
+
+
 def test_repl_waits_for_initial_prompt_before_sending_scenario_input(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
