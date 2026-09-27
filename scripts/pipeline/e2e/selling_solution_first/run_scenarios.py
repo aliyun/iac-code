@@ -3124,6 +3124,12 @@ def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
 
 
 def _restart_repl_at_waiting(pty: Any, patterns: tuple[str, ...], runtime: ScenarioRuntime, label: str) -> None:
+    checks = getattr(runtime, "checks", None)
+
+    def record_restored() -> None:
+        if isinstance(checks, dict):
+            checks[f"{label} restored"] = True
+
     if patterns == REPL_SELECTION_PATTERNS:
         _repl_wait_selection(pty, runtime)
         pty.terminate(force=True)
@@ -3135,6 +3141,7 @@ def _restart_repl_at_waiting(pty: Any, patterns: tuple[str, ...], runtime: Scena
         # instead of matching already-consumed terminal text.
         time.sleep(0.5)
         pty.drain_output()
+        record_restored()
         return
     pty.expect_any(patterns, description=f"{label} before restart", timeout=runtime.args.stream_timeout)
     pty.terminate(force=True)
@@ -3144,14 +3151,17 @@ def _restart_repl_at_waiting(pty: Any, patterns: tuple[str, ...], runtime: Scena
         # Matching a broad confirmation pattern first consumes that hint, so
         # wait for the exact readiness marker directly after restart.
         _prepare_restored_repl_confirmation(pty, runtime)
+        record_restored()
         return
     pty.expect_any(patterns, description=f"{label} restored", timeout=runtime.args.stream_timeout)
     if patterns == REPL_ASK_INPUT_READY_PATTERNS:
         time.sleep(0.25)
         pty.drain_output()
+    record_restored()
 
 
 def _run_repl_waiting_resume_all(runtime: ScenarioRuntime, pty: Any) -> None:
+    runtime.args.stream_timeout = min(runtime.args.stream_timeout, 600.0)
     _repl_submit_initial_prompt(pty, runtime)
     _restart_repl_at_waiting(pty, REPL_ASK_INPUT_READY_PATTERNS, runtime, "Step 1 ask")
     _repl_submit_line_input(
