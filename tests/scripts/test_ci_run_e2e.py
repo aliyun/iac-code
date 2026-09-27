@@ -220,8 +220,13 @@ def test_summary_failure_keeps_failed_checks_and_log_links(tmp_path: Path, monke
     assert result["failedChecks"] == ["step one"]
     run_e2e._write_reports(tmp_path / "report", [result], result["durationSeconds"])
     page = (tmp_path / "report" / "report.html").read_text(encoding="utf-8")
+    markdown = (tmp_path / "report" / "report.md").read_text(encoding="utf-8")
+    machine_summary = json.loads((tmp_path / "report" / "summary.json").read_text(encoding="utf-8"))
     assert "runs/failed/stdout.log" in page
     assert "step one" in page
+    assert "· 失败 ·" in page
+    assert "| 失败 |" in markdown
+    assert machine_summary["cases"][0]["status"] == "failed"
     assert sys.executable in result["command"]
     assert os.path.isfile(tmp_path / "report" / "runs" / "failed" / "ci-result.json")
 

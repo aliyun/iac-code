@@ -31,6 +31,20 @@ SAFE_LIVE_AUDIT_NOTE = re.compile(
     r"location=(?:logs|artifacts|workspace|templates|other); "
     r"suffix=(?:json|jsonl|log|txt|yaml|yml|md|other)\Z"
 )
+RESULT_LABELS = {
+    "passed": "通过",
+    "failed": "失败",
+    "timeout": "超时",
+    "canceled": "已取消",
+    "not-started": "未开始",
+}
+CLEANUP_LABELS = {
+    "completed": "已清理",
+    "failed": "清理失败",
+    "skipped": "已跳过",
+    "not-needed": "无需清理",
+    "unverified": "未验证",
+}
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -620,6 +634,10 @@ def _reason(result: dict[str, Any]) -> str:
     return reason
 
 
+def _report_label(value: str | None, labels: dict[str, str]) -> str:
+    return labels.get(value, "未知") if value else "—"
+
+
 def _write_junit(run_dir: Path, results: list[dict[str, Any]]) -> None:
     suite = ET.Element(
         "testsuite",
@@ -666,8 +684,8 @@ def _write_reports(run_dir: Path, results: list[dict[str, Any]], elapsed: float)
         reason = "—" if result["status"] == "passed" else _reason(result).replace("|", "\\|").replace("\n", " ")
         lines.append(
             "| [{}]({}ci-result.json) | {} | {:.1f}s | {} | {} |".format(
-                result["name"], result["artifacts"], result["status"], result["durationSeconds"],
-                result.get("cleanupStatus") or "—", reason,
+                result["name"], result["artifacts"], _report_label(result["status"], RESULT_LABELS),
+                result["durationSeconds"], _report_label(result.get("cleanupStatus"), CLEANUP_LABELS), reason,
             )
         )
     lines.extend(["", "## 失败用例复盘入口", ""])
@@ -700,7 +718,8 @@ def _write_reports(run_dir: Path, results: list[dict[str, Any]], elapsed: float)
         cards.append(
             '<details><summary><b>{}</b> · {} · {:.1f}s</summary><p>{}</p>'
             '<p><a href="{}ci-result.json">结构化结果</a> · {}</p><pre>{}</pre></details>'.format(
-                html.escape(result["name"]), result["status"], result["durationSeconds"], detail,
+                html.escape(result["name"]), _report_label(result["status"], RESULT_LABELS),
+                result["durationSeconds"], detail,
                 artifact, log_links, log,
             )
         )
