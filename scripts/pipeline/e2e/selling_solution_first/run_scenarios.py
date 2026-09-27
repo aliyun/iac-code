@@ -4983,12 +4983,12 @@ def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
             display_events,
             require_all=spec.cloud_write,
         )
-        if "询价概览" in transcript:
-            expected_headers = ["方案说明", "询价概览"]
+        if "询价概览" in transcript or "Pricing overview" in transcript:
+            expected_headers = [("方案说明", "Solution description"), ("询价概览", "Pricing overview")]
             if _repl_confirmation_has_cost_lines(display_events):
-                expected_headers.append("费用明细")
+                expected_headers.append(("费用明细", "Cost details"))
             runtime.checks["REPL confirmation focuses solution and quote"] = all(
-                marker in transcript for marker in expected_headers
+                any(marker in transcript for marker in localized_headers) for localized_headers in expected_headers
             )
     if spec.surface is Surface.WEB:
         runtime.checks["Web API payload artifact captured"] = (
