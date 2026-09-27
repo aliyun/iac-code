@@ -15,6 +15,8 @@ uv run --no-sync python scripts/ci/run_e2e.py --list --suite all
 
 `fast` 包含 6 个 A2A、REPL、Web API 确定性契约用例，包含修复后的 `e3a-recovery`；`full` 共 42 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 在已完成回合的安全交接点验证重启恢复；执行中快照的接管由执行控制拒绝。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract`。`--jobs` 限定为 1–8，默认 3。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
 
+所有用例子进程强制设置 `IAC_CODE_TELEMETRY_LOCAL_ONLY=1`，并清除继承的 OTLP 导出目标。因此测试不会向远端遥测服务上报，即使 Linux 安装阶段给 `__release_date__` 写入日期。需要验证埋点的场景仍可显式把数据发到同一作业内的 `127.0.0.1` 临时接收器；这是本地断言数据，不会外发。
+
 真实 LLM 与云资源用例显式运行：
 
 ```bash

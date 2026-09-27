@@ -262,9 +262,13 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
 
 
 def _case_env(case_dir: Path) -> dict[str, str]:
-    blocked = ("ALIBABA_CLOUD_", "ALIYUN_", "AKLESS_", "DASHSCOPE_", "OPENAI_", "IAC_CODE_", "ANTHROPIC_")
+    blocked = (
+        "ALIBABA_CLOUD_", "ALIYUN_", "AKLESS_", "DASHSCOPE_", "OPENAI_", "IAC_CODE_", "ANTHROPIC_",
+        "OTEL_EXPORTER_",
+    )
     env = {key: value for key, value in os.environ.items() if not key.startswith(blocked)}
     env["IAC_CODE_CONFIG_DIR"] = str(case_dir / "config")
+    env["IAC_CODE_TELEMETRY_LOCAL_ONLY"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     return env
 

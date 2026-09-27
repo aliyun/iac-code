@@ -52,6 +52,12 @@ def _is_local_build() -> bool:
     return not __release_date__.strip()
 
 
+def _local_telemetry_only() -> bool:
+    # E2E runs must never export to a remote endpoint, including when an
+    # editable install stamps __release_date__ during a Linux build.
+    return _is_local_build() or _is_env_truthy("IAC_CODE_TELEMETRY_LOCAL_ONLY")
+
+
 def _is_local_endpoint(raw: str) -> bool:
     endpoint = raw.strip()
     if not endpoint:
@@ -77,11 +83,11 @@ def _local_telemetry_opt_in_enabled() -> bool:
 
 def is_telemetry_endpoint_allowed(raw: str) -> bool:
     """Whether a configured OTLP endpoint may be used for this build."""
-    return not _is_local_build() or _is_local_endpoint(raw)
+    return not _local_telemetry_only() or _is_local_endpoint(raw)
 
 
 def is_telemetry_disabled() -> bool:
-    if _is_local_build() and not _local_telemetry_opt_in_enabled():
+    if _local_telemetry_only() and not _local_telemetry_opt_in_enabled():
         return True
     return get_privacy_level() != PrivacyLevel.DEFAULT
 

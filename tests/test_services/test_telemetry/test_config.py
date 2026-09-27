@@ -19,6 +19,7 @@ def _clear_env(monkeypatch):
     monkeypatch.delenv("DISABLE_TELEMETRY", raising=False)
     monkeypatch.delenv("IAC_CODE_DISABLE_NONESSENTIAL_TRAFFIC", raising=False)
     monkeypatch.delenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", raising=False)
+    monkeypatch.delenv("IAC_CODE_TELEMETRY_LOCAL_ONLY", raising=False)
     monkeypatch.delenv("IAC_CODE_TELEMETRY_ENDPOINT", raising=False)
     monkeypatch.delenv("IAC_CODE_TELEMETRY_TRACES_ENDPOINT", raising=False)
     monkeypatch.delenv("IAC_CODE_TELEMETRY_METRICS_ENDPOINT", raising=False)
@@ -100,6 +101,21 @@ def test_local_build_allows_explicit_local_telemetry_opt_in(monkeypatch):
     monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
 
     assert is_telemetry_disabled() is False
+
+
+def test_e2e_local_only_gate_rejects_remote_telemetry_in_stamped_build(monkeypatch):
+    monkeypatch.setattr("iac_code.__release_date__", "2026-01-01")
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_LOCAL_ONLY", "1")
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_ENDPOINT", "https://telemetry.example.com")
+
+    assert is_telemetry_disabled() is True
+    assert TelemetryClient._default_traces_enabled() is False
+
+    monkeypatch.setenv("IAC_CODE_ENABLE_LOCAL_TELEMETRY", "1")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318")
+    assert is_telemetry_disabled() is False
+    assert TelemetryClient._default_traces_enabled() is False
+    assert TelemetryClient._user_traces_endpoint() == "http://127.0.0.1:4318/v1/traces"
 
 
 def test_local_build_opt_in_requires_local_telemetry_endpoint(monkeypatch):

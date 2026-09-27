@@ -149,13 +149,16 @@ def test_child_environment_removes_cloud_and_provider_credentials(
     monkeypatch.setenv("IAC_CODE_API_KEY", "fake-secret")
     monkeypatch.setenv("AKLESS_BOOTSTRAP_TOKEN", "fake-secret")
     monkeypatch.setenv("IAC_CODE_E2E_PROVIDER_CAPTURE", "inherited-fixture")
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://telemetry.example.com")
     env = run_e2e._case_env(tmp_path)
     assert "ALIYUN_ACCESS_KEY_ID" not in env
     assert "OPENAI_API_KEY" not in env
     assert "IAC_CODE_API_KEY" not in env
     assert "AKLESS_BOOTSTRAP_TOKEN" not in env
     assert "IAC_CODE_E2E_PROVIDER_CAPTURE" not in env
+    assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in env
     assert env["IAC_CODE_CONFIG_DIR"] == str(tmp_path / "config")
+    assert env["IAC_CODE_TELEMETRY_LOCAL_ONLY"] == "1"
 
 
 def test_timeout_writes_failure_report_without_hanging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -254,13 +257,14 @@ def test_smoke_adapter_has_model_config_but_no_cloud_credentials(
         "from pathlib import Path\n"
         "run_dir = Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
         "config = Path(os.environ['IAC_CODE_CONFIG_DIR'])\n"
-        "assert (config / '.credentials.yml').read_text() == 'model-fixture'\n"
+        "assert (config / '.credentials.yml').read_text(encoding='utf-8') == 'model-fixture'\n"
         "assert (config / 'settings.yml').is_file()\n"
         "assert not (config / '.cloud-credentials.yml').exists()\n"
         "assert Path(os.environ['HOME']).is_relative_to(run_dir)\n"
         "assert Path(os.environ['USERPROFILE']).is_relative_to(run_dir)\n"
         "assert '--allow-real-cloud' not in sys.argv\n"
-        "(run_dir / 'summary.json').write_text(json.dumps({'passed': True, 'checks': {'ok': True}}))\n",
+        "(run_dir / 'summary.json').write_text("
+        "json.dumps({'passed': True, 'checks': {'ok': True}}), encoding='utf-8')\n",
         encoding="utf-8",
     )
     source = tmp_path / "source"
@@ -288,7 +292,7 @@ def test_cloud_helper_generates_per_case_sts_without_leaking_bootstrap_token(
         "assert sys.argv[1] == 'cloud'\n"
         "assert os.environ['AKLESS_BOOTSTRAP_TOKEN'] == 'bootstrap-fixture'\n"
         "path = pathlib.Path(sys.argv[sys.argv.index('--output') + 1])\n"
-        "path.write_text('temporary-sts')\n",
+        "path.write_text('temporary-sts', encoding='utf-8')\n",
         encoding="utf-8",
     )
     script = tmp_path / "live.py"
@@ -306,8 +310,8 @@ def test_cloud_helper_generates_per_case_sts_without_leaking_bootstrap_token(
         stream.write(
             "assert 'AKLESS_BOOTSTRAP_TOKEN' not in os.environ\n"
             "assert 'DASHSCOPE_API_KEY' not in os.environ\n"
-            "assert (source / '.cloud-credentials.yml').read_text() == 'temporary-sts'\n"
-            "(run_dir / 'summary.json').write_text(json.dumps({'passed': True}))\n"
+            "assert (source / '.cloud-credentials.yml').read_text(encoding='utf-8') == 'temporary-sts'\n"
+            "(run_dir / 'summary.json').write_text(json.dumps({'passed': True}), encoding='utf-8')\n"
         )
     source = tmp_path / "source"
     source.mkdir()
@@ -332,9 +336,9 @@ def test_long_live_case_refreshes_cloud_file_while_running(tmp_path: Path, monke
         "import pathlib, sys\n"
         "path = pathlib.Path(sys.argv[sys.argv.index('--output') + 1])\n"
         "count = path.parent / 'refresh-count'\n"
-        "value = int(count.read_text()) + 1 if count.exists() else 1\n"
-        "count.write_text(str(value))\n"
-        "path.write_text('sts-' + str(value))\n",
+        "value = int(count.read_text(encoding='utf-8')) + 1 if count.exists() else 1\n"
+        "count.write_text(str(value), encoding='utf-8')\n"
+        "path.write_text('sts-' + str(value), encoding='utf-8')\n",
         encoding="utf-8",
     )
     script = tmp_path / "long.py"
@@ -342,7 +346,7 @@ def test_long_live_case_refreshes_cloud_file_while_running(tmp_path: Path, monke
         "import json, pathlib, sys, time\n"
         "run_dir = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
         "time.sleep(0.4)\n"
-        "(run_dir / 'summary.json').write_text(json.dumps({'passed': True}))\n",
+        "(run_dir / 'summary.json').write_text(json.dumps({'passed': True}), encoding='utf-8')\n",
         encoding="utf-8",
     )
     source = tmp_path / "source"
@@ -357,7 +361,7 @@ def test_long_live_case_refreshes_cloud_file_while_running(tmp_path: Path, monke
 
     assert result["status"] == "passed"
     count = tmp_path / "report" / "runs" / case.name / "config" / "refresh-count"
-    assert int(count.read_text()) >= 2
+    assert int(count.read_text(encoding="utf-8")) >= 2
 
 
 def test_legacy_a2a_hard_timeout_starts_independent_cleanup(
@@ -367,7 +371,7 @@ def test_legacy_a2a_hard_timeout_starts_independent_cleanup(
     script.write_text(
         "import pathlib, sys, time\n"
         "run_dir = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
-        "(run_dir / 'owned-stacks.json').write_text('fixture')\n"
+        "(run_dir / 'owned-stacks.json').write_text('fixture', encoding='utf-8')\n"
         "time.sleep(60)\n",
         encoding="utf-8",
     )
@@ -376,7 +380,7 @@ def test_legacy_a2a_hard_timeout_starts_independent_cleanup(
     cleanup.write_text(
         "import pathlib, sys\n"
         "run_dir = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
-        "(run_dir / 'cleanup-called').write_text('yes')\n",
+        "(run_dir / 'cleanup-called').write_text('yes', encoding='utf-8')\n",
         encoding="utf-8",
     )
     source = tmp_path / "source"
@@ -393,4 +397,4 @@ def test_legacy_a2a_hard_timeout_starts_independent_cleanup(
 
     assert result["status"] == "timeout"
     assert result["cleanupStatus"] == "completed"
-    assert (tmp_path / "report" / "runs" / case.name / "cleanup-called").read_text() == "yes"
+    assert (tmp_path / "report" / "runs" / case.name / "cleanup-called").read_text(encoding="utf-8") == "yes"
