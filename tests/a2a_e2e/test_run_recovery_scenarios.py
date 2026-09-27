@@ -21,6 +21,32 @@ def _load_runner():
     return module
 
 
+def test_recovery_ci_diagnostics_keep_only_fixed_evidence(tmp_path: Path) -> None:
+    runner = _load_runner()
+    control_dir = tmp_path / "a2a-persistence" / "execution-control"
+    control_dir.mkdir(parents=True)
+    (control_dir / "ctx-1.json").write_text(
+        json.dumps({
+            "taskId": "task-1", "phase": "running", "executionStatus": "working",
+            "releaseReady": False, "inputHandoffReady": False, "streamAvailable": True,
+            "blockers": [{"kind": "execution", "secret": "private-data"}],
+        }),
+        encoding="utf-8",
+    )
+    state = runner._control_state_diagnostic(tmp_path, "ctx-1", "task-1")
+    summary = runner.StreamSummary(
+        name="continue", prompt="private prompt", terminal_status_text="Active execution: private-data"
+    )
+
+    assert state == {
+        "present": True, "task_matches": True, "phase": "running", "execution_status": "working",
+        "release_ready": False, "input_handoff_ready": False, "stream_available": True, "blocker_count": 1,
+    }
+    assert runner._terminal_markers([summary]) == ["execution"]
+    assert "private-data" not in json.dumps(state)
+    assert runner._control_state_diagnostic(tmp_path, "../ctx-1", "task-1") == {"present": False}
+
+
 def _input_required_event(kind: str = "", *, step_id: str = "") -> dict:
     data = {}
     if kind:

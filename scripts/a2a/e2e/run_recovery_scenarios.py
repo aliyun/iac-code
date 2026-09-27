@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import signal
 import sys
@@ -870,6 +871,9 @@ class ScenarioHarness:
             **asdict(result),
             "cleanup_status": self.cleanup_status,
             "cleanup_diagnostic": self.cleanup_diagnostic,
+            "a2a_states": [state for summary in self.summaries.values() for state in summary.status_states][-12:],
+            "terminal_markers": _terminal_markers(self.summaries.values()),
+            "control_state": _control_state_diagnostic(self.run_dir, self.context_id, self.pipeline_task_id),
             "streams": {name: asdict(summary) for name, summary in self.summaries.items()},
             "snapshots": self.snapshots,
         }
@@ -1003,6 +1007,43 @@ def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callabl
                 harness.checks["test-owned ROS Stacks cleaned"] = False
                 harness.notes.append("teardown: " + type(exc).__name__)
     return harness.finish(passed=passed, abort_reason=abort_reason)
+
+
+def _terminal_markers(summaries: Iterable[StreamSummary]) -> list[str]:
+    """Expose only fixed failure clues; terminal text can contain user data."""
+
+    text = " ".join(summary.terminal_status_text for summary in summaries).casefold()
+    markers = (
+        "active session", "execution", "permission", "credential", "timeout", "model",
+        "context", "task", "selector", "not found", "terminal state", "rate limit",
+        "unsupported", "duplicate",
+    )
+    return [marker for marker in markers if marker in text]
+
+
+def _control_state_diagnostic(run_dir: Path, context_id: str, task_id: str) -> dict[str, Any]:
+    """Read only fixed, non-secret execution-control fields for CI triage."""
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", context_id):
+        return {"present": False}
+    path = run_dir / "a2a-persistence" / "execution-control" / f"{context_id}.json"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {"present": False}
+    if not isinstance(record, dict):
+        return {"present": False}
+    blockers = record.get("blockers")
+    return {
+        "present": True,
+        "task_matches": record.get("taskId") == task_id,
+        "phase": record.get("phase"),
+        "execution_status": record.get("executionStatus"),
+        "release_ready": record.get("releaseReady"),
+        "input_handoff_ready": record.get("inputHandoffReady"),
+        "stream_available": record.get("streamAvailable"),
+        "blocker_count": len(blockers) if isinstance(blockers, list) else None,
+    }
 
 
 def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
