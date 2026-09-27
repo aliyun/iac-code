@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+CLOUD_REFRESH_SECONDS = 600
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -45,6 +46,10 @@ class Case:
     live_runner: str = "selling"
     resource_lock: str = ""
     group: str = ""
+
+
+class CloudCredentialSetupError(RuntimeError):
+    """A credential helper failed without exposing its output in CI artifacts."""
 
 
 FAST_CASES = (
@@ -208,6 +213,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--jobs", type=int, default=3, help="Maximum simultaneously running cases")
     parser.add_argument("--run-dir", type=Path, default=REPO_ROOT / "ci-e2e-report")
     parser.add_argument("--credential-source-dir", type=Path)
+    parser.add_argument("--cloud-credential-helper", type=Path)
+    parser.add_argument("--cloud-credential-python", type=Path)
     parser.add_argument("--allow-cloud-write", action="store_true")
     parser.add_argument("--list", action="store_true", help="Show the allowlist and exclusions without running")
     args = parser.parse_args(argv)
@@ -217,9 +224,19 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if not args.list and any(case.suite == "live" for case in selected):
         if args.credential_source_dir is None:
             parser.error("live cases require --credential-source-dir")
+        if args.cloud_credential_helper is not None and not args.cloud_credential_helper.is_file():
+            parser.error("--cloud-credential-helper must name an existing file")
+        if args.cloud_credential_python is not None and not args.cloud_credential_python.is_file():
+            parser.error("--cloud-credential-python must name an existing Python interpreter")
+        if args.cloud_credential_python is not None and args.cloud_credential_helper is None:
+            parser.error("--cloud-credential-python requires --cloud-credential-helper")
+        needs_cloud = any(case.live_runner != "smoke" for case in selected)
+        required_files = [".credentials.yml", "settings.yml"]
+        if needs_cloud and args.cloud_credential_helper is None:
+            required_files.append(".cloud-credentials.yml")
         missing = [
             name
-            for name in (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
+            for name in required_files
             if not (args.credential_source_dir / name).is_file()
         ]
         if missing:
@@ -245,11 +262,24 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
 
 
 def _case_env(case_dir: Path) -> dict[str, str]:
-    blocked = ("ALIBABA_CLOUD_", "ALIYUN_", "DASHSCOPE_", "OPENAI_", "IAC_CODE_", "ANTHROPIC_")
+    blocked = ("ALIBABA_CLOUD_", "ALIYUN_", "AKLESS_", "DASHSCOPE_", "OPENAI_", "IAC_CODE_", "ANTHROPIC_")
     env = {key: value for key, value in os.environ.items() if not key.startswith(blocked)}
     env["IAC_CODE_CONFIG_DIR"] = str(case_dir / "config")
     env["PYTHONUNBUFFERED"] = "1"
     return env
+
+
+def _prepare_cloud_credentials(helper: Path, config_dir: Path, helper_python: Path | None = None) -> None:
+    command = [
+        str(helper_python or sys.executable), str(helper), "cloud", "--output",
+        str(config_dir / ".cloud-credentials.yml"),
+    ]
+    try:
+        result = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, timeout=90, check=False)
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise CloudCredentialSetupError(type(exc).__name__) from exc
+    if result.returncode != 0 or not (config_dir / ".cloud-credentials.yml").is_file():
+        raise CloudCredentialSetupError("helper returned no usable cloud credential")
 
 
 def _stop_tree(process: subprocess.Popen[bytes], grace: int) -> None:
@@ -357,7 +387,11 @@ def _failure_details(summary: dict[str, Any] | None) -> tuple[list[str], list[st
     return failed_checks, notes
 
 
-def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = None) -> dict[str, Any]:
+def run_case(
+    case: Case, run_dir: Path, credential_source_dir: Path | None = None,
+    cloud_credential_helper: Path | None = None,
+    cloud_credential_python: Path | None = None,
+) -> dict[str, Any]:
     case_dir = run_dir / "runs" / case.name
     case_dir.mkdir(parents=True, exist_ok=True)
     (case_dir / "summary.json").unlink(missing_ok=True)
@@ -371,28 +405,38 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
             raise ValueError("live case requires credential source directory")
         config_dir = case_dir / "config"
         config_dir.mkdir(mode=0o700, exist_ok=True)
+        source_config_dir = (
+            case_dir / "credential-source"
+            if case.live_runner in {"selling", "canary"} and cloud_credential_helper is not None else config_dir
+        )
+        source_config_dir.mkdir(mode=0o700, exist_ok=True)
         filenames = (
-            (".credentials.yml", "settings.yml") if case.live_runner == "smoke"
+            (".credentials.yml", "settings.yml") if case.live_runner == "smoke" or cloud_credential_helper is not None
             else (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
         )
         for filename in filenames:
-            destination = config_dir / filename
+            destination = source_config_dir / filename
             shutil.copyfile(credential_source_dir / filename, destination)
             destination.chmod(0o600)
+        if case.live_runner != "smoke" and cloud_credential_helper is not None:
+            _prepare_cloud_credentials(cloud_credential_helper, source_config_dir, cloud_credential_python)
         if case.live_runner != "smoke":
             command.append("--allow-real-cloud")
         if case.live_runner == "selling":
             command.extend(
-                ("--concurrency", "1", "--inherit-settings", "--credential-source-dir", str(credential_source_dir))
+                ("--concurrency", "1", "--inherit-settings", "--credential-source-dir",
+                 str(source_config_dir if cloud_credential_helper is not None else credential_source_dir))
             )
             if case.cloud_write:
                 command.append("--allow-cloud-write")
         elif case.live_runner == "selector":
-            command.extend(("--source-config-dir", str(config_dir)))
+            command.extend(("--source-config-dir", str(source_config_dir)))
         elif case.live_runner == "canary":
-            command.extend(("--source-config-dir", str(credential_source_dir)))
+            command.extend(("--source-config-dir", str(
+                source_config_dir if cloud_credential_helper is not None else credential_source_dir
+            )))
         elif case.live_runner == "repl":
-            command.extend(("--source-config-dir", str(config_dir)))
+            command.extend(("--source-config-dir", str(source_config_dir)))
     if case in FAST_CASES or (case.suite == "live" and case.live_runner != "smoke"):
         command.extend(("--python", sys.executable))
     case_env = _case_env(case_dir)
@@ -406,6 +450,24 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
     timed_out = False
     error = ""
     return_code: int | None = None
+    refresh_stop = threading.Event()
+    refresh_failed = threading.Event()
+    refresh_thread: threading.Thread | None = None
+
+    def refresh_cloud_credentials() -> None:
+        assert cloud_credential_helper is not None
+        if case.live_runner == "selector":
+            runtime_config_dir = script_dir / ".runtime-config"
+        elif case.live_runner == "repl":
+            runtime_config_dir = config_dir / ".e2e-runs" / script_dir.name
+        else:
+            runtime_config_dir = config_dir
+        while not refresh_stop.wait(CLOUD_REFRESH_SECONDS):
+            try:
+                _prepare_cloud_credentials(cloud_credential_helper, runtime_config_dir, cloud_credential_python)
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                refresh_failed.set()
+
     try:
         with (case_dir / "stdout.log").open("wb") as stdout, (case_dir / "stderr.log").open("wb") as stderr:
             process = subprocess.Popen(
@@ -417,6 +479,9 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
                 start_new_session=os.name != "nt",
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
             )
+            if cloud_credential_helper is not None and case.suite == "live" and case.live_runner != "smoke":
+                refresh_thread = threading.Thread(target=refresh_cloud_credentials, daemon=True)
+                refresh_thread.start()
             try:
                 return_code = process.wait(timeout=case.timeout)
             except subprocess.TimeoutExpired:
@@ -424,15 +489,28 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
                 print("TIMEOUT {}: allowing {}s for cleanup".format(case.name, case.cleanup_grace), flush=True)
                 _stop_tree(process, case.cleanup_grace)
                 return_code = process.returncode
+            finally:
+                refresh_stop.set()
+                if refresh_thread is not None:
+                    refresh_thread.join(timeout=95)
     except (OSError, subprocess.SubprocessError) as exc:
         error = "{}: {}".format(type(exc).__name__, exc)
+    if refresh_failed.is_set():
+        error = "cloud credential refresh failed; inspect CI job log"
     fallback_cleanup_status: str | None = None
     if timed_out and case.live_runner == "legacy_a2a" and (script_dir / "owned-stacks.json").is_file():
+        if cloud_credential_helper is not None:
+            try:
+                _prepare_cloud_credentials(cloud_credential_helper, case_dir / "config", cloud_credential_python)
+            except (OSError, RuntimeError, subprocess.SubprocessError):
+                fallback_cleanup_status = "failed"
         cleanup_command = [
             sys.executable, str(REPO_ROOT / "scripts/a2a/e2e/cleanup_owned_stacks.py"),
             "--run-dir", str(script_dir), "--timeout", "840",
         ]
         try:
+            if fallback_cleanup_status == "failed":
+                raise RuntimeError("cloud credential refresh failed before fallback cleanup")
             with (case_dir / "cleanup.stdout.log").open("wb") as stdout, (
                 case_dir / "cleanup.stderr.log"
             ).open("wb") as stderr:
@@ -441,7 +519,7 @@ def run_case(case: Case, run_dir: Path, credential_source_dir: Path | None = Non
                     stdout=stdout, stderr=stderr, timeout=900, check=False,
                 )
             fallback_cleanup_status = "completed" if cleanup_process.returncode == 0 else "failed"
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, RuntimeError, subprocess.SubprocessError):
             fallback_cleanup_status = "failed"
     source = "stdout.log" if case.result_source == "stdout" else case.result_source
     if script_dir != case_dir and source != "stdout.log":
@@ -608,9 +686,15 @@ def main(argv: list[str] | None = None) -> int:
     def run_with_lock(case: Case) -> dict[str, Any]:
         lock = locks.get(case.resource_lock)
         if lock is None:
-            return run_case(case, args.run_dir, args.credential_source_dir)
+            return run_case(
+                case, args.run_dir, args.credential_source_dir,
+                args.cloud_credential_helper, args.cloud_credential_python,
+            )
         with lock:
-            return run_case(case, args.run_dir, args.credential_source_dir)
+            return run_case(
+                case, args.run_dir, args.credential_source_dir,
+                args.cloud_credential_helper, args.cloud_credential_python,
+            )
 
     with ThreadPoolExecutor(max_workers=min(args.jobs, len(selected))) as pool:
         futures = {
@@ -622,9 +706,12 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 result = future.result()
             except Exception as exc:
-                error = "runner exception; inspect CI job log" if case.suite == "live" else "{}: {}".format(
-                    type(exc).__name__, exc
-                )
+                if case.suite != "live":
+                    error = "{}: {}".format(type(exc).__name__, exc)
+                elif isinstance(exc, CloudCredentialSetupError):
+                    error = "cloud credential setup failed; inspect CI job log"
+                else:
+                    error = "runner exception; inspect CI job log"
                 result = {
                     "name": case.name,
                     "status": "failed",

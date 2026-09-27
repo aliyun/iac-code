@@ -83,6 +83,43 @@ def test_live_requires_complete_credential_source_and_write_opt_in(tmp_path: Pat
     assert len(run_e2e.select_cases(args)) == len(run_e2e.LIVE_CASES)
 
 
+def test_live_accepts_llm_only_source_with_cloud_helper(tmp_path: Path) -> None:
+    for name in (".credentials.yml", "settings.yml"):
+        (tmp_path / name).write_text("fixture", encoding="utf-8")
+    helper = tmp_path / "helper.py"
+    helper.write_text("", encoding="utf-8")
+    args = run_e2e.parse_args([
+        "--suite", "live", "--credential-source-dir", str(tmp_path),
+        "--cloud-credential-helper", str(helper), "--cloud-credential-python", sys.executable,
+        "--allow-cloud-write",
+    ])
+    assert len(run_e2e.select_cases(args)) == len(run_e2e.LIVE_CASES)
+
+
+def test_cloud_helper_failure_is_classified_without_exposing_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    helper = tmp_path / "helper.py"
+    helper.write_text("import sys\nprint('secret-fixture', file=sys.stderr)\nsys.exit(1)\n", encoding="utf-8")
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in (".credentials.yml", "settings.yml"):
+        (source / name).write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
+    report = tmp_path / "report"
+
+    code = run_e2e.main([
+        "--suite", "live", "--case", "a2a-recovery-scenario1", "--jobs", "1",
+        "--run-dir", str(report), "--credential-source-dir", str(source),
+        "--cloud-credential-helper", str(helper), "--allow-cloud-write",
+    ])
+
+    assert code == 1
+    summary = json.loads((report / "summary.json").read_text(encoding="utf-8"))
+    assert summary["cases"][0]["error"].startswith("cloud credential setup failed")
+    assert "secret-fixture" not in (report / "report.md").read_text(encoding="utf-8")
+
+
 def test_live_public_summary_drops_notes_error_and_paths() -> None:
     summary = {
         "case_id": "A01", "scenario": "example", "status": "failed", "cleanup_status": "completed",
@@ -110,11 +147,13 @@ def test_child_environment_removes_cloud_and_provider_credentials(
     monkeypatch.setenv("ALIYUN_ACCESS_KEY_ID", "fake-secret")
     monkeypatch.setenv("OPENAI_API_KEY", "fake-secret")
     monkeypatch.setenv("IAC_CODE_API_KEY", "fake-secret")
+    monkeypatch.setenv("AKLESS_BOOTSTRAP_TOKEN", "fake-secret")
     monkeypatch.setenv("IAC_CODE_E2E_PROVIDER_CAPTURE", "inherited-fixture")
     env = run_e2e._case_env(tmp_path)
     assert "ALIYUN_ACCESS_KEY_ID" not in env
     assert "OPENAI_API_KEY" not in env
     assert "IAC_CODE_API_KEY" not in env
+    assert "AKLESS_BOOTSTRAP_TOKEN" not in env
     assert "IAC_CODE_E2E_PROVIDER_CAPTURE" not in env
     assert env["IAC_CODE_CONFIG_DIR"] == str(tmp_path / "config")
 
@@ -237,6 +276,88 @@ def test_smoke_adapter_has_model_config_but_no_cloud_credentials(
     assert result["status"] == "passed"
     assert result["cleanupStatus"] == "not-needed"
     assert "cloud-fixture" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("runner", ["repl", "selling", "canary"])
+def test_cloud_helper_generates_per_case_sts_without_leaking_bootstrap_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: str
+) -> None:
+    helper = tmp_path / "helper.py"
+    helper.write_text(
+        "import os, pathlib, sys\n"
+        "assert sys.argv[1] == 'cloud'\n"
+        "assert os.environ['AKLESS_BOOTSTRAP_TOKEN'] == 'bootstrap-fixture'\n"
+        "path = pathlib.Path(sys.argv[sys.argv.index('--output') + 1])\n"
+        "path.write_text('temporary-sts')\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "live.py"
+    script.write_text(
+        "import json, os, pathlib, sys\n"
+        "run_dir = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
+        "source = pathlib.Path(sys.argv[sys.argv.index('--source-config-dir') + 1])\n"
+        if runner in {"repl", "canary"} else
+        "import json, os, pathlib, sys\n"
+        "run_dir = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
+        "source = pathlib.Path(sys.argv[sys.argv.index('--credential-source-dir') + 1])\n",
+        encoding="utf-8",
+    )
+    with script.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "assert 'AKLESS_BOOTSTRAP_TOKEN' not in os.environ\n"
+            "assert 'DASHSCOPE_API_KEY' not in os.environ\n"
+            "assert (source / '.cloud-credentials.yml').read_text() == 'temporary-sts'\n"
+            "(run_dir / 'summary.json').write_text(json.dumps({'passed': True}))\n"
+        )
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / ".credentials.yml").write_text("model-key", encoding="utf-8")
+    (source / "settings.yml").write_text("model-settings", encoding="utf-8")
+    monkeypatch.setenv("AKLESS_BOOTSTRAP_TOKEN", "bootstrap-fixture")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "model-key")
+    monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
+    case = run_e2e.Case("akless-" + runner, "live.py", (), 5, "live", live_runner=runner)
+
+    result = run_e2e.run_case(case, tmp_path / "report", source, helper, Path(sys.executable))
+
+    assert result["status"] == "passed"
+    assert "bootstrap-fixture" not in json.dumps(result)
+    if runner in {"selling", "canary"}:
+        assert (tmp_path / "report" / "runs" / case.name / "credential-source" / ".cloud-credentials.yml").is_file()
+
+
+def test_long_live_case_refreshes_cloud_file_while_running(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    helper = tmp_path / "helper.py"
+    helper.write_text(
+        "import pathlib, sys\n"
+        "path = pathlib.Path(sys.argv[sys.argv.index('--output') + 1])\n"
+        "count = path.parent / 'refresh-count'\n"
+        "value = int(count.read_text()) + 1 if count.exists() else 1\n"
+        "count.write_text(str(value))\n"
+        "path.write_text('sts-' + str(value))\n",
+        encoding="utf-8",
+    )
+    script = tmp_path / "long.py"
+    script.write_text(
+        "import json, pathlib, sys, time\n"
+        "run_dir = pathlib.Path(sys.argv[sys.argv.index('--run-dir') + 1])\n"
+        "time.sleep(0.4)\n"
+        "(run_dir / 'summary.json').write_text(json.dumps({'passed': True}))\n",
+        encoding="utf-8",
+    )
+    source = tmp_path / "source"
+    source.mkdir()
+    for name in (".credentials.yml", "settings.yml"):
+        (source / name).write_text("fixture", encoding="utf-8")
+    monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(run_e2e, "CLOUD_REFRESH_SECONDS", 0.1)
+    case = run_e2e.Case("akless-refresh", "long.py", (), 5, "live", live_runner="legacy_a2a")
+
+    result = run_e2e.run_case(case, tmp_path / "report", source, helper)
+
+    assert result["status"] == "passed"
+    count = tmp_path / "report" / "runs" / case.name / "config" / "refresh-count"
+    assert int(count.read_text()) >= 2
 
 
 def test_legacy_a2a_hard_timeout_starts_independent_cleanup(
