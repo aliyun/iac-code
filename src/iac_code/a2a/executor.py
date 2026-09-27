@@ -1639,7 +1639,25 @@ class IacCodeA2AExecutor(AgentExecutor):
                     and current_task is not None
                 ):
                     try:
-                        await existing.attach_task(current_task, mark_working=True)
+                        if (
+                            resource_selection_response is not None
+                            and resolve_request_run_mode(getattr(context, "message", None)) is not RunMode.PIPELINE
+                            and existing.phase == "terminated"
+                            and existing.release_ready
+                            and not existing.has_managed_work()
+                        ):
+                            # A normal-chat selector closes its first stream at
+                            # INPUT_REQUIRED. Its answer is a new execution, not
+                            # another task to attach to the released controller.
+                            existing = await self._execution_control_service.begin_execution(
+                                context_id=context_id,
+                                task_id=resource_selection_response.task_id,
+                                owner=owner,
+                                cwd=self._resolve_cwd(metadata),
+                                execution_mode="normal",
+                            )
+                        else:
+                            await existing.attach_task(current_task, mark_working=True)
                     except ExecutionControlConflictError as exc:
                         raise InputResponseExecutionControlConflictError(str(exc)) from exc
                     await existing.mark_execution_started()
