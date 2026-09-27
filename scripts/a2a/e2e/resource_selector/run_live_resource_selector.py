@@ -432,13 +432,27 @@ def _assert_input_required(summary: StreamSummary) -> None:
         raise AssertionError("A2A task did not enter input-required state: {}".format(summary.status_states))
 
 
+class _TurnNotReadyError(AssertionError):
+    def __init__(self, summary: StreamSummary, name: str) -> None:
+        super().__init__("{} did not become ready for the next turn".format(name))
+        self.states = [state for state in summary.status_states if state.startswith("TASK_STATE_")]
+        terminal = summary.terminal_status_text.casefold()
+        self.terminal_markers = [
+            marker for marker in (
+                "resource_selection_resume_invalid", "active session", "execution", "permission",
+                "credential", "timeout", "model", "context", "task", "selector",
+            ) if marker in terminal
+        ]
+        self.terminal_message_present = bool(terminal)
+
+
 def _assert_turn_ready(summary: StreamSummary, *, name: str) -> None:
     # Normal A2A turns intentionally settle in INPUT_REQUIRED so the context is
     # ready for the next user message.  COMPLETED is also valid for providers
     # or transports that publish an explicit terminal completion.
     ready_states = {"TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"}
     if not ready_states.intersection(summary.status_states):
-        raise AssertionError("{} did not become ready for the next turn: {}".format(name, summary.status_states))
+        raise _TurnNotReadyError(summary, name)
 
 
 class _DurableReleaseTimeoutError(AssertionError):
@@ -911,6 +925,10 @@ def main() -> None:
             "passed": False, "scenario": args.scenario,
             "error_type": type(exc).__name__, "error_site": error_site,
         }
+        if isinstance(exc, _TurnNotReadyError):
+            failure["turn_states"] = exc.states
+            failure["terminal_markers"] = exc.terminal_markers
+            failure["terminal_message_present"] = exc.terminal_message_present
         if isinstance(exc, _DurableReleaseTimeoutError):
             failure["control_state"] = exc.state
         event_name = next(
