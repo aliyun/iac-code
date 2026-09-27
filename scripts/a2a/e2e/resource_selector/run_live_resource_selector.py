@@ -588,12 +588,13 @@ def _answer_selection(
     name: str,
     pending: Mapping[str, Any],
     response: Mapping[str, Any],
+    omit_task_id: bool = False,
 ) -> StreamSummary:
     return harness.stream(
         name=name,
         prompt=RESOURCE_SELECTION_QUERY_PREFIX + json.dumps(response, ensure_ascii=False, separators=(",", ":")),
         context_id=str(pending["contextId"]),
-        task_id=str(pending["requestTaskId"]),
+        task_id="" if omit_task_id else str(pending["requestTaskId"]),
     )
 
 
@@ -700,7 +701,13 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
                 value=selected_value,
                 label=selected_label,
             )
-        answer = _answer_selection(harness, name="answer", pending=pending, response=response)
+        answer = _answer_selection(
+            harness,
+            name="answer",
+            pending=pending,
+            response=response,
+            omit_task_id=args.scenario == "restart-before-answer",
+        )
 
         secondary_selector_id = ""
         secondary_candidate_count = 0
@@ -845,7 +852,28 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> None:
     args = _parse_args()
-    result = _run(args)
+    try:
+        result = _run(args)
+    except Exception as exc:
+        # Only the exception class and source location are safe to publish in
+        # live CI reports; exception messages may contain cloud resource data.
+        frame = exc.__traceback__
+        error_site = ""
+        while frame is not None:
+            path = Path(frame.tb_frame.f_code.co_filename)
+            try:
+                relative = path.resolve().relative_to(Path(__file__).resolve().parents[4])
+            except ValueError:
+                pass
+            else:
+                if relative.parts and relative.parts[0] in {"scripts", "src"}:
+                    error_site = "{}:{}".format(relative.as_posix(), frame.tb_lineno)
+            frame = frame.tb_next
+        _write_json(
+            args.run_dir.expanduser().resolve() / "summary.json",
+            {"passed": False, "scenario": args.scenario, "error_type": type(exc).__name__, "error_site": error_site},
+        )
+        raise
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
 

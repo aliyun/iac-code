@@ -5,12 +5,14 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import (
     SCENARIOS,
+    _answer_selection,
     _iac_code_values,
     _resource_selection_inputs,
     _selection_response,
@@ -112,6 +114,19 @@ def test_iac_code_value_extraction_reads_nested_transport_metadata(tmp_path: Pat
     )
 
     assert _iac_code_values(event_path, "inputReceived") == [{"duplicate": True}]
+
+
+def test_selection_answer_omits_task_id_only_for_restart_recovery() -> None:
+    harness = Mock()
+    pending = {"contextId": "ctx-1", "requestTaskId": "task-1"}
+    response = {"kind": "cloud_resource_selection", "status": "selected"}
+
+    _answer_selection(harness, name="normal", pending=pending, response=response)
+    _answer_selection(harness, name="restart", pending=pending, response=response, omit_task_id=True)
+
+    assert harness.stream.call_args_list[0].kwargs["task_id"] == "task-1"
+    assert harness.stream.call_args_list[1].kwargs["task_id"] == ""
+    assert all(call.kwargs["context_id"] == "ctx-1" for call in harness.stream.call_args_list)
 
 
 def test_live_pipeline_fixtures_load_with_production_pipeline_loader() -> None:
