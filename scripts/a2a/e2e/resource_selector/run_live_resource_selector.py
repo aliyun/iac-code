@@ -797,10 +797,13 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             pipeline_handoff_verified = True
 
         continuation_token = "LIVE_SELECTOR_NEXT_TURN_OK_" + uuid.uuid4().hex[:8]
+        # After a cold restart, keep the recovered input-required Task so the
+        # sidecar can prove its waiting state before admitting the next turn.
         next_turn = harness.stream(
             name="next-turn",
             prompt="这是同一会话的下一条普通消息。只回复：{}".format(continuation_token),
             context_id=initial.context_id,
+            task_id=initial.task_id if args.scenario == "restart-before-answer" else "",
         )
         _assert_turn_ready(next_turn, name="next turn")
         if continuation_token not in next_turn.text:
