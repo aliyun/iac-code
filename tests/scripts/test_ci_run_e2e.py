@@ -158,10 +158,19 @@ def test_live_public_summary_keeps_only_known_a2a_states() -> None:
     public = run_e2e._public_live_summary({
         "a2a_states": ["TASK_STATE_WORKING", "TASK_STATE_FAILED", "TASK_STATE_PRIVATE_sk-fixture"],
         "a2a_phase": "next-turn",
+        "control_state": {
+            "present": True, "task_matches": True, "phase": "running",
+            "release_ready": False, "input_handoff_ready": False,
+            "unsafe": "sk-fixture",
+        },
     })
     assert public is not None
     assert public["a2a_states"] == ["TASK_STATE_WORKING", "TASK_STATE_FAILED"]
     assert public["a2a_phase"] == "next-turn"
+    assert public["control_state"] == {
+        "present": True, "task_matches": True, "phase": "running",
+        "release_ready": False, "input_handoff_ready": False,
+    }
     assert "sk-fixture" not in json.dumps(public)
 
 

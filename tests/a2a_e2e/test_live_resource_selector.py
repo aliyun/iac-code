@@ -138,8 +138,10 @@ def test_restart_waits_for_durable_execution_release(tmp_path: Path) -> None:
         "inputHandoffReady": False,
     }
     control_path.write_text(json.dumps(control), encoding="utf-8")
-    with pytest.raises(AssertionError, match="durable release"):
-        _wait_for_released_execution(tmp_path, summary, timeout=0)
+    with pytest.raises(AssertionError, match="durable release") as error:
+        _wait_for_released_execution(tmp_path, summary, timeout=0.01)
+    assert error.value.state["phase"] == "terminated"
+    assert error.value.state["release_ready"] is False
 
     control["releaseReady"] = True
     control_path.write_text(json.dumps(control), encoding="utf-8")

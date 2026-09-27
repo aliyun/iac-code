@@ -441,6 +441,12 @@ def _assert_turn_ready(summary: StreamSummary, *, name: str) -> None:
         raise AssertionError("{} did not become ready for the next turn: {}".format(name, summary.status_states))
 
 
+class _DurableReleaseTimeoutError(AssertionError):
+    def __init__(self, state: dict[str, Any]) -> None:
+        super().__init__("A2A input-required execution did not reach a durable release")
+        self.state = state
+
+
 def _wait_for_released_execution(config_dir: Path, summary: StreamSummary, *, timeout: float) -> None:
     """Crash only after the input-required Task has a durable, safe handoff."""
     context_id = summary.context_id
@@ -448,11 +454,19 @@ def _wait_for_released_execution(config_dir: Path, summary: StreamSummary, *, ti
         raise AssertionError("A2A context ID is invalid")
     control_path = config_dir / "a2a" / "execution-control" / "{}.json".format(context_id)
     deadline = time.monotonic() + timeout
+    last_state: dict[str, Any] = {"present": False}
     while time.monotonic() < deadline:
         try:
             control = json.loads(control_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             control = None
+        last_state = {
+            "present": isinstance(control, dict),
+            "task_matches": isinstance(control, dict) and control.get("taskId") == summary.task_id,
+            "phase": control.get("phase") if isinstance(control, dict) else None,
+            "release_ready": control.get("releaseReady") if isinstance(control, dict) else None,
+            "input_handoff_ready": control.get("inputHandoffReady") if isinstance(control, dict) else None,
+        }
         if (
             isinstance(control, dict)
             and control.get("taskId") == summary.task_id
@@ -462,7 +476,7 @@ def _wait_for_released_execution(config_dir: Path, summary: StreamSummary, *, ti
         ):
             return
         time.sleep(0.1)
-    raise AssertionError("A2A input-required execution did not reach a durable release")
+    raise _DurableReleaseTimeoutError(last_state)
 
 
 class _Harness:
@@ -893,6 +907,8 @@ def main() -> None:
             "passed": False, "scenario": args.scenario,
             "error_type": type(exc).__name__, "error_site": error_site,
         }
+        if isinstance(exc, _DurableReleaseTimeoutError):
+            failure["control_state"] = exc.state
         event_name = next(
             (
                 name for name in ("next-turn", "answer")
