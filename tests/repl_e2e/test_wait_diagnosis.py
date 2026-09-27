@@ -59,5 +59,21 @@ def test_diagnosis_failure_returns_fixed_safe_state(tmp_path, monkeypatch) -> No
 
     monkeypatch.setattr(wait_diagnosis.httpx, "post", fake_post)
     assert wait_diagnosis.diagnose_wait(tmp_path, expected="prompt", transcript="waiting") == {
-        "state": "unavailable", "confidence": 0.0,
+        "state": "unavailable", "confidence": 0.0, "failure": "transport",
+    }
+
+
+def test_diagnosis_accepts_fenced_json_response(tmp_path, monkeypatch) -> None:
+    (tmp_path / ".credentials.yml").write_text('{"dashscope":"sk-fixture-secret-value"}', encoding="utf-8")
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"choices": [{"message": {"content": '```json\n{"state":"unknown","confidence":0.5}\n```'}}]}
+
+    monkeypatch.setattr(wait_diagnosis.httpx, "post", lambda *_args, **_kwargs: Response())
+    assert wait_diagnosis.diagnose_wait(tmp_path, expected="prompt", transcript="waiting") == {
+        "state": "unknown", "confidence": 0.5,
     }

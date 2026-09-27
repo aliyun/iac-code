@@ -88,11 +88,22 @@ def diagnose_wait(config_dir: Path, *, expected: str, transcript: str) -> dict[s
         )
         response.raise_for_status()
         content = response.json()["choices"][0]["message"]["content"]
+        if not isinstance(content, str):
+            return {"state": "unavailable", "confidence": 0.0, "failure": "invalid_content"}
+        content = content.strip()
+        if content.startswith("```"):
+            content = re.sub(r"\A```(?:json)?\s*|\s*```\Z", "", content).strip()
         decoded = json.loads(content)
         state = decoded.get("state")
         confidence = decoded.get("confidence")
         if state not in STATES or not isinstance(confidence, (int, float)) or isinstance(confidence, bool):
             return {"state": "unknown", "confidence": 0.0}
         return {"state": state, "confidence": round(max(0.0, min(float(confidence), 1.0)), 2)}
-    except (httpx.HTTPError, OSError, KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError):
-        return {"state": "unavailable", "confidence": 0.0}
+    except httpx.HTTPStatusError as exc:
+        return {"state": "unavailable", "confidence": 0.0, "failure": f"http_{exc.response.status_code}"}
+    except httpx.TimeoutException:
+        return {"state": "unavailable", "confidence": 0.0, "failure": "timeout"}
+    except httpx.HTTPError:
+        return {"state": "unavailable", "confidence": 0.0, "failure": "transport"}
+    except (OSError, KeyError, IndexError, TypeError, ValueError):
+        return {"state": "unavailable", "confidence": 0.0, "failure": "invalid_response"}
