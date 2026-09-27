@@ -60,6 +60,24 @@ def _pipeline_batch(*envelopes: dict) -> dict:
     }
 
 
+def test_top_level_task_status_message_is_preserved() -> None:
+    runner = _load_runner()
+    summary = runner.StreamSummary(name="recovered", prompt="continue")
+    runner._apply_event(summary, {
+        "task": {
+            "id": "task-fixture",
+            "contextId": "context-fixture",
+            "status": {
+                "state": "TASK_STATE_FAILED",
+                "message": {"parts": [{"text": "recovery failure fixture"}]},
+            },
+        },
+    })
+
+    assert summary.last_status_state == "TASK_STATE_FAILED"
+    assert summary.text == "recovery failure fixture"
+
+
 def test_latest_input_required_kind_from_events_uses_latest_kind() -> None:
     runner = _load_runner()
 

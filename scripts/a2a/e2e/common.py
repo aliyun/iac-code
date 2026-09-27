@@ -398,9 +398,10 @@ def _status_message_texts(payload: Any) -> list[str]:
     result = payload.get("result")
     if isinstance(result, dict):
         _extend_unique(texts, _status_message_texts(result))
-        task = result.get("task")
-        if isinstance(task, dict):
-            _extend_unique(texts, _status_message_texts(task))
+
+    task = payload.get("task")
+    if isinstance(task, dict):
+        _extend_unique(texts, _status_message_texts(task))
 
     status = payload.get("status")
     if isinstance(status, dict):
