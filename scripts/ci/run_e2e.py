@@ -31,6 +31,16 @@ SAFE_LIVE_AUDIT_NOTE = re.compile(
     r"location=(?:logs|artifacts|workspace|templates|other); "
     r"suffix=(?:json|jsonl|log|txt|yaml|yml|md|other)\Z"
 )
+TERMINAL_CATEGORIES = (
+    ("task_busy", r"already working|already running|task is busy"),
+    ("rate_limit", r"rate.?limit|throttl|\b429\b|quota"),
+    ("timeout", r"timed? out|timeout|deadline"),
+    ("authentication", r"unauthorized|invalid.{0,20}api.?key|\b401\b"),
+    ("permission", r"forbidden|permission denied|\b403\b"),
+    ("model_unavailable", r"model.{0,30}not found|\b404\b"),
+    ("network", r"connection|network|\b50[234]\b"),
+    ("model_context", r"context length|max(?:imum)? tokens?"),
+)
 RESULT_LABELS = {
     "passed": "通过",
     "failed": "失败",
@@ -445,18 +455,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     raw_error = summary.get("error")
     if isinstance(raw_error, str) and "A2A task entered unexpected terminal state TASK_STATE_FAILED" in raw_error:
         terminal_text = raw_error.rsplit("TASK_STATE_FAILED", 1)[-1].lower()
-        terminal_categories = (
-            ("task_busy", r"already working|already running|task is busy"),
-            ("rate_limit", r"rate.?limit|throttl|\b429\b|quota"),
-            ("timeout", r"timed? out|timeout|deadline"),
-            ("authentication", r"unauthorized|invalid.{0,20}api.?key|\b401\b"),
-            ("permission", r"forbidden|permission denied|\b403\b"),
-            ("model_unavailable", r"model.{0,30}not found|\b404\b"),
-            ("network", r"connection|network|\b50[234]\b"),
-            ("model_context", r"context length|max(?:imum)? tokens?"),
-        )
         public["terminal_category"] = next(
-            (category for category, pattern in terminal_categories if re.search(pattern, terminal_text)), "other"
+            (category for category, pattern in TERMINAL_CATEGORIES if re.search(pattern, terminal_text)), "other"
         )
         known_exceptions = (
             "AssertionError", "AttributeError", "ConnectionError", "FileNotFoundError", "KeyError",
@@ -469,6 +469,44 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     if watchdog is not None:
         public["watchdog"] = watchdog
     return public
+
+
+def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, str]:
+    """Read local A2A events and return fixed-schema failure clues, never event text."""
+    from scripts.a2a.debugger import _extract_pipeline_envelopes
+
+    evidence: dict[str, str] = {}
+    for event_path in script_dir.glob("*.events.jsonl"):
+        with event_path.open(encoding="utf-8", errors="replace") as events:
+            for line in events:
+                if "pipeline_failed" not in line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                for envelope in _extract_pipeline_envelopes(payload):
+                    if envelope.get("eventType") != "pipeline_failed":
+                        continue
+                    evidence["pipeline_failed_event"] = "observed"
+                    data = envelope.get("data")
+                    if not isinstance(data, dict):
+                        continue
+                    details = data.get("errorDetails")
+                    inner_type = details.get("type") if isinstance(details, dict) else None
+                    if isinstance(inner_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,59}", inner_type):
+                        evidence["terminal_inner_type"] = inner_type
+                    error_summary = data.get("errorSummary")
+                    if isinstance(error_summary, str):
+                        lower_summary = error_summary.lower()
+                        evidence["terminal_category"] = next(
+                            (
+                                category for category, pattern in TERMINAL_CATEGORIES
+                                if re.search(pattern, lower_summary)
+                            ),
+                            "other",
+                        )
+    return evidence
 
 
 def _tail(path: Path, limit: int = 4000) -> str:
@@ -649,6 +687,8 @@ def run_case(
     )
     if case.suite == "live":
         summary = _public_live_summary(summary, cleanup_status)
+        if case.live_runner == "selling" and isinstance(summary, dict):
+            summary.update(_live_a2a_terminal_evidence(script_dir))
         error = "" if not error else "runner failed to start; inspect CI job log"
     failed_checks, notes = _failure_details(summary)
     notes.extend(safe_audit_notes)
@@ -702,6 +742,8 @@ def _reason(result: dict[str, Any]) -> str:
             reason += "；A2A 终态类别：{}".format(result["summary"]["terminal_category"])
         if result["summary"].get("terminal_exception"):
             reason += "；内部异常：{}".format(result["summary"]["terminal_exception"])
+        if result["summary"].get("terminal_inner_type"):
+            reason += "；流水线异常：{}".format(result["summary"]["terminal_inner_type"])
     elif result["notes"]:
         first_lines = [str(note).splitlines()[0] for note in result["notes"][:3]]
         reason = "；".join(first_lines)[:240]

@@ -165,6 +165,28 @@ def test_live_public_summary_classifies_a2a_terminal_without_text() -> None:
     assert "sk-fixture" not in json.dumps(public)
 
 
+def test_live_a2a_terminal_evidence_keeps_only_fixed_fields(tmp_path: Path) -> None:
+    event = {
+        "metadata": {"iac_code": {"pipeline": {
+            "eventType": "pipeline_failed",
+            "data": {
+                "errorSummary": "ValueError: Rate limit exceeded; token=sk-fixture",
+                "errorDetails": {"type": "ValueError", "traceback": "secret fixture"},
+            },
+        }}},
+    }
+    (tmp_path / "failed.events.jsonl").write_text(json.dumps(event) + "\n", encoding="utf-8")
+
+    evidence = run_e2e._live_a2a_terminal_evidence(tmp_path)
+
+    assert evidence == {
+        "pipeline_failed_event": "observed",
+        "terminal_inner_type": "ValueError",
+        "terminal_category": "rate_limit",
+    }
+    assert "sk-fixture" not in json.dumps(evidence)
+
+
 def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
     summary = {
         "passed": False,
