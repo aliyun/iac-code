@@ -38,8 +38,9 @@ def test_stream_message_surfaces_json_rpc_error(tmp_path: Path, monkeypatch: pyt
     response = _json_response({"error": {"code": -32602, "message": "invalid request"}})
     monkeypatch.setattr(common, "urlopen", lambda request, timeout: response)
 
-    with pytest.raises(RuntimeError, match="JSON-RPC error"):
+    with pytest.raises(common.JsonRpcResponseError, match="JSON-RPC error") as raised:
         common.stream_message(
             server_url="http://example.invalid", cwd=str(tmp_path), prompt="answer", name="answer",
             run_dir=tmp_path, timeout=1,
         )
+    assert raised.value.code == -32602

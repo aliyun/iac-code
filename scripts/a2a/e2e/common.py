@@ -54,6 +54,23 @@ RUN_LOG_ROOT_NAME = "iac-code-a2a-e2e-runs"
 NORMAL_TURN_TERMINAL_STATES = {"TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"}
 
 
+class JsonRpcResponseError(RuntimeError):
+    """A JSON-RPC error with only bounded, non-secret diagnostics for E2E reports."""
+
+    def __init__(self, name: str, error: Any) -> None:
+        super().__init__(f"{name} returned a JSON-RPC error")
+        self.name = name
+        self.code = error.get("code") if isinstance(error, dict) and isinstance(error.get("code"), int) else None
+        message = str(error.get("message") or "").casefold() if isinstance(error, dict) else ""
+        self.markers = [
+            marker for marker in (
+                "resource_selection_resume_invalid", "task is already working", "active session",
+                "execution", "context", "not found", "terminal state", "permission", "rate limit",
+                "unsupported", "duplicate",
+            ) if marker in message
+        ]
+
+
 @dataclass
 class StreamSummary:
     name: str
@@ -208,7 +225,7 @@ def stream_message(
                 parsed = json.loads(raw)
                 _append_jsonl(run_dir / f"{name}.events.jsonl", parsed, redaction_env)
                 if isinstance(parsed, dict) and parsed.get("error"):
-                    raise RuntimeError(f"{name} returned a JSON-RPC error")
+                    raise JsonRpcResponseError(name, parsed["error"])
                 _apply_event(summary, parsed)
             else:
                 for line in response:

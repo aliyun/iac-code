@@ -504,10 +504,18 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         public["a2a_raw_line_count"] = raw_line_count
     if summary.get("a2a_response_content_type") in {"text/event-stream", "application/json", "text/plain"}:
         public["a2a_response_content_type"] = summary["a2a_response_content_type"]
+    jsonrpc_error_code = summary.get("jsonrpc_error_code")
+    if (
+        isinstance(jsonrpc_error_code, int)
+        and not isinstance(jsonrpc_error_code, bool)
+        and -1000000 <= jsonrpc_error_code <= 1000000
+    ):
+        public["jsonrpc_error_code"] = jsonrpc_error_code
     terminal_markers = summary.get("terminal_markers")
     allowed_terminal_markers = {
         "resource_selection_resume_invalid", "active session", "execution", "permission",
         "credential", "timeout", "model", "context", "task", "selector",
+        "task is already working", "not found", "terminal state", "rate limit", "unsupported", "duplicate",
     }
     if isinstance(terminal_markers, list):
         public["terminal_markers"] = [

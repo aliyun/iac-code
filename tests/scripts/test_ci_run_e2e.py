@@ -183,6 +183,7 @@ def test_live_public_summary_keeps_only_known_a2a_states() -> None:
         "a2a_text_present": True,
         "a2a_raw_line_count": 2,
         "a2a_response_content_type": "text/event-stream",
+        "jsonrpc_error_code": -32602,
         "terminal_markers": ["resource_selection_resume_invalid", "sk-fixture"],
         "terminal_message_present": True,
         "control_state": {
@@ -199,6 +200,7 @@ def test_live_public_summary_keeps_only_known_a2a_states() -> None:
     assert public["a2a_text_present"] is True
     assert public["a2a_raw_line_count"] == 2
     assert public["a2a_response_content_type"] == "text/event-stream"
+    assert public["jsonrpc_error_code"] == -32602
     assert public["terminal_markers"] == ["resource_selection_resume_invalid"]
     assert public["terminal_message_present"] is True
     assert public["control_state"] == {

@@ -23,6 +23,7 @@ if str(E2E_ROOT) not in sys.path:
     sys.path.insert(0, str(E2E_ROOT))
 
 from common import (  # noqa: E402
+    JsonRpcResponseError,
     ManagedServer,
     StreamSummary,
     _a2a_task_identity,
@@ -939,6 +940,10 @@ def main() -> None:
             failure["a2a_response_content_type"] = exc.response_content_type
             failure["terminal_markers"] = exc.terminal_markers
             failure["terminal_message_present"] = exc.terminal_message_present
+        if isinstance(exc, JsonRpcResponseError):
+            failure["a2a_phase"] = "next-turn" if exc.name == "next-turn" else "answer"
+            failure["jsonrpc_error_code"] = exc.code
+            failure["terminal_markers"] = exc.markers
         if isinstance(exc, _DurableReleaseTimeoutError):
             failure["control_state"] = exc.state
         event_name = next(
