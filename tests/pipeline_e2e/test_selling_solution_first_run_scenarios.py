@@ -2089,6 +2089,75 @@ def test_repl_display_wait_fails_fast_on_terminal_pipeline_event(runner: ModuleT
         )
 
 
+@pytest.mark.parametrize(
+    ("transcript", "elapsed", "aborts"),
+    [("", 601.0, True), ("CreateStack", 601.0, False), ("CreateStack", 1501.0, True)],
+)
+def test_repl_file_wait_uses_output_idle_guard(
+    runner: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    transcript: str,
+    elapsed: float,
+    aborts: bool,
+) -> None:
+    pty = argparse.Namespace(_last_output_at=0.0, transcript=transcript, events=[], _wait_diagnoses=[])
+    runtime = argparse.Namespace(watchdog=None)
+    monkeypatch.setattr(
+        runner,
+        "_legacy_repl_module",
+        lambda: argparse.Namespace(WAIT_IDLE_SECONDS=600.0, WAIT_CLOUD_IDLE_SECONDS=1500.0),
+    )
+    monkeypatch.setattr(runner.time, "monotonic", lambda: elapsed)
+
+    if aborts:
+        with pytest.raises(TimeoutError, match="no terminal output"):
+            runner._observe_repl_wait(
+                pty, runtime, description="REPL display pipeline_completed occurrence 1",
+                started=0.0, transcript_offset=0, diagnosis_attempted=False,
+            )
+        assert runtime.watchdog["action"] == "early_abort"
+        assert pty._wait_diagnoses[-1] == runtime.watchdog
+    else:
+        assert runner._observe_repl_wait(
+            pty, runtime, description="REPL display pipeline_completed occurrence 1",
+            started=0.0, transcript_offset=0, diagnosis_attempted=False,
+        ) is True
+        assert runtime.watchdog is None
+
+
+def test_repl_file_wait_records_advisory_diagnosis(
+    runner: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = {
+        "state": "normal_operation", "action": "observe", "waitingFor": "REPL display pipeline_completed occurrence 1",
+        "elapsedSeconds": 121.0, "cue": "none",
+    }
+    pty = argparse.Namespace(_last_output_at=120.0, transcript="working", events=[], _wait_diagnoses=[])
+    calls: list[tuple[str, int, float]] = []
+
+    def diagnose(description: str, offset: int, elapsed: float) -> bool:
+        calls.append((description, offset, elapsed))
+        pty._wait_diagnoses.append(record)
+        return True
+
+    pty._diagnose_wait = diagnose
+    runtime = argparse.Namespace(watchdog=None)
+    monkeypatch.setattr(
+        runner,
+        "_legacy_repl_module",
+        lambda: argparse.Namespace(WAIT_IDLE_SECONDS=600.0, WAIT_CLOUD_IDLE_SECONDS=1500.0),
+    )
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 121.0)
+
+    assert runner._observe_repl_wait(
+        pty, runtime, description=record["waitingFor"], started=0.0,
+        transcript_offset=3, diagnosis_attempted=False,
+    ) is True
+    assert calls == [(record["waitingFor"], 3, 121.0)]
+    assert runtime.watchdog == record
+
+
 def test_repl_candidate_switch_uses_right_arrow_before_enter(runner: ModuleType) -> None:
     sent: list[tuple[str, str]] = []
 

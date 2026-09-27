@@ -684,6 +684,7 @@ class ScenarioResult:
     error: str = ""
     error_type: str = ""
     error_site: str = ""
+    watchdog: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
@@ -705,6 +706,7 @@ class ScenarioRuntime:
     processes: list[subprocess.Popen[Any]] = field(default_factory=list)
     checks: dict[str, bool] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    watchdog: dict[str, Any] | None = None
     cloud_resources: list[dict[str, Any]] = field(default_factory=list)
     owned_stack_names: set[str] = field(default_factory=set)
     repl_candidate_wait_count: int = 0
@@ -2651,6 +2653,7 @@ def _repl_wait_selection(pty: Any, runtime: ScenarioRuntime) -> None:
         occurrence=runtime.repl_candidate_wait_count,
         timeout=runtime.args.stream_timeout,
         drain_output=getattr(pty, "drain_output", None),
+        pty=pty,
     )
     pty.events.append(
         {
@@ -2679,6 +2682,7 @@ def _repl_wait_step_started(
         timeout=runtime.args.stream_timeout,
         drain_output=getattr(pty, "drain_output", None),
         predicate=lambda item: item.get("step_id") == step_id,
+        pty=pty,
     )
     pty.events.append(
         {
@@ -2755,7 +2759,10 @@ def _wait_repl_transcript_tool_use(
     after the target tool call had actually been persisted.
     """
 
-    deadline = time.monotonic() + runtime.args.stream_timeout
+    started = time.monotonic()
+    deadline = started + runtime.args.stream_timeout
+    transcript_offset = len(getattr(pty, "transcript", ""))
+    diagnosis_attempted = False
     while time.monotonic() < deadline:
         pty.drain_output()
         terminal_event = _repl_latest_terminal_display_event(runtime)
@@ -2783,6 +2790,14 @@ def _wait_repl_transcript_tool_use(
                 }
             )
             return
+        diagnosis_attempted = _observe_repl_wait(
+            pty,
+            runtime,
+            description=f"REPL tool use {step_id}",
+            started=started,
+            transcript_offset=transcript_offset,
+            diagnosis_attempted=diagnosis_attempted,
+        )
         time.sleep(0.1)
     raise TimeoutError(
         f"timed out waiting for {description}; expected one of {sorted(tool_names)!r} "
@@ -2863,6 +2878,62 @@ def _repl_submit_line_input(pty: Any, text: str, *, label: str) -> None:
     pty.send("\r", label=f"{label}-enter")
 
 
+def _observe_repl_wait(
+    pty: Any,
+    runtime: ScenarioRuntime,
+    *,
+    description: str,
+    started: float,
+    transcript_offset: int,
+    diagnosis_attempted: bool,
+) -> bool:
+    """Apply the REPL idle guard while polling durable pipeline files."""
+
+    now = time.monotonic()
+    last_output_at = getattr(pty, "_last_output_at", None)
+    if isinstance(last_output_at, (int, float)) and not isinstance(last_output_at, bool):
+        chunks = getattr(pty, "raw_chunks", None)
+        recent_output = (
+            "".join(chunks[-10:])[-2000:]
+            if isinstance(chunks, list)
+            else str(getattr(pty, "transcript", "")[-2000:])
+        )
+        cloud_wait = bool(
+            re.search(
+                r"(?i)Deploying\s*\(|CreateStack|ROS Deploy|CREATE_IN_PROGRESS|DELETE_IN_PROGRESS|回滚清理",
+                recent_output,
+            )
+        )
+        repl = _legacy_repl_module()
+        idle_limit = repl.WAIT_CLOUD_IDLE_SECONDS if cloud_wait else repl.WAIT_IDLE_SECONDS
+        if now - max(float(last_output_at), started) >= idle_limit:
+            record = {
+                "state": "no_output",
+                "confidence": 1.0,
+                "waitingFor": description,
+                "elapsedSeconds": round(now - started, 1),
+                "action": "early_abort",
+                "cue": "none",
+            }
+            diagnoses = getattr(pty, "_wait_diagnoses", [])
+            diagnoses.append(record)
+            pty._wait_diagnoses = diagnoses
+            pty.events.append({"type": "wait_diagnosis", **record, "at": utc_now()})
+            runtime.watchdog = record
+            raise TimeoutError(f"no terminal output for {round(idle_limit)}s while waiting for {description}")
+    if not diagnosis_attempted and now - started >= 120.0:
+        diagnose = getattr(pty, "_diagnose_wait", None)
+        if callable(diagnose):
+            try:
+                diagnose(description, transcript_offset, now - started)
+            finally:
+                diagnoses = getattr(pty, "_wait_diagnoses", [])
+                if diagnoses and isinstance(diagnoses[-1], dict):
+                    runtime.watchdog = diagnoses[-1]
+        return True
+    return diagnosis_attempted
+
+
 def _wait_repl_display_event(
     runtime: ScenarioRuntime,
     *,
@@ -2872,8 +2943,12 @@ def _wait_repl_display_event(
     drain_output: Callable[[], None] | None = None,
     predicate: Callable[[dict[str, Any]], bool] | None = None,
     check_before_drain: bool = False,
+    pty: Any | None = None,
 ) -> tuple[dict[str, Any], Path]:
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
+    transcript_offset = len(getattr(pty, "transcript", "")) if pty is not None else 0
+    diagnosis_attempted = False
     latest_count = 0
     terminal_types = {"pipeline_user_aborted", "pipeline_failed", "backup_blocked", "pipeline_completed"}
     while time.monotonic() < deadline:
@@ -2903,6 +2978,15 @@ def _wait_repl_display_event(
                     f"REPL pipeline reached terminal display event {terminal_event.get('type')!r} "
                     f"before {event_type!r} occurrence {occurrence}"
                 )
+        if pty is not None:
+            diagnosis_attempted = _observe_repl_wait(
+                pty,
+                runtime,
+                description=f"REPL display {event_type} occurrence {occurrence}",
+                started=started,
+                transcript_offset=transcript_offset,
+                diagnosis_attempted=diagnosis_attempted,
+            )
         if drain_output is not None and check_before_drain:
             drain_output()
         time.sleep(0.1)
@@ -3011,6 +3095,7 @@ def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input
         drain_output=getattr(pty, "drain_output", None),
         predicate=_is_repl_deployment_confirmation,
         check_before_drain=True,
+        pty=pty,
     )
     # The display record is written before the REPL renders the confirmation.
     # Normal flows can wait for the selector's terminal frame. Recovery flows
@@ -3068,6 +3153,7 @@ def _repl_wait_pipeline_completed(pty: Any, runtime: ScenarioRuntime) -> None:
         occurrence=1,
         timeout=runtime.args.stream_timeout,
         drain_output=getattr(pty, "drain_output", None),
+        pty=pty,
     )
     pty.events.append(
         {
@@ -3548,6 +3634,9 @@ def _run_repl(runtime: ScenarioRuntime) -> None:
             _repl_wait_pipeline_completed(pty, runtime)
     finally:
         pty.terminate()
+        diagnoses = getattr(pty, "_wait_diagnoses", [])
+        if diagnoses and isinstance(diagnoses[-1], dict):
+            runtime.watchdog = diagnoses[-1]
         _write_repl_artifacts(runtime, pty, repl)
 
 
@@ -5138,6 +5227,7 @@ def run_one_scenario(
         error=error,
         error_type=error_type,
         error_site=error_site,
+        watchdog=runtime.watchdog if runtime is not None else None,
     )
     if runtime is not None:
         services.unregister_runtime(runtime)
