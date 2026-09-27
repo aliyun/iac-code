@@ -37,9 +37,10 @@ def test_diagnosis_uses_bailian_key_and_redacts_known_secrets(tmp_path, monkeypa
     assert result == {"state": "waiting_for_input", "confidence": 0.93}
     assert len(calls) == 1
     assert calls[0][0] == wait_diagnosis.BAILIAN_CHAT_URL
-    assert calls[0][1]["timeout"] == 15.0
+    assert calls[0][1]["timeout"] == 20.0
     assert calls[0][1]["headers"]["Authorization"] == "Bearer " + api_key
     content = json.dumps(calls[0][1]["json"])
+    assert calls[0][1]["json"]["enable_thinking"] is False
     assert api_key not in content
     assert cloud_key not in content
 
