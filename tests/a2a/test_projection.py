@@ -42,6 +42,19 @@ def test_a2a_roots_always_include_application_root(tmp_path, monkeypatch) -> Non
     assert any(root["path"] == str(application_root) for root in roots)
 
 
+def test_a2a_roots_hide_server_process_cwd(tmp_path, monkeypatch) -> None:
+    server_cwd = tmp_path / "server"
+    server_cwd.mkdir()
+    monkeypatch.chdir(server_cwd)
+    monkeypatch.setattr("iac_code.a2a.projection.tempfile.gettempdir", lambda: str(tmp_path / "unrelated-temp"))
+
+    roots = build_a2a_public_path_roots(cwd=str(tmp_path / "workspace"))
+    public = project_a2a_data({"error": str(server_cwd / "private.log")}, public_path_roots=roots, safe_mode=True)
+
+    assert any(root["path"] == str(server_cwd) for root in roots)
+    assert public == {"error": "[PATH]"}
+
+
 def test_project_a2a_data_safe_mode_off_returns_unredacted_deep_copy() -> None:
     canonical = {"password": "secret-value", "path": "/server-root/private/result.json"}
 
