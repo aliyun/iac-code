@@ -154,14 +154,16 @@ class ACPStdioClient:
         return stderr_output
 
 
-def test_acp_lifecycle():
+def test_acp_lifecycle(checks: dict[str, bool] | None = None):
     print("\n=== Test: ACP stdio Full Lifecycle ===")
     client = ACPStdioClient()
-    checks: dict[str, bool] = {}
+    if checks is None:
+        checks = {}
 
     try:
         client.start()
         if client.process and client.process.poll() is not None:
+            checks["ACP process started successfully"] = False
             print(f"{FAIL} ACP process exited immediately after start, exit code: {client.process.returncode}")
             return False
 
@@ -283,6 +285,7 @@ def test_acp_lifecycle():
             print(f"{INFO} close response: {json.dumps(close_resp.get('result', {}))}")
 
     except Exception as e:
+        checks["unexpected exception"] = False
         print(f"{FAIL} Exception: {e}")
         import traceback
         traceback.print_exc()
@@ -318,7 +321,8 @@ def main():
     print("  iac-code ACP Mode Windows Compatibility Test")
     print("=" * 60)
 
-    passed = test_acp_lifecycle()
+    checks: dict[str, bool] = {}
+    passed = test_acp_lifecycle(checks)
 
     print()
     if passed:
@@ -328,7 +332,7 @@ def main():
 
     if args.run_dir is not None:
         (args.run_dir / "summary.json").write_text(
-            json.dumps({"passed": passed, "checks": {"ACP lifecycle": passed}}, ensure_ascii=False, indent=2)
+            json.dumps({"passed": passed, "checks": {"ACP lifecycle": passed, **checks}}, ensure_ascii=False, indent=2)
             + "\n",
             encoding="utf-8",
         )

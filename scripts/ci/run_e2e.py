@@ -494,6 +494,18 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         public["a2a_states"] = [state for state in states if isinstance(state, str) and state in allowed_states][:12]
     if summary.get("a2a_phase") in {"answer", "next-turn"}:
         public["a2a_phase"] = summary["a2a_phase"]
+    terminal_markers = summary.get("terminal_markers")
+    allowed_terminal_markers = {
+        "resource_selection_resume_invalid", "active session", "execution", "permission",
+        "credential", "timeout", "model", "context", "task", "selector",
+    }
+    if isinstance(terminal_markers, list):
+        public["terminal_markers"] = [
+            marker for marker in terminal_markers
+            if isinstance(marker, str) and marker in allowed_terminal_markers
+        ][:10]
+    if isinstance(summary.get("terminal_message_present"), bool):
+        public["terminal_message_present"] = summary["terminal_message_present"]
     control_state = summary.get("control_state")
     if isinstance(control_state, dict):
         safe_control_state = {

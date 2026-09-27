@@ -435,6 +435,7 @@ def _assert_input_required(summary: StreamSummary) -> None:
 class _TurnNotReadyError(AssertionError):
     def __init__(self, summary: StreamSummary, name: str) -> None:
         super().__init__("{} did not become ready for the next turn".format(name))
+        self.name = name
         self.states = [state for state in summary.status_states if state.startswith("TASK_STATE_")]
         terminal = summary.terminal_status_text.casefold()
         self.terminal_markers = [
@@ -926,7 +927,8 @@ def main() -> None:
             "error_type": type(exc).__name__, "error_site": error_site,
         }
         if isinstance(exc, _TurnNotReadyError):
-            failure["turn_states"] = exc.states
+            failure["a2a_states"] = exc.states
+            failure["a2a_phase"] = "next-turn" if exc.name == "next turn" else "answer"
             failure["terminal_markers"] = exc.terminal_markers
             failure["terminal_message_present"] = exc.terminal_message_present
         if isinstance(exc, _DurableReleaseTimeoutError):
