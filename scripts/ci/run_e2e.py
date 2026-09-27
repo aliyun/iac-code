@@ -21,11 +21,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLOUD_REFRESH_SECONDS = 600
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from iac_code.services.telemetry.identity import E2E_USER_ID_ENV, is_e2e_user_id  # noqa: E402
 from scripts.a2a.e2e.execution_control.run_execution_control_scenarios import SCENARIO_MODES  # noqa: E402
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import SCENARIOS as SELECTOR_SCENARIOS  # noqa: E402
 from scripts.a2a.e2e.run_recovery_scenarios import _SCENARIOS as A2A_RECOVERY_SCENARIOS  # noqa: E402
@@ -197,6 +200,14 @@ EXCLUDED = (
     ("Qoder MCP reconnect", "requires a Qoder installation and its local MCP state"),
     ("Web browser contract", "requires provisioned Chrome and playwright-core; API coverage is listed separately"),
 )
+LOCAL_TELEMETRY_SCRIPTS = frozenset({
+    "scripts/a2a/e2e/run_contract_scenarios.py",
+    "scripts/repl/e2e/run_contract_scenarios.py",
+    "scripts/repl/e2e/run_pipeline_contract_scenario.py",
+    "scripts/web/e2e/run_contract_scenario.py",
+    "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py",
+    "scripts/repl/e2e/run_real_aliyun_contract_canary.py",
+})
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -261,16 +272,30 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
     return list(CASES)
 
 
-def _case_env(case_dir: Path) -> dict[str, str]:
+def _case_env(case_dir: Path, case: Case, user_id: str) -> dict[str, str]:
     blocked = (
         "ALIBABA_CLOUD_", "ALIYUN_", "AKLESS_", "DASHSCOPE_", "OPENAI_", "IAC_CODE_", "ANTHROPIC_",
         "OTEL_EXPORTER_",
     )
     env = {key: value for key, value in os.environ.items() if not key.startswith(blocked)}
     env["IAC_CODE_CONFIG_DIR"] = str(case_dir / "config")
-    env["IAC_CODE_TELEMETRY_LOCAL_ONLY"] = "1"
+    env[E2E_USER_ID_ENV] = user_id
+    if case.script in LOCAL_TELEMETRY_SCRIPTS:
+        env["IAC_CODE_TELEMETRY_LOCAL_ONLY"] = "1"
     env["PYTHONUNBUFFERED"] = "1"
     return env
+
+
+def _prepare_e2e_user_id(settings_path: Path) -> str:
+    settings = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
+    if not isinstance(settings, dict):
+        raise ValueError("settings.yml must contain a mapping")
+    user_id = settings.get("userID")
+    if not is_e2e_user_id(user_id):
+        user_id = "iac_user_e2e_" + uuid.uuid4().hex
+        settings["userID"] = user_id
+        settings_path.write_text(yaml.safe_dump(settings, allow_unicode=True), encoding="utf-8")
+    return user_id
 
 
 def _prepare_cloud_credentials(helper: Path, config_dir: Path, helper_python: Path | None = None) -> None:
@@ -404,6 +429,7 @@ def run_case(
     needs_fresh_dir = case.name.startswith("permission-") or case.live_runner == "selector"
     script_dir = case_dir / ("scenario-" + uuid.uuid4().hex) if needs_fresh_dir else case_dir
     command = [sys.executable, str(REPO_ROOT / case.script), "--run-dir", str(script_dir), *case.args]
+    case_user_id = "iac_user_e2e_" + uuid.uuid4().hex
     if case.suite == "live":
         if credential_source_dir is None:
             raise ValueError("live case requires credential source directory")
@@ -422,6 +448,7 @@ def run_case(
             destination = source_config_dir / filename
             shutil.copyfile(credential_source_dir / filename, destination)
             destination.chmod(0o600)
+        case_user_id = _prepare_e2e_user_id(source_config_dir / "settings.yml")
         if case.live_runner != "smoke" and cloud_credential_helper is not None:
             _prepare_cloud_credentials(cloud_credential_helper, source_config_dir, cloud_credential_python)
         if case.live_runner != "smoke":
@@ -443,7 +470,7 @@ def run_case(
             command.extend(("--source-config-dir", str(source_config_dir)))
     if case in FAST_CASES or (case.suite == "live" and case.live_runner != "smoke"):
         command.extend(("--python", sys.executable))
-    case_env = _case_env(case_dir)
+    case_env = _case_env(case_dir, case, case_user_id)
     if case.live_runner == "smoke":
         isolated_home = case_dir / "home"
         isolated_home.mkdir(mode=0o700, exist_ok=True)
@@ -519,7 +546,7 @@ def run_case(
                 case_dir / "cleanup.stderr.log"
             ).open("wb") as stderr:
                 cleanup_process = subprocess.run(
-                    cleanup_command, cwd=REPO_ROOT, env=_case_env(case_dir),
+                    cleanup_command, cwd=REPO_ROOT, env=_case_env(case_dir, case, case_user_id),
                     stdout=stdout, stderr=stderr, timeout=900, check=False,
                 )
             fallback_cleanup_status = "completed" if cleanup_process.returncode == 0 else "failed"

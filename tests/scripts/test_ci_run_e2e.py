@@ -105,6 +105,7 @@ def test_cloud_helper_failure_is_classified_without_exposing_secret(
     source.mkdir()
     for name in (".credentials.yml", "settings.yml"):
         (source / name).write_text("fixture", encoding="utf-8")
+    (source / "settings.yml").write_text('{"activeProvider": "dashscope"}', encoding="utf-8")
     monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
     report = tmp_path / "report"
 
@@ -150,7 +151,8 @@ def test_child_environment_removes_cloud_and_provider_credentials(
     monkeypatch.setenv("AKLESS_BOOTSTRAP_TOKEN", "fake-secret")
     monkeypatch.setenv("IAC_CODE_E2E_PROVIDER_CAPTURE", "inherited-fixture")
     monkeypatch.setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://telemetry.example.com")
-    env = run_e2e._case_env(tmp_path)
+    user_id = "iac_user_e2e_" + "a" * 32
+    env = run_e2e._case_env(tmp_path, run_e2e.EXECUTION_CASES[0], user_id)
     assert "ALIYUN_ACCESS_KEY_ID" not in env
     assert "OPENAI_API_KEY" not in env
     assert "IAC_CODE_API_KEY" not in env
@@ -158,7 +160,20 @@ def test_child_environment_removes_cloud_and_provider_credentials(
     assert "IAC_CODE_E2E_PROVIDER_CAPTURE" not in env
     assert "OTEL_EXPORTER_OTLP_ENDPOINT" not in env
     assert env["IAC_CODE_CONFIG_DIR"] == str(tmp_path / "config")
-    assert env["IAC_CODE_TELEMETRY_LOCAL_ONLY"] == "1"
+    assert env["IAC_CODE_TELEMETRY_E2E_USER_ID"] == user_id
+    assert "IAC_CODE_TELEMETRY_LOCAL_ONLY" not in env
+    local_env = run_e2e._case_env(tmp_path, run_e2e.FAST_CASES[0], user_id)
+    assert local_env["IAC_CODE_TELEMETRY_LOCAL_ONLY"] == "1"
+    assert sum(case.script in run_e2e.LOCAL_TELEMETRY_SCRIPTS for case in run_e2e.CASES) == 49
+
+
+def test_e2e_settings_id_is_preserved_or_generated(tmp_path: Path) -> None:
+    settings = tmp_path / "settings.yml"
+    settings.write_text('{"userID": "iac_user_regular", "activeProvider": "dashscope"}', encoding="utf-8")
+    generated = run_e2e._prepare_e2e_user_id(settings)
+    assert generated.startswith("iac_user_e2e_")
+    assert generated in settings.read_text(encoding="utf-8")
+    assert run_e2e._prepare_e2e_user_id(settings) == generated
 
 
 def test_timeout_writes_failure_report_without_hanging(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -219,7 +234,7 @@ def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
 ) -> None:
     script = tmp_path / "fake_live.py"
     script.write_text(
-        "import argparse, json\n"
+        "import argparse, json, os, yaml\n"
         "from pathlib import Path\n"
         "p = argparse.ArgumentParser()\n"
         "p.add_argument('--run-dir', type=Path, required=True)\n"
@@ -228,6 +243,8 @@ def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
         "if args.run_dir.name.startswith('scenario-'):\n"
         "    args.run_dir.mkdir(parents=True, exist_ok=False)\n"
         "assert (args.source_config_dir / '.credentials.yml').read_text(encoding='utf-8') == 'fixture-secret'\n"
+        "assert yaml.safe_load((args.source_config_dir / 'settings.yml').read_text("
+        "encoding='utf-8'))['userID'] == os.environ['IAC_CODE_TELEMETRY_E2E_USER_ID']\n"
         "(args.run_dir / 'summary.json').write_text("
         "json.dumps({'passed': True, 'checks': {'ok': True}}), encoding='utf-8')\n",
         encoding="utf-8",
@@ -236,6 +253,7 @@ def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
     source.mkdir()
     for name in (".credentials.yml", ".cloud-credentials.yml", "settings.yml"):
         (source / name).write_text("fixture-secret", encoding="utf-8")
+    (source / "settings.yml").write_text('{"activeProvider": "dashscope"}', encoding="utf-8")
     monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
     case = run_e2e.Case("selector-smoke" if runner == "selector" else "repl-smoke", "fake_live.py", (),
                         5, "live", live_runner=runner)
@@ -271,7 +289,7 @@ def test_smoke_adapter_has_model_config_but_no_cloud_credentials(
     source.mkdir()
     (source / ".credentials.yml").write_text("model-fixture", encoding="utf-8")
     (source / ".cloud-credentials.yml").write_text("cloud-fixture", encoding="utf-8")
-    (source / "settings.yml").write_text("settings-fixture", encoding="utf-8")
+    (source / "settings.yml").write_text('{"activeProvider": "dashscope"}', encoding="utf-8")
     monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
     case = run_e2e.Case("smoke-vpc-fixture", "smoke.py", (), 5, "live", live_runner="smoke")
 
@@ -316,7 +334,7 @@ def test_cloud_helper_generates_per_case_sts_without_leaking_bootstrap_token(
     source = tmp_path / "source"
     source.mkdir()
     (source / ".credentials.yml").write_text("model-key", encoding="utf-8")
-    (source / "settings.yml").write_text("model-settings", encoding="utf-8")
+    (source / "settings.yml").write_text('{"activeProvider": "dashscope"}', encoding="utf-8")
     monkeypatch.setenv("AKLESS_BOOTSTRAP_TOKEN", "bootstrap-fixture")
     monkeypatch.setenv("DASHSCOPE_API_KEY", "model-key")
     monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
@@ -353,6 +371,7 @@ def test_long_live_case_refreshes_cloud_file_while_running(tmp_path: Path, monke
     source.mkdir()
     for name in (".credentials.yml", "settings.yml"):
         (source / name).write_text("fixture", encoding="utf-8")
+    (source / "settings.yml").write_text('{"activeProvider": "dashscope"}', encoding="utf-8")
     monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
     monkeypatch.setattr(run_e2e, "CLOUD_REFRESH_SECONDS", 0.1)
     case = run_e2e.Case("akless-refresh", "long.py", (), 5, "live", live_runner="legacy_a2a")
@@ -387,6 +406,7 @@ def test_legacy_a2a_hard_timeout_starts_independent_cleanup(
     source.mkdir()
     for name in (".credentials.yml", ".cloud-credentials.yml", "settings.yml"):
         (source / name).write_text("fixture", encoding="utf-8")
+    (source / "settings.yml").write_text('{"activeProvider": "dashscope"}', encoding="utf-8")
     monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
     case = run_e2e.Case(
         "legacy-timeout", "hang_with_stack.py", (), 1, "live", cloud_write=True,
