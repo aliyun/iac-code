@@ -2978,6 +2978,8 @@ def _wait_repl_display_event(
                     f"REPL pipeline reached terminal display event {terminal_event.get('type')!r} "
                     f"before {event_type!r} occurrence {occurrence}"
                 )
+        if drain_output is not None and check_before_drain:
+            drain_output()
         if pty is not None:
             diagnosis_attempted = _observe_repl_wait(
                 pty,
@@ -2987,8 +2989,6 @@ def _wait_repl_display_event(
                 transcript_offset=transcript_offset,
                 diagnosis_attempted=diagnosis_attempted,
             )
-        if drain_output is not None and check_before_drain:
-            drain_output()
         time.sleep(0.1)
     runtime.checks[f"REPL display {event_type} occurrence {occurrence} observed"] = False
     runtime.checks["REPL display matched at least once before timeout"] = latest_count > 0
