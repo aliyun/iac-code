@@ -10,12 +10,14 @@ from unittest.mock import Mock
 import pytest
 
 from iac_code.pipeline.engine.loader import load_pipeline_dir
+from scripts.a2a.e2e.common import StreamSummary
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import (
     SCENARIOS,
     _answer_selection,
     _iac_code_values,
     _resource_selection_inputs,
     _selection_response,
+    _wait_for_released_execution,
 )
 
 
@@ -116,17 +118,32 @@ def test_iac_code_value_extraction_reads_nested_transport_metadata(tmp_path: Pat
     assert _iac_code_values(event_path, "inputReceived") == [{"duplicate": True}]
 
 
-def test_selection_answer_omits_task_id_only_for_restart_recovery() -> None:
+def test_selection_answer_uses_original_task_correlation() -> None:
     harness = Mock()
     pending = {"contextId": "ctx-1", "requestTaskId": "task-1"}
     response = {"kind": "cloud_resource_selection", "status": "selected"}
 
-    _answer_selection(harness, name="normal", pending=pending, response=response)
-    _answer_selection(harness, name="restart", pending=pending, response=response, omit_task_id=True)
+    _answer_selection(harness, name="answer", pending=pending, response=response)
 
-    assert harness.stream.call_args_list[0].kwargs["task_id"] == "task-1"
-    assert harness.stream.call_args_list[1].kwargs["task_id"] == ""
-    assert all(call.kwargs["context_id"] == "ctx-1" for call in harness.stream.call_args_list)
+    assert harness.stream.call_args.kwargs["task_id"] == "task-1"
+    assert harness.stream.call_args.kwargs["context_id"] == "ctx-1"
+
+
+def test_restart_waits_for_durable_execution_release(tmp_path: Path) -> None:
+    control_path = tmp_path / "a2a" / "execution-control" / "ctx-1.json"
+    control_path.parent.mkdir(parents=True)
+    summary = StreamSummary(name="initial", prompt="", task_id="task-1", context_id="ctx-1")
+    control = {
+        "taskId": "task-1", "phase": "terminated", "releaseReady": False,
+        "inputHandoffReady": False,
+    }
+    control_path.write_text(json.dumps(control), encoding="utf-8")
+    with pytest.raises(AssertionError, match="durable release"):
+        _wait_for_released_execution(tmp_path, summary, timeout=0)
+
+    control["releaseReady"] = True
+    control_path.write_text(json.dumps(control), encoding="utf-8")
+    _wait_for_released_execution(tmp_path, summary, timeout=0.1)
 
 
 def test_live_pipeline_fixtures_load_with_production_pipeline_loader() -> None:

@@ -1768,6 +1768,7 @@ def _backup_restore_hook(
             raise RuntimeError("failed to establish backup-only recovery state")
         harness.start_server()
         restored.add(key)
+        runtime.checks[f"backup restore checkpoint {len(restored)}"] = True
         runtime.event("backup-restored", pending=key, sessionId=session_id)
         return True
 

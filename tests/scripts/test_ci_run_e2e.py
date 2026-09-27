@@ -216,6 +216,7 @@ def test_live_a2a_terminal_evidence_keeps_only_fixed_fields(tmp_path: Path) -> N
         "pipeline_failed_event": "observed",
         "terminal_inner_type": "ValueError",
         "terminal_category": "rate_limit",
+        "terminal_terms": ["error"],
     }
     assert "sk-fixture" not in json.dumps(evidence)
 
@@ -239,6 +240,7 @@ def test_live_a2a_terminal_evidence_reads_persistent_journal(tmp_path: Path) -> 
         "pipeline_failed_event": "observed",
         "terminal_inner_type": "TimeoutError",
         "terminal_category": "timeout",
+        "terminal_terms": ["provider", "error"],
     }
     assert "sk-fixture" not in json.dumps(evidence)
 

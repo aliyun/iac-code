@@ -441,6 +441,30 @@ def _assert_turn_ready(summary: StreamSummary, *, name: str) -> None:
         raise AssertionError("{} did not become ready for the next turn: {}".format(name, summary.status_states))
 
 
+def _wait_for_released_execution(config_dir: Path, summary: StreamSummary, *, timeout: float) -> None:
+    """Crash only after the input-required Task has a durable, safe handoff."""
+    context_id = summary.context_id
+    if not context_id or not all(char.isalnum() or char in "-_" for char in context_id):
+        raise AssertionError("A2A context ID is invalid")
+    control_path = config_dir / "a2a" / "execution-control" / "{}.json".format(context_id)
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            control = json.loads(control_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            control = None
+        if (
+            isinstance(control, dict)
+            and control.get("taskId") == summary.task_id
+            and control.get("phase") == "terminated"
+            and control.get("releaseReady") is True
+            and control.get("inputHandoffReady") is False
+        ):
+            return
+        time.sleep(0.1)
+    raise AssertionError("A2A input-required execution did not reach a durable release")
+
+
 class _Harness:
     def __init__(
         self,
@@ -590,13 +614,12 @@ def _answer_selection(
     name: str,
     pending: Mapping[str, Any],
     response: Mapping[str, Any],
-    omit_task_id: bool = False,
 ) -> StreamSummary:
     return harness.stream(
         name=name,
         prompt=RESOURCE_SELECTION_QUERY_PREFIX + json.dumps(response, ensure_ascii=False, separators=(",", ":")),
         context_id=str(pending["contextId"]),
-        task_id="" if omit_task_id else str(pending["requestTaskId"]),
+        task_id=str(pending["requestTaskId"]),
     )
 
 
@@ -691,6 +714,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             selected_value, selected_label, candidate_count, queried_values = asyncio.run(_query_real_vpc(pending))
 
         if args.scenario == "restart-before-answer":
+            _wait_for_released_execution(harness.config_dir, initial, timeout=args.server_timeout)
             harness.restart_after_crash()
         if args.scenario == "canceled-next-turn":
             response = _selection_response(pending, status="canceled", options_empty=False)
@@ -703,13 +727,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
                 value=selected_value,
                 label=selected_label,
             )
-        answer = _answer_selection(
-            harness,
-            name="answer",
-            pending=pending,
-            response=response,
-            omit_task_id=args.scenario == "restart-before-answer",
-        )
+        answer = _answer_selection(harness, name="answer", pending=pending, response=response)
 
         secondary_selector_id = ""
         secondary_candidate_count = 0
@@ -797,13 +815,10 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             pipeline_handoff_verified = True
 
         continuation_token = "LIVE_SELECTOR_NEXT_TURN_OK_" + uuid.uuid4().hex[:8]
-        # After a cold restart, keep the recovered input-required Task so the
-        # sidecar can prove its waiting state before admitting the next turn.
         next_turn = harness.stream(
             name="next-turn",
             prompt="这是同一会话的下一条普通消息。只回复：{}".format(continuation_token),
             context_id=initial.context_id,
-            task_id=initial.task_id if args.scenario == "restart-before-answer" else "",
         )
         _assert_turn_ready(next_turn, name="next turn")
         if continuation_token not in next_turn.text:

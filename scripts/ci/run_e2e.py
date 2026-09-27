@@ -509,11 +509,11 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     return public
 
 
-def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, str]:
+def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
     """Read local A2A events and return fixed-schema failure clues, never event text."""
     from scripts.a2a.debugger import _extract_pipeline_envelopes
 
-    evidence: dict[str, str] = {}
+    evidence: dict[str, Any] = {}
 
     def record_failure(envelope: dict[str, Any]) -> None:
         if envelope.get("eventType") != "pipeline_failed":
@@ -533,6 +533,16 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, str]:
                 (category for category, pattern in TERMINAL_CATEGORIES if re.search(pattern, lower_summary)),
                 "other",
             )
+            normalized = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", error_summary).replace("_", " ").lower()
+            terms = [
+                term for term in SAFE_TERMINAL_TERMS
+                if (re.search(r"\b{}\b".format(term), normalized) if term.isascii() else term in normalized)
+            ]
+            if terms:
+                evidence["terminal_terms"] = terms[:12]
+            code = next((code for code in TERMINAL_FIXED_CODES if code in lower_summary), None)
+            if code is not None:
+                evidence["terminal_code"] = code
 
     for event_path in (*script_dir.glob("*.events.jsonl"), *script_dir.rglob("a2a-events.jsonl")):
         with event_path.open(encoding="utf-8", errors="replace") as events:
