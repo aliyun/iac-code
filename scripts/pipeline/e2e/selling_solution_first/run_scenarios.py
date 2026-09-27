@@ -4433,6 +4433,8 @@ def credential_values_absent_from_artifacts(runtime: ScenarioRuntime) -> bool:
     excluded_roots = (
         runtime.paths.config_dir.resolve(),
         runtime.paths.backup_dir.resolve(),
+        # The outer CI runner stages its protected input credentials here.
+        (runtime.paths.run_dir / "credential-source").resolve(),
         (runtime.paths.run_dir / ".preflight" / "config").resolve(),
         (runtime.paths.run_dir / ".preflight" / "config-backup").resolve(),
     )

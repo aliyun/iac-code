@@ -1555,6 +1555,12 @@ def test_case_artifact_credential_audit_ignores_config_but_detects_log_leak(runn
     preflight_config.mkdir(parents=True)
     (preflight_config / ".credentials.yml").write_text("api_key: unit-secret-value\n", encoding="utf-8")
     assert runner.credential_values_absent_from_artifacts(runtime)
+    credential_source = runtime.paths.run_dir / "credential-source"
+    credential_source.mkdir()
+    (credential_source / ".cloud-credentials.yml").write_text(
+        "access_key_secret: cloud-secret-value\n", encoding="utf-8"
+    )
+    assert runner.credential_values_absent_from_artifacts(runtime)
     (runtime.paths.logs_dir / "leak.log").write_text("unit-secret-value", encoding="utf-8")
     assert not runner.credential_values_absent_from_artifacts(runtime)
     assert runtime.notes[-1] == "credential audit: source=llm; location=logs; suffix=log"
