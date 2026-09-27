@@ -875,8 +875,16 @@ def main() -> None:
             "passed": False, "scenario": args.scenario,
             "error_type": type(exc).__name__, "error_site": error_site,
         }
-        answer_events = args.run_dir.expanduser().resolve() / "answer.events.jsonl"
-        if answer_events.is_file():
+        event_name = next(
+            (
+                name for name in ("next-turn", "answer")
+                if (args.run_dir.expanduser().resolve() / "{}.events.jsonl".format(name)).is_file()
+            ),
+            "",
+        )
+        if event_name:
+            answer_events = args.run_dir.expanduser().resolve() / "{}.events.jsonl".format(event_name)
+            failure["a2a_phase"] = event_name
             states: list[str] = []
             terminal_text = ""
             for line in answer_events.read_text(encoding="utf-8", errors="replace").splitlines():

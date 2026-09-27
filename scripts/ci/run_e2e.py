@@ -474,6 +474,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     }
     if isinstance(states, list):
         public["a2a_states"] = [state for state in states if isinstance(state, str) and state in allowed_states][:12]
+    if summary.get("a2a_phase") in {"answer", "next-turn"}:
+        public["a2a_phase"] = summary["a2a_phase"]
     raw_error = summary.get("error")
     if isinstance(raw_error, str) and "A2A task entered unexpected terminal state TASK_STATE_FAILED" in raw_error:
         terminal_message = raw_error.rsplit("TASK_STATE_FAILED", 1)[-1]
