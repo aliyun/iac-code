@@ -466,6 +466,14 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     safe_error_site = r"(?:scripts|src)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.py:[1-9][0-9]{0,5}"
     if isinstance(error_site, str) and re.fullmatch(safe_error_site, error_site):
         public["error_site"] = error_site
+    states = summary.get("a2a_states")
+    allowed_states = {
+        "TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_INPUT_REQUIRED",
+        "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED",
+        "TASK_STATE_REJECTED", "TASK_STATE_AUTH_REQUIRED", "TASK_STATE_UNKNOWN",
+    }
+    if isinstance(states, list):
+        public["a2a_states"] = [state for state in states if isinstance(state, str) and state in allowed_states][:12]
     raw_error = summary.get("error")
     if isinstance(raw_error, str) and "A2A task entered unexpected terminal state TASK_STATE_FAILED" in raw_error:
         terminal_message = raw_error.rsplit("TASK_STATE_FAILED", 1)[-1]

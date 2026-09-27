@@ -25,9 +25,11 @@ if str(E2E_ROOT) not in sys.path:
 from common import (  # noqa: E402
     ManagedServer,
     StreamSummary,
+    _a2a_task_identity,
     _free_port,
     _server_env,
     _split_python_command,
+    _status_message_texts,
     _write_json,
     _write_server_config,
     run_llm_preflight,
@@ -869,10 +871,31 @@ def main() -> None:
                 if relative.parts and relative.parts[0] in {"scripts", "src"}:
                     error_site = "{}:{}".format(relative.as_posix(), frame.tb_lineno)
             frame = frame.tb_next
-        _write_json(
-            args.run_dir.expanduser().resolve() / "summary.json",
-            {"passed": False, "scenario": args.scenario, "error_type": type(exc).__name__, "error_site": error_site},
-        )
+        failure = {
+            "passed": False, "scenario": args.scenario,
+            "error_type": type(exc).__name__, "error_site": error_site,
+        }
+        answer_events = args.run_dir.expanduser().resolve() / "answer.events.jsonl"
+        if answer_events.is_file():
+            states: list[str] = []
+            terminal_text = ""
+            for line in answer_events.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                identity = _a2a_task_identity(event)
+                if identity is None:
+                    continue
+                state = identity.get("state")
+                if isinstance(state, str) and state not in states:
+                    states.append(state)
+                if state == "TASK_STATE_FAILED":
+                    terminal_text = "".join(_status_message_texts(event))
+            failure["a2a_states"] = states
+            if terminal_text:
+                failure["error"] = "A2A task entered unexpected terminal state TASK_STATE_FAILED " + terminal_text
+        _write_json(args.run_dir.expanduser().resolve() / "summary.json", failure)
         raise
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
