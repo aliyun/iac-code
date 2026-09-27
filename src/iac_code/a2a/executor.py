@@ -1641,14 +1641,20 @@ class IacCodeA2AExecutor(AgentExecutor):
                     try:
                         if (
                             resource_selection_response is not None
-                            and resolve_request_run_mode(getattr(context, "message", None)) is not RunMode.PIPELINE
                             and existing.phase == "terminated"
                             and existing.release_ready
                             and not existing.has_managed_work()
+                            and (
+                                resolve_request_run_mode(getattr(context, "message", None)) is not RunMode.PIPELINE
+                                or await self._should_route_pipeline_handoff_to_normal(
+                                    context_id=context_id,
+                                    cwd=self._resolve_cwd(metadata),
+                                )
+                            )
                         ):
-                            # A normal-chat selector closes its first stream at
-                            # INPUT_REQUIRED. Its answer is a new execution, not
-                            # another task to attach to the released controller.
+                            # A selector in normal chat, including one after a
+                            # proven Pipeline handoff, answers in a new execution
+                            # rather than attaching to a released controller.
                             existing = await self._execution_control_service.begin_execution(
                                 context_id=context_id,
                                 task_id=resource_selection_response.task_id,

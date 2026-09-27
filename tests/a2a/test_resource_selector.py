@@ -84,10 +84,16 @@ def response(*, value="i-test123") -> ResourceSelectionResponse:
     )
 
 
+@pytest.mark.parametrize(
+    ("run_mode", "proven_handoff"),
+    [("normal", False), ("pipeline", True)],
+)
 @pytest.mark.asyncio
 async def test_normal_selector_answer_starts_new_execution_after_released_input_wait(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    run_mode: str,
+    proven_handoff: bool,
 ) -> None:
     task_store = A2ATaskStore(metrics=NoOpA2AMetrics())
     owner = task_store.owner_for_context(None)
@@ -107,16 +113,20 @@ async def test_normal_selector_answer_starts_new_execution_after_released_input_
         task_store=task_store, model="test-model", execution_control_service=execution_control,
     )
     executor._execute = AsyncMock()
+    handoff_probe = AsyncMock(return_value=proven_handoff)
+    monkeypatch.setattr(executor, "_should_route_pipeline_handoff_to_normal", handoff_probe)
     monkeypatch.setattr("iac_code.a2a.executor.parse_resource_selection_response", lambda _message: response())
 
     await executor.execute(
-        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), FakeEventQueue()
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path), "run_mode": run_mode}}), FakeEventQueue()
     )
 
     old_control.attach_task.assert_not_called()
     execution_control.begin_execution.assert_awaited_once()
     new_control.mark_execution_started.assert_awaited_once()
     new_control.detach_task.assert_awaited_once()
+    if proven_handoff:
+        handoff_probe.assert_awaited_once_with(context_id="ctx-1", cwd=str(tmp_path))
 
 
 def test_private_resume_result_preserves_empty_cancel_without_registered_tool() -> None:
