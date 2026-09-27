@@ -187,6 +187,29 @@ def test_live_a2a_terminal_evidence_keeps_only_fixed_fields(tmp_path: Path) -> N
     assert "sk-fixture" not in json.dumps(evidence)
 
 
+def test_live_a2a_terminal_evidence_reads_persistent_journal(tmp_path: Path) -> None:
+    journal = tmp_path / "config" / "projects" / "session" / "pipeline" / "a2a-events.jsonl"
+    journal.parent.mkdir(parents=True)
+    journal.write_text(json.dumps({
+        "events": [
+            {"eventType": "step_started"},
+            {"eventType": "pipeline_failed", "data": {
+                "errorSummary": "TimeoutError: private provider payload sk-fixture",
+                "errorDetails": {"type": "TimeoutError"},
+            }},
+        ],
+    }) + "\n", encoding="utf-8")
+
+    evidence = run_e2e._live_a2a_terminal_evidence(tmp_path)
+
+    assert evidence == {
+        "pipeline_failed_event": "observed",
+        "terminal_inner_type": "TimeoutError",
+        "terminal_category": "timeout",
+    }
+    assert "sk-fixture" not in json.dumps(evidence)
+
+
 def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
     summary = {
         "passed": False,

@@ -476,7 +476,27 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, str]:
     from scripts.a2a.debugger import _extract_pipeline_envelopes
 
     evidence: dict[str, str] = {}
-    for event_path in script_dir.glob("*.events.jsonl"):
+
+    def record_failure(envelope: dict[str, Any]) -> None:
+        if envelope.get("eventType") != "pipeline_failed":
+            return
+        evidence["pipeline_failed_event"] = "observed"
+        data = envelope.get("data")
+        if not isinstance(data, dict):
+            return
+        details = data.get("errorDetails")
+        inner_type = details.get("type") if isinstance(details, dict) else None
+        if isinstance(inner_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,59}", inner_type):
+            evidence["terminal_inner_type"] = inner_type
+        error_summary = data.get("errorSummary")
+        if isinstance(error_summary, str):
+            lower_summary = error_summary.lower()
+            evidence["terminal_category"] = next(
+                (category for category, pattern in TERMINAL_CATEGORIES if re.search(pattern, lower_summary)),
+                "other",
+            )
+
+    for event_path in (*script_dir.glob("*.events.jsonl"), *script_dir.rglob("a2a-events.jsonl")):
         with event_path.open(encoding="utf-8", errors="replace") as events:
             for line in events:
                 if "pipeline_failed" not in line:
@@ -485,27 +505,14 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, str]:
                     payload = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-                for envelope in _extract_pipeline_envelopes(payload):
-                    if envelope.get("eventType") != "pipeline_failed":
-                        continue
-                    evidence["pipeline_failed_event"] = "observed"
-                    data = envelope.get("data")
-                    if not isinstance(data, dict):
-                        continue
-                    details = data.get("errorDetails")
-                    inner_type = details.get("type") if isinstance(details, dict) else None
-                    if isinstance(inner_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,59}", inner_type):
-                        evidence["terminal_inner_type"] = inner_type
-                    error_summary = data.get("errorSummary")
-                    if isinstance(error_summary, str):
-                        lower_summary = error_summary.lower()
-                        evidence["terminal_category"] = next(
-                            (
-                                category for category, pattern in TERMINAL_CATEGORIES
-                                if re.search(pattern, lower_summary)
-                            ),
-                            "other",
-                        )
+                if event_path.name == "a2a-events.jsonl":
+                    records = payload.get("events") if isinstance(payload, dict) else None
+                    for envelope in records if isinstance(records, list) else [payload]:
+                        if isinstance(envelope, dict):
+                            record_failure(envelope)
+                else:
+                    for envelope in _extract_pipeline_envelopes(payload):
+                        record_failure(envelope)
     return evidence
 
 
