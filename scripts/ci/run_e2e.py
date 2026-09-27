@@ -465,6 +465,12 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         error_type = cleanup_diagnostic.get("error_type")
         if isinstance(error_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,59}", error_type):
             safe_cleanup_diagnostic["error_type"] = error_type
+        stage = cleanup_diagnostic.get("stage")
+        if stage in {"credential_lookup", "client_create", "list_stacks", "other"}:
+            safe_cleanup_diagnostic["stage"] = stage
+        sdk_code = cleanup_diagnostic.get("sdk_code")
+        if isinstance(sdk_code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,79}", sdk_code):
+            safe_cleanup_diagnostic["sdk_code"] = sdk_code
         for count_key in ("failure_count", "remaining_count"):
             count = cleanup_diagnostic.get(count_key)
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 100:

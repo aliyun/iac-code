@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.a2a.e2e.cleanup_owned_stacks import cleanup_owned_stacks
+from scripts.a2a.e2e.cleanup_owned_stacks import CleanupOperationError, cleanup_owned_stacks
 
 
 def _manifest(run_dir: Path, names: list[str]) -> None:
@@ -91,3 +91,27 @@ def test_cleanup_refuses_listed_stack_with_mismatched_identity(
 
     assert result["status"] == "failed"
     assert result["remainingStackIds"] == ["id"]
+
+
+def test_cleanup_reports_safe_list_failure_stage(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+
+    _manifest(tmp_path, ["iac-e2e-123456789abc-main"])
+
+    class CloudError(Exception):
+        code = "Throttling"
+
+    class Client:
+        def list_stacks(self, _request):
+            raise CloudError("private provider response")
+
+    monkeypatch.setattr(CloudCredentials, "get_provider", lambda _self, _name: SimpleNamespace(region_id="cn-hangzhou"))
+    monkeypatch.setattr(RosClientFactory, "create", lambda _credential, _region: Client())
+
+    with pytest.raises(CleanupOperationError) as captured:
+        cleanup_owned_stacks(tmp_path)
+    assert captured.value.stage == "list_stacks"
+    assert captured.value.cause_type == "CloudError"
+    assert captured.value.sdk_code == "Throttling"
+    assert "private provider response" not in str(captured.value)

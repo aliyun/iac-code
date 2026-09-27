@@ -158,6 +158,8 @@ def test_live_public_summary_keeps_only_safe_cleanup_diagnostic() -> None:
     public = run_e2e._public_live_summary({
         "cleanup_diagnostic": {
             "error_type": "UnretryableError",
+            "stage": "list_stacks",
+            "sdk_code": "Throttling",
             "failure_count": 1,
             "remaining_count": 0,
             "stack_id": "sensitive-stack-id",
@@ -166,6 +168,8 @@ def test_live_public_summary_keeps_only_safe_cleanup_diagnostic() -> None:
     assert public is not None
     assert public["cleanup_diagnostic"] == {
         "error_type": "UnretryableError",
+        "stage": "list_stacks",
+        "sdk_code": "Throttling",
         "failure_count": 1,
         "remaining_count": 0,
     }

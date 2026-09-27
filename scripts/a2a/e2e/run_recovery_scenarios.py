@@ -984,7 +984,7 @@ def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callabl
             harness.checks["server stopped"] = False
         if getattr(args, "ci_teardown", False):
             try:
-                from cleanup_owned_stacks import cleanup_owned_stacks
+                from cleanup_owned_stacks import CleanupOperationError, cleanup_owned_stacks
 
                 cleanup = cleanup_owned_stacks(harness.run_dir)
                 harness.cleanup_status = cleanup["status"]
@@ -995,7 +995,11 @@ def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callabl
                 harness.checks["test-owned ROS Stacks cleaned"] = cleanup["status"] == "completed"
             except Exception as exc:
                 harness.cleanup_status = "failed"
-                harness.cleanup_diagnostic = {"error_type": type(exc).__name__}
+                harness.cleanup_diagnostic = {
+                    "error_type": exc.cause_type if isinstance(exc, CleanupOperationError) else type(exc).__name__,
+                    "stage": exc.stage if isinstance(exc, CleanupOperationError) else "other",
+                    "sdk_code": exc.sdk_code if isinstance(exc, CleanupOperationError) else "",
+                }
                 harness.checks["test-owned ROS Stacks cleaned"] = False
                 harness.notes.append("teardown: " + type(exc).__name__)
     return harness.finish(passed=passed, abort_reason=abort_reason)

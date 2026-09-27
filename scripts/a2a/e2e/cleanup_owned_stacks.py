@@ -11,6 +11,17 @@ from pathlib import Path
 from typing import Any
 
 
+class CleanupOperationError(RuntimeError):
+    """Expose a fixed cleanup stage without leaking the cloud error message."""
+
+    def __init__(self, stage: str, cause: Exception) -> None:
+        self.stage = stage
+        self.cause_type = type(cause).__name__
+        code = getattr(cause, "code", None)
+        self.sdk_code = code if isinstance(code, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,79}", code) else ""
+        super().__init__(f"{stage}: {self.cause_type}")
+
+
 def _stack_body(client: Any, models: Any, stack_id: str, region: str) -> dict[str, Any] | None:
     try:
         return client.get_stack(models.GetStackRequest(stack_id=stack_id, region_id=region)).body.to_map()
@@ -51,17 +62,27 @@ def cleanup_owned_stacks(run_dir: Path, *, timeout: float = 840) -> dict[str, An
     from iac_code.services.cloud_credentials import CloudCredentials
     from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
 
-    credential = CloudCredentials().get_provider("aliyun")
+    try:
+        credential = CloudCredentials().get_provider("aliyun")
+    except Exception as exc:
+        raise CleanupOperationError("credential_lookup", exc) from exc
     if credential is None:
         raise RuntimeError("Aliyun credential is unavailable for E2E teardown")
     region = str(manifest.get("regionId") or credential.region_id)
-    client = RosClientFactory.create(credential, region)
+    try:
+        client = RosClientFactory.create(credential, region)
+    except Exception as exc:
+        raise CleanupOperationError("client_create", exc) from exc
     deadline = time.monotonic() + timeout
     deleted: list[str] = []
     remaining: list[str] = []
     failures: list[str] = []
     for name in names:
-        for listed in _named_stacks(client, ros_models, name, region):
+        try:
+            named_stacks = _named_stacks(client, ros_models, name, region)
+        except Exception as exc:
+            raise CleanupOperationError("list_stacks", exc) from exc
+        for listed in named_stacks:
             stack_id = listed.stack_id
             if not isinstance(stack_id, str) or not stack_id:
                 failures.append(name + ": Stack ID missing")
