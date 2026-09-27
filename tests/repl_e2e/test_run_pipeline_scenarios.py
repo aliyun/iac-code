@@ -736,6 +736,38 @@ def test_expect_any_keeps_waiting_when_model_cannot_confirm_input(tmp_path: Path
     assert pty._wait_diagnoses[-1]["cue"] == "none"
 
 
+def test_expect_any_does_not_abort_on_repl_prompt_while_pipeline_may_continue(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--wait-diagnosis-after", "0"])
+    pty = _repl_pty_unit_instance(
+        runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={"IAC_CODE_CONFIG_DIR": str(tmp_path)}
+    )
+
+    class Child:
+        before = ""
+        after = ""
+        calls = 0
+
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                pty.raw_chunks.append("❯\x1b[>4;2m")
+                raise runner.pexpect.TIMEOUT("waiting")
+            self.after = "Confirm and select (3/5)"
+            return 0
+
+    pty.child = Child()
+    monkeypatch.setattr(
+        runner, "diagnose_wait", lambda *_args, **_kwargs: {"state": "waiting_for_input", "confidence": 0.95}
+    )
+
+    assert pty.expect_any(("Confirm and select",), description="candidate selection visible", timeout=300) == (
+        "Confirm and select"
+    )
+    assert pty._wait_diagnoses[-1]["cue"] == "repl_prompt"
+    assert pty._wait_diagnoses[-1]["action"] == "observe"
+
+
 def test_expect_any_aborts_silent_non_cloud_wait_before_stream_timeout(tmp_path: Path, monkeypatch) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud"])

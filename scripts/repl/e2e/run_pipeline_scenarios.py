@@ -674,7 +674,12 @@ class ReplPty:
             cue = "repl_prompt"
         else:
             cue = "none"
-        early_abort = state == "waiting_for_input" and confidence >= 0.85 and cue != "none"
+        # The normal REPL prompt can be redrawn while a pipeline is still
+        # running. Only explicit question/selection controls prove that the
+        # scenario is waiting for an unhandled user action.
+        early_abort = state == "waiting_for_input" and confidence >= 0.85 and cue in {
+            "ask_question", "candidate_controls",
+        }
         record = {
             "state": state,
             "confidence": confidence,
