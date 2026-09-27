@@ -2665,6 +2665,12 @@ def _repl_wait_selection(pty: Any, runtime: ScenarioRuntime) -> None:
         drain_output=getattr(pty, "drain_output", None),
         pty=pty,
     )
+    # The journal entry precedes the terminal renderer. Let its cbreak key
+    # reader become active before the scenario sends arrow or Enter keys.
+    time.sleep(0.5)
+    drain_output = getattr(pty, "drain_output", None)
+    if callable(drain_output):
+        drain_output()
     pty.events.append(
         {
             "type": "display-event",
