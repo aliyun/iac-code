@@ -11,8 +11,8 @@ import httpx
 import yaml
 
 BAILIAN_CHAT_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-DIAGNOSIS_MODEL = "qwen3.5-flash"
-DIAGNOSIS_TIMEOUT_SECONDS = 20.0
+DIAGNOSIS_MODEL = "glm-5.3-prime"
+DIAGNOSIS_TIMEOUT_SECONDS = 45.0
 STATES = frozenset({"waiting_for_input", "terminal_error", "normal_operation", "unknown"})
 
 
@@ -76,9 +76,8 @@ def diagnose_wait(config_dir: Path, *, expected: str, transcript: str) -> dict[s
                 "content": json.dumps({"expected": expected, "terminal_tail": excerpt}, ensure_ascii=False),
             },
         ],
-        "temperature": 0,
-        "max_tokens": 64,
-        "enable_thinking": False,
+        "max_tokens": 512,
+        "reasoning_effort": "low",
     }
     try:
         response = httpx.post(
