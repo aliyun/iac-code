@@ -99,9 +99,9 @@ def _pid_alive(pid: int) -> bool:
 def _claim_remnant_admits_input_recovery(document: dict[str, Any]) -> bool:
     """Admit a dead publisher's remnant only for a sidecar-proven input wait.
 
-    The caller must already have proved the durable input wait. A dead parent
-    may leave live tool subprocesses, so this is not a general replacement rule
-    for an interrupted execution.
+    The caller must already have proved the durable input wait, or separately
+    established that subprocess tools were quiescent. A dead parent alone may
+    leave live tool subprocesses, so this is not a general replacement rule.
 
     ``claim_begin_without_admission`` publishes the next running owner before
     any state transition, so a process killed mid-turn leaves a ``running``
@@ -141,6 +141,22 @@ def _claim_remnant_admits_input_recovery(document: dict[str, Any]) -> bool:
     if backup is None:
         return True
     return isinstance(backup, dict) and backup.get("status") in {None, "not_requested", "disabled"}
+
+
+def _claim_remnant_admits_replacement(document: dict[str, Any]) -> bool:
+    """Allow a dead owner's settled claim when no subprocess tool was in flight.
+
+    Older snapshots have no durable subprocess accounting and cannot establish
+    that a killed owner did not leave a child process behind.
+    """
+
+    return (
+        type(document.get("subprocessToolTrackingVersion")) is int
+        and document["subprocessToolTrackingVersion"] == 1
+        and type(document.get("activeSubprocessTools")) is int
+        and document["activeSubprocessTools"] == 0
+        and _claim_remnant_admits_input_recovery(document)
+    )
 
 
 def persisted_natural_handoff_admits_input_recovery(document: Any, context_id: str) -> bool:
@@ -415,6 +431,7 @@ class _RecoverableInputAdmissionStore:
         return bool(
             (control.get("phase") == "terminated" and release_ready)
             or self._persisted_natural_handoff_admits_replacement(control, context_id)
+            or (control.get("contextId") == context_id and _claim_remnant_admits_replacement(control))
         )
 
     @staticmethod
@@ -905,6 +922,7 @@ class ExecutionController:
         self._termination_pause_id: str | None = None
         self.backup: dict[str, Any] = {"status": "not_requested"}
         self.external_operations: list[dict[str, Any]] = []
+        self._active_subprocess_tools: set[str] = set()
         self._lock = asyncio.Lock()
         self._condition = asyncio.Condition(self._lock)
         self._commit_lock = asyncio.Lock()
@@ -1505,6 +1523,7 @@ class ExecutionController:
         *,
         check_gate: bool = True,
         handoff_to_parent: bool = False,
+        may_spawn_subprocess: bool = False,
     ) -> ActivityHandle:
         inherited_participant_ids = _CURRENT_PARTICIPANT_IDS.get()
         handoff_participant_ids = inherited_participant_ids[-1:] if handoff_to_parent else ()
@@ -1521,10 +1540,22 @@ class ExecutionController:
                 ancestor_activity_ids=_CURRENT_ACTIVITY_IDS.get(),
                 handoff_participant_ids=handoff_participant_ids,
             )
+            if may_spawn_subprocess:
+                self._active_subprocess_tools.add(activity_id)
+                self.revision += 1
+                subprocess_snapshot = self.snapshot()
+            else:
+                subprocess_snapshot = None
             self._invalidate_pause_commit_locked()
             self._notify_activity_budgets_locked()
             self._condition.notify_all()
-            return ActivityHandle(self, activity_id)
+        if subprocess_snapshot is not None:
+            try:
+                await self._persist_snapshot(subprocess_snapshot)
+            except BaseException:
+                await self.end_activity(activity_id)
+                raise
+        return ActivityHandle(self, activity_id)
 
     async def begin_non_advancing_wait(self) -> str:
         async with self._condition:
@@ -1562,6 +1593,12 @@ class ExecutionController:
     async def end_activity(self, activity_id: str) -> None:
         async with self._condition:
             activity = self._activities.pop(activity_id, None)
+            if activity_id in self._active_subprocess_tools:
+                self._active_subprocess_tools.remove(activity_id)
+                self.revision += 1
+                subprocess_snapshot = self.snapshot()
+            else:
+                subprocess_snapshot = None
             if activity is not None:
                 # A child activity can finish while its parent is parked in a
                 # non-advancing wait.  Keep the parent unsafe until it consumes
@@ -1574,6 +1611,8 @@ class ExecutionController:
             self._condition.notify_all()
             self._schedule_pause_commit_locked()
             self._maybe_mark_release_ready_locked()
+        if subprocess_snapshot is not None:
+            await self._persist_snapshot(subprocess_snapshot)
 
     async def record_external_operation(
         self,
@@ -1642,6 +1681,8 @@ class ExecutionController:
             "ownerGeneration": self.owner_generation,
             "serverInstanceId": self.server_instance_id,
             "ownerPid": os.getpid(),
+            "subprocessToolTrackingVersion": 1,
+            "activeSubprocessTools": len(self._active_subprocess_tools),
             "pauseId": self.pause_id,
             "pauseReason": self.pause_reason,
             "connectionEpoch": self.connection_epoch,
@@ -1671,6 +1712,8 @@ class ExecutionController:
         public_snapshot.pop("owner", None)
         public_snapshot.pop("ownerGeneration", None)
         public_snapshot.pop("ownerPid", None)
+        public_snapshot.pop("subprocessToolTrackingVersion", None)
+        public_snapshot.pop("activeSubprocessTools", None)
         public_snapshot.pop("inputHandoffReady", None)
         public_snapshot.pop("localInputContinuationReady", None)
         return public_snapshot
@@ -3336,6 +3379,7 @@ async def execution_activity(
     *,
     check_gate: bool = True,
     handoff_to_parent: bool = False,
+    may_spawn_subprocess: bool = False,
 ) -> AsyncIterator[ActivityHandle | None]:
     control = current_execution_control()
     if control is None:
@@ -3345,6 +3389,7 @@ async def execution_activity(
         kind,
         check_gate=check_gate,
         handoff_to_parent=handoff_to_parent,
+        may_spawn_subprocess=may_spawn_subprocess,
     )
     stack_token = _CURRENT_ACTIVITY_IDS.set((*_CURRENT_ACTIVITY_IDS.get(), handle.activity_id))
     try:
