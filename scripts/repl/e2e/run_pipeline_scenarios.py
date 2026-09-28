@@ -938,7 +938,7 @@ def _run_with_pty(
 
 
 def _display_progress(config_dir: Path) -> dict[str, int]:
-    """Count fixed display event types without exposing event payloads."""
+    """Count fixed display events and deployment milestones without exposing payloads."""
 
     allowed = {
         "candidate_selection_ready", "user_input_required", "user_input_received",
@@ -958,6 +958,25 @@ def _display_progress(config_dir: Path) -> dict[str, int]:
             event_type = event.get("type") if isinstance(event, dict) else None
             if isinstance(event_type, str) and event_type in allowed:
                 counts[event_type] = min(counts.get(event_type, 0) + 1, 10000)
+            if not isinstance(event, dict):
+                continue
+            if (
+                isinstance(event_type, str)
+                and event_type in {"step_started", "step_completed"}
+                and event.get("step_id") == "deploying"
+            ):
+                key = f"{event_type}_deploying"
+                counts[key] = min(counts.get(key, 0) + 1, 10000)
+            if event_type == "tool_used":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and payload.get("name") == "ros_deploy":
+                    counts["ros_deploy_used"] = min(counts.get("ros_deploy_used", 0) + 1, 10000)
+            if event_type == "pipeline_completed":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and payload.get("early_exit") is True:
+                    counts["pipeline_completed_early_exit"] = min(
+                        counts.get("pipeline_completed_early_exit", 0) + 1, 10000
+                    )
     return counts
 
 

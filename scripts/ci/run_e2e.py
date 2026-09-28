@@ -454,6 +454,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     allowed_progress = {
         "candidate_selection_ready", "user_input_required", "user_input_received",
         "step_started", "step_completed", "pipeline_completed", "pipeline_failed",
+        "step_started_deploying", "step_completed_deploying", "ros_deploy_used",
+        "pipeline_completed_early_exit",
     }
     public = {
         "case_id": summary.get("case_id"),

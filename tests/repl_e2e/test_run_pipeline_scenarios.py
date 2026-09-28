@@ -3065,12 +3065,20 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
             {"type": "user_input_received"},
             {"type": "private-sk-fixture"},
             {"type": ["candidate_selection_ready"]},
+            {"type": "step_started", "step_id": "deploying"},
+            {"type": "step_completed", "step_id": "deploying"},
+            {"type": "tool_used", "payload": {"name": "ros_deploy", "secret": "sk-fixture"}},
+            {"type": "pipeline_completed", "payload": {"early_exit": True, "secret": "sk-fixture"}},
         )) + "\n",
         encoding="utf-8",
     )
 
     assert runner._display_progress(tmp_path) == {
         "candidate_selection_ready": 1, "user_input_received": 1,
+        "step_started": 1, "step_started_deploying": 1,
+        "step_completed": 1, "step_completed_deploying": 1,
+        "ros_deploy_used": 1,
+        "pipeline_completed": 1, "pipeline_completed_early_exit": 1,
     }
 
 
