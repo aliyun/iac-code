@@ -579,9 +579,19 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
     from scripts.a2a.debugger import _extract_pipeline_envelopes
 
     evidence: dict[str, Any] = {}
+    safe_event_types = {
+        "step_started", "step_completed", "input_required", "input_received",
+        "rollback_started", "rollback_completed", "cleanup_started", "cleanup_completed",
+        "pipeline_completed", "pipeline_failed", "pipeline_user_aborted",
+    }
+    recent_events: list[str] = []
 
     def record_failure(envelope: dict[str, Any]) -> None:
-        if envelope.get("eventType") != "pipeline_failed":
+        event_type = envelope.get("eventType")
+        if event_type in safe_event_types:
+            recent_events.append(event_type)
+            del recent_events[:-12]
+        if event_type != "pipeline_failed":
             return
         evidence["pipeline_failed_event"] = "observed"
         data = envelope.get("data")
@@ -612,7 +622,7 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
     for event_path in (*script_dir.glob("*.events.jsonl"), *script_dir.rglob("a2a-events.jsonl")):
         with event_path.open(encoding="utf-8", errors="replace") as events:
             for line in events:
-                if "pipeline_failed" not in line:
+                if not any(event_type in line for event_type in safe_event_types):
                     continue
                 try:
                     payload = json.loads(line)
@@ -626,6 +636,8 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
                 else:
                     for envelope in _extract_pipeline_envelopes(payload):
                         record_failure(envelope)
+    if recent_events:
+        evidence["pipeline_events"] = recent_events
     return evidence
 
 

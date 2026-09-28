@@ -263,6 +263,7 @@ def test_live_a2a_terminal_evidence_keeps_only_fixed_fields(tmp_path: Path) -> N
         "terminal_inner_type": "ValueError",
         "terminal_category": "rate_limit",
         "terminal_terms": ["error"],
+        "pipeline_events": ["pipeline_failed"],
     }
     assert "sk-fixture" not in json.dumps(evidence)
 
@@ -287,8 +288,21 @@ def test_live_a2a_terminal_evidence_reads_persistent_journal(tmp_path: Path) -> 
         "terminal_inner_type": "TimeoutError",
         "terminal_category": "timeout",
         "terminal_terms": ["provider", "error"],
+        "pipeline_events": ["step_started", "pipeline_failed"],
     }
     assert "sk-fixture" not in json.dumps(evidence)
+
+
+def test_live_a2a_progress_evidence_ignores_untrusted_event_names(tmp_path: Path) -> None:
+    events = [
+        {"metadata": {"iac_code": {"pipeline": {"eventType": "input_required"}}}},
+        {"metadata": {"iac_code": {"pipeline": {"eventType": "private-token-sk-fixture"}}}},
+    ]
+    (tmp_path / "turn.events.jsonl").write_text(
+        "\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8"
+    )
+
+    assert run_e2e._live_a2a_terminal_evidence(tmp_path) == {"pipeline_events": ["input_required"]}
 
 
 def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
