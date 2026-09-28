@@ -63,6 +63,29 @@ recovery 换轮用例另存 `recovery-conflict.json`、`recovery-after-rollover.
 
 ## 真实 A2A 云资源选择矩阵
 
+### AG-UI HTTP/SSE 资源选择矩阵
+
+`resource_selector/run_live_agui_resource_selector.py` 经真实 AG-UI HTTP/SSE → A2A HTTP → LLM 触发
+`vpc.vpc` 选择器，再用当前账号的云凭证只读查询杭州 VPC。normal 会话与实际
+`selling_solution_first` Pipeline 各测列表选中、取消、直接输入，共六个场景。Pipeline 会先选择
+第一个架构候选，再在物化阶段等待资源选择；测试不确认部署。每条路径断言 Interrupt 契约、同一会话
+的恢复、选择器工具调用完成以及后续流程事件。账号在目标地域没有 VPC 时明确失败，不使用假资源。
+
+运行单条或完整矩阵：
+
+```bash
+uv run --all-extras python scripts/a2a/e2e/resource_selector/run_live_agui_resource_selector.py \
+  --allow-real-cloud --scenario normal-selected --run-dir /tmp/iac-agui-selector-normal-selected
+
+IAC_CODE_AGUI_RESOURCE_SELECTOR_LIVE_E2E=1 \
+uv run --all-extras pytest -q tests/a2a_e2e/test_live_agui_resource_selector.py
+```
+
+场景名：`normal-selected`、`normal-canceled`、`normal-direct-input`、`pipeline-selected`、
+`pipeline-canceled`、`pipeline-direct-input`。runner 不创建隔离的 `IAC_CODE_CONFIG_DIR`，直接使用
+调用者现有配置及 OAuth STS 凭证链；不要与会改写该配置的其他 live runner 并发运行。默认 pytest 只跑
+离线 runner 约束检查，六条真实路径必须显式设置开关。
+
 `resource_selector/run_live_resource_selector.py` 启动真实 HTTP A2A server，使用当前 iac-code 配置中的
 真实 LLM 和阿里云凭证验证资源选择的完整暂停/回调/续聊链路。模型必须实际调用
 `resolve_cloud_resource_selector` 和 `select_cloud_resource`；runner 再根据 A2A `input_required` 中的

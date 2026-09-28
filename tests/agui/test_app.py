@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 
 from iac_code.a2a.app import create_app as create_a2a_app
 from iac_code.a2a.client import A2AClientResponse, A2ASessionBackupNotReadyError
+from iac_code.a2a.resource_selector import RESOURCE_SELECTION_QUERY_PREFIX
 from iac_code.agui.adapter import AguiA2AAdapter, ThreadBinding
 from iac_code.agui.app import create_app
 from iac_code.agui.events import A2AEventMapper, a2a_state
@@ -207,6 +208,24 @@ def _input_event(*, context_id: str, value: dict[str, Any]) -> dict[str, Any]:
     event = _event(context_id=context_id, state="TASK_STATE_INPUT_REQUIRED")
     event["result"]["metadata"] = {"iac_code": {"input": value}}
     return event
+
+
+def _resource_selector_input(*, selector_id: str = "vpc.vpc") -> dict[str, Any]:
+    return {
+        "schemaVersion": 1,
+        "kind": "cloud_resource_selection",
+        "inputId": "resource-" + "a" * 32,
+        "toolUseId": "select-1",
+        "prompt": "Choose a VPC",
+        "required": True,
+        "selector": {
+            "id": selector_id,
+            "associationProperty": "ALIYUN::VPC::VPC::VPCId",
+            "outputKind": "resource_id",
+            "associationPropertyMetadata": {},
+            "source": None,
+        },
+    }
 
 
 def _payload(tmp_path, *, run_id: str = "run-1", resume: list[dict[str, Any]] | None = None):
@@ -979,6 +998,188 @@ async def test_question_selection_resume_is_sent_to_same_a2a_task(tmp_path, monk
         == 1
     )
     assert second_events[-1]["outcome"] == {"type": "success"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "answer", "expected"),
+    [
+        (
+            "resolved",
+            {"value": "vpc-123456", "label": "test-vpc"},
+            {"status": "selected", "value": "vpc-123456", "label": "test-vpc"},
+        ),
+        ("resolved", {"freeText": "vpc-987654"}, {"status": "selected", "value": "vpc-987654", "label": "vpc-987654"}),
+        ("cancelled", {"optionsEmpty": True}, {"status": "canceled", "optionsEmpty": True}),
+    ],
+)
+async def test_resource_selector_resume_uses_structured_a2a_contract(
+    tmp_path, monkeypatch, status, answer, expected
+) -> None:
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = FakeA2AClient(input_value=_resource_selector_input())
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake, state_dir=tmp_path / "state")
+    app = create_app(adapter=adapter)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+        first = _events(await client.post("/", json=_payload(tmp_path)))
+        interrupt = first[-1]["outcome"]["interrupts"][0]
+        assert interrupt["metadata"]["selector"]["id"] == "vpc.vpc"
+        assert interrupt["responseSchema"]["oneOf"]
+        fake.context_id = adapter._threads["thread-1"].context_id
+        second = _events(
+            await client.post(
+                "/",
+                json=_payload(
+                    tmp_path,
+                    run_id="run-2",
+                    resume=[{"interruptId": interrupt["id"], "status": status, "payload": answer}],
+                ),
+            )
+        )
+    assert second[-1]["outcome"] == {"type": "success"}
+    assert fake.cancelled == []
+    prompt, task_id = fake.resumed_prompts[0]
+    assert task_id == "task-1"
+    assert prompt.startswith(RESOURCE_SELECTION_QUERY_PREFIX)
+    response = json.loads(prompt.removeprefix(RESOURCE_SELECTION_QUERY_PREFIX))
+    assert response.items() >= expected.items()
+    assert response["requestTaskId"] == "task-1"
+    assert response["contextId"] == fake.context_id
+    assert response["inputId"] == interrupt["id"]
+    assert response["toolUseId"] == "select-1"
+    if status == "resolved":
+        assert response["selectorId"] == "vpc.vpc"
+        assert sum(event.get("type") == "TOOL_CALL_RESULT" for event in second) == 1
+
+
+@pytest.mark.asyncio
+async def test_resource_selector_invalid_answer_is_retryable_after_adapter_restart(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = FakeA2AClient(input_value=_resource_selector_input())
+    state_dir = tmp_path / "state"
+    first_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake, state_dir=state_dir)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=first_adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=_payload(tmp_path)))
+    interrupt_id = first[-1]["outcome"]["interrupts"][0]["id"]
+    fake.context_id = first_adapter._threads["thread-1"].context_id
+    second_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake, state_dir=state_dir)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=second_adapter)), base_url="http://test"
+    ) as client:
+        invalid = _events(
+            await client.post(
+                "/",
+                json=_payload(
+                    tmp_path,
+                    run_id="run-invalid",
+                    resume=[{"interruptId": interrupt_id, "status": "resolved", "payload": {"value": "bad value"}}],
+                ),
+            )
+        )
+        assert invalid[-1]["type"] == "RUN_ERROR"
+        assert invalid[-1]["code"] == "RESUME_PAYLOAD_INVALID"
+        assert fake.resumed_prompts == []
+        corrected = _events(
+            await client.post(
+                "/",
+                json=_payload(
+                    tmp_path,
+                    run_id="run-corrected",
+                    resume=[{"interruptId": interrupt_id, "status": "resolved", "payload": {"value": "vpc-123456"}}],
+                ),
+            )
+        )
+    assert corrected[-1].get("outcome") == {"type": "success"}, corrected
+    assert second_adapter._threads["thread-1"].pending == {}
+
+
+@pytest.mark.asyncio
+async def test_derived_resource_selector_preserves_authoritative_source_on_resume(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    input_value = _resource_selector_input(selector_id="redis.connection_url")
+    source = {
+        "selector_id": "redis.instance",
+        "value": "r-test0001",
+        "association_property_metadata": {"RegionId": "cn-hangzhou"},
+    }
+    input_value["selector"].update(
+        {
+            "associationProperty": "ALIYUN::Redis::Instance::ConnectionURL",
+            "outputKind": "endpoint",
+            "associationPropertyMetadata": {"RegionId": "cn-hangzhou", "InstanceId": "r-test0001"},
+            "source": source,
+        }
+    )
+    fake = FakeA2AClient(input_value=input_value)
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=_payload(tmp_path)))
+        fake.context_id = adapter._threads["thread-1"].context_id
+        second = _events(
+            await client.post(
+                "/",
+                json=_payload(
+                    tmp_path,
+                    run_id="run-2",
+                    resume=[
+                        {
+                            "interruptId": first[-1]["outcome"]["interrupts"][0]["id"],
+                            "status": "resolved",
+                            "payload": {"value": "redis://example.com:6379"},
+                        }
+                    ],
+                ),
+            )
+        )
+    assert second[-1]["outcome"] == {"type": "success"}
+    response = json.loads(fake.resumed_prompts[0][0].removeprefix(RESOURCE_SELECTION_QUERY_PREFIX))
+    assert response["selectorId"] == "redis.connection_url"
+    assert response["source"] == source
+
+
+@pytest.mark.asyncio
+async def test_resource_selector_rejected_a2a_response_keeps_interrupt_for_retry(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+
+    class RetryableResourceSelectionClient(FakeA2AClient):
+        reject_resume = True
+
+        def stream_message(self, url, prompt, *, context_id, task_id=None, **kwargs):
+            if not self.reject_resume:
+                return super().stream_message(url, prompt, context_id=context_id, task_id=task_id, **kwargs)
+
+            async def rejected():
+                yield {"jsonrpc": "2.0", "id": "resume", "error": {"code": -32602, "message": "rejected"}}
+
+            return rejected()
+
+    fake = RetryableResourceSelectionClient(input_value=_resource_selector_input())
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    response = {
+        "interruptId": _resource_selector_input()["inputId"],
+        "status": "resolved",
+        "payload": {"value": "vpc-123456"},
+    }
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        await client.post("/", json=_payload(tmp_path))
+        fake.context_id = adapter._threads["thread-1"].context_id
+        failed = _events(await client.post("/", json=_payload(tmp_path, run_id="run-failed", resume=[response])))
+        assert failed[-1]["code"] == "A2A_UNAVAILABLE"
+        assert set(adapter._threads["thread-1"].pending) == {response["interruptId"]}
+        assert fake.cancelled == []
+        fake.reject_resume = False
+        retried = _events(await client.post("/", json=_payload(tmp_path, run_id="run-retried", resume=[response])))
+    assert retried[-1]["outcome"] == {"type": "success"}
+    assert len(fake.resumed_prompts) == 1
+    assert fake.resumed_prompts[0][1] == "task-1"
+    assert fake.resumed_prompts[0][0].startswith(RESOURCE_SELECTION_QUERY_PREFIX)
+    assert adapter._threads["thread-1"].pending == {}
 
 
 @pytest.mark.asyncio

@@ -206,7 +206,29 @@ def interrupt_from_a2a(value: Mapping[str, Any]) -> Interrupt:
         raw_options if isinstance(raw_options, list) else [],
         pipeline=kind == "candidate_selection",
     )
-    if kind == "permission":
+    if kind == "cloud_resource_selection":
+        schema = {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": {
+                        "value": {"type": "string", "minLength": 1},
+                        "label": {"type": "string"},
+                    },
+                    "required": ["value"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {"freeText": {"type": "string", "minLength": 1}},
+                    "required": ["freeText"],
+                    "additionalProperties": False,
+                },
+            ]
+        }
+        message = str(value.get("prompt") or translate_message("Input required", language=language))
+        reason = "input_required"
+    elif kind == "permission":
         schema = {
             "type": "object",
             "properties": {"decision": {"type": "string", "enum": ["allow_once", "deny"]}},
