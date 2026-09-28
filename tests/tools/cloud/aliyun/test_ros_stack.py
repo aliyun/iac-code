@@ -1920,6 +1920,20 @@ class TestRosStackExtra:
         assert result == "stack-fake"
 
     @pytest.mark.asyncio
+    async def test_create_stack_reuses_idempotency_token_for_same_request(self, stack):
+        client = _FakeRosClient()
+        stack._get_client = lambda region: client
+        params = {"StackName": "n", "TemplateURL": _REMOTE_TEMPLATE_URL}
+
+        await stack.call_action("CreateStack", params, "cn-hangzhou")
+        first_token = client.create_request.client_token
+        assert isinstance(first_token, str) and len(first_token) == 32
+        assert params["ClientToken"] == first_token
+
+        await stack.call_action("CreateStack", params, "cn-hangzhou")
+        assert client.create_request.client_token == first_token
+
+    @pytest.mark.asyncio
     async def test_create_stack_is_rejected_in_pipeline(self, stack):
         with pytest.raises(ValueError, match="ros_deploy"):
             await stack.call_action(

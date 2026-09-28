@@ -9,6 +9,9 @@ from iac_code.tools.cloud.aliyun.ecs_credential_errors import ecs_credential_err
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 
+_ROS_CONNECT_TIMEOUT_MS = 10_000
+_ROS_READ_TIMEOUT_MS = 60_000
+
 
 def public_ecs_credential_message(error: BaseException, *, action: str, region: str) -> str | None:
     """Render a credential-runtime ECS failure, or `None` for unrelated failures.
@@ -56,6 +59,8 @@ class RosClientFactory:
                 security_token=credential.sts_token,
                 region_id=region_id,
                 user_agent=user_agent,
+                connect_timeout=_ROS_CONNECT_TIMEOUT_MS,
+                read_timeout=_ROS_READ_TIMEOUT_MS,
             )
 
         if mode in {"RamRoleArn", "EcsRamRole"}:
@@ -68,6 +73,8 @@ class RosClientFactory:
                 credential=dynamic_client,
                 region_id=region_id,
                 user_agent=user_agent,
+                connect_timeout=_ROS_CONNECT_TIMEOUT_MS,
+                read_timeout=_ROS_READ_TIMEOUT_MS,
             )
 
         # Default: AK mode
@@ -76,4 +83,6 @@ class RosClientFactory:
             access_key_secret=credential.access_key_secret,
             region_id=region_id,
             user_agent=user_agent,
+            connect_timeout=_ROS_CONNECT_TIMEOUT_MS,
+            read_timeout=_ROS_READ_TIMEOUT_MS,
         )
