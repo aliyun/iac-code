@@ -925,6 +925,7 @@ def _run_with_pty(
                 if passed:
                     passed = False
         progress = _display_progress(runtime_paths.config_dir)
+        progress.update(_transcript_tool_progress(runtime_paths.config_dir))
         ledger_path = _cleanup_ledger_path(pty)
         progress["cleanup_ledger_found"] = int(ledger_path is not None and ledger_path.is_file())
         progress["observed_stack_count"] = min(len(_observed_create_stack_ids(pty)), 10000)
@@ -1007,6 +1008,46 @@ def _display_progress(config_dir: Path) -> dict[str, int]:
         sum(1 for _ in config_dir.glob("projects/*/*/pipeline/cleanup.yaml")), 10000
     )
     return counts
+
+
+def _transcript_tool_progress(config_dir: Path) -> dict[str, int]:
+    """Count completed ros_deploy calls without exposing transcript content or tool IDs."""
+
+    used: set[str] = set()
+    completed: set[str] = set()
+    failed: set[str] = set()
+    for path in config_dir.glob("projects/*/*/pipeline/transcripts/*/session.jsonl"):
+        try:
+            if path.stat().st_size > 20_000_000:
+                continue
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            blocks = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(blocks, list):
+                continue
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and block.get("name") == "ros_deploy":
+                    tool_id = block.get("id")
+                    if isinstance(tool_id, str):
+                        used.add(tool_id)
+                elif block.get("type") == "tool_result":
+                    tool_id = block.get("tool_use_id")
+                    if isinstance(tool_id, str):
+                        completed.add(tool_id)
+                        if block.get("is_error") is True:
+                            failed.add(tool_id)
+    return {
+        "ros_deploy_result": min(len(used & completed), 10000),
+        "ros_deploy_result_error": min(len(used & failed), 10000),
+    }
 
 
 def _print_result(result: ScenarioRunResult) -> None:

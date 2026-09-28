@@ -3172,6 +3172,32 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
     }
 
 
+def test_transcript_tool_progress_counts_results_without_content(tmp_path: Path) -> None:
+    runner = _load_runner()
+    transcript = (
+        tmp_path / "projects" / "project" / "session" / "pipeline" / "transcripts" / "attempt" / "session.jsonl"
+    )
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(
+        "\n".join(json.dumps(item) for item in [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "first", "name": "ros_deploy", "input": {"secret": "sk-fixture"}},
+                {"type": "tool_use", "id": "second", "name": "ros_deploy", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "first", "content": "sk-fixture", "is_error": True},
+                {"type": "tool_result", "tool_use_id": "unrelated", "content": "", "is_error": False},
+            ]},
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    assert runner._transcript_tool_progress(tmp_path) == {
+        "ros_deploy_result": 1,
+        "ros_deploy_result_error": 1,
+    }
+
+
 def test_first_stack_create_uses_display_deploy_event_when_terminal_marker_is_absent(tmp_path: Path) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud"])

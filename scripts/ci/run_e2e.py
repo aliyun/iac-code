@@ -456,6 +456,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         "step_started", "step_completed", "pipeline_completed", "pipeline_failed",
         "step_started_deploying", "step_completed_deploying", "ros_deploy_used",
         "aliyun_api_used", "ros_stack_used", "bash_used",
+        "ros_deploy_result", "ros_deploy_result_error",
         "pipeline_completed_early_exit", "stack_progress", "stack_progress_create_complete",
         "cleanup_ledger_files", "cleanup_ledger_found", "observed_stack_count",
         "cloud_stack_without_ledger", "cloud_stack_not_created", "cloud_probe_failures",
