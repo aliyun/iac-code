@@ -3229,6 +3229,31 @@ def test_first_stack_observation_stops_when_deploying_finishes_without_stack(tmp
         runner._wait_for_latest_observed_stack_id(FakePty(), exclude=set(), timeout=10)
 
 
+def test_first_stack_observation_stops_when_cloud_completed_without_ledger(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    ticks = iter([0.0, 121.0, 121.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner, "_latest_observed_stack_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: ["stack-id"])
+    monkeypatch.setattr(
+        runner,
+        "_fresh_ros_stack_state",
+        lambda _pty, _stack_id: {
+            "stack_name": runner._cleanup_stack_name(tmp_path, "first"),
+            "status": "CREATE_COMPLETE",
+        },
+    )
+
+    class FakePty:
+        run_dir = tmp_path
+        env: dict[str, str] = {}
+
+    pty = FakePty()
+    with pytest.raises(RuntimeError, match="ROS Stack completed but no resource reached the cleanup ledger"):
+        runner._wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=1800)
+    assert pty.cloud_stack_without_ledger is True
+
+
 def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud"])

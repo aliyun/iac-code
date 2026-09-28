@@ -928,6 +928,8 @@ def _run_with_pty(
         ledger_path = _cleanup_ledger_path(pty)
         progress["cleanup_ledger_found"] = int(ledger_path is not None and ledger_path.is_file())
         progress["observed_stack_count"] = min(len(_observed_create_stack_ids(pty)), 10000)
+        progress["cloud_stack_without_ledger"] = int(bool(getattr(pty, "cloud_stack_without_ledger", False)))
+        progress["cloud_probe_failures"] = min(int(getattr(pty, "cloud_probe_failures", 0)), 10000)
         result = ScenarioRunResult(
             scenario=scenario,
             run_dir=str(run_dir),
@@ -1553,15 +1555,34 @@ def _observed_create_stack_names(pty: Any) -> list[str]:
 
 
 def _wait_for_latest_observed_stack_id(pty: Any, *, exclude: set[str], timeout: float) -> str:
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
+    next_cloud_check = started + 120.0
     while time.monotonic() < deadline:
         stack_id = _latest_observed_stack_id(pty, exclude=exclude)
+        if stack_id:
+            return stack_id
         config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
         progress = _display_progress(Path(config_path)) if config_path else {}
         if progress.get("step_completed_deploying") or progress.get("pipeline_completed"):
             raise RuntimeError("deploying finished before rollback observed a ROS stack")
-        if stack_id:
-            return stack_id
+        now = time.monotonic()
+        run_dir = getattr(pty, "run_dir", None)
+        if run_dir and now >= next_cloud_check:
+            next_cloud_check = now + 60.0
+            try:
+                owned_names = _owned_cleanup_stack_names(Path(run_dir))
+                for candidate_id in _discover_owned_cleanup_stack_ids(Path(run_dir)):
+                    state = _fresh_ros_stack_state(pty, candidate_id)
+                    if state.get("stack_name") in owned_names and state.get("status") == "CREATE_COMPLETE":
+                        pty.cloud_stack_without_ledger = True
+                        raise RuntimeError("ROS Stack completed but no resource reached the cleanup ledger")
+            except RuntimeError:
+                if bool(getattr(pty, "cloud_stack_without_ledger", False)):
+                    raise
+                pty.cloud_probe_failures = int(getattr(pty, "cloud_probe_failures", 0)) + 1
+            except Exception:
+                pty.cloud_probe_failures = int(getattr(pty, "cloud_probe_failures", 0)) + 1
         time.sleep(0.5)
     raise TimeoutError("Timed out waiting for rollback cleanup ledger to observe a ROS stack")
 

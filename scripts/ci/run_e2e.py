@@ -457,6 +457,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         "step_started_deploying", "step_completed_deploying", "ros_deploy_used",
         "pipeline_completed_early_exit", "stack_progress", "stack_progress_create_complete",
         "cleanup_ledger_files", "cleanup_ledger_found", "observed_stack_count",
+        "cloud_stack_without_ledger", "cloud_probe_failures",
     }
     public = {
         "case_id": summary.get("case_id"),
