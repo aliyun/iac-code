@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import copy
 import hashlib
+import json
 import logging
 import time
 import uuid
@@ -28,6 +29,7 @@ from jsonschema import ValidationError as JsonSchemaValidationError
 from jsonschema import validate as validate_json_schema
 
 from iac_code.a2a.client import A2AClient, A2ASessionBackupNotReadyError
+from iac_code.a2a.resource_selector import RESOURCE_SELECTION_QUERY_PREFIX, ResourceSelectionResponse
 from iac_code.agui.errors import AdmissionError, AguiError, normalize_agui_language, translate_agui_error
 from iac_code.agui.events import (
     A2AEventMapper,
@@ -57,6 +59,8 @@ from iac_code.agui.state import (
     AguiStateStoreError,
     FileAguiThreadStateStore,
 )
+from iac_code.resource_selector.profiles import get_profile
+from iac_code.resource_selector.validation import validate_answer_value
 from iac_code.services.session_backup import SESSION_BACKUP_NOT_READY_CODE
 
 logger = logging.getLogger(__name__)
@@ -587,6 +591,15 @@ class AguiA2AAdapter:
                         "decision": decision,
                     }
                     permission_responses.append((pending, payload, digest))
+                    continue
+                if pending.value.get("kind") == "cloud_resource_selection":
+                    response = _resource_selection_response(binding, pending, entry, normalized_payload)
+                    prompt = RESOURCE_SELECTION_QUERY_PREFIX + json.dumps(
+                        response.to_dict(), ensure_ascii=False, separators=(",", ":")
+                    )
+                    if response.status == "selected":
+                        resolved_tools.append((response.tool_use_id, response.label or response.value or ""))
+                    prompt_responses.append((pending, digest))
                     continue
                 elif str(entry.status) == "cancelled":
                     await self.client.cancel_task(self.a2a_url, binding.task_id)
@@ -1340,6 +1353,7 @@ _PERSISTED_INPUT_FIELDS = frozenset(
         "allowFreeText",
         "freeTextPrompt",
         "required",
+        "selector",
     }
 )
 
@@ -1348,6 +1362,63 @@ def _persistent_input(value: Mapping[str, Any]) -> dict[str, Any]:
     """Keep only the public A2A input projection, never request/tool secrets."""
 
     return {key: copy.deepcopy(item) for key, item in value.items() if key in _PERSISTED_INPUT_FIELDS}
+
+
+def _resource_selection_response(
+    binding: ThreadBinding,
+    pending: PendingInput,
+    entry: Any,
+    payload: Any,
+) -> ResourceSelectionResponse:
+    selector = pending.value.get("selector")
+    if not isinstance(selector, Mapping) or not isinstance(selector.get("id"), str):
+        raise AguiError("A2A_PROTOCOL_ERROR", "The A2A interrupt response was not accepted.")
+    selector_id = selector["id"]
+    tool_use_id = pending.value.get("toolUseId")
+    if not isinstance(tool_use_id, str) or not tool_use_id or binding.task_id is None:
+        raise AguiError("A2A_PROTOCOL_ERROR", "The A2A interrupt response was not accepted.")
+    if str(entry.status) == "cancelled":
+        if payload is not None and (
+            not isinstance(payload, Mapping)
+            or set(payload) - {"optionsEmpty"}
+            or ("optionsEmpty" in payload and not isinstance(payload["optionsEmpty"], bool))
+        ):
+            raise AguiError("RESUME_PAYLOAD_INVALID", "The interrupt response payload is invalid.")
+        return ResourceSelectionResponse(
+            task_id=binding.task_id,
+            context_id=binding.context_id,
+            input_id=pending.interrupt.id,
+            tool_use_id=tool_use_id,
+            status="canceled",
+            options_empty=payload.get("optionsEmpty") if isinstance(payload, Mapping) else None,
+        )
+    if not isinstance(payload, Mapping):
+        raise AguiError("RESUME_PAYLOAD_INVALID", "The interrupt response payload is invalid.")
+    value = payload.get("value") if "value" in payload else payload.get("freeText")
+    label = payload.get("label", value) if "value" in payload else value
+    profile = get_profile(selector_id)
+    if (
+        profile is None
+        or not profile.enabled
+        or validate_answer_value(profile, value, metadata=selector.get("associationPropertyMetadata"))
+        or not isinstance(label, str)
+        or len(label) > 1024
+    ):
+        raise AguiError("RESUME_PAYLOAD_INVALID", "The interrupt response payload is invalid.")
+    source = selector.get("source")
+    if source is not None and not isinstance(source, dict):
+        raise AguiError("A2A_PROTOCOL_ERROR", "The A2A interrupt response was not accepted.")
+    return ResourceSelectionResponse(
+        task_id=binding.task_id,
+        context_id=binding.context_id,
+        input_id=pending.interrupt.id,
+        tool_use_id=tool_use_id,
+        status="selected",
+        selector_id=selector_id,
+        value=value,
+        label=label,
+        source=source,
+    )
 
 
 def _required_state_string(value: Mapping[str, Any], key: str) -> str:
