@@ -41,6 +41,8 @@ def test_recovery_ci_diagnostics_keep_only_fixed_evidence(tmp_path: Path) -> Non
     assert state == {
         "present": True, "task_matches": True, "phase": "running", "execution_status": "working",
         "release_ready": False, "input_handoff_ready": False, "stream_available": True, "blocker_count": 1,
+        "subprocess_tracking": False, "active_subprocess_tools": None,
+        "external_operation_count": None, "revision_settled": False, "backup_status": None,
     }
     assert runner._terminal_markers([summary]) == ["execution"]
     assert "private-data" not in json.dumps(state)

@@ -190,6 +190,9 @@ def test_live_public_summary_keeps_only_known_a2a_states() -> None:
             "present": True, "task_matches": True, "phase": "running",
             "release_ready": False, "input_handoff_ready": False,
             "execution_status": "working", "stream_available": True, "blocker_count": 2,
+            "subprocess_tracking": True, "active_subprocess_tools": 0,
+            "external_operation_count": 1, "revision_settled": True,
+            "backup_status": "not_requested",
             "unsafe": "sk-fixture",
         },
     })
@@ -207,6 +210,9 @@ def test_live_public_summary_keeps_only_known_a2a_states() -> None:
         "present": True, "task_matches": True, "phase": "running",
         "release_ready": False, "input_handoff_ready": False,
         "execution_status": "working", "stream_available": True, "blocker_count": 2,
+        "subprocess_tracking": True, "active_subprocess_tools": 0,
+        "external_operation_count": 1, "revision_settled": True,
+        "backup_status": "not_requested",
     }
     assert "sk-fixture" not in json.dumps(public)
 

@@ -563,6 +563,17 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         blocker_count = control_state.get("blocker_count")
         if isinstance(blocker_count, int) and not isinstance(blocker_count, bool) and 0 <= blocker_count <= 100:
             safe_control_state["blocker_count"] = blocker_count
+        for key in ("active_subprocess_tools", "external_operation_count"):
+            count = control_state.get(key)
+            if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 100:
+                safe_control_state[key] = count
+        for key in ("subprocess_tracking", "revision_settled"):
+            if isinstance(control_state.get(key), bool):
+                safe_control_state[key] = control_state[key]
+        if control_state.get("backup_status") in {
+            "not_requested", "disabled", "shared_committed", "staged_committed", "failed"
+        }:
+            safe_control_state["backup_status"] = control_state["backup_status"]
         public["control_state"] = safe_control_state
     raw_error = summary.get("error")
     if isinstance(raw_error, str) and "A2A task entered unexpected terminal state TASK_STATE_FAILED" in raw_error:

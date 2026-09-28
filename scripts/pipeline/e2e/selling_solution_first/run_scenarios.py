@@ -685,6 +685,7 @@ class ScenarioResult:
     error_type: str = ""
     error_site: str = ""
     watchdog: dict[str, Any] | None = None
+    control_state: dict[str, Any] | None = None
 
     @property
     def passed(self) -> bool:
@@ -707,6 +708,7 @@ class ScenarioRuntime:
     checks: dict[str, bool] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
     watchdog: dict[str, Any] | None = None
+    control_state: dict[str, Any] | None = None
     cloud_resources: list[dict[str, Any]] = field(default_factory=list)
     owned_stack_names: set[str] = field(default_factory=set)
     repl_candidate_wait_count: int = 0
@@ -2335,6 +2337,9 @@ def _run_a2a_rollback_cleanup(
         harness.kill9_and_restart()
         with contextlib.suppress(Exception):
             first_deploy.join(timeout=5)
+        runtime.control_state = a2a._control_state_diagnostic(
+            harness.run_dir, harness.context_id, harness.pipeline_task_id
+        )
         runtime.event("server-restarted", checkpoint="rollback-cleanup-started")
         recovered = harness.stream(prompt="继续恢复旧 Stack 清理和新目标规划。", name="cleanup-after-restart")
         current = recovered
@@ -5253,6 +5258,7 @@ def run_one_scenario(
         error_type=error_type,
         error_site=error_site,
         watchdog=runtime.watchdog if runtime is not None else None,
+        control_state=runtime.control_state if runtime is not None else None,
     )
     if runtime is not None:
         services.unregister_runtime(runtime)

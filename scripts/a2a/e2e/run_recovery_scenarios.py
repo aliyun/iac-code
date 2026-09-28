@@ -1034,6 +1034,8 @@ def _control_state_diagnostic(run_dir: Path, context_id: str, task_id: str) -> d
     if not isinstance(record, dict):
         return {"present": False}
     blockers = record.get("blockers")
+    external_operations = record.get("externalOperations")
+    backup = record.get("backup")
     return {
         "present": True,
         "task_matches": record.get("taskId") == task_id,
@@ -1043,6 +1045,15 @@ def _control_state_diagnostic(run_dir: Path, context_id: str, task_id: str) -> d
         "input_handoff_ready": record.get("inputHandoffReady"),
         "stream_available": record.get("streamAvailable"),
         "blocker_count": len(blockers) if isinstance(blockers, list) else None,
+        "subprocess_tracking": record.get("subprocessToolTrackingVersion") == 1,
+        "active_subprocess_tools": record.get("activeSubprocessTools"),
+        "external_operation_count": len(external_operations) if isinstance(external_operations, list) else None,
+        "revision_settled": (
+            isinstance(record.get("revision"), int)
+            and not isinstance(record["revision"], bool)
+            and record.get("revision") == record.get("persistedRevision")
+        ),
+        "backup_status": backup.get("status") if isinstance(backup, dict) else None,
     }
 
 
