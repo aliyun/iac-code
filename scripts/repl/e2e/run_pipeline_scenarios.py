@@ -956,7 +956,7 @@ def _display_progress(config_dir: Path) -> dict[str, int]:
             except json.JSONDecodeError:
                 continue
             event_type = event.get("type") if isinstance(event, dict) else None
-            if event_type in allowed:
+            if isinstance(event_type, str) and event_type in allowed:
                 counts[event_type] = min(counts.get(event_type, 0) + 1, 10000)
     return counts
 

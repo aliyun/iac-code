@@ -601,7 +601,7 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
 
     def record_failure(envelope: dict[str, Any]) -> None:
         event_type = envelope.get("eventType")
-        if event_type in safe_event_types:
+        if isinstance(event_type, str) and event_type in safe_event_types:
             recent_events.append(event_type)
             del recent_events[:-12]
         if event_type != "pipeline_failed":

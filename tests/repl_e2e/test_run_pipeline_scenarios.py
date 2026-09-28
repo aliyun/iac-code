@@ -3064,6 +3064,7 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
             {"type": "candidate_selection_ready", "payload": {"secret": "sk-fixture"}},
             {"type": "user_input_received"},
             {"type": "private-sk-fixture"},
+            {"type": ["candidate_selection_ready"]},
         )) + "\n",
         encoding="utf-8",
     )
