@@ -1560,12 +1560,12 @@ def _wait_for_latest_observed_stack_id(pty: Any, *, exclude: set[str], timeout: 
     next_cloud_check = started + 120.0
     while time.monotonic() < deadline:
         stack_id = _latest_observed_stack_id(pty, exclude=exclude)
-        if stack_id:
-            return stack_id
         config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
         progress = _display_progress(Path(config_path)) if config_path else {}
         if progress.get("step_completed_deploying") or progress.get("pipeline_completed"):
             raise RuntimeError("deploying finished before rollback observed a ROS stack")
+        if stack_id:
+            return stack_id
         now = time.monotonic()
         run_dir = getattr(pty, "run_dir", None)
         if run_dir and now >= next_cloud_check:
