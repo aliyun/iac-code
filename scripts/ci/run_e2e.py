@@ -507,6 +507,11 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     safe_error_site = r"(?:scripts|src)/(?:[A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.py:[1-9][0-9]{0,5}"
     if isinstance(error_site, str) and re.fullmatch(safe_error_site, error_site):
         public["error_site"] = error_site
+    if summary.get("failure_stage") in {
+        "pre_rollback_candidate", "rollback_completion", "post_rollback_confirmation",
+        "post_rollback_step", "restart", "resume", "verify",
+    }:
+        public["failure_stage"] = summary["failure_stage"]
     states = summary.get("a2a_states")
     allowed_states = {
         "TASK_STATE_SUBMITTED", "TASK_STATE_WORKING", "TASK_STATE_INPUT_REQUIRED",

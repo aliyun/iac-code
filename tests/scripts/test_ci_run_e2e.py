@@ -229,6 +229,20 @@ def test_live_public_summary_classifies_a2a_terminal_without_text() -> None:
     assert "sk-fixture" not in json.dumps(public)
 
 
+def test_live_public_summary_keeps_fixed_recovery_failure_stage_only() -> None:
+    public = run_e2e._public_live_summary({
+        "error_type": "TimeoutError",
+        "error_site": "scripts/a2a/e2e/run_recovery_scenarios.py:1820",
+        "failure_stage": "post_rollback_confirmation",
+        "abort_reason": "private token sk-fixture",
+    })
+    assert public is not None
+    assert public["error_type"] == "TimeoutError"
+    assert public["failure_stage"] == "post_rollback_confirmation"
+    assert "sk-fixture" not in json.dumps(public)
+    assert "failure_stage" not in run_e2e._public_live_summary({"failure_stage": "sk-fixture"})
+
+
 def test_live_public_summary_extracts_only_safe_chinese_terminal_terms() -> None:
     public = run_e2e._public_live_summary({
         "error": "RuntimeError: A2A task entered unexpected terminal state TASK_STATE_FAILED: "

@@ -49,6 +49,41 @@ def test_recovery_ci_diagnostics_keep_only_fixed_evidence(tmp_path: Path) -> Non
     assert runner._control_state_diagnostic(tmp_path, "../ctx-1", "task-1") == {"present": False}
 
 
+def test_recovery_harness_records_failure_location_without_relying_on_error_text(monkeypatch) -> None:
+    runner = _load_runner()
+    result = {}
+
+    class FakeHarness:
+        def __init__(self, _args, *, scenario):
+            self.scenario = scenario
+            self.failure_stage = "post_rollback_confirmation"
+            self.notes = []
+            self.checks = {}
+
+        def preflight(self):
+            pass
+
+        def start_server(self):
+            pass
+
+        def terminate(self):
+            pass
+
+        def finish(self, **kwargs):
+            result.update(kwargs)
+            return 1
+
+    monkeypatch.setattr(runner, "ScenarioHarness", FakeHarness)
+
+    def fail(_harness):
+        raise TimeoutError("private token sk-fixture")
+
+    assert runner._run_with_harness(SimpleNamespace(ci_teardown=False), "rollback-step5", fail) == 1
+    assert result["passed"] is False
+    assert result["error_type"] == "TimeoutError"
+    assert result["error_site"].startswith("scripts/a2a/e2e/run_recovery_scenarios.py:")
+
+
 def _input_required_event(kind: str = "", *, step_id: str = "") -> dict:
     data = {}
     if kind:

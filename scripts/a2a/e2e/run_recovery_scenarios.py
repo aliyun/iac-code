@@ -606,6 +606,7 @@ class ScenarioHarness:
         self.cleanup_diagnostic: dict[str, Any] = {}
         self.summaries: dict[str, Any] = {}
         self.snapshots: dict[str, Any] = {}
+        self.failure_stage = ""
 
     def preflight(self) -> None:
         if self.args.skip_preflight:
@@ -853,7 +854,9 @@ class ScenarioHarness:
         if summary.task_id and not self.pipeline_task_id:
             self.pipeline_task_id = summary.task_id
 
-    def finish(self, *, passed: bool | None = None, abort_reason: str = "") -> int:
+    def finish(
+        self, *, passed: bool | None = None, abort_reason: str = "", error_type: str = "", error_site: str = ""
+    ) -> int:
         if passed is None:
             passed = bool(self.checks) and all(self.checks.values())
         result = ScenarioRunResult(
@@ -877,6 +880,8 @@ class ScenarioHarness:
             "streams": {name: asdict(summary) for name, summary in self.summaries.items()},
             "snapshots": self.snapshots,
         }
+        if not result.passed:
+            payload.update(error_type=error_type, error_site=error_site, failure_stage=self.failure_stage)
         _write_json(self.run_dir / "summary.json", payload)
         _print_result(result)
         return 0 if result.passed else 1
@@ -972,6 +977,8 @@ def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callabl
     harness = ScenarioHarness(args, scenario=scenario)
     passed: bool | None = None
     abort_reason = ""
+    error_type = ""
+    error_site = ""
     try:
         harness.preflight()
         harness.start_server()
@@ -980,6 +987,18 @@ def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callabl
         harness.notes.append(f"exception: {type(exc).__name__}: {exc}")
         passed = False
         abort_reason = str(exc)
+        error_type = type(exc).__name__
+        traceback = exc.__traceback__
+        while traceback is not None:
+            filename = Path(traceback.tb_frame.f_code.co_filename)
+            try:
+                relative = filename.resolve().relative_to(E2E_SCRIPTS_DIR.parents[2])
+            except ValueError:
+                pass
+            else:
+                if relative.parts[0] in {"scripts", "src"} and relative.suffix == ".py":
+                    error_site = f"{relative.as_posix()}:{traceback.tb_lineno}"
+            traceback = traceback.tb_next
     finally:
         try:
             harness.terminate()
@@ -1006,7 +1025,7 @@ def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callabl
                 }
                 harness.checks["test-owned ROS Stacks cleaned"] = False
                 harness.notes.append("teardown: " + type(exc).__name__)
-    return harness.finish(passed=passed, abort_reason=abort_reason)
+    return harness.finish(passed=passed, abort_reason=abort_reason, error_type=error_type, error_site=error_site)
 
 
 def _terminal_markers(summaries: Iterable[StreamSummary]) -> list[str]:
@@ -1768,6 +1787,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
     target_step = _ROLLBACK_SCENARIOS[scenario]
 
     def callback(h: ScenarioHarness) -> None:
+        h.failure_stage = "pre_rollback_candidate"
         initial = h.start_stream(prompt=args.initial_prompt, name="01-initial-running", context_id="", task_id="")
         observed_streams = _wait_for_with_intervening_ask_inputs(
             h,
@@ -1777,6 +1797,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
             timeout=args.event_timeout,
             name_prefix="initial-running",
         )
+        h.failure_stage = "rollback_completion"
         rollback = h.start_stream(prompt=ROLLBACK_PROMPT, name="02-rollback-interrupt")
         _wait_any(
             [*observed_streams, rollback],
@@ -1786,6 +1807,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
         )
         streams_to_join = [*observed_streams, rollback]
         if target_step == "deploying":
+            h.failure_stage = "post_rollback_confirmation"
             observed_streams = _wait_for_with_intervening_ask_inputs(
                 h,
                 streams_to_join,
@@ -1799,6 +1821,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
             streams_to_join = observed_streams
             selection = h.start_stream(prompt=args.selection_prompt, name="03-select-after-rollback")
             streams_to_join.append(selection)
+            h.failure_stage = "post_rollback_step"
             _wait_any(
                 [selection],
                 _step_started(target_step),
@@ -1806,6 +1829,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
                 timeout=args.event_timeout,
             )
         else:
+            h.failure_stage = "post_rollback_step"
             streams_to_join = _wait_for_with_intervening_ask_inputs(
                 h,
                 streams_to_join,
@@ -1816,17 +1840,20 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
                 answer_prompt=ROLLBACK_PROMPT,
                 answer_input_steps={"intent_parsing"},
             )
+        h.failure_stage = "restart"
         h.fetch_state("before-kill")
         h.kill9_and_restart()
         for stream in streams_to_join:
             _join_after_kill(stream, h)
         snapshot = h.fetch_state("after-restart")
         h.checks["state endpoint returned snapshot after rollback restart"] = _snapshot(snapshot) is not None
+        h.failure_stage = "resume"
         resumed = h.stream(
             prompt=CONTINUE_PROMPT,
             name="04-continue-after-restart" if target_step == "deploying" else "03-continue-after-restart",
         )
         _finish_pipeline_after_possible_input(h, resumed, args, input_prompt=ROLLBACK_PROMPT)
+        h.failure_stage = "verify"
         h.checks["pipeline completed after rollback recovery"] = _completed_snapshot_or_stream(h, resumed)
         final_state = h.fetch_state("after-rollback-completion")
         final_deploying = _final_deployment_evidence(final_state)
