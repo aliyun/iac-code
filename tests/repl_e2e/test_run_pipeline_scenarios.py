@@ -241,6 +241,7 @@ def _install_cleanup_teardown_fakes(monkeypatch, runner, run_dir: Path) -> list[
 
     monkeypatch.setattr(runner, "_fresh_ros_stack_state", fake_fresh_ros_stack_state)
     monkeypatch.setattr(runner, "_delete_ros_stack", fake_delete_ros_stack)
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: [])
     monkeypatch.setattr(
         runner,
         "_wait_for_ros_stack_deleted",
@@ -1577,6 +1578,59 @@ def test_cleanup_final_teardown_deletes_owned_second_stack(monkeypatch, tmp_path
     assert checks["teardown: cleanup scenario owned ROS stacks deleted"] is True
 
 
+def test_cleanup_final_teardown_discovers_stack_missing_from_ledger(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    first_name = runner._cleanup_stack_name(tmp_path, "first")
+    deleted: list[str] = []
+
+    class FakePty:
+        run_dir = tmp_path
+        env: dict[str, str] = {"ALIBABA_CLOUD_REGION_ID": "cn-hangzhou"}
+        cleanup_ledger = {"observed_resources": []}
+
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: ["first-stack-id"])
+    monkeypatch.setattr(
+        runner, "_fresh_ros_stack_state",
+        lambda _pty, _id: {
+            "status": "CREATE_COMPLETE", "not_found": False,
+            "stack_name": first_name, "region_id": "cn-hangzhou",
+        },
+    )
+    monkeypatch.setattr(runner, "_delete_ros_stack", lambda **kwargs: deleted.append(kwargs["stack_id"]))
+    monkeypatch.setattr(
+        runner, "_wait_for_ros_stack_deleted",
+        lambda **_kwargs: {"status": "DELETE_COMPLETE", "not_found": False},
+    )
+    checks: dict[str, bool] = {}
+    runner._teardown_cleanup_scenario_resources(
+        args=args, scenario="rollback-step5-cleanup", pty=FakePty(), checks=checks, notes=[]
+    )
+
+    assert deleted == ["first-stack-id"]
+    assert checks["teardown: owned ROS Stack discovery succeeded"] is True
+    assert checks["teardown: cleanup scenario owned ROS stacks deleted"] is True
+
+
+def test_cleanup_stack_discovery_matches_exact_run_owned_names(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    first_name = runner._cleanup_stack_name(tmp_path, "first")
+    second_name = runner._cleanup_stack_name(tmp_path, "second")
+    requested: list[str] = []
+
+    def fake_call(_product: str, _action: str, params: dict) -> dict:
+        requested.extend(params["StackName"])
+        return {"Stacks": [
+            {"StackName": first_name, "StackId": "first-stack-id", "Status": "CREATE_COMPLETE"},
+            {"StackName": second_name, "StackId": "deleted-stack-id", "Status": "DELETE_COMPLETE"},
+            {"StackName": "other-stack", "StackId": "other-stack-id", "Status": "CREATE_COMPLETE"},
+        ]}
+
+    monkeypatch.setattr(runner, "_call_aliyun_api", fake_call)
+    assert runner._discover_owned_cleanup_stack_ids(tmp_path) == ["first-stack-id"]
+    assert requested == sorted({first_name, second_name})
+
+
 def test_cleanup_final_teardown_refuses_unowned_stack_name(monkeypatch, tmp_path: Path) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
@@ -1600,6 +1654,7 @@ def test_cleanup_final_teardown_refuses_unowned_stack_name(monkeypatch, tmp_path
 
     monkeypatch.setattr(runner, "_fresh_ros_stack_state", fake_fresh_ros_stack_state)
     monkeypatch.setattr(runner, "_delete_ros_stack", lambda **_kwargs: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: [])
 
     checks: dict[str, bool] = {}
     notes: list[str] = []

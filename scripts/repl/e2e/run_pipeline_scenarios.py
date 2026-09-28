@@ -1896,6 +1896,21 @@ def _owned_cleanup_stack_names(run_dir: Path) -> set[str]:
     return {_cleanup_stack_name(run_dir, "first"), _cleanup_stack_name(run_dir, "second")}
 
 
+def _discover_owned_cleanup_stack_ids(run_dir: Path) -> list[str]:
+    """Find exact run-owned names when an interrupted tool never wrote the local ledger."""
+
+    stack_ids: list[str] = []
+    for name in sorted(_owned_cleanup_stack_names(run_dir)):
+        response = _call_aliyun_api("ROS", "ListStacks", {"StackName": [name], "PageSize": 50})
+        for stack in _nested_api_items(response, "Stacks", "Stack"):
+            if stack.get("StackName") != name or stack.get("Status") == "DELETE_COMPLETE":
+                continue
+            stack_id = stack.get("StackId")
+            if isinstance(stack_id, str) and stack_id:
+                stack_ids.append(stack_id)
+    return _unique_strings(stack_ids)
+
+
 def _observed_cleanup_stack_ids(pty: Any) -> list[str]:
     stack_ids = [
         str(getattr(pty, "cleanup_first_stack_id", "") or ""),
@@ -1957,8 +1972,16 @@ def _teardown_cleanup_scenario_resources(
     run_dir = Path(getattr(pty, "run_dir", ""))
     owned_stack_names = _owned_cleanup_stack_names(run_dir)
     stack_ids = _observed_cleanup_stack_ids(pty)
+    try:
+        stack_ids = _unique_strings([*stack_ids, *_discover_owned_cleanup_stack_ids(run_dir)])
+        checks["teardown: owned ROS Stack discovery succeeded"] = True
+    except Exception as exc:
+        checks["teardown: owned ROS Stack discovery succeeded"] = False
+        notes.append(f"final teardown Stack discovery failed: {type(exc).__name__}")
     if not stack_ids:
-        checks["teardown: no cleanup scenario stacks leaked"] = True
+        checks["teardown: no cleanup scenario stacks leaked"] = bool(
+            checks["teardown: owned ROS Stack discovery succeeded"]
+        )
         return
 
     deletion_failures: list[str] = []
