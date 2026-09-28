@@ -2060,6 +2060,7 @@ def _run_rollback_step5_cleanup(
     kill_during_cleanup: bool,
 ) -> int:
     def callback(h: ScenarioHarness) -> None:
+        h.failure_stage = "initial_selection"
         first_stack_name = _cleanup_stack_name(h, "first")
         second_stack_name = _cleanup_stack_name(h, "second")
 
@@ -2072,6 +2073,7 @@ def _run_rollback_step5_cleanup(
         initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
         h.checks["initial reached step4 selection"] = initial.last_input_required_step_id == "confirm_and_select"
 
+        h.failure_stage = "first_stack_create"
         first_deploy = h.start_stream(
             prompt=_cleanup_deployment_prompt(args.selection_prompt, h, "first"),
             name="02-create-first-stack",
@@ -2084,6 +2086,7 @@ def _run_rollback_step5_cleanup(
         )
         h.checks["first rollback stack observed before rollback"] = bool(first_stack_id)
 
+        h.failure_stage = "rollback_cleanup"
         rollback = h.start_stream(
             prompt=_cleanup_intent_prompt(ROLLBACK_PROMPT, second_stack_name),
             name="03-rollback-after-first-stack",
@@ -2106,6 +2109,7 @@ def _run_rollback_step5_cleanup(
         )
         h.checks["rollback cleanup target stacks observed"] = bool(cleanup_stack_ids)
 
+        h.failure_stage = "second_stack_create"
         second_deploy = h.start_stream(
             prompt=_cleanup_deployment_prompt(args.selection_prompt, h, "second"),
             name="04-select-second-stack",
@@ -2141,6 +2145,7 @@ def _run_rollback_step5_cleanup(
         h.checks["rollback cleanup target stacks observed"] = bool(cleanup_stack_ids)
 
         if kill_during_cleanup:
+            h.failure_stage = "cleanup_recovery"
             cleanup_stream = h.start_stream(
                 prompt=args.normal_followup_prompt,
                 name="05-cleanup-running",
@@ -2157,6 +2162,7 @@ def _run_rollback_step5_cleanup(
                 event_types={"cleanup_started", "cleanup_progress", "cleanup_completed"},
             )
         else:
+            h.failure_stage = "cleanup_normal_turn"
             cleanup_summary = h.stream(
                 prompt=args.normal_followup_prompt,
                 name="05-cleanup-normal-turn",
@@ -2165,6 +2171,7 @@ def _run_rollback_step5_cleanup(
         h.checks["cleanup normal turn stayed in same context"] = cleanup_summary.context_id == h.context_id
         h.checks["cleanup normal turn used normal task"] = cleanup_summary.task_id != h.pipeline_task_id
 
+        h.failure_stage = "cleanup_verify"
         after_cleanup = h.fetch_state("after-cleanup")
         cleanup_resource = _cleanup_resource_for_stack(after_cleanup, first_stack_id)
         h.checks["first rollback stack cleanup completed in snapshot"] = _cleanup_resource_completed(cleanup_resource)

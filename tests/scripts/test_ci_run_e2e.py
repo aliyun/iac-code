@@ -241,6 +241,31 @@ def test_live_public_summary_keeps_fixed_recovery_failure_stage_only() -> None:
     assert public["failure_stage"] == "post_rollback_confirmation"
     assert "sk-fixture" not in json.dumps(public)
     assert "failure_stage" not in run_e2e._public_live_summary({"failure_stage": "sk-fixture"})
+    cleanup_public = run_e2e._public_live_summary({"failure_stage": "first_stack_create"})
+    assert cleanup_public is not None
+    assert cleanup_public["failure_stage"] == "first_stack_create"
+
+
+def test_live_public_summary_filters_runner_diagnostics() -> None:
+    public = run_e2e._public_live_summary({
+        "diagnostics": {
+            "confirmation_event_count": 2,
+            "ros_deploy_event_count": 1,
+            "public_tool_event_count": 3,
+            "a2a_pending_kinds": ["deployment_confirmation", "sk-fixture"],
+            "repl_image_keys": ["initial", "sk-fixture"],
+            "private": "sk-fixture",
+        },
+    })
+    assert public is not None
+    assert public["diagnostics"] == {
+        "confirmation_event_count": 2,
+        "ros_deploy_event_count": 1,
+        "public_tool_event_count": 3,
+        "a2a_pending_kinds": ["deployment_confirmation"],
+        "repl_image_keys": ["initial"],
+    }
+    assert "sk-fixture" not in json.dumps(public)
 
 
 def test_live_public_summary_extracts_only_safe_chinese_terminal_terms() -> None:

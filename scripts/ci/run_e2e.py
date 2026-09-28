@@ -474,6 +474,36 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         if isinstance(checks, dict)
         else {},
     }
+    raw_diagnostics = summary.get("diagnostics")
+    if isinstance(raw_diagnostics, dict):
+        diagnostics: dict[str, Any] = {}
+        for key in (
+            "confirmation_event_count", "ros_deploy_event_count", "public_tool_event_count",
+            "repl_confirmation_count",
+        ):
+            count = raw_diagnostics.get(key)
+            if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
+                diagnostics[key] = count
+        for key in ("repl_solution_summary_changed", "repl_effective_parameters_changed"):
+            if isinstance(raw_diagnostics.get(key), bool):
+                diagnostics[key] = raw_diagnostics[key]
+        pending_kinds = raw_diagnostics.get("a2a_pending_kinds")
+        allowed_pending = {"none", "ask_user_question", "candidate_select", "candidate_selection", "deployment_confirmation"}
+        if isinstance(pending_kinds, list):
+            diagnostics["a2a_pending_kinds"] = [
+                kind for kind in pending_kinds if isinstance(kind, str) and kind in allowed_pending
+            ][:24]
+        image_keys = raw_diagnostics.get("repl_image_keys")
+        allowed_images = {
+            "initial", "selection", "ask-first-answer", "ask-second-answer", "confirmation-adjust",
+            "rollback-interrupt", "rollback-ask-answer", "normal-followup",
+        }
+        if isinstance(image_keys, list):
+            diagnostics["repl_image_keys"] = [
+                key for key in image_keys if isinstance(key, str) and key in allowed_images
+            ][:16]
+        if diagnostics:
+            public["diagnostics"] = diagnostics
     if isinstance(raw_progress, dict):
         public["progress"] = {
             key: value for key, value in raw_progress.items()
@@ -510,6 +540,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     if summary.get("failure_stage") in {
         "pre_rollback_candidate", "rollback_completion", "post_rollback_confirmation",
         "post_rollback_step", "restart", "resume", "verify",
+        "initial_selection", "first_stack_create", "rollback_cleanup", "second_stack_create",
+        "cleanup_recovery", "cleanup_normal_turn", "cleanup_verify",
     }:
         public["failure_stage"] = summary["failure_stage"]
     states = summary.get("a2a_states")

@@ -686,6 +686,7 @@ class ScenarioResult:
     error_site: str = ""
     watchdog: dict[str, Any] | None = None
     control_state: dict[str, Any] | None = None
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -707,6 +708,7 @@ class ScenarioRuntime:
     processes: list[subprocess.Popen[Any]] = field(default_factory=list)
     checks: dict[str, bool] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
     watchdog: dict[str, Any] | None = None
     control_state: dict[str, Any] | None = None
     cloud_resources: list[dict[str, Any]] = field(default_factory=list)
@@ -1078,6 +1080,12 @@ def _json_text(values: Any) -> str:
     return json.dumps(values, ensure_ascii=False, default=str)
 
 
+def _record_diagnostic(runtime: ScenarioRuntime, key: str, value: Any) -> None:
+    diagnostics = getattr(runtime, "diagnostics", None)
+    if isinstance(diagnostics, dict):
+        diagnostics[key] = value
+
+
 def _tool_sequence(values: Sequence[Any]) -> list[dict[str, Any]]:
     sequence: list[dict[str, Any]] = []
     tool_keys = {"toolName", "tool_name", "name"}
@@ -1213,6 +1221,8 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
     runtime.checks["no deploy before confirmation"] = not ros_event_indexes or (
         bool(confirmation_indexes) and min(ros_event_indexes) > min(confirmation_indexes)
     )
+    _record_diagnostic(runtime, "confirmation_event_count", len(confirmation_indexes))
+    _record_diagnostic(runtime, "ros_deploy_event_count", len(ros_event_indexes))
     if runtime.spec.profile == "safe_cancel":
         runtime.checks["cancel kept the deployment unattempted"] = not ros_event_indexes
         runtime.checks["safe mode and cancel made no cloud write"] = not discover_cloud_resources(runtime)
@@ -1459,6 +1469,9 @@ def _continue_a2a_from_summary(
             break
         path = runtime.paths.run_dir / f"{summary.name}.events.jsonl"
         kind = _pending_kind(a2a, path)
+        diagnostics = getattr(runtime, "diagnostics", None)
+        if isinstance(diagnostics, dict):
+            diagnostics.setdefault("a2a_pending_kinds", []).append(kind or "none")
         step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         if not kind:
             # A rejected/early-exit pipeline may already have handed off without a pending input.
@@ -3458,6 +3471,7 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         for event in pty.events
         if isinstance(event, dict) and event.get("type") == "paste-image-fixture"
     }
+    _record_diagnostic(runtime, "repl_image_keys", sorted(observed_keys))
     runtime.checks["REPL full image lifecycle exercised"] = {
         "initial",
         "ask-first-answer",
@@ -4806,6 +4820,7 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         )
         runtime.checks["Aliyun business body and public payload contract passed"] = False
     tools = [item["tool"].lower() for item in _tool_sequence(values)]
+    _record_diagnostic(runtime, "public_tool_event_count", len(tools))
     runtime.checks["public events preserve Aliyun tool attribution"] = "aliyun_api" in tools
     if "aliyun_api" not in tools:
         runtime.notes.append("public tool attribution observed: " + ", ".join(sorted(set(tools))))
@@ -5045,6 +5060,24 @@ def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
     elif profile == "natural_adjust":
         display_events = _read_repl_display_events(runtime)
         runtime.checks.update(_repl_natural_adjustment_checks(display_events, _read_repl_transcript_values(runtime)))
+        confirmations = [
+            event.get("payload")
+            for event in display_events
+            if event.get("type") == "user_input_required"
+            and event.get("step_id") == NEW_STEPS[1]
+            and isinstance(event.get("payload"), dict)
+        ]
+        _record_diagnostic(runtime, "repl_confirmation_count", len(confirmations))
+        if len(confirmations) >= 2:
+            _record_diagnostic(
+                runtime, "repl_solution_summary_changed",
+                confirmations[0].get("solution_summary") != confirmations[-1].get("solution_summary"),
+            )
+            _record_diagnostic(
+                runtime, "repl_effective_parameters_changed",
+                confirmations[0].get("effective_deployment_parameters")
+                != confirmations[-1].get("effective_deployment_parameters"),
+            )
     elif profile == "reselect_new_intent":
         runtime.checks["reselect and new intent both returned to Step 1"] = (
             sum(step == NEW_STEPS[0] for _, step in _started_steps(values)) >= 3
@@ -5272,6 +5305,7 @@ def run_one_scenario(
         error_site=error_site,
         watchdog=runtime.watchdog if runtime is not None else None,
         control_state=runtime.control_state if runtime is not None else None,
+        diagnostics=runtime.diagnostics if runtime is not None else {},
     )
     if runtime is not None:
         services.unregister_runtime(runtime)
