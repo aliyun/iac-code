@@ -1843,7 +1843,7 @@ def test_repl_selection_after_restart_waits_for_live_controls(
 
     runner._repl_wait_selection(pty, runtime, after_restart=True)
 
-    assert calls == [("journal", None), ("controls", True)]
+    assert calls == [("journal", None), ("controls", False)]
     assert runtime.repl_candidate_wait_count == 1
 
 
@@ -2224,16 +2224,22 @@ def test_repl_file_wait_records_advisory_diagnosis(
     assert runtime.watchdog == record
 
 
-def test_repl_candidate_switch_uses_right_arrow_before_enter(runner: ModuleType) -> None:
-    sent: list[tuple[str, str]] = []
+def test_repl_candidate_switch_waits_for_arrow_before_enter(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[tuple[str, str] | str] = []
 
     class Pty:
         def send(self, text: str, *, label: str) -> None:
             sent.append((text, label))
 
+        def drain_output(self) -> None:
+            sent.append("drain")
+
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: sent.append("settle"))
     runner._repl_select_current(Pty(), next_candidate=True)
 
-    assert sent == [("\x1b[C", "candidate-right"), ("\r", "candidate-enter")]
+    assert sent == [("\x1b[C", "candidate-right"), "settle", "drain", ("\r", "candidate-enter")]
 
 
 def test_repl_restored_line_input_uses_paste_then_separate_enter(
@@ -2725,7 +2731,7 @@ def test_repl_multimodal_selection_answers_step1_ask_before_candidates(
         "_repl_submit_generated_image",
         lambda _runtime, _pty, key, text, *, label: calls.append(("generated", key, text, label)),
     )
-    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
+    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
 
     runner._repl_wait_multimodal_selection(runtime, Pty(), phase="rollback")
 
@@ -3003,7 +3009,7 @@ def test_repl_step2_parameter_waits_only_after_candidate_selection(
         args=argparse.Namespace(cleanup_vpc_id="vpc-test", cleanup_zone_id="cn-hangzhou-i"),
     )
     monkeypatch.setattr(runner, "_repl_submit_initial_prompt", lambda *_args: calls.append("initial"))
-    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
+    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
     monkeypatch.setattr(
         runner,
         "_repl_select_current",
@@ -3070,7 +3076,7 @@ def test_repl_replace_invalid_uses_candidate_interrupt_editor(
     )
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: calls.append(("sleep", seconds)))
     monkeypatch.setattr(runner, "_repl_submit_initial_prompt", lambda *_args: calls.append("initial"))
-    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
+    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
     monkeypatch.setattr(
         runner,
         "_repl_submit_candidate_interrupt",

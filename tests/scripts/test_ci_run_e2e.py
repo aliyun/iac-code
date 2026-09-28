@@ -342,6 +342,7 @@ def test_live_a2a_terminal_evidence_reports_step_failure_without_raw_error(tmp_p
     event = {
         "metadata": {"iac_code": {"pipeline": {
             "eventType": "step_failed",
+            "step": {"id": "materialize_selected_candidate"},
             "data": {
                 "errorSummary": "TimeoutError: provider timed out; token=sk-fixture",
                 "errorDetails": {"type": "TimeoutError", "traceback": "private fixture"},
@@ -354,6 +355,7 @@ def test_live_a2a_terminal_evidence_reports_step_failure_without_raw_error(tmp_p
 
     assert evidence == {
         "step_failed_event": "observed",
+        "step_failure_step": "materialize_selected_candidate",
         "step_failure_inner_type": "TimeoutError",
         "step_failure_category": "timeout",
         "step_failure_terms": ["provider", "error"],

@@ -2573,6 +2573,12 @@ REPL_CLEANUP_PATTERNS = (r"cleanup", r"回滚清理", r"DeleteStack", r"开始�
 def _repl_select_current(pty: Any, *, next_candidate: bool = False) -> None:
     if next_candidate:
         pty.send("\x1b[C", label="candidate-right")
+        # RawInputCapture reads one terminal key at a time. Let the arrow
+        # update selection before the confirmation Enter arrives.
+        time.sleep(0.25)
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
     pty.send("\r", label="candidate-enter")
 
 
@@ -2676,7 +2682,9 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
     )
 
 
-def _repl_wait_selection(pty: Any, runtime: ScenarioRuntime, *, after_restart: bool = False) -> None:
+def _repl_wait_selection(
+    pty: Any, runtime: ScenarioRuntime, *, after_restart: bool = False, await_controls: bool = False
+) -> None:
     runtime.repl_candidate_wait_count += 1
     event, path = _wait_repl_display_event(
         runtime,
@@ -2685,16 +2693,22 @@ def _repl_wait_selection(pty: Any, runtime: ScenarioRuntime, *, after_restart: b
         timeout=runtime.args.stream_timeout,
         # On --continue, the saved selection screen can be replayed before the
         # live cbreak reader exists. Keep PTY output for the live-ready handshake.
-        drain_output=None if after_restart else getattr(pty, "drain_output", None),
+        drain_output=None if after_restart or await_controls else getattr(pty, "drain_output", None),
         pty=pty,
     )
-    if after_restart:
+    options = event.get("payload", {}).get("options") if isinstance(event.get("payload"), dict) else None
+    if isinstance(options, list):
+        _record_diagnostic(runtime, "candidate_option_count", len(options))
+    if after_restart or await_controls:
         _legacy_repl_module()._expect_candidate_selection(
             pty,
             _python_namespace(runtime),
-            description="candidate selection restored after --continue",
-            require_live_refresh=True,
+            description="candidate selection restored after --continue" if after_restart else "candidate selection controls",
+            require_live_refresh=False,
         )
+        # The durable marker is recorded after waiting_input is set; one
+        # rendered controls frame is sufficient to accept the next key.
+        time.sleep(0.25)
     else:
         # The journal entry precedes the terminal renderer. Let its cbreak key
         # reader become active before the scenario sends arrow or Enter keys.
@@ -3233,7 +3247,7 @@ def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
     if profile == "step1_clarify":
         _repl_wait_ask(pty, runtime, description="pipeline question")
         pty.sendline(_repl_step1_clarification_answer(runtime))
-    _repl_wait_selection(pty, runtime)
+    _repl_wait_selection(pty, runtime, await_controls=profile in {"natural_adjust", "reselect_progress"})
     if profile == "step1_clarify":
         _repl_submit_candidate_interrupt(
             pty,

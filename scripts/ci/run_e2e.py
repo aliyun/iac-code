@@ -479,7 +479,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         diagnostics: dict[str, Any] = {}
         for key in (
             "confirmation_event_count", "ros_deploy_event_count", "public_tool_event_count",
-            "repl_confirmation_count",
+            "repl_confirmation_count", "candidate_option_count",
         ):
             count = raw_diagnostics.get(key)
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
@@ -666,6 +666,14 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
             return
         prefix = "terminal" if event_type == "pipeline_failed" else "step_failure"
         evidence[event_type + "_event"] = "observed"
+        if event_type == "step_failed":
+            step = envelope.get("step")
+            step_id = step.get("id") if isinstance(step, dict) else envelope.get("step_id")
+            if step_id in {
+                "solution_planning_and_selection", "materialize_selected_candidate", "deploying",
+                "intent_parsing", "architecture_generation", "confirm_and_select", "deployment_preparation",
+            }:
+                evidence["step_failure_step"] = step_id
         data = envelope.get("data")
         if not isinstance(data, dict):
             return
