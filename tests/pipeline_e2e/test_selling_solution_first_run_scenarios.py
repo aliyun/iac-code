@@ -2915,6 +2915,12 @@ def test_repl_natural_adjustment_is_proven_by_outcomes_without_structured_action
     }
 
 
+def test_repl_natural_adjustment_uses_distinct_reserved_subnet(runner: ModuleType) -> None:
+    runtime = argparse.Namespace(cidr="10.250.0.0/24")
+
+    assert runner._repl_natural_adjusted_cidr(runtime) == "10.250.0.128/25"
+
+
 def test_repl_question_waits_for_actual_input_prompt(runner: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, object]] = []
 

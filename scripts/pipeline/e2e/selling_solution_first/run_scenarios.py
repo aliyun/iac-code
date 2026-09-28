@@ -3241,6 +3241,14 @@ def _repl_step1_clarification_answer(runtime: ScenarioRuntime) -> str:
     )
 
 
+def _repl_natural_adjusted_cidr(runtime: ScenarioRuntime) -> str:
+    """Pick a distinct deployable subnet inside this case's reserved CIDR."""
+    reserved = ipaddress.IPv4Network(runtime.cidr)
+    if reserved.prefixlen >= 29:
+        raise ValueError("natural adjustment requires a reserved CIDR wider than /29")
+    return str(list(reserved.subnets(new_prefix=reserved.prefixlen + 1))[1])
+
+
 def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
     profile = runtime.spec.profile
     _repl_submit_initial_prompt(pty, runtime)
@@ -3285,7 +3293,9 @@ def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
         pty.sendline(runtime.args.cleanup_zone_id or "cn-hangzhou-h")
     _repl_wait_confirmation(pty, runtime)
     if profile == "natural_adjust":
-        _repl_choose_direct_input(runtime, pty, f"把 VSwitch 网段调整为 {runtime.cidr}，重新 Preview 和询价。")
+        _repl_choose_direct_input(
+            runtime, pty, f"把 VSwitch 网段调整为 {_repl_natural_adjusted_cidr(runtime)}，重新 Preview 和询价。"
+        )
         _repl_wait_confirmation(pty, runtime)
         _repl_choose_direct_input(runtime, pty, "确认部署，参数覆盖保持刚才的值。")
     elif profile == "reselect_progress":
