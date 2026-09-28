@@ -932,6 +932,16 @@ def _run_with_pty(
         progress["cloud_stack_without_ledger"] = int(bool(getattr(pty, "cloud_stack_without_ledger", False)))
         progress["cloud_stack_not_created"] = int(bool(getattr(pty, "cloud_stack_not_created", False)))
         progress["cloud_probe_failures"] = min(int(getattr(pty, "cloud_probe_failures", 0)), 10000)
+        if checks.get("acceptance: no ROS create failure in cleanup transcript") is False:
+            after_rollback = _suffix_after_sendline_text(pty.transcript, pty.events, args.rollback_prompt)
+            for name, pattern in zip(
+                ("create_failed", "route_conflict", "stack_exists", "invalid_cidr_block"),
+                CLEANUP_DEPLOYMENT_FAILURE_PATTERNS,
+            ):
+                progress[f"cleanup_failure_{name}"] = min(len(re.findall(pattern, pty.transcript)), 10000)
+                progress[f"cleanup_failure_{name}_after_rollback"] = min(
+                    len(re.findall(pattern, after_rollback)), 10000
+                )
         result = ScenarioRunResult(
             scenario=scenario,
             run_dir=str(run_dir),
