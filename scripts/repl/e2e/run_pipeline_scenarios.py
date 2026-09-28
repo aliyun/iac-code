@@ -1610,6 +1610,9 @@ def _wait_for_latest_observed_stack_id(pty: Any, *, exclude: set[str], timeout: 
     deadline = started + timeout
     next_cloud_check = started + 120.0
     while time.monotonic() < deadline:
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
         stack_id = _latest_observed_stack_id(pty, exclude=exclude)
         config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
         progress = _display_progress(Path(config_path)) if config_path else {}
@@ -1660,6 +1663,9 @@ def _cleanup_target_stack_ids(pty: Any, *, exclude: set[str]) -> list[str]:
 def _wait_for_cleanup_target_stack_ids(pty: Any, *, exclude: set[str], timeout: float) -> list[str]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
         stack_ids = _cleanup_target_stack_ids(pty, exclude=exclude)
         if stack_ids:
             return stack_ids

@@ -3259,6 +3259,47 @@ def test_first_stack_observation_stops_when_deploying_finishes_without_stack(tmp
         runner._wait_for_latest_observed_stack_id(FakePty(), exclude=set(), timeout=10)
 
 
+def test_first_stack_observation_drains_pty_while_waiting(monkeypatch) -> None:
+    runner = _load_runner()
+
+    class FakePty:
+        env: dict[str, str] = {}
+        drained = False
+
+        def drain_output(self) -> None:
+            self.drained = True
+
+    pty = FakePty()
+    monkeypatch.setattr(
+        runner,
+        "_latest_observed_stack_id",
+        lambda _pty, *, exclude: "stack-id" if pty.drained else None,
+    )
+
+    assert runner._wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=10) == "stack-id"
+    assert pty.drained is True
+
+
+def test_cleanup_target_observation_drains_pty_while_waiting(monkeypatch) -> None:
+    runner = _load_runner()
+
+    class FakePty:
+        drained = False
+
+        def drain_output(self) -> None:
+            self.drained = True
+
+    pty = FakePty()
+    monkeypatch.setattr(
+        runner,
+        "_cleanup_target_stack_ids",
+        lambda _pty, *, exclude: ["stack-id"] if pty.drained else [],
+    )
+
+    assert runner._wait_for_cleanup_target_stack_ids(pty, exclude=set(), timeout=10) == ["stack-id"]
+    assert pty.drained is True
+
+
 def test_first_stack_observation_stops_when_cloud_completed_without_ledger(monkeypatch, tmp_path: Path) -> None:
     runner = _load_runner()
     ticks = iter([0.0, 121.0, 121.0])
