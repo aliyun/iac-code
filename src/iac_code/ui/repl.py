@@ -5148,10 +5148,15 @@ class InlineREPL:
                         # must mean the cbreak key reader can already accept an
                         # Enter; recording it before ``waiting_input`` was set
                         # created a race where fast drivers lost the key press.
-                        try:
-                            await asyncio.wait_for(key_capture_ready.wait(), timeout=5.0)
-                        except asyncio.TimeoutError as exc:
-                            raise RuntimeError("candidate selection key reader did not start") from exc
+                        # A timed wait_for can consume a simultaneous task
+                        # cancellation and event completion on Python 3.10/3.11.
+                        # Poll with cancellable sleeps so Ctrl+C and SIGINT
+                        # still abort while the key reader is starting.
+                        key_capture_deadline = asyncio.get_running_loop().time() + 5.0
+                        while not key_capture_ready.is_set():
+                            if key_task.done() or asyncio.get_running_loop().time() >= key_capture_deadline:
+                                raise RuntimeError("candidate selection key reader did not start")
+                            await asyncio.sleep(0.01)
                         recorder = getattr(self, "_pipeline_display_recorder", None)
                         if recorder is not None:
                             try:
