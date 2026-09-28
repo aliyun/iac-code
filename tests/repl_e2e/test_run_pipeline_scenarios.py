@@ -787,6 +787,29 @@ def test_expect_any_aborts_silent_non_cloud_wait_before_stream_timeout(tmp_path:
     assert pty._wait_diagnoses[-1]["state"] == "no_output"
 
 
+def test_expect_any_aborts_when_pipeline_finishes_before_first_stack_create(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    config_dir = tmp_path / "config"
+    display = config_dir / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text('{"type":"pipeline_completed"}\n', encoding="utf-8")
+    pty = _repl_pty_unit_instance(
+        runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={"IAC_CODE_CONFIG_DIR": str(config_dir)}
+    )
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+
+    class Child:
+        def expect(self, _patterns, timeout):
+            clock[0] += runner.WAIT_PROGRESS_SECONDS + 1
+            raise runner.pexpect.TIMEOUT("waiting")
+
+    pty.child = Child()
+    with pytest.raises(RuntimeError, match="pipeline completed before first stack create started"):
+        pty.expect_any(("ROS Deploy",), description="first stack create started", timeout=1800)
+
+
 def test_expect_any_allows_long_cloud_silence(tmp_path: Path, monkeypatch) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud"])

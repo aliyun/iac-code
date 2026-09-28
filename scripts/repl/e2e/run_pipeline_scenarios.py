@@ -605,6 +605,10 @@ class ReplPty:
                     index = child.expect(all_patterns, timeout=min(remaining, WAIT_POLL_SECONDS))
                 except pexpect.TIMEOUT:
                     elapsed = time.monotonic() - started
+                    if description == "first stack create started" and elapsed >= WAIT_PROGRESS_SECONDS:
+                        config_path = self.env.get("IAC_CODE_CONFIG_DIR")
+                        if config_path and _display_progress(Path(config_path)).get("pipeline_completed", 0):
+                            raise RuntimeError("pipeline completed before first stack create started")
                     if not diagnosed and elapsed >= self.args.wait_diagnosis_after:
                         diagnosed = self._diagnose_wait(description, transcript_offset, elapsed)
                     continue
