@@ -522,6 +522,26 @@ def test_backup_delay_uses_artifact_directory_for_multiple_windows(
     assert runner._backup_delay_marker(second, "arm").is_file()
 
 
+def test_backup_window_wait_allows_a_full_llm_turn(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class MarkerRequestedError(Exception):
+        pass
+
+    def wait_for_marker(_control: Path, marker: str, *, timeout: float) -> None:
+        assert marker == "started"
+        assert timeout == 1800.0
+        raise MarkerRequestedError
+
+    runtime = argparse.Namespace(args=argparse.Namespace(timeout=240.0, stream_timeout=1800.0))
+    harness = argparse.Namespace(start_stream=lambda **_kwargs: object())
+    a2a = argparse.Namespace(_wait_for_backup_delay_marker=wait_for_marker)
+    monkeypatch.setattr(runner, "_initial_prompt", lambda _runtime: "test prompt")
+
+    with pytest.raises(MarkerRequestedError):
+        runner._run_a2a_input_during_backup(runtime, harness, a2a, object(), tmp_path / "control")
+
+
 @pytest.mark.parametrize("state", ["TASK_STATE_FAILED", "TASK_STATE_CANCELED"])
 def test_unexpected_a2a_terminal_state_fails_immediately(runner: ModuleType, state: str) -> None:
     summary = argparse.Namespace(

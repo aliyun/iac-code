@@ -2043,7 +2043,7 @@ def _run_a2a_input_during_backup(
                 "started",
                 # Reaching the next waiting boundary can include a real LLM turn.
                 # The short delay-sized timeout only applies after the marker exists.
-                timeout=runtime.args.timeout,
+                timeout=runtime.args.stream_timeout,
             )
             pending_state = harness.fetch_state(f"backup-window-{control_index:02d}-pending")
             observed_step, observed_kind, pending_data = _pending_from_pipeline_state(pending_state)
