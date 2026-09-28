@@ -1063,6 +1063,24 @@ def _all_event_values(run_dir: Path) -> list[Any]:
     return values
 
 
+def _public_journal_tool_names(config_dir: Path) -> list[str]:
+    """Read tool attribution from translated A2A envelopes, without result bodies."""
+    names: list[str] = []
+    for path in (config_dir / "projects").glob("*/*/pipeline/a2a-events.jsonl"):
+        for row in _read_json_lines(path):
+            envelopes = row.get("events") if isinstance(row, dict) else None
+            for envelope in envelopes if isinstance(envelopes, list) else [row]:
+                if not isinstance(envelope, dict) or envelope.get("eventType") not in {
+                    "tool_started", "tool_result", "artifact_created",
+                }:
+                    continue
+                data = envelope.get("data")
+                tool_name = data.get("toolName") if isinstance(data, dict) else None
+                if isinstance(tool_name, str):
+                    names.append(tool_name.lower())
+    return names
+
+
 def _walk(value: Any) -> Iterator[tuple[str, Any]]:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -2683,29 +2701,39 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
 
 
 def _repl_wait_selection(
-    pty: Any, runtime: ScenarioRuntime, *, after_restart: bool = False, await_controls: bool = False
+    pty: Any,
+    runtime: ScenarioRuntime,
+    *,
+    after_restart: bool = False,
+    await_controls: bool = False,
+    terminal_offset: int | None = None,
 ) -> None:
     runtime.repl_candidate_wait_count += 1
+    offset = (0 if await_controls else len(getattr(pty, "transcript", ""))) if terminal_offset is None else terminal_offset
     event, path = _wait_repl_display_event(
         runtime,
         event_type="candidate_selection_ready",
         occurrence=runtime.repl_candidate_wait_count,
         timeout=runtime.args.stream_timeout,
-        # On --continue, the saved selection screen can be replayed before the
-        # live cbreak reader exists. Keep PTY output for the live-ready handshake.
-        drain_output=None if after_restart or await_controls else getattr(pty, "drain_output", None),
+        # Always drain the PTY while the model renders the candidate screen;
+        # otherwise a full terminal buffer can block the durable event itself.
+        drain_output=getattr(pty, "drain_output", None),
         pty=pty,
     )
     options = event.get("payload", {}).get("options") if isinstance(event.get("payload"), dict) else None
     if isinstance(options, list):
         _record_diagnostic(runtime, "candidate_option_count", len(options))
     if after_restart or await_controls:
-        _legacy_repl_module()._expect_candidate_selection(
-            pty,
-            _python_namespace(runtime),
-            description="candidate selection restored after --continue" if after_restart else "candidate selection controls",
-            require_live_refresh=False,
-        )
+        repl = _legacy_repl_module()
+        deadline = time.monotonic() + min(runtime.args.stream_timeout, 30.0)
+        while time.monotonic() < deadline:
+            pty.drain_output()
+            rendered = repl._normalize_transcript(pty.transcript[offset:])
+            if any(re.search(pattern, rendered) for pattern in repl.CANDIDATE_SELECTION_READY_PATTERNS):
+                break
+            time.sleep(0.1)
+        else:
+            raise TimeoutError("candidate selection controls were not rendered after durable ready event")
         # The durable marker is recorded after waiting_input is set; one
         # rendered controls frame is sufficient to accept the next key.
         time.sleep(0.25)
@@ -3668,6 +3696,7 @@ def _run_repl(runtime: ScenarioRuntime) -> None:
                     description="running_step3 persisted deployment tool checkpoint",
                 )
             pty.terminate(force=True)
+            terminal_offset = len(pty.transcript) if profile == "running_step1" else None
             if profile == "running_step1":
                 runtime.repl_candidate_wait_count = max(
                     runtime.repl_candidate_wait_count,
@@ -3676,7 +3705,7 @@ def _run_repl(runtime: ScenarioRuntime) -> None:
             pty.spawn(extra_args=["--continue"])
             runtime.checks["REPL used --continue"] = True
             if profile == "running_step1":
-                _repl_wait_selection(pty, runtime, after_restart=True)
+                _repl_wait_selection(pty, runtime, after_restart=True, terminal_offset=terminal_offset)
                 _repl_select_current(pty)
                 _repl_wait_confirmation(pty, runtime)
                 if runtime.spec.cloud_write:
@@ -4845,6 +4874,8 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         runtime.checks["Aliyun business body and public payload contract passed"] = False
     tools = [item["tool"].lower() for item in _tool_sequence(values)]
     _record_diagnostic(runtime, "public_tool_event_count", len(tools))
+    journal_tools = _public_journal_tool_names(runtime.paths.config_dir)
+    _record_diagnostic(runtime, "public_journal_aliyun_count", journal_tools.count("aliyun_api"))
     runtime.checks["public events preserve Aliyun tool attribution"] = "aliyun_api" in tools
     if "aliyun_api" not in tools:
         runtime.notes.append("public tool attribution observed: " + ", ".join(sorted(set(tools))))

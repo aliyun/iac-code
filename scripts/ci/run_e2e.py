@@ -479,7 +479,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         diagnostics: dict[str, Any] = {}
         for key in (
             "confirmation_event_count", "ros_deploy_event_count", "public_tool_event_count",
-            "repl_confirmation_count", "candidate_option_count",
+            "public_journal_aliyun_count", "repl_confirmation_count", "candidate_option_count",
         ):
             count = raw_diagnostics.get(key)
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:

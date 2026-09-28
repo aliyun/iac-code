@@ -1819,10 +1819,10 @@ def test_repl_selection_after_restart_waits_for_live_controls(
         args=argparse.Namespace(stream_timeout=1.0),
         repl_candidate_wait_count=0,
     )
-    pty = argparse.Namespace(events=[], drain_output=lambda: calls.append("drain"))
+    pty = argparse.Namespace(events=[], transcript="Enter to confirm", drain_output=lambda: calls.append("drain"))
 
     def wait_for_display(*_args: object, **kwargs: object) -> tuple[dict[str, str], Path]:
-        calls.append(("journal", kwargs["drain_output"]))
+        calls.append(("journal", callable(kwargs["drain_output"])))
         return {"type": "candidate_selection_ready"}, tmp_path
 
     monkeypatch.setattr(
@@ -1834,16 +1834,15 @@ def test_repl_selection_after_restart_waits_for_live_controls(
         runner,
         "_legacy_repl_module",
         lambda: argparse.Namespace(
-            _expect_candidate_selection=lambda *_args, **kwargs: calls.append(
-                ("controls", kwargs["require_live_refresh"])
-            )
+            _normalize_transcript=lambda value: value,
+            CANDIDATE_SELECTION_READY_PATTERNS=("Enter to confirm",),
         ),
     )
     monkeypatch.setattr(runner, "_python_namespace", lambda _runtime: argparse.Namespace())
 
-    runner._repl_wait_selection(pty, runtime, after_restart=True)
+    runner._repl_wait_selection(pty, runtime, after_restart=True, terminal_offset=0)
 
-    assert calls == [("journal", None), ("controls", False)]
+    assert calls == [("journal", True), "drain"]
     assert runtime.repl_candidate_wait_count == 1
 
 
@@ -2093,6 +2092,7 @@ def test_repl_running_step1_resume_waits_on_candidate_boundary_without_second_st
     class Pty:
         def __init__(self, **_kwargs: object) -> None:
             self.events: list[dict[str, object]] = []
+            self.transcript = ""
 
         def spawn(self, *, extra_args: list[str] | None = None) -> None:
             calls.append(("spawn", extra_args))
@@ -2919,6 +2919,21 @@ def test_repl_natural_adjustment_uses_distinct_reserved_subnet(runner: ModuleTyp
     runtime = argparse.Namespace(cidr="10.250.0.0/24")
 
     assert runner._repl_natural_adjusted_cidr(runtime) == "10.250.0.128/25"
+
+
+def test_public_journal_tool_names_reads_only_translated_tool_envelopes(runner: ModuleType, tmp_path: Path) -> None:
+    journal = tmp_path / "projects" / "project" / "session" / "pipeline" / "a2a-events.jsonl"
+    journal.parent.mkdir(parents=True)
+    journal.write_text(
+        json.dumps({"events": [
+            {"eventType": "tool_result", "data": {"toolName": "aliyun_api", "result": "private"}},
+            {"eventType": "text_delta", "data": {"toolName": "private"}},
+            {"eventType": "tool_started", "data": {"toolName": "ros_deploy"}},
+        ]}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert runner._public_journal_tool_names(tmp_path) == ["aliyun_api", "ros_deploy"]
 
 
 def test_repl_question_waits_for_actual_input_prompt(runner: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
