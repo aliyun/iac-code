@@ -2352,6 +2352,15 @@ def _select_default_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
         pty.send("\r", label="select-default-candidate")
 
 
+def _select_cleanup_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
+    # The first candidate is already selected. A digit and Enter in one PTY
+    # write can redraw the selector between the two keys and lose Enter.
+    if args.selection_prompt.strip() in {"", "1"}:
+        pty.send("\r", label="select-default-candidate")
+    else:
+        _select_default_candidate(pty, args)
+
+
 def _expect_initial_prompt(pty: ReplPty, args: argparse.Namespace) -> None:
     pty.expect_any(REPL_PROMPT_PATTERNS, description="initial prompt", timeout=args.timeout)
     pty.expect_any(REPL_INPUT_READY_PATTERNS, description="prompt input ready", timeout=args.timeout)
@@ -3022,7 +3031,7 @@ def _run_rollback_step5_cleanup(
         )
         checks["initial reached step4 selection"] = True
 
-        _select_default_candidate(pty, args)
+        _select_cleanup_candidate(pty, args)
         checks["initial candidate selected"] = True
         pty.expect_any(
             CREATE_STACK_STARTED_PATTERNS,
@@ -3056,7 +3065,7 @@ def _run_rollback_step5_cleanup(
         checks["rollback cleanup ledger includes first stack"] = first_stack_id in cleanup_stack_ids
         checks["rollback cleanup target stacks observed"] = bool(cleanup_stack_ids)
 
-        _select_default_candidate(pty, args)
+        _select_cleanup_candidate(pty, args)
         checks["post-rollback candidate selected"] = True
         second_deployment_offset = len(pty.transcript)
         pty.expect_any(
