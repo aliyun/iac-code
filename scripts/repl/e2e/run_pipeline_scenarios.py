@@ -979,8 +979,17 @@ def _display_progress(config_dir: Path) -> dict[str, int]:
                 counts[key] = min(counts.get(key, 0) + 1, 10000)
             if event_type == "tool_used":
                 payload = event.get("payload")
-                if isinstance(payload, dict) and payload.get("name") == "ros_deploy":
-                    counts["ros_deploy_used"] = min(counts.get("ros_deploy_used", 0) + 1, 10000)
+                if isinstance(payload, dict):
+                    tool_name = payload.get("name")
+                    tool_counts = {
+                        "ros_deploy": "ros_deploy_used",
+                        "aliyun_api": "aliyun_api_used",
+                        "ros_stack": "ros_stack_used",
+                        "bash": "bash_used",
+                    }
+                    key = tool_counts.get(tool_name) if isinstance(tool_name, str) else None
+                    if key:
+                        counts[key] = min(counts.get(key, 0) + 1, 10000)
             if event_type == "pipeline_completed":
                 payload = event.get("payload")
                 if isinstance(payload, dict) and payload.get("early_exit") is True:

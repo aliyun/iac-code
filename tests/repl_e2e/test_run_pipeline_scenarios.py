@@ -3152,6 +3152,9 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
             {"type": "step_started", "step_id": "deploying"},
             {"type": "step_completed", "step_id": "deploying"},
             {"type": "tool_used", "payload": {"name": "ros_deploy", "secret": "sk-fixture"}},
+            {"type": "tool_used", "payload": {"name": "aliyun_api", "secret": "sk-fixture"}},
+            {"type": "tool_used", "payload": {"name": "ros_stack", "secret": "sk-fixture"}},
+            {"type": "tool_used", "payload": {"name": "bash", "secret": "sk-fixture"}},
             {"type": "pipeline_completed", "payload": {"early_exit": True, "secret": "sk-fixture"}},
             {"type": "stack_progress", "payload": {"status": "CREATE_COMPLETE", "stack_id": "secret-id"}},
         )) + "\n",
@@ -3163,6 +3166,7 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
         "step_started": 1, "step_started_deploying": 1,
         "step_completed": 1, "step_completed_deploying": 1,
         "ros_deploy_used": 1,
+        "aliyun_api_used": 1, "ros_stack_used": 1, "bash_used": 1,
         "pipeline_completed": 1, "pipeline_completed_early_exit": 1,
         "stack_progress": 1, "stack_progress_create_complete": 1, "cleanup_ledger_files": 1,
     }
