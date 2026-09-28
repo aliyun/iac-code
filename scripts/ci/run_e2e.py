@@ -450,6 +450,11 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             }
             if isinstance(cue, str) and cue in {"ask_question", "candidate_controls", "repl_prompt", "none"}:
                 watchdog["cue"] = cue
+    raw_progress = summary.get("progress")
+    allowed_progress = {
+        "candidate_selection_ready", "user_input_required", "user_input_received",
+        "step_started", "step_completed", "pipeline_completed", "pipeline_failed",
+    }
     public = {
         "case_id": summary.get("case_id"),
         "scenario": summary.get("scenario"),
@@ -459,6 +464,14 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         if isinstance(checks, dict)
         else {},
     }
+    if isinstance(raw_progress, dict):
+        public["progress"] = {
+            key: value for key, value in raw_progress.items()
+            if key in allowed_progress
+            and isinstance(value, int)
+            and not isinstance(value, bool)
+            and 0 <= value <= 10000
+        }
     cleanup_diagnostic = summary.get("cleanup_diagnostic")
     if isinstance(cleanup_diagnostic, dict):
         safe_cleanup_diagnostic: dict[str, Any] = {}

@@ -218,6 +218,7 @@ class ScenarioRunResult:
     abort_reason: str = ""
     notes: list[str] = field(default_factory=list)
     watchdog: dict[str, Any] | None = None
+    progress: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -928,11 +929,36 @@ def _run_with_pty(
             abort_reason=abort_reason,
             notes=notes,
             watchdog=(getattr(pty, "_wait_diagnoses", []) or [None])[-1],
+            progress=_display_progress(runtime_paths.config_dir),
         )
         _write_run_artifacts(run_dir=run_dir, env=env, raw_transcript=pty.transcript, events=pty.events, result=result)
         _print_result(result)
 
     return 0 if passed else 1
+
+
+def _display_progress(config_dir: Path) -> dict[str, int]:
+    """Count fixed display event types without exposing event payloads."""
+
+    allowed = {
+        "candidate_selection_ready", "user_input_required", "user_input_received",
+        "step_started", "step_completed", "pipeline_completed", "pipeline_failed",
+    }
+    counts: dict[str, int] = {}
+    for path in config_dir.glob("projects/*/*/pipeline/display.jsonl"):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = event.get("type") if isinstance(event, dict) else None
+            if event_type in allowed:
+                counts[event_type] = min(counts.get(event_type, 0) + 1, 10000)
+    return counts
 
 
 def _print_result(result: ScenarioRunResult) -> None:
@@ -2343,22 +2369,10 @@ def _apply_acceptance_checks(
 
 
 def _select_default_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
-    # The selection hint can be rendered before the raw key reader takes over.
-    # Give that handoff the same settling time used after restored selection.
-    time.sleep(0.5)
     if args.selection_prompt:
         pty.send(f"{args.selection_prompt}\r", label="select-default-candidate")
     else:
         pty.send("\r", label="select-default-candidate")
-
-
-def _select_cleanup_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
-    # The first candidate is already selected. A digit and Enter in one PTY
-    # write can redraw the selector between the two keys and lose Enter.
-    if args.selection_prompt.strip() in {"", "1"}:
-        pty.send("\r", label="select-default-candidate")
-    else:
-        _select_default_candidate(pty, args)
 
 
 def _expect_initial_prompt(pty: ReplPty, args: argparse.Namespace) -> None:
@@ -3031,7 +3045,7 @@ def _run_rollback_step5_cleanup(
         )
         checks["initial reached step4 selection"] = True
 
-        _select_cleanup_candidate(pty, args)
+        _select_default_candidate(pty, args)
         checks["initial candidate selected"] = True
         pty.expect_any(
             CREATE_STACK_STARTED_PATTERNS,
@@ -3065,7 +3079,7 @@ def _run_rollback_step5_cleanup(
         checks["rollback cleanup ledger includes first stack"] = first_stack_id in cleanup_stack_ids
         checks["rollback cleanup target stacks observed"] = bool(cleanup_stack_ids)
 
-        _select_cleanup_candidate(pty, args)
+        _select_default_candidate(pty, args)
         checks["post-rollback candidate selected"] = True
         second_deployment_offset = len(pty.transcript)
         pty.expect_any(

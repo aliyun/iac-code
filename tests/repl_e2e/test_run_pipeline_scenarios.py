@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
 import sys
@@ -3036,14 +3037,14 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
         ("expect", "prompt input ready"),
         ("sendline", runner._cleanup_pipeline_prompt(args, tmp_path)),
         ("expect", "initial candidate selection or clarification visible"),
-        ("select-default-candidate", "\r"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
         ("send-esc", "\x1b"),
         ("expect", "deploying interrupt input visible"),
         ("expect", "deploying interrupt input ready"),
         ("sendline", runner._cleanup_rollback_prompt(args, tmp_path)),
         ("expect", "post-rollback candidate selection or clarification visible"),
-        ("select-default-candidate", "\r"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after second deployment"),
         ("expect", "cleanup start or normal follow-up prompt input ready"),
         ("sendline", args.normal_followup_prompt),
@@ -3052,6 +3053,24 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
         ("expect", "post-cleanup prompt input ready"),
         ("sendline", "/exit"),
     ]
+
+
+def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
+    runner = _load_runner()
+    display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text(
+        "\n".join(json.dumps(event) for event in (
+            {"type": "candidate_selection_ready", "payload": {"secret": "sk-fixture"}},
+            {"type": "user_input_received"},
+            {"type": "private-sk-fixture"},
+        )) + "\n",
+        encoding="utf-8",
+    )
+
+    assert runner._display_progress(tmp_path) == {
+        "candidate_selection_ready": 1, "user_input_received": 1,
+    }
 
 
 def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch) -> None:
@@ -3296,14 +3315,14 @@ def test_rollback_step5_cleanup_recovery_runs_expected_terminal_flow(monkeypatch
         ("expect", "prompt input ready"),
         ("sendline", runner._cleanup_pipeline_prompt(args, tmp_path)),
         ("expect", "initial candidate selection or clarification visible"),
-        ("select-default-candidate", "\r"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
         ("send-esc", "\x1b"),
         ("expect", "deploying interrupt input visible"),
         ("expect", "deploying interrupt input ready"),
         ("sendline", runner._cleanup_rollback_prompt(args, tmp_path)),
         ("expect", "post-rollback candidate selection or clarification visible"),
-        ("select-default-candidate", "\r"),
+        ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "pipeline completed after second deployment"),
         ("expect", "cleanup start or normal follow-up prompt input ready"),
         ("sendline", args.normal_followup_prompt),

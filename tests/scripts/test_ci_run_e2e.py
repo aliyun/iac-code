@@ -313,6 +313,10 @@ def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
             "waitingFor": "pipeline completed", "elapsedSeconds": 125.33,
             "action": "early_abort", "cue": "ask_question", "raw": "secret-fixture-value",
         },
+        "progress": {
+            "candidate_selection_ready": 2, "user_input_received": 1,
+            "private-token-sk-fixture": 9, "step_started": True,
+        },
     }
 
     public = run_e2e._public_live_summary(summary)
@@ -322,6 +326,7 @@ def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
         "state": "waiting_for_input", "waitingFor": "pipeline completed",
         "elapsedSeconds": 125.3, "action": "early_abort", "cue": "ask_question",
     }
+    assert public["progress"] == {"candidate_selection_ready": 2, "user_input_received": 1}
     assert "secret-fixture-value" not in json.dumps(public)
     assert run_e2e._public_live_summary({
         "watchdog": {**summary["watchdog"], "waitingFor": "secret: sk-fixture"}
