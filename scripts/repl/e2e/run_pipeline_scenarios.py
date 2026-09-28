@@ -1543,6 +1543,10 @@ def _wait_for_latest_observed_stack_id(pty: Any, *, exclude: set[str], timeout: 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         stack_id = _latest_observed_stack_id(pty, exclude=exclude)
+        config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+        progress = _display_progress(Path(config_path)) if config_path else {}
+        if progress.get("step_completed_deploying") or progress.get("pipeline_completed"):
+            raise RuntimeError("deploying finished before rollback observed a ROS stack")
         if stack_id:
             return stack_id
         time.sleep(0.5)
@@ -3116,6 +3120,11 @@ def _run_rollback_step5_cleanup(
         _select_default_candidate(pty, args)
         checks["initial candidate selected"] = True
         _expect_first_stack_create_started(pty, args)
+
+        first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
+        pty.cleanup_first_stack_id = first_stack_id
+        checks["first rollback stack observed before rollback"] = bool(first_stack_id)
+
         pty.send("\x1b", label="send-esc")
         checks["esc sent during deploying"] = True
         _expect_interrupt_input_ready(
@@ -3125,10 +3134,6 @@ def _run_rollback_step5_cleanup(
             ready_description="deploying interrupt input ready",
         )
         checks["deploying interrupt input ready"] = True
-
-        first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
-        pty.cleanup_first_stack_id = first_stack_id
-        checks["first rollback stack observed before rollback"] = bool(first_stack_id)
 
         pty.sendline(_cleanup_rollback_prompt(args, pty.run_dir))
         checks["rollback prompt sent"] = True

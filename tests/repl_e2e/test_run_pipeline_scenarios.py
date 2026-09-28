@@ -3036,7 +3036,11 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
             rollback_vswitch_cidr="172.31.254.0/24",
         ),
     )
-    monkeypatch.setattr(runner, "_wait_for_latest_observed_stack_id", lambda *_, **__: "first-stack-id")
+    def observe_first_stack(*_, **__) -> str:
+        actions.append(("stack-observed", "first-stack-id"))
+        return "first-stack-id"
+
+    monkeypatch.setattr(runner, "_wait_for_latest_observed_stack_id", observe_first_stack)
     monkeypatch.setattr(runner, "_cleanup_target_stack_ids", lambda *_, **__: ["first-stack-id"])
     monkeypatch.setattr(runner, "_wait_for_cleanup_resource_status", lambda *_, **__: None)
     monkeypatch.setattr(
@@ -3052,7 +3056,7 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
     ordered_actions = [
         (kind, value)
         for kind, value in actions
-        if kind in {"expect", "send-esc", "sendline", "select-default-candidate"}
+        if kind in {"expect", "send-esc", "sendline", "select-default-candidate", "stack-observed"}
         or (kind == "expect_optional" and value == "cleanup completed")
     ]
     assert ordered_actions == [
@@ -3062,6 +3066,7 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
         ("expect", "initial candidate selection or clarification visible"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
+        ("stack-observed", "first-stack-id"),
         ("send-esc", "\x1b"),
         ("expect", "deploying interrupt input visible"),
         ("expect", "deploying interrupt input ready"),
@@ -3150,6 +3155,20 @@ def test_first_stack_create_rejects_deploy_event_after_step_completed(tmp_path: 
 
     with pytest.raises(RuntimeError, match="ROS deployment finished before rollback interrupt"):
         runner._expect_first_stack_create_started(FakePty(), args)
+
+
+def test_first_stack_observation_stops_when_deploying_finishes_without_stack(tmp_path: Path) -> None:
+    runner = _load_runner()
+    config_dir = tmp_path / "config"
+    display = config_dir / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text('{"type":"step_completed","step_id":"deploying"}\n', encoding="utf-8")
+
+    class FakePty:
+        env = {"IAC_CODE_CONFIG_DIR": str(config_dir)}
+
+    with pytest.raises(RuntimeError, match="deploying finished before rollback observed a ROS stack"):
+        runner._wait_for_latest_observed_stack_id(FakePty(), exclude=set(), timeout=10)
 
 
 def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch) -> None:
