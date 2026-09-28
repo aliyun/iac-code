@@ -2663,22 +2663,32 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
     )
 
 
-def _repl_wait_selection(pty: Any, runtime: ScenarioRuntime) -> None:
+def _repl_wait_selection(pty: Any, runtime: ScenarioRuntime, *, after_restart: bool = False) -> None:
     runtime.repl_candidate_wait_count += 1
     event, path = _wait_repl_display_event(
         runtime,
         event_type="candidate_selection_ready",
         occurrence=runtime.repl_candidate_wait_count,
         timeout=runtime.args.stream_timeout,
-        drain_output=getattr(pty, "drain_output", None),
+        # On --continue, the saved selection screen can be replayed before the
+        # live cbreak reader exists. Keep PTY output for the live-ready handshake.
+        drain_output=None if after_restart else getattr(pty, "drain_output", None),
         pty=pty,
     )
-    # The journal entry precedes the terminal renderer. Let its cbreak key
-    # reader become active before the scenario sends arrow or Enter keys.
-    time.sleep(0.5)
-    drain_output = getattr(pty, "drain_output", None)
-    if callable(drain_output):
-        drain_output()
+    if after_restart:
+        _legacy_repl_module()._expect_candidate_selection(
+            pty,
+            _python_namespace(runtime),
+            description="candidate selection restored after --continue",
+            require_live_refresh=True,
+        )
+    else:
+        # The journal entry precedes the terminal renderer. Let its cbreak key
+        # reader become active before the scenario sends arrow or Enter keys.
+        time.sleep(0.5)
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
     pty.events.append(
         {
             "type": "display-event",
@@ -3620,12 +3630,15 @@ def _run_repl(runtime: ScenarioRuntime) -> None:
                     description="running_step3 persisted deployment tool checkpoint",
                 )
             pty.terminate(force=True)
+            if profile == "running_step1":
+                runtime.repl_candidate_wait_count = max(
+                    runtime.repl_candidate_wait_count,
+                    sum(event.get("type") == "candidate_selection_ready" for event in _read_repl_display_events(runtime)),
+                )
             pty.spawn(extra_args=["--continue"])
             runtime.checks["REPL used --continue"] = True
             if profile == "running_step1":
-                _repl_wait_selection(pty, runtime)
-                time.sleep(0.5)
-                pty.drain_output()
+                _repl_wait_selection(pty, runtime, after_restart=True)
                 _repl_select_current(pty)
                 _repl_wait_confirmation(pty, runtime)
                 if runtime.spec.cloud_write:

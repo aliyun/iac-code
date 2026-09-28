@@ -1810,6 +1810,43 @@ def test_repl_selection_waits_for_durable_display_event_occurrence(runner: Modul
     ]
 
 
+def test_repl_selection_after_restart_waits_for_live_controls(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[object] = []
+    runtime = argparse.Namespace(
+        paths=argparse.Namespace(config_dir=tmp_path),
+        args=argparse.Namespace(stream_timeout=1.0),
+        repl_candidate_wait_count=0,
+    )
+    pty = argparse.Namespace(events=[], drain_output=lambda: calls.append("drain"))
+
+    def wait_for_display(*_args: object, **kwargs: object) -> tuple[dict[str, str], Path]:
+        calls.append(("journal", kwargs["drain_output"]))
+        return {"type": "candidate_selection_ready"}, tmp_path
+
+    monkeypatch.setattr(
+        runner,
+        "_wait_repl_display_event",
+        wait_for_display,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_legacy_repl_module",
+        lambda: argparse.Namespace(
+            _expect_candidate_selection=lambda *_args, **kwargs: calls.append(
+                ("controls", kwargs["require_live_refresh"])
+            )
+        ),
+    )
+    monkeypatch.setattr(runner, "_python_namespace", lambda _runtime: argparse.Namespace())
+
+    runner._repl_wait_selection(pty, runtime, after_restart=True)
+
+    assert calls == [("journal", None), ("controls", True)]
+    assert runtime.repl_candidate_wait_count == 1
+
+
 def test_repl_candidate_waiting_restart_uses_durable_events_and_handoff_delay(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2073,9 +2110,10 @@ def test_repl_running_step1_resume_waits_on_candidate_boundary_without_second_st
     runtime = argparse.Namespace(
         args=argparse.Namespace(stream_timeout=1.0),
         env={},
-        paths=argparse.Namespace(run_dir=tmp_path, workspace_dir=tmp_path),
+        paths=argparse.Namespace(run_dir=tmp_path, workspace_dir=tmp_path, config_dir=tmp_path),
         spec=argparse.Namespace(profile="running_step1", cloud_write=False),
         checks={},
+        repl_candidate_wait_count=0,
         event=lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(runner, "_legacy_repl_module", lambda: fake_repl)
@@ -2086,7 +2124,7 @@ def test_repl_running_step1_resume_waits_on_candidate_boundary_without_second_st
         "_repl_wait_step_started",
         lambda *_args, **kwargs: calls.append(("step-started", kwargs["occurrence"])),
     )
-    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
+    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
     monkeypatch.setattr(runner, "_repl_select_current", lambda *_args: calls.append("select"))
     monkeypatch.setattr(runner, "_repl_wait_confirmation", lambda *_args: calls.append("confirmation"))
     monkeypatch.setattr(runner, "_repl_choose_direct_input", lambda *_args: calls.append("cancel"))
