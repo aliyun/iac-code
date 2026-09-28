@@ -924,6 +924,10 @@ def _run_with_pty(
                 notes.append(f"terminal child termination failed: {type(exc).__name__}: {exc}")
                 if passed:
                     passed = False
+        progress = _display_progress(runtime_paths.config_dir)
+        ledger_path = _cleanup_ledger_path(pty)
+        progress["cleanup_ledger_found"] = int(ledger_path is not None and ledger_path.is_file())
+        progress["observed_stack_count"] = min(len(_observed_create_stack_ids(pty)), 10000)
         result = ScenarioRunResult(
             scenario=scenario,
             run_dir=str(run_dir),
@@ -933,7 +937,7 @@ def _run_with_pty(
             abort_reason=abort_reason,
             notes=notes,
             watchdog=(getattr(pty, "_wait_diagnoses", []) or [None])[-1],
-            progress=_display_progress(runtime_paths.config_dir),
+            progress=progress,
         )
         _write_run_artifacts(run_dir=run_dir, env=env, raw_transcript=pty.transcript, events=pty.events, result=result)
         _print_result(result)
@@ -946,7 +950,7 @@ def _display_progress(config_dir: Path) -> dict[str, int]:
 
     allowed = {
         "candidate_selection_ready", "user_input_required", "user_input_received",
-        "step_started", "step_completed", "pipeline_completed", "pipeline_failed",
+        "step_started", "step_completed", "pipeline_completed", "pipeline_failed", "stack_progress",
     }
     counts: dict[str, int] = {}
     for path in config_dir.glob("projects/*/*/pipeline/display.jsonl"):
@@ -981,6 +985,15 @@ def _display_progress(config_dir: Path) -> dict[str, int]:
                     counts["pipeline_completed_early_exit"] = min(
                         counts.get("pipeline_completed_early_exit", 0) + 1, 10000
                     )
+            if event_type == "stack_progress":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and payload.get("status") == "CREATE_COMPLETE":
+                    counts["stack_progress_create_complete"] = min(
+                        counts.get("stack_progress_create_complete", 0) + 1, 10000
+                    )
+    counts["cleanup_ledger_files"] = min(
+        sum(1 for _ in config_dir.glob("projects/*/*/pipeline/cleanup.yaml")), 10000
+    )
     return counts
 
 

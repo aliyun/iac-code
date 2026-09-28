@@ -3142,6 +3142,7 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
     runner = _load_runner()
     display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
     display.parent.mkdir(parents=True)
+    (display.parent / "cleanup.yaml").write_text("observed_resources: []\n", encoding="utf-8")
     display.write_text(
         "\n".join(json.dumps(event) for event in (
             {"type": "candidate_selection_ready", "payload": {"secret": "sk-fixture"}},
@@ -3152,6 +3153,7 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
             {"type": "step_completed", "step_id": "deploying"},
             {"type": "tool_used", "payload": {"name": "ros_deploy", "secret": "sk-fixture"}},
             {"type": "pipeline_completed", "payload": {"early_exit": True, "secret": "sk-fixture"}},
+            {"type": "stack_progress", "payload": {"status": "CREATE_COMPLETE", "stack_id": "secret-id"}},
         )) + "\n",
         encoding="utf-8",
     )
@@ -3162,6 +3164,7 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
         "step_completed": 1, "step_completed_deploying": 1,
         "ros_deploy_used": 1,
         "pipeline_completed": 1, "pipeline_completed_early_exit": 1,
+        "stack_progress": 1, "stack_progress_create_complete": 1, "cleanup_ledger_files": 1,
     }
 
 
