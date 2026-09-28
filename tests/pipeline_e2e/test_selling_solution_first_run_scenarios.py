@@ -2936,6 +2936,17 @@ def test_public_journal_tool_names_reads_only_translated_tool_envelopes(runner: 
     assert runner._public_journal_tool_names(tmp_path) == ["aliyun_api", "ros_deploy"]
 
 
+def test_public_a2a_tool_use_ids_ignores_non_tool_payloads(runner: ModuleType) -> None:
+    attributed = {"metadata": {"iac_code": {"pipeline": {
+        "eventType": "tool_result", "data": {"toolName": "aliyun_api", "toolUseId": "call-1"},
+    }}}}
+    text_only = {"metadata": {"iac_code": {"pipeline": {
+        "eventType": "text_delta", "data": {"toolUseId": "private"},
+    }}}}
+
+    assert runner._public_a2a_tool_use_ids([attributed, text_only]) == {"call-1"}
+
+
 def test_repl_question_waits_for_actual_input_prompt(runner: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, object]] = []
 

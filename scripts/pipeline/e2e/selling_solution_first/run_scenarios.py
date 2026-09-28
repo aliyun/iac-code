@@ -1081,6 +1081,20 @@ def _public_journal_tool_names(config_dir: Path) -> list[str]:
     return names
 
 
+def _public_a2a_tool_use_ids(values: Sequence[Any]) -> set[str]:
+    extract = _legacy_a2a_module()._extract_pipeline_envelopes
+    ids: set[str] = set()
+    for value in values:
+        for envelope in extract(value):
+            if envelope.get("eventType") not in {"tool_started", "tool_result", "artifact_created"}:
+                continue
+            data = envelope.get("data")
+            tool_use_id = data.get("toolUseId") if isinstance(data, dict) else None
+            if isinstance(tool_use_id, str) and tool_use_id:
+                ids.add(tool_use_id)
+    return ids
+
+
 def _walk(value: Any) -> Iterator[tuple[str, Any]]:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -4844,8 +4858,10 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         with contextlib.suppress(OSError, json.JSONDecodeError):
             values.append(json.loads(web_payload_path.read_text(encoding="utf-8")))
     forbidden_values = _copied_credential_values(runtime)
+    persisted_tool_use_id = ""
     try:
         persisted_path, tool_result = contract.find_latest_aliyun_tool_result(runtime.paths.config_dir)
+        persisted_tool_use_id = str(tool_result.get("tool_use_id") or "")
         content = tool_result.get("content")
         metadata = tool_result.get("metadata")
         if not isinstance(content, str) or not isinstance(metadata, dict):
@@ -4876,6 +4892,11 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
     _record_diagnostic(runtime, "public_tool_event_count", len(tools))
     journal_tools = _public_journal_tool_names(runtime.paths.config_dir)
     _record_diagnostic(runtime, "public_journal_aliyun_count", journal_tools.count("aliyun_api"))
+    if runtime.spec.surface is Surface.A2A and persisted_tool_use_id:
+        _record_diagnostic(
+            runtime, "persisted_aliyun_tool_publicly_seen",
+            persisted_tool_use_id in _public_a2a_tool_use_ids(values),
+        )
     runtime.checks["public events preserve Aliyun tool attribution"] = "aliyun_api" in tools
     if "aliyun_api" not in tools:
         runtime.notes.append("public tool attribution observed: " + ", ".join(sorted(set(tools))))

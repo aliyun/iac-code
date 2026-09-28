@@ -484,7 +484,10 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             count = raw_diagnostics.get(key)
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
                 diagnostics[key] = count
-        for key in ("repl_solution_summary_changed", "repl_effective_parameters_changed"):
+        for key in (
+            "repl_solution_summary_changed", "repl_effective_parameters_changed",
+            "persisted_aliyun_tool_publicly_seen",
+        ):
             if isinstance(raw_diagnostics.get(key), bool):
                 diagnostics[key] = raw_diagnostics[key]
         pending_kinds = raw_diagnostics.get("a2a_pending_kinds")
