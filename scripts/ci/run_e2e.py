@@ -691,7 +691,7 @@ def run_case(
     (case_dir / "summary.json").unlink(missing_ok=True)
     # Permission scripts create their run directory with exist_ok=False. Keep their
     # workspace below the case directory so the parent can hold process logs.
-    needs_fresh_dir = case.name.startswith("permission-") or case.live_runner == "selector"
+    needs_fresh_dir = case.name.startswith("permission-") or case.live_runner in {"selector", "repl"}
     script_dir = case_dir / ("scenario-" + uuid.uuid4().hex) if needs_fresh_dir else case_dir
     command = [sys.executable, str(REPO_ROOT / case.script), "--run-dir", str(script_dir), *case.args]
     case_user_id = "iac_user_e2e_" + uuid.uuid4().hex

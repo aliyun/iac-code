@@ -483,6 +483,10 @@ def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
     assert result["command"] == [case.name]
     assert "fixture-secret" not in json.dumps(result)
     assert (tmp_path / "report" / "runs" / case.name / "config" / ".credentials.yml").is_file()
+    if runner == "repl":
+        scenarios = list((tmp_path / "report" / "runs" / case.name).glob("scenario-*"))
+        assert len(scenarios) == 1
+        assert len(scenarios[0].name.removeprefix("scenario-")) == 32
 
 
 def test_smoke_adapter_has_model_config_but_no_cloud_credentials(
@@ -548,6 +552,7 @@ def test_cloud_helper_generates_per_case_sts_without_leaking_bootstrap_token(
             "assert 'AKLESS_BOOTSTRAP_TOKEN' not in os.environ\n"
             "assert 'DASHSCOPE_API_KEY' not in os.environ\n"
             "assert (source / '.cloud-credentials.yml').read_text(encoding='utf-8') == 'temporary-sts'\n"
+            "run_dir.mkdir(parents=True, exist_ok=True)\n"
             "(run_dir / 'summary.json').write_text(json.dumps({'passed': True}), encoding='utf-8')\n"
         )
     source = tmp_path / "source"
