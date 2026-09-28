@@ -96,7 +96,27 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _claim_remnant_admits_input_recovery(document: dict[str, Any]) -> bool:
+def _settled_ros_stack_operations(document: dict[str, Any]) -> bool:
+    """Recognize completed ROS stack writes whose resource identity was recorded."""
+
+    operations = document.get("externalOperations")
+    return isinstance(operations, list) and bool(operations) and all(
+        isinstance(operation, dict)
+        and operation.get("product") == "ros"
+        and operation.get("action") in {"CreateStack", "UpdateStack", "DeleteStack", "ContinueCreateStack"}
+        and operation.get("outcome") == "accepted"
+        and operation.get("resourceType") == "stack"
+        and isinstance(operation.get("resourceId"), str)
+        and bool(operation["resourceId"])
+        and isinstance(operation.get("regionId"), str)
+        and bool(operation["regionId"])
+        for operation in operations
+    )
+
+
+def _claim_remnant_admits_input_recovery(
+    document: dict[str, Any], *, allow_settled_ros_stack_operations: bool = False
+) -> bool:
     """Admit a dead publisher's remnant only for a sidecar-proven input wait.
 
     The caller must already have proved the durable input wait, or separately
@@ -127,7 +147,11 @@ def _claim_remnant_admits_input_recovery(document: dict[str, Any]) -> bool:
         return False
     if document.get("terminationReason") is not None or document.get("naturalHandoff") is not None:
         return False
-    if document.get("pauseId") is not None or document.get("externalOperations"):
+    if document.get("pauseId") is not None:
+        return False
+    if document.get("externalOperations") and not (
+        allow_settled_ros_stack_operations and _settled_ros_stack_operations(document)
+    ):
         return False
     revisions = (document.get("revision"), document.get("persistedRevision"))
     if any(
@@ -143,7 +167,7 @@ def _claim_remnant_admits_input_recovery(document: dict[str, Any]) -> bool:
     return isinstance(backup, dict) and backup.get("status") in {None, "not_requested", "disabled"}
 
 
-def _claim_remnant_admits_replacement(document: dict[str, Any]) -> bool:
+def _claim_remnant_admits_replacement(document: dict[str, Any], task_id: str) -> bool:
     """Allow a dead owner's settled claim when no subprocess tool was in flight.
 
     Older snapshots have no durable subprocess accounting and cannot establish
@@ -155,7 +179,10 @@ def _claim_remnant_admits_replacement(document: dict[str, Any]) -> bool:
         and document["subprocessToolTrackingVersion"] == 1
         and type(document.get("activeSubprocessTools")) is int
         and document["activeSubprocessTools"] == 0
-        and _claim_remnant_admits_input_recovery(document)
+        and _claim_remnant_admits_input_recovery(
+            document,
+            allow_settled_ros_stack_operations=document.get("taskId") == task_id,
+        )
     )
 
 
@@ -363,6 +390,7 @@ class _RecoverableInputAdmissionStore:
             if not self._persisted_control_allows_begin_without_admission(
                 previous_control,
                 context_id=context_id,
+                task_id=str(control_snapshot["taskId"]),
                 local_execution_id=local_execution_id,
                 local_server_instance_id=local_server_instance_id,
             ):
@@ -413,6 +441,7 @@ class _RecoverableInputAdmissionStore:
         control: dict[str, Any] | None,
         *,
         context_id: str,
+        task_id: str,
         local_execution_id: str | None,
         local_server_instance_id: str,
     ) -> bool:
@@ -431,7 +460,7 @@ class _RecoverableInputAdmissionStore:
         return bool(
             (control.get("phase") == "terminated" and release_ready)
             or self._persisted_natural_handoff_admits_replacement(control, context_id)
-            or (control.get("contextId") == context_id and _claim_remnant_admits_replacement(control))
+            or (control.get("contextId") == context_id and _claim_remnant_admits_replacement(control, task_id))
         )
 
     @staticmethod
