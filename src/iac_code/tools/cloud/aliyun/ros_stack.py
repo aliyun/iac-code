@@ -7,7 +7,6 @@ import json
 import logging
 import re
 import time
-import uuid
 from typing import Any, Literal
 
 from alibabacloud_ros20190910 import models as ros_models
@@ -615,10 +614,6 @@ class RosStack(BaseCloudStack):
             raise ValueError(error)
         if error := reject_pipeline_template_source_params(action, params, pipeline_mode=pipeline_mode):
             raise ValueError(error)
-        if action == "CreateStack" and not params.get("ClientToken"):
-            # The SDK can retry after a lost response. ROS must see every retry as
-            # the same create request, even when the first call was accepted.
-            params["ClientToken"] = uuid.uuid4().hex
         # Ensure RegionId is always in params for the API request
         if region:
             params.setdefault("RegionId", region)

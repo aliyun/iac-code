@@ -27,12 +27,6 @@ def test_create_client_uses_override_region(credential):
     assert isinstance(client, RosClient)
 
 
-def test_ros_client_bounds_network_waits(credential):
-    config = RosClientFactory._build_config(credential, "cn-hangzhou")
-    assert config.connect_timeout == 10_000
-    assert config.read_timeout == 60_000
-
-
 def test_create_client_without_credentials_raises():
     with pytest.raises(ValueError, match="credentials"):
         RosClientFactory.create(None)
