@@ -2398,6 +2398,51 @@ def _select_default_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
         pty.send("\r", label="select-default-candidate")
 
 
+def _expect_first_stack_create_started(pty: ReplPty, args: argparse.Namespace) -> None:
+    config_path = pty.env.get("IAC_CODE_CONFIG_DIR")
+    if not config_path:
+        pty.expect_any(
+            CREATE_STACK_STARTED_PATTERNS,
+            description="first stack create started",
+            timeout=args.stream_timeout,
+        )
+        return
+    started = time.monotonic()
+    transcript_offset = len(pty.transcript)
+    diagnosed = False
+    while True:
+        elapsed = time.monotonic() - started
+        remaining = args.stream_timeout - elapsed
+        if remaining <= 0:
+            raise TimeoutError("timed out waiting for first stack create started")
+        progress = _display_progress(Path(config_path))
+        if progress.get("ros_deploy_used"):
+            if progress.get("step_completed_deploying") or progress.get("pipeline_completed"):
+                raise RuntimeError("ROS deployment finished before rollback interrupt")
+            pty.events.append({
+                "type": "expect", "description": "first stack create started",
+                "pattern": "display:ros_deploy", "passed": True, "at": _utc_now(),
+            })
+            return
+        if progress.get("pipeline_completed"):
+            raise RuntimeError("pipeline completed before first stack create started")
+        try:
+            pty.expect_any(
+                CREATE_STACK_STARTED_PATTERNS,
+                description="first stack create started",
+                timeout=min(1.0, remaining),
+            )
+            return
+        except TimeoutError as exc:
+            if str(exc) != "timed out waiting for first stack create started":
+                raise
+        elapsed = time.monotonic() - started
+        if elapsed >= WAIT_IDLE_SECONDS and time.monotonic() - pty._last_output_at >= WAIT_IDLE_SECONDS:
+            raise TimeoutError("no terminal output while waiting for first stack create started")
+        if not diagnosed and elapsed >= args.wait_diagnosis_after:
+            diagnosed = pty._diagnose_wait("first stack create started", transcript_offset, elapsed)
+
+
 def _expect_initial_prompt(pty: ReplPty, args: argparse.Namespace) -> None:
     pty.expect_any(REPL_PROMPT_PATTERNS, description="initial prompt", timeout=args.timeout)
     pty.expect_any(REPL_INPUT_READY_PATTERNS, description="prompt input ready", timeout=args.timeout)
@@ -3070,11 +3115,7 @@ def _run_rollback_step5_cleanup(
 
         _select_default_candidate(pty, args)
         checks["initial candidate selected"] = True
-        pty.expect_any(
-            CREATE_STACK_STARTED_PATTERNS,
-            description="first stack create started",
-            timeout=args.stream_timeout,
-        )
+        _expect_first_stack_create_started(pty, args)
         pty.send("\x1b", label="send-esc")
         checks["esc sent during deploying"] = True
         _expect_interrupt_input_ready(

@@ -3105,6 +3105,53 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
     }
 
 
+def test_first_stack_create_uses_display_deploy_event_when_terminal_marker_is_absent(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    config_dir = tmp_path / "config"
+    display = config_dir / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+
+    class FakePty:
+        env = {"IAC_CODE_CONFIG_DIR": str(config_dir)}
+        transcript = ""
+        events: list[dict[str, object]] = []
+
+        def expect_any(self, patterns, *, description, timeout):
+            assert patterns == runner.CREATE_STACK_STARTED_PATTERNS
+            assert description == "first stack create started"
+            display.write_text('{"type":"tool_used","payload":{"name":"ros_deploy"}}\n', encoding="utf-8")
+            raise TimeoutError("timed out waiting for first stack create started")
+
+    pty = FakePty()
+    runner._expect_first_stack_create_started(pty, args)
+    assert pty.events[-1]["pattern"] == "display:ros_deploy"
+
+
+def test_first_stack_create_rejects_deploy_event_after_step_completed(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    config_dir = tmp_path / "config"
+    display = config_dir / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text(
+        '{"type":"tool_used","payload":{"name":"ros_deploy"}}\n'
+        '{"type":"step_completed","step_id":"deploying"}\n',
+        encoding="utf-8",
+    )
+
+    class FakePty:
+        env = {"IAC_CODE_CONFIG_DIR": str(config_dir)}
+        transcript = ""
+        events: list[dict[str, object]] = []
+
+        def expect_any(self, patterns, *, description, timeout):
+            raise AssertionError("the completed deployment must be detected before waiting on PTY")
+
+    with pytest.raises(RuntimeError, match="ROS deployment finished before rollback interrupt"):
+        runner._expect_first_stack_create_started(FakePty(), args)
+
+
 def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud"])
