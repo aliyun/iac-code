@@ -317,6 +317,8 @@ def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
             "candidate_selection_ready": 2, "user_input_received": 1,
             "ros_deploy_used": 1, "pipeline_completed_early_exit": 1,
             "stack_progress_create_complete": 1, "cleanup_ledger_found": 0,
+            "cleanup_failure_route_conflict": 1,
+            "cleanup_failure_route_conflict_after_rollback": 0,
             "private-token-sk-fixture": 9, "step_started": True,
         },
     }
@@ -332,6 +334,8 @@ def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
         "candidate_selection_ready": 2, "user_input_received": 1,
         "ros_deploy_used": 1, "pipeline_completed_early_exit": 1,
         "stack_progress_create_complete": 1, "cleanup_ledger_found": 0,
+        "cleanup_failure_route_conflict": 1,
+        "cleanup_failure_route_conflict_after_rollback": 0,
     }
     assert "secret-fixture-value" not in json.dumps(public)
     assert run_e2e._public_live_summary({

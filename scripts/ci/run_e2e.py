@@ -460,6 +460,10 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         "pipeline_completed_early_exit", "stack_progress", "stack_progress_create_complete",
         "cleanup_ledger_files", "cleanup_ledger_found", "observed_stack_count",
         "cloud_stack_without_ledger", "cloud_stack_not_created", "cloud_probe_failures",
+        "cleanup_failure_create_failed", "cleanup_failure_create_failed_after_rollback",
+        "cleanup_failure_route_conflict", "cleanup_failure_route_conflict_after_rollback",
+        "cleanup_failure_stack_exists", "cleanup_failure_stack_exists_after_rollback",
+        "cleanup_failure_invalid_cidr_block", "cleanup_failure_invalid_cidr_block_after_rollback",
     }
     public = {
         "case_id": summary.get("case_id"),
