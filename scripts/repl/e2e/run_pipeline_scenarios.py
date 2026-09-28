@@ -2343,6 +2343,9 @@ def _apply_acceptance_checks(
 
 
 def _select_default_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
+    # The selection hint can be rendered before the raw key reader takes over.
+    # Give that handoff the same settling time used after restored selection.
+    time.sleep(0.5)
     if args.selection_prompt:
         pty.send(f"{args.selection_prompt}\r", label="select-default-candidate")
     else:
