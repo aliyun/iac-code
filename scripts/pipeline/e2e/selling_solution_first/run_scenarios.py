@@ -2630,13 +2630,16 @@ def _read_repl_display_events(runtime: ScenarioRuntime) -> list[dict[str, Any]]:
 
 
 def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None:
+    credential_values = sorted(set(_copied_credential_values(runtime)), key=len, reverse=True)
     raw = repl._redact_sensitive_text(pty.transcript, runtime.env)
+    raw = _redact_copied_credential_values(raw, credential_values)
     normalized = repl._normalize_transcript(raw)
     (runtime.paths.run_dir / "transcript.raw.log").write_text(raw, encoding="utf-8")
     (runtime.paths.run_dir / "transcript.normalized.log").write_text(normalized, encoding="utf-8")
     with (runtime.paths.run_dir / "repl-events.jsonl").open("w", encoding="utf-8") as handle:
         for event in pty.events:
-            handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+            line = json.dumps(event, ensure_ascii=False, default=str)
+            handle.write(_redact_copied_credential_values(line, credential_values) + "\n")
     # Display events are ordered pipeline facts. Put them before the PTY-only
     # interaction records so Step 1/2 boundaries cannot be inferred from a
     # monolithic transcript that also contains later Preview/quote output.
@@ -4655,6 +4658,12 @@ def _copied_credential_entries(runtime: ScenarioRuntime) -> list[tuple[str, str]
 
 def _copied_credential_values(runtime: ScenarioRuntime) -> list[str]:
     return [value for _, value in _copied_credential_entries(runtime)]
+
+
+def _redact_copied_credential_values(text: str, credential_values: Sequence[str]) -> str:
+    for value in credential_values:
+        text = text.replace(value, "[REDACTED]")
+    return text
 
 
 def credential_values_absent_from_artifacts(runtime: ScenarioRuntime) -> bool:

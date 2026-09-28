@@ -1235,16 +1235,22 @@ def test_repl_artifacts_reject_child_exit_before_runner_teardown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / ".cloud-credentials.yml").write_text(
+        "access_key_secret: cloud-secret-value\n", encoding="utf-8"
+    )
     runtime = argparse.Namespace(
         env={},
-        paths=argparse.Namespace(run_dir=tmp_path),
+        paths=argparse.Namespace(run_dir=tmp_path, config_dir=config_dir),
         checks={},
     )
     pty = argparse.Namespace(
-        transcript="handled tool output",
+        transcript="handled tool output cloud-secret-value",
         events=[
             {
                 "type": "terminate",
+                "detail": "cloud-secret-value",
                 "force": False,
                 "aliveBeforeTerminate": False,
                 "exitStatus": 1,
@@ -1265,6 +1271,8 @@ def test_repl_artifacts_reject_child_exit_before_runner_teardown(
     assert runtime.checks["REPL has no terminal exception"] is False
     recorded = json.loads((tmp_path / "repl-events.jsonl").read_text(encoding="utf-8"))
     assert recorded["exitStatus"] == 1
+    assert "cloud-secret-value" not in (tmp_path / "transcript.raw.log").read_text(encoding="utf-8")
+    assert "cloud-secret-value" not in (tmp_path / "repl-events.jsonl").read_text(encoding="utf-8")
 
 
 def test_first_pending_resource_option_id_ignores_control_actions(runner: ModuleType) -> None:
