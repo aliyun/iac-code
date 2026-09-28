@@ -614,7 +614,7 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
 
     evidence: dict[str, Any] = {}
     safe_event_types = {
-        "step_started", "step_completed", "input_required", "input_received",
+        "step_started", "step_completed", "step_failed", "input_required", "input_received",
         "rollback_started", "rollback_completed", "cleanup_started", "cleanup_completed",
         "pipeline_completed", "pipeline_failed", "pipeline_user_aborted",
     }
@@ -625,20 +625,21 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
         if isinstance(event_type, str) and event_type in safe_event_types:
             recent_events.append(event_type)
             del recent_events[:-12]
-        if event_type != "pipeline_failed":
+        if event_type not in {"pipeline_failed", "step_failed"}:
             return
-        evidence["pipeline_failed_event"] = "observed"
+        prefix = "terminal" if event_type == "pipeline_failed" else "step_failure"
+        evidence[event_type + "_event"] = "observed"
         data = envelope.get("data")
         if not isinstance(data, dict):
             return
         details = data.get("errorDetails")
         inner_type = details.get("type") if isinstance(details, dict) else None
         if isinstance(inner_type, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,59}", inner_type):
-            evidence["terminal_inner_type"] = inner_type
+            evidence[prefix + "_inner_type"] = inner_type
         error_summary = data.get("errorSummary")
         if isinstance(error_summary, str):
             lower_summary = error_summary.lower()
-            evidence["terminal_category"] = next(
+            evidence[prefix + "_category"] = next(
                 (category for category, pattern in TERMINAL_CATEGORIES if re.search(pattern, lower_summary)),
                 "other",
             )
@@ -648,10 +649,10 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
                 if (re.search(r"\b{}\b".format(term), normalized) if term.isascii() else term in normalized)
             ]
             if terms:
-                evidence["terminal_terms"] = terms[:12]
+                evidence[prefix + "_terms"] = terms[:12]
             code = next((code for code in TERMINAL_FIXED_CODES if code in lower_summary), None)
             if code is not None:
-                evidence["terminal_code"] = code
+                evidence[prefix + "_code"] = code
 
     for event_path in (*script_dir.glob("*.events.jsonl"), *script_dir.rglob("a2a-events.jsonl")):
         with event_path.open(encoding="utf-8", errors="replace") as events:

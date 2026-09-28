@@ -299,6 +299,30 @@ def test_live_a2a_terminal_evidence_reads_persistent_journal(tmp_path: Path) -> 
     assert "sk-fixture" not in json.dumps(evidence)
 
 
+def test_live_a2a_terminal_evidence_reports_step_failure_without_raw_error(tmp_path: Path) -> None:
+    event = {
+        "metadata": {"iac_code": {"pipeline": {
+            "eventType": "step_failed",
+            "data": {
+                "errorSummary": "TimeoutError: provider timed out; token=sk-fixture",
+                "errorDetails": {"type": "TimeoutError", "traceback": "private fixture"},
+            },
+        }}},
+    }
+    (tmp_path / "failed.events.jsonl").write_text(json.dumps(event) + "\n", encoding="utf-8")
+
+    evidence = run_e2e._live_a2a_terminal_evidence(tmp_path)
+
+    assert evidence == {
+        "step_failed_event": "observed",
+        "step_failure_inner_type": "TimeoutError",
+        "step_failure_category": "timeout",
+        "step_failure_terms": ["provider", "error"],
+        "pipeline_events": ["step_failed"],
+    }
+    assert "sk-fixture" not in json.dumps(evidence)
+
+
 def test_live_a2a_progress_evidence_ignores_untrusted_event_names(tmp_path: Path) -> None:
     events = [
         {"metadata": {"iac_code": {"pipeline": {"eventType": "input_required"}}}},
