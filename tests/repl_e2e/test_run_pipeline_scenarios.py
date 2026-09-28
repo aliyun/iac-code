@@ -3258,6 +3258,23 @@ def test_first_stack_observation_stops_when_cloud_completed_without_ledger(monke
     assert pty.cloud_stack_without_ledger is True
 
 
+def test_first_stack_observation_stops_when_cloud_never_created_stack(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    ticks = iter([0.0, 601.0, 601.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner, "_latest_observed_stack_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: [])
+
+    class FakePty:
+        run_dir = tmp_path
+        env: dict[str, str] = {}
+
+    pty = FakePty()
+    with pytest.raises(RuntimeError, match="did not create a test Stack within 10 minutes"):
+        runner._wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=1800)
+    assert pty.cloud_stack_not_created is True
+
+
 def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud"])

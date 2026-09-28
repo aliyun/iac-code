@@ -929,6 +929,7 @@ def _run_with_pty(
         progress["cleanup_ledger_found"] = int(ledger_path is not None and ledger_path.is_file())
         progress["observed_stack_count"] = min(len(_observed_create_stack_ids(pty)), 10000)
         progress["cloud_stack_without_ledger"] = int(bool(getattr(pty, "cloud_stack_without_ledger", False)))
+        progress["cloud_stack_not_created"] = int(bool(getattr(pty, "cloud_stack_not_created", False)))
         progress["cloud_probe_failures"] = min(int(getattr(pty, "cloud_probe_failures", 0)), 10000)
         result = ScenarioRunResult(
             scenario=scenario,
@@ -1581,13 +1582,19 @@ def _wait_for_latest_observed_stack_id(pty: Any, *, exclude: set[str], timeout: 
             next_cloud_check = now + 60.0
             try:
                 owned_names = _owned_cleanup_stack_names(Path(run_dir))
-                for candidate_id in _discover_owned_cleanup_stack_ids(Path(run_dir)):
+                candidate_ids = _discover_owned_cleanup_stack_ids(Path(run_dir))
+                for candidate_id in candidate_ids:
                     state = _fresh_ros_stack_state(pty, candidate_id)
                     if state.get("stack_name") in owned_names and state.get("status") == "CREATE_COMPLETE":
                         pty.cloud_stack_without_ledger = True
                         raise RuntimeError("ROS Stack completed but no resource reached the cleanup ledger")
+                if not candidate_ids and now - started >= 600.0:
+                    pty.cloud_stack_not_created = True
+                    raise RuntimeError("ROS deployment did not create a test Stack within 10 minutes")
             except RuntimeError:
-                if bool(getattr(pty, "cloud_stack_without_ledger", False)):
+                if bool(getattr(pty, "cloud_stack_without_ledger", False)) or bool(
+                    getattr(pty, "cloud_stack_not_created", False)
+                ):
                     raise
                 pty.cloud_probe_failures = int(getattr(pty, "cloud_probe_failures", 0)) + 1
             except Exception:
