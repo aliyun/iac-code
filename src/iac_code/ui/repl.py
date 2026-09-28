@@ -5008,6 +5008,7 @@ class InlineREPL:
 
         stop_keys = asyncio.Event()
         interrupt_requested = asyncio.Event()
+        key_capture_ready = asyncio.Event()
         parent_task = asyncio.current_task()
 
         def _request_pipeline_cancel() -> None:
@@ -5020,6 +5021,7 @@ class InlineREPL:
             loop = asyncio.get_running_loop()
             try:
                 with RawInputCapture(use_cbreak=True) as cap:
+                    key_capture_ready.set()
                     while not stop_keys.is_set():
                         key_event = await loop.run_in_executor(None, cap.read_key, 0.1)
                         if key_event is None:
@@ -5045,6 +5047,10 @@ class InlineREPL:
                             _live_update(_render_current_content())
             except (OSError, ValueError):
                 pass
+
+        def start_key_reader() -> asyncio.Task[None]:
+            key_capture_ready.clear()
+            return asyncio.create_task(key_reader())
 
         async def _handle_esc_interrupt() -> bool:
             """Handle ESC interrupt prompt. Returns True if pipeline restarted."""
@@ -5109,7 +5115,7 @@ class InlineREPL:
             live.start()
             if show_agent_prelude:
                 _live_update(_render_current_content())
-            key_task = asyncio.create_task(key_reader())
+            key_task = start_key_reader()
 
             async for event in event_stream:
                 if interrupt_requested.is_set():
@@ -5120,7 +5126,7 @@ class InlineREPL:
                     if self._pipeline_waiting_input and getattr(self, "_last_interrupt_paused", False):
                         await _stop_key_reader()
                         return None
-                    key_task = asyncio.create_task(key_reader())
+                    key_task = start_key_reader()
 
                 if isinstance(event, PipelineEvent):
                     if event.type != PipelineEventType.USER_INPUT_REQUIRED:
@@ -5142,6 +5148,10 @@ class InlineREPL:
                         # must mean the cbreak key reader can already accept an
                         # Enter; recording it before ``waiting_input`` was set
                         # created a race where fast drivers lost the key press.
+                        try:
+                            await asyncio.wait_for(key_capture_ready.wait(), timeout=5.0)
+                        except asyncio.TimeoutError as exc:
+                            raise RuntimeError("candidate selection key reader did not start") from exc
                         recorder = getattr(self, "_pipeline_display_recorder", None)
                         if recorder is not None:
                             try:
@@ -5169,7 +5179,7 @@ class InlineREPL:
                                 if self._pipeline_waiting_input and getattr(self, "_last_interrupt_paused", False):
                                     await _stop_key_reader()
                                     return None
-                                key_task = asyncio.create_task(key_reader())
+                                key_task = start_key_reader()
                                 continue
                             break
                         break
@@ -5293,7 +5303,7 @@ class InlineREPL:
                             event.response_future.set_result(answer)
                     finally:
                         live.start()
-                    key_task = asyncio.create_task(key_reader())
+                    key_task = start_key_reader()
 
                 elif isinstance(event, StepResult):
                     continue

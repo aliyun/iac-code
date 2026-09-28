@@ -476,12 +476,35 @@ async def test_candidate_selection_resumes_with_structured_payload(monkeypatch):
 @pytest.mark.asyncio
 async def test_candidate_selection_ready_is_recorded_only_after_key_input_is_ready(monkeypatch):
     repl, _resumed_payloads = _make_repl_for_selection(monkeypatch)
-    observed_waiting_flags: list[bool] = []
+    from iac_code.ui.core.key_event import KeyEvent
+
+    observed_readiness: list[tuple[bool, bool]] = []
+    capture_entered = False
+
+    class ObservedCapture:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            nonlocal capture_entered
+            capture_entered = True
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read_key(self, timeout):
+            if repl._pipeline_waiting_input:
+                return KeyEvent(key="enter", char="")
+            time.sleep(0.01)
+            return None
+
+    monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", ObservedCapture)
 
     class Recorder:
         def record(self, event_type, **_kwargs):
             assert event_type == "candidate_selection_ready"
-            observed_waiting_flags.append(repl._pipeline_waiting_input)
+            observed_readiness.append((repl._pipeline_waiting_input, capture_entered))
 
     repl._pipeline_display_recorder = Recorder()
     repl._pipeline_display_current_step_id = "solution_planning_and_selection"
@@ -500,7 +523,7 @@ async def test_candidate_selection_ready_is_recorded_only_after_key_input_is_rea
     selected = await asyncio.wait_for(repl._render_candidate_selection_tabs(stream), timeout=5)
 
     assert selected == "Plan A"
-    assert observed_waiting_flags == [True]
+    assert observed_readiness == [(True, True)]
 
 
 @pytest.mark.asyncio
