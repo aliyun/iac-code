@@ -49,6 +49,16 @@ def test_recovery_ci_diagnostics_keep_only_fixed_evidence(tmp_path: Path) -> Non
     assert runner._control_state_diagnostic(tmp_path, "../ctx-1", "task-1") == {"present": False}
 
 
+def test_cleanup_failure_code_extraction_keeps_only_code_and_http_status() -> None:
+    runner = _load_runner()
+    assert runner._cleanup_failure_code_and_http_status(
+        "Alibaba Cloud API ROS/DeleteStack returned HTTP 409 with error code StackInOperation. sk-fixture"
+    ) == ("StackInOperation", 409)
+    assert runner._cleanup_failure_code_and_http_status("private provider error sk-fixture") == ("", None)
+    assert runner._cleanup_failure_kind("StackInOperation") == "resource_busy"
+    assert runner._cleanup_failure_kind("private provider error sk-fixture") == "unknown"
+
+
 def test_recovery_harness_records_failure_location_without_relying_on_error_text(monkeypatch) -> None:
     runner = _load_runner()
     result = {}

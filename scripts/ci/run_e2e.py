@@ -483,6 +483,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "text_exit_code", "text_output_length",
             "cleanup_turn_event_count", "cleanup_turn_cleanup_event_count", "cleanup_target_count",
             "cleanup_ledger_pending_count", "cleanup_delete_tool_use_count", "cleanup_get_tool_use_count",
+            "cleanup_failure_event_count", "cleanup_delete_http_status", "cleanup_get_http_status",
         ):
             count = raw_diagnostics.get(key)
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
@@ -492,6 +493,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "persisted_aliyun_tool_publicly_seen",
             "text_has_vpc_marker",
             "cleanup_prompt_active", "cleanup_first_ros_not_found",
+            "cleanup_delete_target_matches", "cleanup_get_target_matches",
         ):
             if isinstance(raw_diagnostics.get(key), bool):
                 diagnostics[key] = raw_diagnostics[key]
@@ -517,15 +519,34 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "CREATE_COMPLETE", "DELETE_STARTED", "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED", "unknown",
         }
         for key in ("cleanup_first_ledger_status", "cleanup_first_snapshot_status"):
-            if raw_diagnostics.get(key) in allowed_cleanup_states:
-                diagnostics[key] = raw_diagnostics[key]
-        if raw_diagnostics.get("cleanup_first_ros_status") in allowed_ros_states:
-            diagnostics["cleanup_first_ros_status"] = raw_diagnostics["cleanup_first_ros_status"]
+            value = raw_diagnostics.get(key)
+            if isinstance(value, str) and value in allowed_cleanup_states:
+                diagnostics[key] = value
+        ros_status = raw_diagnostics.get("cleanup_first_ros_status")
+        if isinstance(ros_status, str) and ros_status in allowed_ros_states:
+            diagnostics["cleanup_first_ros_status"] = ros_status
         allowed_task_states = {
             "TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "unknown",
         }
-        if raw_diagnostics.get("cleanup_turn_terminal_state") in allowed_task_states:
-            diagnostics["cleanup_turn_terminal_state"] = raw_diagnostics["cleanup_turn_terminal_state"]
+        terminal_state = raw_diagnostics.get("cleanup_turn_terminal_state")
+        if isinstance(terminal_state, str) and terminal_state in allowed_task_states:
+            diagnostics["cleanup_turn_terminal_state"] = terminal_state
+        for key in ("cleanup_delete_error_code", "cleanup_get_error_code"):
+            value = raw_diagnostics.get(key)
+            if isinstance(value, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,79}", value):
+                diagnostics[key] = value
+        for key in ("cleanup_delete_tool_kind", "cleanup_get_tool_kind"):
+            value = raw_diagnostics.get(key)
+            if isinstance(value, str) and value in {"aliyun_api", "ros_stack", "unknown"}:
+                diagnostics[key] = value
+        allowed_error_kinds = {
+            "permission", "credential", "not_found", "resource_busy", "rate_limited",
+            "invalid_input", "timeout", "network", "unknown",
+        }
+        for key in ("cleanup_delete_error_kind", "cleanup_get_error_kind"):
+            value = raw_diagnostics.get(key)
+            if isinstance(value, str) and value in allowed_error_kinds:
+                diagnostics[key] = value
         if diagnostics:
             public["diagnostics"] = diagnostics
     if isinstance(raw_progress, dict):

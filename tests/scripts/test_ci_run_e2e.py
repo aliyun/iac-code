@@ -176,6 +176,11 @@ def test_live_public_summary_keeps_only_fixed_rollback_cleanup_diagnostics() -> 
         "diagnostics": {
             "cleanup_turn_event_count": 12,
             "cleanup_delete_tool_use_count": 0,
+            "cleanup_delete_error_code": "StackInOperation",
+            "cleanup_delete_http_status": 409,
+            "cleanup_delete_target_matches": True,
+            "cleanup_delete_tool_kind": "aliyun_api",
+            "cleanup_delete_error_kind": "resource_busy",
             "cleanup_prompt_active": True,
             "cleanup_first_ledger_status": "pending",
             "cleanup_first_ros_status": "CREATE_COMPLETE",
@@ -189,6 +194,11 @@ def test_live_public_summary_keeps_only_fixed_rollback_cleanup_diagnostics() -> 
     assert public["diagnostics"] == {
         "cleanup_turn_event_count": 12,
         "cleanup_delete_tool_use_count": 0,
+        "cleanup_delete_error_code": "StackInOperation",
+        "cleanup_delete_http_status": 409,
+        "cleanup_delete_target_matches": True,
+        "cleanup_delete_tool_kind": "aliyun_api",
+        "cleanup_delete_error_kind": "resource_busy",
         "cleanup_prompt_active": True,
         "cleanup_first_ledger_status": "pending",
         "cleanup_first_ros_status": "CREATE_COMPLETE",

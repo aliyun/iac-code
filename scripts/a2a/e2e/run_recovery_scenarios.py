@@ -3722,6 +3722,7 @@ def _rollback_cleanup_diagnostics(
 ) -> dict[str, Any]:
     resources = _cleanup_ledger_items(h, "cleanup_resources")
     tool_uses = _cleanup_ledger_items(h, "tool_uses")
+    history = _cleanup_ledger_items(h, "history")
     first_ledger = next(
         (
             item for item in resources if _string_from_mapping(item, "resource_id", "resourceId") == first_stack_id
@@ -3730,6 +3731,17 @@ def _rollback_cleanup_diagnostics(
     )
     first_snapshot = _cleanup_resource_for_stack(after_cleanup, first_stack_id)
     first_ros = ros_states.get(first_stack_id, {}) if first_stack_id else {}
+    first_region = first_ledger.get("region_id") if first_ledger else None
+    failures = [
+        item for item in history
+        if item.get("type") == "cleanup_failed"
+        and isinstance(item.get("resource"), dict)
+        and item["resource"].get("resource_id") == first_stack_id
+    ]
+    failure_by_action = {
+        action: next((item for item in reversed(failures) if item.get("cleanup_action") == action), None)
+        for action in ("DeleteStack", "GetStack")
+    }
     allowed_cleanup_statuses = {"pending", "started", "in_progress", "completed", "failed", "unknown"}
     allowed_ros_statuses = {
         "CREATE_COMPLETE", "DELETE_STARTED", "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED",
@@ -3747,7 +3759,7 @@ def _rollback_cleanup_diagnostics(
         )
     except Exception:
         active_prompt = False
-    return {
+    diagnostics = {
         "cleanup_turn_event_count": cleanup_summary.event_count,
         "cleanup_turn_cleanup_event_count": sum(
             event_type in {"cleanup_started", "cleanup_progress", "cleanup_completed", "cleanup_failed"}
@@ -3759,6 +3771,17 @@ def _rollback_cleanup_diagnostics(
         ),
         "cleanup_delete_tool_use_count": sum(item.get("action") == "DeleteStack" for item in tool_uses),
         "cleanup_get_tool_use_count": sum(item.get("action") == "GetStack" for item in tool_uses),
+        "cleanup_delete_tool_kind": _cleanup_tool_kind(tool_uses, "DeleteStack"),
+        "cleanup_get_tool_kind": _cleanup_tool_kind(tool_uses, "GetStack"),
+        "cleanup_delete_target_matches": all(
+            item.get("resource_id") == first_stack_id and item.get("region_id") == first_region
+            for item in tool_uses if item.get("action") == "DeleteStack"
+        ),
+        "cleanup_get_target_matches": all(
+            item.get("resource_id") == first_stack_id and item.get("region_id") == first_region
+            for item in tool_uses if item.get("action") == "GetStack"
+        ),
+        "cleanup_failure_event_count": len(failures),
         "cleanup_prompt_active": active_prompt,
         "cleanup_turn_terminal_state": status(
             cleanup_summary.last_status_state,
@@ -3773,6 +3796,56 @@ def _rollback_cleanup_diagnostics(
         "cleanup_first_ros_status": status(first_ros.get("status"), allowed_ros_statuses),
         "cleanup_first_ros_not_found": first_ros.get("not_found") is True,
     }
+    for action, prefix in (("DeleteStack", "delete"), ("GetStack", "get")):
+        failure = failure_by_action[action]
+        if failure is None:
+            continue
+        code, http_status = _cleanup_failure_code_and_http_status(failure.get("last_error"))
+        if code:
+            diagnostics[f"cleanup_{prefix}_error_code"] = code
+        if http_status:
+            diagnostics[f"cleanup_{prefix}_http_status"] = http_status
+        diagnostics[f"cleanup_{prefix}_error_kind"] = _cleanup_failure_kind(failure.get("last_error"))
+    return diagnostics
+
+
+def _cleanup_tool_kind(tool_uses: list[dict[str, Any]], action: str) -> str:
+    names = {str(item.get("tool_name") or "") for item in tool_uses if item.get("action") == action}
+    return next(iter(names)) if len(names) == 1 and names <= {"aliyun_api", "ros_stack"} else "unknown"
+
+
+def _cleanup_failure_code_and_http_status(value: Any) -> tuple[str, int | None]:
+    if not isinstance(value, str):
+        return "", None
+    code_match = re.search(
+        r"(?:error code|[\"']?[Cc]ode[\"']?\s*[:=])\s*[\"']?([A-Za-z][A-Za-z0-9_.-]{0,79})",
+        value,
+        re.IGNORECASE,
+    )
+    status_match = re.search(r"\bHTTP\s+([45][0-9]{2})\b", value)
+    return (
+        code_match.group(1).rstrip(".") if code_match else "",
+        int(status_match.group(1)) if status_match else None,
+    )
+
+
+def _cleanup_failure_kind(value: Any) -> str:
+    if not isinstance(value, str):
+        return "unknown"
+    lowered = value.casefold()
+    for kind, markers in (
+        ("permission", ("forbidden", "permission", "accessdenied", "denied")),
+        ("credential", ("credential", "authenticate", "signature")),
+        ("not_found", ("notfound", "not found", "nonexistent")),
+        ("resource_busy", ("inoperation", "operationinprogress", "busy", "in use")),
+        ("rate_limited", ("throttl", "ratelimit")),
+        ("invalid_input", ("invalidparameter", "invalid parameter", "invalidinput")),
+        ("timeout", ("timeout", "timed out")),
+        ("network", ("connection", "network", "endpoint")),
+    ):
+        if any(marker in lowered for marker in markers):
+            return kind
+    return "unknown"
 
 
 def _snapshot_cleanup(response: Any) -> dict[str, Any]:
