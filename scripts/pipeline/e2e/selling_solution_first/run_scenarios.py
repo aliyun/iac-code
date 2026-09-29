@@ -3292,11 +3292,11 @@ def _prepare_restored_repl_confirmation(pty: Any, runtime: ScenarioRuntime) -> N
 
 
 def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input_ready: bool = True) -> None:
-    runtime.repl_confirmation_wait_count += 1
+    occurrence = runtime.repl_confirmation_wait_count + 1
     event, path = _wait_repl_display_event(
         runtime,
         event_type="user_input_required",
-        occurrence=runtime.repl_confirmation_wait_count,
+        occurrence=occurrence,
         timeout=runtime.args.stream_timeout,
         drain_output=getattr(pty, "drain_output", None),
         predicate=_is_repl_deployment_confirmation,
@@ -3311,7 +3311,7 @@ def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input
     if require_input_ready:
         pty.expect_any(
             REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-            description=f"deployment confirmation selector ready #{runtime.repl_confirmation_wait_count}",
+            description=f"deployment confirmation selector ready #{occurrence}",
             timeout=runtime.args.stream_timeout,
         )
         time.sleep(0.25)
@@ -3319,37 +3319,73 @@ def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input
         time.sleep(0.5)
     pty.drain_output()
     _record_repl_confirmation_options(runtime, event)
+    runtime.repl_confirmation_wait_count = occurrence
     pty.events.append(
         {
             "type": "display-event",
             "description": "selling_solution_first deployment confirmation",
             "event_type": event.get("type"),
-            "occurrence": runtime.repl_confirmation_wait_count,
+            "occurrence": occurrence,
             "path": str(path),
             "at": utc_now(),
         }
     )
 
 
-def _repl_wait_confirmation_after_optional_parameter_asks(pty: Any, runtime: ScenarioRuntime) -> None:
-    """Answer legitimate Step 2 parameter asks before the confirmation boundary."""
+def _repl_wait_confirmation_after_optional_parameter_asks(
+    pty: Any, runtime: ScenarioRuntime, *, recover_stalled_step: bool = False
+) -> None:
+    """Follow this selection's durable Step 2 inputs, ignoring stale terminal redraws."""
 
-    for ask_index in range(1, 4):
-        matched = pty.expect_any(
-            REPL_ASK_INPUT_READY_PATTERNS + REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-            description=f"Step 2 ask or confirmation #{ask_index}",
-            timeout=runtime.args.stream_timeout,
-        )
-        if matched in REPL_CONFIRMATION_INPUT_READY_PATTERNS:
-            # The readiness line was consumed above; use the durable display
-            # record without trying to match the same transient hint twice.
+    display_events = _read_repl_display_events(runtime)
+    selection_indexes = [
+        index for index, event in enumerate(display_events) if event.get("type") == "candidate_selection_submitted"
+    ]
+    if not selection_indexes:
+        raise RuntimeError("candidate selection was not persisted before Step 2 input")
+    selection_index = selection_indexes[-1]
+    prior_inputs = sum(
+        event.get("type") == "user_input_required" and event.get("step_id") == NEW_STEPS[1]
+        for event in display_events[:selection_index]
+    )
+    restarted = False
+    for input_index in range(1, 5):
+        while True:
+            try:
+                event, _ = _wait_repl_display_event(
+                    runtime,
+                    event_type="user_input_required",
+                    occurrence=prior_inputs + input_index,
+                    timeout=min(runtime.args.stream_timeout, 360.0) if recover_stalled_step and not restarted
+                    else runtime.args.stream_timeout,
+                    drain_output=getattr(pty, "drain_output", None),
+                    predicate=lambda item: item.get("step_id") == NEW_STEPS[1],
+                    check_before_drain=True,
+                    pty=pty,
+                )
+                break
+            except TimeoutError:
+                if not recover_stalled_step or restarted or _repl_active_deploy_step(runtime):
+                    raise
+                # Step 2 has no cloud creation. Resume the persisted attempt
+                # once if the model/PTY stopped producing progress.
+                restarted = True
+                _record_diagnostic(runtime, "repl_step2_stall_restarts", 1)
+                pty.terminate(force=True)
+                pty.spawn(extra_args=["--continue"])
+                missed_check = f"REPL display user_input_required occurrence {prior_inputs + input_index} observed"
+                runtime.checks.pop(missed_check, None)
+                runtime.checks.pop("REPL display matched at least once before timeout", None)
+        if _is_repl_deployment_confirmation(event):
             _repl_wait_confirmation(pty, runtime, require_input_ready=False)
             return
-        time.sleep(0.25)
-        pty.drain_output()
+        payload = event.get("payload")
+        if not isinstance(payload, dict) or payload.get("kind") != "ask_user_question":
+            raise RuntimeError("unexpected Step 2 input kind before deployment confirmation")
+        _repl_wait_ask(pty, runtime, description=f"Step 2 parameter ask #{input_index}")
         answer = runtime.args.cleanup_vpc_id or "请使用上面列出的第一个可用杭州 VPC"
-        _repl_submit_line_input(pty, answer, label=f"step2-parameter-answer-{ask_index}")
-    raise RuntimeError("Step 2 did not reach deployment confirmation after three parameter asks")
+        _repl_submit_line_input(pty, answer, label=f"step2-parameter-answer-{input_index}")
+    raise RuntimeError("Step 2 did not reach deployment confirmation after four parameter asks")
 
 
 def _repl_wait_pipeline_completed(pty: Any, runtime: ScenarioRuntime) -> None:
@@ -3533,7 +3569,7 @@ def _run_repl_interrupt_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
     _repl_choose_direct_input(runtime, pty, "我改需求了：只创建安全组，不创建 VPC 或 VSwitch；请重新规划。")
     _repl_wait_selection(pty, runtime)
     _repl_select_current(pty)
-    _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+    _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime, recover_stalled_step=True)
     pty.send("\r", label="confirmation-confirm")
     _wait_repl_transcript_tool_use(
         pty,

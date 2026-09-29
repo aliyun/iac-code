@@ -2618,25 +2618,38 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
-    matches = iter(
+    inputs = iter(
         [
-            runner.REPL_ASK_INPUT_READY_PATTERNS[0],
-            runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS[0],
+            {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {"kind": "ask_user_question"}},
+            {
+                "type": "user_input_required",
+                "step_id": runner.NEW_STEPS[1],
+                "payload": {"kind": "deployment_confirmation"},
+            },
         ]
     )
 
     class Pty:
-        def expect_any(self, patterns, *, description, timeout):
-            calls.append(("expect", description, timeout, patterns))
-            return next(matches)
-
         def drain_output(self) -> None:
             calls.append("drain")
 
     runtime = argparse.Namespace(
         args=argparse.Namespace(stream_timeout=9.0, cleanup_vpc_id="vpc-test"),
     )
-    monkeypatch.setattr(runner.time, "sleep", lambda seconds: calls.append(("sleep", seconds)))
+    monkeypatch.setattr(
+        runner, "_read_repl_display_events", lambda _runtime: [
+            {"type": "user_input_required", "step_id": runner.NEW_STEPS[1]},
+            {"type": "candidate_selection_submitted"},
+        ],
+    )
+    def wait_input(_runtime, **kwargs):
+        calls.append(("durable", kwargs["occurrence"]))
+        return next(inputs), Path("display")
+
+    monkeypatch.setattr(runner, "_wait_repl_display_event", wait_input)
+    monkeypatch.setattr(
+        runner, "_repl_wait_ask", lambda _pty, _runtime, *, description: calls.append(("ask", description)),
+    )
     monkeypatch.setattr(
         runner,
         "_repl_submit_line_input",
@@ -2651,23 +2664,64 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
     runner._repl_wait_confirmation_after_optional_parameter_asks(Pty(), runtime)
 
     assert calls == [
-        (
-            "expect",
-            "Step 2 ask or confirmation #1",
-            9.0,
-            runner.REPL_ASK_INPUT_READY_PATTERNS + runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-        ),
-        ("sleep", 0.25),
-        "drain",
+        ("durable", 2),
+        ("ask", "Step 2 parameter ask #1"),
         ("answer", "vpc-test", "step2-parameter-answer-1"),
-        (
-            "expect",
-            "Step 2 ask or confirmation #2",
-            9.0,
-            runner.REPL_ASK_INPUT_READY_PATTERNS + runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-        ),
+        ("durable", 3),
         ("confirmation", False),
     ]
+
+
+def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[object] = []
+    event = {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+        "kind": "deployment_confirmation",
+    }}
+
+    class Pty:
+        def terminate(self, *, force):
+            calls.append(("terminate", force))
+
+        def spawn(self, *, extra_args):
+            calls.append(("spawn", extra_args))
+
+        def drain_output(self) -> None:
+            pass
+
+    def wait(_runtime, **kwargs):
+        calls.append(("wait", kwargs["timeout"], kwargs["occurrence"]))
+        if len([item for item in calls if item[0] == "wait"]) == 1:
+            raise TimeoutError("stalled")
+        return event, Path("display")
+
+    runtime = argparse.Namespace(
+        args=argparse.Namespace(stream_timeout=900.0, cleanup_vpc_id="vpc-test"),
+        checks={"REPL display user_input_required occurrence 1 observed": False},
+        diagnostics={},
+    )
+    monkeypatch.setattr(runner, "_read_repl_display_events", lambda _runtime: [{
+        "type": "candidate_selection_submitted",
+    }])
+    monkeypatch.setattr(runner, "_wait_repl_display_event", wait)
+    monkeypatch.setattr(runner, "_repl_active_deploy_step", lambda _runtime: False)
+    monkeypatch.setattr(
+        runner, "_repl_wait_confirmation",
+        lambda _pty, _runtime, *, require_input_ready: calls.append(("confirmation", require_input_ready)),
+    )
+
+    runner._repl_wait_confirmation_after_optional_parameter_asks(Pty(), runtime, recover_stalled_step=True)
+
+    assert calls == [
+        ("wait", 360.0, 1),
+        ("terminate", True),
+        ("spawn", ["--continue"]),
+        ("wait", 900.0, 1),
+        ("confirmation", False),
+    ]
+    assert runtime.diagnostics["repl_step2_stall_restarts"] == 1
+    assert "REPL display user_input_required occurrence 1 observed" not in runtime.checks
 
 
 def test_repl_image_lifecycle_requires_initial_vpc_question(runner: ModuleType) -> None:
