@@ -2602,7 +2602,21 @@ REPL_STACK_CREATED_PATTERNS = (r"CREATE_COMPLETE", r"Stack ID", r"StackId", r"st
 REPL_CLEANUP_PATTERNS = (r"cleanup", r"回滚清理", r"DeleteStack", r"开始清理")
 
 
+def _repl_selection_submission_count(pty: Any) -> int | None:
+    env = getattr(pty, "env", None)
+    if not isinstance(env, dict) or not isinstance(env.get("IAC_CODE_CONFIG_DIR"), str):
+        return None
+    projects = Path(env["IAC_CODE_CONFIG_DIR"]) / "projects"
+    return sum(
+        event.get("type") == "candidate_selection_submitted"
+        for path in projects.glob("*/*/pipeline/display.jsonl")
+        for event in _read_json_lines(path)
+        if isinstance(event, dict)
+    )
+
+
 def _repl_select_current(pty: Any, *, next_candidate: bool = False) -> None:
+    submitted_before = _repl_selection_submission_count(pty)
     if next_candidate:
         pty.send("\x1b[C", label="candidate-right")
         # RawInputCapture reads one terminal key at a time. Let the arrow
@@ -2611,7 +2625,17 @@ def _repl_select_current(pty: Any, *, next_candidate: bool = False) -> None:
         drain_output = getattr(pty, "drain_output", None)
         if callable(drain_output):
             drain_output()
-    pty.send("\r", label="candidate-enter")
+    for attempt in range(1, 4):
+        pty.send("\r", label="candidate-enter" if attempt == 1 else f"candidate-enter-retry-{attempt}")
+        if submitted_before is None:
+            return
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            pty.drain_output()
+            if _repl_selection_submission_count(pty) > submitted_before:
+                return
+            time.sleep(0.1)
+    raise TimeoutError("candidate selection Enter was not accepted after three attempts")
 
 
 def _repl_focus_confirmation_input(runtime: ScenarioRuntime, pty: Any) -> None:

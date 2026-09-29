@@ -5040,6 +5040,16 @@ class InlineREPL:
                             nonlocal selected
                             candidate_selection = tabs.confirm_selection()
                             if candidate_selection.selected_candidate_name:
+                                recorder = getattr(self, "_pipeline_display_recorder", None)
+                                if recorder is not None:
+                                    try:
+                                        recorder.record(
+                                            "candidate_selection_submitted",
+                                            step_id=getattr(self, "_pipeline_display_current_step_id", None),
+                                            payload={"selected_index": candidate_selection.selected_candidate_index},
+                                        )
+                                    except Exception as exc:
+                                        logger.warning("Failed to record candidate selection submission: {}", exc)
                                 selected = candidate_selection
                                 stop_keys.set()
                             continue

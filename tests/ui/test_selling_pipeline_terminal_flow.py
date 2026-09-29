@@ -479,6 +479,7 @@ async def test_candidate_selection_ready_is_recorded_only_after_key_input_is_rea
     from iac_code.ui.core.key_event import KeyEvent
 
     observed_readiness: list[tuple[bool, bool]] = []
+    submissions: list[int | None] = []
     capture_entered = False
 
     class ObservedCapture:
@@ -502,9 +503,13 @@ async def test_candidate_selection_ready_is_recorded_only_after_key_input_is_rea
     monkeypatch.setattr("iac_code.ui.core.raw_input.RawInputCapture", ObservedCapture)
 
     class Recorder:
-        def record(self, event_type, **_kwargs):
-            assert event_type == "candidate_selection_ready"
-            observed_readiness.append((repl._pipeline_waiting_input, capture_entered))
+        def record(self, event_type, **kwargs):
+            if event_type == "candidate_selection_ready":
+                observed_readiness.append((repl._pipeline_waiting_input, capture_entered))
+            elif event_type == "candidate_selection_submitted":
+                submissions.append(kwargs["payload"]["selected_index"])
+            else:
+                raise AssertionError(event_type)
 
     repl._pipeline_display_recorder = Recorder()
     repl._pipeline_display_current_step_id = "solution_planning_and_selection"
@@ -524,6 +529,7 @@ async def test_candidate_selection_ready_is_recorded_only_after_key_input_is_rea
 
     assert selected == "Plan A"
     assert observed_readiness == [(True, True)]
+    assert submissions == [0]
 
 
 @pytest.mark.asyncio

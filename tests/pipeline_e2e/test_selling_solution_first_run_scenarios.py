@@ -2242,6 +2242,28 @@ def test_repl_candidate_switch_waits_for_arrow_before_enter(
     assert sent == [("\x1b[C", "candidate-right"), "settle", "drain", ("\r", "candidate-enter")]
 
 
+def test_repl_candidate_enter_retries_until_submission_is_recorded(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[str] = []
+    ticks = iter(range(100))
+
+    class Pty:
+        def send(self, _text: str, *, label: str) -> None:
+            sent.append(label)
+
+        def drain_output(self) -> None:
+            pass
+
+    monkeypatch.setattr(runner, "_repl_selection_submission_count", lambda _pty: int(len(sent) >= 2))
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    runner._repl_select_current(Pty())
+
+    assert sent == ["candidate-enter", "candidate-enter-retry-2"]
+
+
 def test_repl_restored_line_input_uses_paste_then_separate_enter(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
