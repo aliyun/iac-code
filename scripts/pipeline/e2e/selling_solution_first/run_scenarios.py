@@ -1114,6 +1114,19 @@ def _public_aliyun_attribution_consistent(events: Sequence[dict[str, Any]]) -> b
     return all(str(item.get("toolName") or "").lower() == "aliyun_api" for item in events)
 
 
+def _public_tool_name_category(value: Any) -> str:
+    if value is None or value == "":
+        return "missing"
+    if not isinstance(value, str):
+        return "non_string"
+    normalized = re.sub(r"[^a-z0-9]", "", value.lower())
+    if normalized == "aliyunapi":
+        return "aliyun_api_alias"
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", value.lower()):
+        return "other_tool_name"
+    return "other_string"
+
+
 def _walk(value: Any) -> Iterator[tuple[str, Any]]:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -3151,6 +3164,26 @@ def _repl_submit_line_input(pty: Any, text: str, *, label: str) -> None:
     pty.send("\r", label=f"{label}-enter")
 
 
+def _repl_durable_progress_signature(runtime: ScenarioRuntime) -> tuple[tuple[str, int, int], ...]:
+    config_dir = getattr(getattr(runtime, "paths", None), "config_dir", None)
+    if not isinstance(config_dir, Path):
+        return ()
+    projects = config_dir / "projects"
+    paths = [
+        *projects.glob("*/*/pipeline/display.jsonl"),
+        *projects.glob("*/*/pipeline/meta.yaml"),
+        *projects.glob("*/*/pipeline/transcripts/*/session.jsonl"),
+    ]
+    signature: list[tuple[str, int, int]] = []
+    for path in paths:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        signature.append((str(path), stat.st_size, stat.st_mtime_ns))
+    return tuple(sorted(signature))
+
+
 def _observe_repl_wait(
     pty: Any,
     runtime: ScenarioRuntime,
@@ -3163,6 +3196,18 @@ def _observe_repl_wait(
     """Apply the REPL idle guard while polling durable pipeline files."""
 
     now = time.monotonic()
+    if getattr(pty, "_durable_wait_started", None) != started:
+        pty._durable_wait_started = started
+        pty._durable_progress_signature = _repl_durable_progress_signature(runtime)
+        pty._durable_progress_checked_at = now
+        pty._durable_last_progress_at = started
+    elif now - getattr(pty, "_durable_progress_checked_at", 0.0) >= 2.0:
+        signature = _repl_durable_progress_signature(runtime)
+        if signature != pty._durable_progress_signature:
+            pty._durable_progress_signature = signature
+            pty._durable_last_progress_at = now
+        pty._durable_progress_checked_at = now
+    durable_progress_at = float(getattr(pty, "_durable_last_progress_at", started))
     last_output_at = getattr(pty, "_last_output_at", None)
     if isinstance(last_output_at, (int, float)) and not isinstance(last_output_at, bool):
         # Ignore a prior cloud operation retained in the PTY tail. Only output
@@ -3176,7 +3221,7 @@ def _observe_repl_wait(
         )
         repl = _legacy_repl_module()
         idle_limit = repl.WAIT_CLOUD_IDLE_SECONDS if cloud_wait else repl.WAIT_IDLE_SECONDS
-        if now - max(float(last_output_at), started) >= idle_limit:
+        if now - max(float(last_output_at), started, durable_progress_at) >= idle_limit:
             record = {
                 "state": "no_output",
                 "confidence": 1.0,
@@ -3191,7 +3236,7 @@ def _observe_repl_wait(
             pty.events.append({"type": "wait_diagnosis", **record, "at": utc_now()})
             runtime.watchdog = record
             raise TimeoutError(f"no terminal output for {round(idle_limit)}s while waiting for {description}")
-    if not diagnosis_attempted and now - started >= 120.0:
+    if not diagnosis_attempted and now - max(started, durable_progress_at) >= 120.0:
         diagnose = getattr(pty, "_diagnose_wait", None)
         if callable(diagnose):
             try:
@@ -3436,8 +3481,7 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
                     runtime,
                     event_type="user_input_required",
                     occurrence=prior_inputs + input_index,
-                    timeout=min(runtime.args.stream_timeout, 360.0) if recover_stalled_step and not restarted
-                    else runtime.args.stream_timeout,
+                    timeout=runtime.args.stream_timeout,
                     drain_output=getattr(pty, "drain_output", None),
                     predicate=lambda item: item.get("step_id") == NEW_STEPS[1],
                     check_before_drain=True,
@@ -3445,14 +3489,20 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
                 )
                 break
             except TimeoutError:
-                if not recover_stalled_step or restarted or _repl_active_deploy_step(runtime):
+                watchdog = getattr(runtime, "watchdog", None)
+                if (
+                    not recover_stalled_step or restarted or _repl_active_deploy_step(runtime)
+                    or not isinstance(watchdog, dict) or watchdog.get("state") != "no_output"
+                ):
                     raise
-                # Step 2 has no cloud creation. Resume the persisted attempt
-                # once if the model/PTY stopped producing progress.
+                # Resume only after both terminal and durable step records
+                # have stopped changing. Step 2 may legitimately work for
+                # many minutes without printing to the terminal.
                 restarted = True
                 _record_diagnostic(runtime, "repl_step2_stall_restarts", 1)
                 pty.terminate(force=True)
                 pty.spawn(extra_args=["--continue"])
+                watchdog["action"] = "observe"
                 missed_check = f"REPL display user_input_required occurrence {prior_inputs + input_index} observed"
                 runtime.checks.pop(missed_check, None)
                 runtime.checks.pop("REPL display matched at least once before timeout", None)
@@ -3923,14 +3973,14 @@ def _repl_wait_multimodal_confirmation(
             else:
                 _repl_submit_image_fixture(pty, primary_image_key, label=label)
         else:
-            _repl_paste_generated_image(
+            _repl_submit_generated_image(
                 runtime,
                 pty,
                 f"{phase}-parameter-{ask_index}",
-                "请直接选择问题选项中的第一个默认 VPC，并继续；"
-                "后续可用区和网段使用低成本且合法的默认值，不要再次询问。",
+                "请按当前问题选择列出的第一个可用项；若问 VPC 就选首个已有 VPC。"
+                "可用区、网段及其他参数使用合法且低成本的推荐默认值，不要重复询问。",
+                label=f"{phase}-image-ask-enter-{ask_index}",
             )
-            pty.send("\r", label=f"{phase}-image-ask-enter-{ask_index}")
     raise RuntimeError(f"{phase} multimodal Step 2 did not reach confirmation after four parameter asks")
 
 
@@ -5182,6 +5232,9 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         _record_diagnostic(runtime, "persisted_aliyun_public_tool_event_count", len(public_aliyun_tool_events))
         _record_diagnostic(runtime, "persisted_aliyun_public_tool_names", sorted({
             str(item.get("toolName") or "none").lower() for item in public_aliyun_tool_events
+        }))
+        _record_diagnostic(runtime, "persisted_aliyun_public_tool_name_categories", sorted({
+            _public_tool_name_category(item.get("toolName")) for item in public_aliyun_tool_events
         }))
         _record_diagnostic(
             runtime, "persisted_aliyun_tool_publicly_seen",

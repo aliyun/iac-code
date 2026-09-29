@@ -521,11 +521,25 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 name for name in public_tool_names if isinstance(name, str) and name in allowed_tool_names
             ][:16]
         persisted_tool_names = raw_diagnostics.get("persisted_aliyun_public_tool_names")
+        allowed_attributed_names = allowed_tool_names | {
+            "ros_preview_template", "ros_estimate_template_cost", "ros_get_template_parameter_constraints",
+            "ros_validate_template", "complete_step", "ask_user_question", "read_file", "show_candidate_detail",
+            "select_cloud_resource", "resolve_cloud_resource_selector", "none",
+        }
         if isinstance(persisted_tool_names, list):
             diagnostics["persisted_aliyun_public_tool_names"] = [
                 name for name in persisted_tool_names
-                if isinstance(name, str) and name in allowed_tool_names | {"none"}
+                if isinstance(name, str) and name in allowed_attributed_names
             ][:16]
+        tool_name_categories = raw_diagnostics.get("persisted_aliyun_public_tool_name_categories")
+        allowed_name_categories = {
+            "missing", "non_string", "aliyun_api_alias", "other_tool_name", "other_string",
+        }
+        if isinstance(tool_name_categories, list):
+            diagnostics["persisted_aliyun_public_tool_name_categories"] = [
+                category for category in tool_name_categories
+                if isinstance(category, str) and category in allowed_name_categories
+            ][:8]
         step2_tool_names = raw_diagnostics.get("repl_step2_tool_use_names")
         allowed_step2_tools = allowed_tool_names | {
             "ros_preview_template", "ros_estimate_template_cost", "ros_get_template_parameter_constraints",
@@ -547,6 +561,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         allowed_images = {
             "initial", "selection", "ask-first-answer", "ask-second-answer", "confirmation-adjust",
             "rollback-interrupt", "rollback-ask-answer", "normal-followup",
+            *(f"{phase}-parameter-{index}" for phase in ("initial", "adjustment", "rollback") for index in (2, 3, 4)),
         }
         if isinstance(image_keys, list):
             diagnostics["repl_image_keys"] = [

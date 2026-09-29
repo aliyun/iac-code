@@ -2319,6 +2319,37 @@ def test_repl_file_wait_ignores_old_cloud_text_but_keeps_active_deploy(
     ) is True
 
 
+def test_repl_file_wait_counts_persisted_step_progress_as_activity(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    transcript = (
+        tmp_path / "projects" / "project" / "session" / "pipeline" / "transcripts" / "attempt" / "session.jsonl"
+    )
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text('{"type":"tool_use"}\n', encoding="utf-8")
+    pty = argparse.Namespace(_last_output_at=0.0, transcript="", events=[], _wait_diagnoses=[])
+    runtime = argparse.Namespace(paths=argparse.Namespace(config_dir=tmp_path), watchdog=None)
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        runner, "_legacy_repl_module",
+        lambda: argparse.Namespace(WAIT_IDLE_SECONDS=600.0, WAIT_CLOUD_IDLE_SECONDS=1500.0),
+    )
+
+    runner._observe_repl_wait(
+        pty, runtime, description="Step 2 confirmation", started=0.0,
+        transcript_offset=0, diagnosis_attempted=True,
+    )
+    transcript.write_text('{"type":"tool_use"}\n{"type":"tool_result"}\n', encoding="utf-8")
+    clock[0] = 601.0
+
+    assert runner._observe_repl_wait(
+        pty, runtime, description="Step 2 confirmation", started=0.0,
+        transcript_offset=0, diagnosis_attempted=True,
+    ) is True
+    assert runtime.watchdog is None
+
+
 def test_repl_file_wait_records_advisory_diagnosis(
     runner: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
@@ -2774,6 +2805,7 @@ def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
     def wait(_runtime, **kwargs):
         calls.append(("wait", kwargs["timeout"], kwargs["occurrence"]))
         if len([item for item in calls if item[0] == "wait"]) == 1:
+            runtime.watchdog = {"state": "no_output", "action": "early_abort"}
             raise TimeoutError("stalled")
         return event, Path("display")
 
@@ -2781,6 +2813,7 @@ def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
         args=argparse.Namespace(stream_timeout=900.0, cleanup_vpc_id="vpc-test"),
         checks={"REPL display user_input_required occurrence 1 observed": False},
         diagnostics={},
+        watchdog=None,
     )
     monkeypatch.setattr(runner, "_read_repl_display_events", lambda _runtime: [{
         "type": "candidate_selection_submitted",
@@ -2795,13 +2828,14 @@ def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
     runner._repl_wait_confirmation_after_optional_parameter_asks(Pty(), runtime, recover_stalled_step=True)
 
     assert calls == [
-        ("wait", 360.0, 1),
+        ("wait", 900.0, 1),
         ("terminate", True),
         ("spawn", ["--continue"]),
         ("wait", 900.0, 1),
         ("confirmation", False),
     ]
     assert runtime.diagnostics["repl_step2_stall_restarts"] == 1
+    assert runtime.watchdog["action"] == "observe"
     assert "REPL display user_input_required occurrence 1 observed" not in runtime.checks
 
 
@@ -2899,9 +2933,10 @@ def test_repl_multimodal_confirmation_answers_repeated_asks_before_confirmation(
     assert ("fixture", "ask-first-answer") in calls
     generated = next(item for item in calls if isinstance(item, tuple) and item[0] == "generated")
     assert generated[1] == "initial-parameter-2"
-    assert "第一个默认 VPC" in generated[2]
+    assert "首个已有 VPC" in generated[2]
     assert ("send", "\r", "initial-image-ask-enter-1") in calls
     assert ("send", "\r", "initial-image-ask-enter-2") in calls
+    assert calls[calls.index(("send", "\r", "initial-image-ask-enter-2")) - 1] == "drain"
     assert calls[-2][0:2] == ("expect", "initial image ask or confirmation #3")
     assert calls[-1] == ("confirmation", False)
 
@@ -3239,6 +3274,9 @@ def test_public_a2a_attribution_ignores_artifact_reference_but_checks_tool_event
     assert not runner._public_aliyun_attribution_consistent(
         runner._public_a2a_tool_events_for_id([misattributed_tool], "call-1")
     )
+    assert runner._public_tool_name_category("aliyun_api") == "aliyun_api_alias"
+    assert runner._public_tool_name_category("ros_preview_template") == "other_tool_name"
+    assert runner._public_tool_name_category(None) == "missing"
 
 
 def test_repl_question_waits_for_actual_input_prompt(runner: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
