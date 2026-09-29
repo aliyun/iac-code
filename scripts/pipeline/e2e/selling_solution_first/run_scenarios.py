@@ -1220,6 +1220,8 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
     ros_event_indexes = [item["eventIndex"] for item in sequence if item["tool"].lower() == "ros_deploy"]
     confirmation_indexes: list[int] = []
     repl_unstructured_confirmation_indexes: list[int] = []
+    unstructured_confirmation_count = 0
+    image_confirmation_count = 0
     for event_index, value in enumerate(values):
         candidates = [item for _, item in _walk(value) if isinstance(item, dict)]
         if isinstance(value, dict):
@@ -1237,6 +1239,10 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
                 confirmation_indexes.append(event_index)
             elif runtime.spec.surface is Surface.REPL and payload.get("structured") is False:
                 repl_unstructured_confirmation_indexes.append(event_index)
+            if payload.get("structured") is False:
+                unstructured_confirmation_count += 1
+            if payload.get("has_images") is True:
+                image_confirmation_count += 1
     if runtime.spec.surface is Surface.REPL:
         step3_indexes = [event_index for event_index, step in started_steps if step == NEW_STEPS[2]]
         if step3_indexes:
@@ -1254,6 +1260,8 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
         bool(confirmation_indexes) and min(ros_event_indexes) > min(confirmation_indexes)
     )
     _record_diagnostic(runtime, "confirmation_event_count", len(confirmation_indexes))
+    _record_diagnostic(runtime, "unstructured_confirmation_count", unstructured_confirmation_count)
+    _record_diagnostic(runtime, "image_confirmation_count", image_confirmation_count)
     _record_diagnostic(runtime, "ros_deploy_event_count", len(ros_event_indexes))
     if runtime.spec.profile == "safe_cancel":
         runtime.checks["cancel kept the deployment unattempted"] = not ros_event_indexes
@@ -2746,7 +2754,14 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
     # Display events are ordered pipeline facts. Put them before the PTY-only
     # interaction records so Step 1/2 boundaries cannot be inferred from a
     # monolithic transcript that also contains later Preview/quote output.
-    _common_pipeline_checks(runtime, _read_repl_display_events(runtime) + pty.events + [{"transcript": normalized}])
+    display_events = _read_repl_display_events(runtime)
+    for event_type, key in (
+        ("candidate_selection_ready", "repl_selection_ready_count"),
+        ("candidate_selection_submitted", "repl_selection_submitted_count"),
+        ("step_started", "repl_step_started_count"),
+    ):
+        _record_diagnostic(runtime, key, sum(event.get("type") == event_type for event in display_events))
+    _common_pipeline_checks(runtime, display_events + pty.events + [{"transcript": normalized}])
     runtime.checks["REPL transcript captured"] = bool(normalized.strip())
     unexpected_exit = any(
         event.get("type") == "terminate"
@@ -2770,7 +2785,10 @@ def _repl_wait_selection(
     terminal_offset: int | None = None,
 ) -> None:
     runtime.repl_candidate_wait_count += 1
-    offset = (0 if await_controls else len(getattr(pty, "transcript", ""))) if terminal_offset is None else terminal_offset
+    offset = (
+        (0 if await_controls else len(getattr(pty, "transcript", "")))
+        if terminal_offset is None else terminal_offset
+    )
     event, path = _wait_repl_display_event(
         runtime,
         event_type="candidate_selection_ready",
@@ -3042,12 +3060,9 @@ def _observe_repl_wait(
     now = time.monotonic()
     last_output_at = getattr(pty, "_last_output_at", None)
     if isinstance(last_output_at, (int, float)) and not isinstance(last_output_at, bool):
-        chunks = getattr(pty, "raw_chunks", None)
-        recent_output = (
-            "".join(chunks[-10:])[-2000:]
-            if isinstance(chunks, list)
-            else str(getattr(pty, "transcript", "")[-2000:])
-        )
+        # Ignore a prior cloud operation retained in the PTY tail. Only output
+        # emitted during this wait may extend the cloud idle allowance.
+        recent_output = str(getattr(pty, "transcript", ""))[transcript_offset:][-2000:]
         cloud_wait = bool(
             re.search(
                 r"(?i)Deploying\s*\(|CreateStack|ROS Deploy|CREATE_IN_PROGRESS|DELETE_IN_PROGRESS|回滚清理",
@@ -3585,14 +3600,22 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         if isinstance(event, dict) and event.get("type") == "paste-image-fixture"
     }
     _record_diagnostic(runtime, "repl_image_keys", sorted(observed_keys))
-    runtime.checks["REPL full image lifecycle exercised"] = {
+    # The model may proceed directly to confirmation in one phase. Require an
+    # image at every fixed boundary and at least one actual question boundary,
+    # without requiring a question in a phase where none was presented.
+    runtime.checks["REPL full image lifecycle exercised"] = _multimodal_image_lifecycle_complete(observed_keys)
+
+
+def _multimodal_image_lifecycle_complete(observed_keys: set[str]) -> bool:
+    return {
         "initial",
-        "ask-first-answer",
         "selection",
         "confirmation-adjust",
         "rollback-interrupt",
         "normal-followup",
-    }.issubset(observed_keys)
+    }.issubset(observed_keys) and bool(
+        observed_keys & {"ask-first-answer", "ask-second-answer", "rollback-ask-answer"}
+    )
 
 
 def _repl_wait_multimodal_selection(runtime: ScenarioRuntime, pty: Any, *, phase: str) -> None:
@@ -3761,7 +3784,10 @@ def _run_repl(runtime: ScenarioRuntime) -> None:
             if profile == "running_step1":
                 runtime.repl_candidate_wait_count = max(
                     runtime.repl_candidate_wait_count,
-                    sum(event.get("type") == "candidate_selection_ready" for event in _read_repl_display_events(runtime)),
+                    sum(
+                        event.get("type") == "candidate_selection_ready"
+                        for event in _read_repl_display_events(runtime)
+                    ),
                 )
             pty.spawn(extra_args=["--continue"])
             runtime.checks["REPL used --continue"] = True
@@ -4937,12 +4963,22 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         runtime.checks["Aliyun business body and public payload contract passed"] = False
     tools = [item["tool"].lower() for item in _tool_sequence(values)]
     _record_diagnostic(runtime, "public_tool_event_count", len(tools))
+    _record_diagnostic(runtime, "public_tool_names", sorted(set(tools)))
     journal_tools = _public_journal_tool_names(runtime.paths.config_dir)
     _record_diagnostic(runtime, "public_journal_aliyun_count", journal_tools.count("aliyun_api"))
     if runtime.spec.surface is Surface.A2A and persisted_tool_use_id:
         _record_diagnostic(
             runtime, "persisted_aliyun_tool_publicly_seen",
             persisted_tool_use_id in _public_a2a_tool_use_ids(values),
+        )
+        _record_diagnostic(
+            runtime, "persisted_aliyun_publicly_attributed",
+            any(
+                isinstance(item, dict)
+                and item.get("toolUseId") == persisted_tool_use_id
+                and str(item.get("toolName") or "").lower() == "aliyun_api"
+                for value in values for _, item in _walk(value)
+            ),
         )
     runtime.checks["public events preserve Aliyun tool attribution"] = "aliyun_api" in tools
     if "aliyun_api" not in tools:

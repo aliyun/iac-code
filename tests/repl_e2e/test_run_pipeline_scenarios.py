@@ -3172,6 +3172,54 @@ def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
     }
 
 
+def test_candidate_selection_retries_only_until_durable_submission(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text("", encoding="utf-8")
+    sent: list[str] = []
+    clock = [0.0]
+
+    class Pty:
+        env = {"IAC_CODE_CONFIG_DIR": str(tmp_path)}
+
+        def send(self, text: str, *, label: str):
+            sent.append(label)
+            if len(sent) == 2:
+                display.write_text('{"type":"candidate_selection_submitted"}\n', encoding="utf-8")
+
+        def drain_output(self):
+            pass
+
+    def tick() -> float:
+        clock[0] += 1.0
+        return clock[0]
+
+    monkeypatch.setattr(runner.time, "monotonic", tick)
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    runner._select_default_candidate(Pty(), type("Args", (), {"selection_prompt": ""})())
+
+    assert sent == ["select-default-candidate", "select-default-candidate-retry-2"]
+
+
+def test_reliable_sendline_drains_paste_before_enter(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    pty = _repl_pty_unit_instance(runner, args=None, run_dir=tmp_path, cwd=tmp_path, env={})
+    actions: list[str] = []
+
+    class Child:
+        def send(self, text: str):
+            actions.append(text)
+
+    pty.child = Child()
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    monkeypatch.setattr(pty, "drain_output", lambda: actions.append("drain"))
+    pty.sendline_reliable("rollback")
+
+    assert actions == ["\x1b[200~rollback\x1b[201~", "drain", "\r"]
+    assert pty.events[-1]["type"] == "sendline"
+
+
 def test_transcript_tool_progress_counts_results_without_content(tmp_path: Path) -> None:
     runner = _load_runner()
     transcript = (

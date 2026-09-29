@@ -302,8 +302,13 @@ def test_live_public_summary_filters_runner_diagnostics() -> None:
     public = run_e2e._public_live_summary({
         "diagnostics": {
             "confirmation_event_count": 2,
+            "unstructured_confirmation_count": 1,
+            "image_confirmation_count": 1,
             "ros_deploy_event_count": 1,
             "public_tool_event_count": 3,
+            "public_tool_names": ["aliyun_api", "sk-fixture"],
+            "persisted_aliyun_publicly_attributed": True,
+            "repl_selection_submitted_count": 1,
             "a2a_pending_kinds": ["deployment_confirmation", "sk-fixture"],
             "repl_image_keys": ["initial", "sk-fixture"],
             "private": "sk-fixture",
@@ -312,8 +317,13 @@ def test_live_public_summary_filters_runner_diagnostics() -> None:
     assert public is not None
     assert public["diagnostics"] == {
         "confirmation_event_count": 2,
+        "unstructured_confirmation_count": 1,
+        "image_confirmation_count": 1,
         "ros_deploy_event_count": 1,
         "public_tool_event_count": 3,
+        "public_tool_names": ["aliyun_api"],
+        "persisted_aliyun_publicly_attributed": True,
+        "repl_selection_submitted_count": 1,
         "a2a_pending_kinds": ["deployment_confirmation"],
         "repl_image_keys": ["initial"],
     }

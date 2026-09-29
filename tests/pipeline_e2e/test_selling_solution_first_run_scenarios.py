@@ -2623,6 +2623,15 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
     ]
 
 
+def test_repl_image_lifecycle_requires_actual_ask_but_not_specific_phase(runner: ModuleType) -> None:
+    required = {"initial", "selection", "confirmation-adjust", "rollback-interrupt", "normal-followup"}
+
+    assert runner._multimodal_image_lifecycle_complete(required | {"rollback-ask-answer"})
+    assert runner._multimodal_image_lifecycle_complete(required | {"ask-first-answer"})
+    assert not runner._multimodal_image_lifecycle_complete(required)
+    assert not runner._multimodal_image_lifecycle_complete((required - {"selection"}) | {"rollback-ask-answer"})
+
+
 def test_repl_multimodal_confirmation_answers_repeated_asks_before_confirmation(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:

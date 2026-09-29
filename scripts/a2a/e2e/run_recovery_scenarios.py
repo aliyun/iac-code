@@ -1314,10 +1314,12 @@ def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
     def callback(h: ScenarioHarness) -> None:
         control = _backup_delay_control_path(h)
         initial_stream = h.start_stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
-        started = _wait_for_backup_delay_marker(control, "started", timeout=args.event_timeout)
+        started, initial_streams = _wait_for_backup_start_with_intervening_asks(
+            h, control, initial_stream, timeout=args.event_timeout
+        )
         h.snapshots["backup_delay_started"] = started
         h.checks["input_required backup delay started"] = started.get("delaySeconds") == BACKUP_DELAY_SECONDS
-        h.checks["initial stream was open when backup delay started"] = not initial_stream.done
+        h.checks["active stream was open when backup delay started"] = not initial_streams[-1].done
 
         h.checks["backup was unfinished when selection request was dispatched"] = not _backup_delay_marker_path(
             control, "finished"
@@ -1328,14 +1330,15 @@ def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
             wait_for_identity=False,
         )
 
-        initial_streams = _wait_for_with_intervening_ask_inputs(
+        continued_streams = _wait_for_with_intervening_ask_inputs(
             h,
-            [initial_stream],
+            [initial_streams[-1]],
             _input_required_step("confirm_and_select"),
             description="step4 candidate selection input_required",
             timeout=args.event_timeout,
             name_prefix="01-initial",
         )
+        initial_streams = [*initial_streams[:-1], *continued_streams]
         h.checks["initial reached step4 input_required"] = any(
             stream.summary.last_input_required_step_id == "confirm_and_select" for stream in initial_streams
         )
@@ -2537,6 +2540,38 @@ def _wait_for_backup_delay_marker(control: Path, marker: str, *, timeout: float)
         last_error = "marker was not a JSON object"
         time.sleep(0.05)
     raise TimeoutError(f"Timed out waiting for backup delay marker {path}: {last_error}")
+
+
+def _wait_for_backup_start_with_intervening_asks(
+    h: ScenarioHarness, control: Path, initial_stream: BackgroundStream, *, timeout: float
+) -> tuple[dict[str, Any], list[BackgroundStream]]:
+    """Keep Step 1 clarification turns moving while waiting for the Step 4 backup hook."""
+
+    streams = [initial_stream]
+    handled: set[int] = set()
+    path = _backup_delay_marker_path(control, "started")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.is_file():
+            return _wait_for_backup_delay_marker(control, "started", timeout=1.0), streams
+        for stream in list(streams):
+            if not stream.done or id(stream) in handled:
+                continue
+            handled.add(id(stream))
+            kind = _latest_input_required_kind_from_events(stream.events)
+            if kind != "ask_user_question":
+                continue
+            if len(streams) > 4:
+                raise RuntimeError("too many intervening questions before backup delay")
+            h.notes.append(f"answered intervening ask_user_question before backup delay: {stream.name}")
+            streams.append(
+                h.start_stream(
+                    prompt=INTERVENING_ASK_ANSWER,
+                    name=f"01-initial-answer-ask-{len(streams)}",
+                )
+            )
+        time.sleep(0.05)
+    raise TimeoutError("Timed out waiting for backup delay to start after Step 1 clarification")
 
 
 def _float_value(value: Any) -> float | None:

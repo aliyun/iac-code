@@ -452,7 +452,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 watchdog["cue"] = cue
     raw_progress = summary.get("progress")
     allowed_progress = {
-        "candidate_selection_ready", "user_input_required", "user_input_received",
+        "candidate_selection_ready", "candidate_selection_submitted", "user_input_required", "user_input_received",
         "step_started", "step_completed", "pipeline_completed", "pipeline_failed",
         "step_started_deploying", "step_completed_deploying", "ros_deploy_used",
         "aliyun_api_used", "ros_stack_used", "bash_used",
@@ -478,8 +478,10 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     if isinstance(raw_diagnostics, dict):
         diagnostics: dict[str, Any] = {}
         for key in (
-            "confirmation_event_count", "ros_deploy_event_count", "public_tool_event_count",
+            "confirmation_event_count", "unstructured_confirmation_count", "image_confirmation_count",
+            "ros_deploy_event_count", "public_tool_event_count",
             "public_journal_aliyun_count", "repl_confirmation_count", "candidate_option_count",
+            "repl_selection_ready_count", "repl_selection_submitted_count", "repl_step_started_count",
             "text_exit_code", "text_output_length",
             "cleanup_turn_event_count", "cleanup_turn_cleanup_event_count", "cleanup_target_count",
             "cleanup_ledger_pending_count", "cleanup_delete_tool_use_count", "cleanup_get_tool_use_count",
@@ -490,7 +492,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 diagnostics[key] = count
         for key in (
             "repl_solution_summary_changed", "repl_effective_parameters_changed",
-            "persisted_aliyun_tool_publicly_seen",
+            "persisted_aliyun_tool_publicly_seen", "persisted_aliyun_publicly_attributed",
             "text_has_vpc_marker",
             "cleanup_prompt_active", "cleanup_first_ros_not_found",
             "cleanup_delete_target_matches", "cleanup_get_target_matches",
@@ -505,6 +507,14 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             diagnostics["a2a_pending_kinds"] = [
                 kind for kind in pending_kinds if isinstance(kind, str) and kind in allowed_pending
             ][:24]
+        public_tool_names = raw_diagnostics.get("public_tool_names")
+        allowed_tool_names = {
+            "aliyun_api", "ros_deploy", "ros_stack", "write", "write_file", "edit", "edit_file", "bash",
+        }
+        if isinstance(public_tool_names, list):
+            diagnostics["public_tool_names"] = [
+                name for name in public_tool_names if isinstance(name, str) and name in allowed_tool_names
+            ][:16]
         image_keys = raw_diagnostics.get("repl_image_keys")
         allowed_images = {
             "initial", "selection", "ask-first-answer", "ask-second-answer", "confirmation-adjust",

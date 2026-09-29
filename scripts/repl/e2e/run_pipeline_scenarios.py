@@ -537,6 +537,23 @@ class ReplPty:
             }
         )
 
+    def sendline_reliable(self, text: str) -> None:
+        """Drain a bracketed paste before Enter reaches prompt_toolkit."""
+
+        transcript_offset = len(self.transcript)
+        self._require_child().send(f"\x1b[200~{text}\x1b[201~")
+        time.sleep(0.1)
+        self.drain_output()
+        self._require_child().send("\r")
+        self.events.append(
+            {
+                "type": "sendline",
+                "text": _redact_sensitive_text(text, self.env),
+                "transcript_offset": transcript_offset,
+                "at": _utc_now(),
+            }
+        )
+
     def send(self, text: str, *, label: str = "send") -> None:
         transcript_offset = len(self.transcript)
         self._require_child().send(text)
@@ -963,7 +980,7 @@ def _display_progress(config_dir: Path) -> dict[str, int]:
     """Count fixed display events and deployment milestones without exposing payloads."""
 
     allowed = {
-        "candidate_selection_ready", "user_input_required", "user_input_received",
+        "candidate_selection_ready", "candidate_selection_submitted", "user_input_required", "user_input_received",
         "step_started", "step_completed", "pipeline_completed", "pipeline_failed", "stack_progress",
     }
     counts: dict[str, int] = {}
@@ -2526,10 +2543,29 @@ def _apply_acceptance_checks(
 
 
 def _select_default_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
-    if args.selection_prompt:
-        pty.send(f"{args.selection_prompt}\r", label="select-default-candidate")
-    else:
-        pty.send("\r", label="select-default-candidate")
+    config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+    drain_output = getattr(pty, "drain_output", None)
+    baseline = (
+        _display_progress(Path(config_path))
+        if config_path and callable(drain_output) and (Path(config_path) / "projects").is_dir()
+        else None
+    )
+    for attempt in range(1, 4):
+        label = "select-default-candidate" if attempt == 1 else f"select-default-candidate-retry-{attempt}"
+        pty.send(f"{args.selection_prompt or ''}\r", label=label)
+        if baseline is None:
+            return
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            drain_output()
+            progress = _display_progress(Path(config_path))
+            if any(
+                progress.get(event, 0) > baseline.get(event, 0)
+                for event in ("candidate_selection_submitted", "user_input_received", "step_started")
+            ):
+                return
+            time.sleep(0.1)
+    raise TimeoutError("candidate selection input was not accepted after three attempts")
 
 
 def _expect_first_stack_create_started(pty: ReplPty, args: argparse.Namespace) -> None:
@@ -3207,7 +3243,8 @@ def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int
             ready_description="candidate selection interrupt text input ready",
         )
         checks["candidate selection interrupt text input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        reliable_sendline = getattr(pty, "sendline_reliable", pty.sendline)
+        reliable_sendline(args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
