@@ -257,6 +257,7 @@ def test_ci_recovery_records_run_owned_stacks_and_constrains_create_prompt(tmp_p
     assert manifest["stackNames"] == harness.owned_stack_names
     assert manifest["stackNames"] == ["iac-e2e-" + manifest["runId"] + "-main"]
     assert manifest["stackNames"][0] in harness._ci_owned_prompt(args.initial_prompt)
+    assert manifest["stackNames"][0] in harness._ci_owned_prompt(runner.IMAGE_INTERRUPT_PROMPT)
     assert harness._ci_owned_prompt(args.recovery_prompt) == args.recovery_prompt
 
 

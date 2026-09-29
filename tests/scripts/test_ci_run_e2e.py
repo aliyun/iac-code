@@ -310,6 +310,7 @@ def test_live_public_summary_filters_runner_diagnostics() -> None:
             "persisted_aliyun_publicly_attributed": True,
             "repl_selection_submitted_count": 1,
             "repl_step_started_ids": ["solution_planning_and_selection", "sk-fixture"],
+            "repl_first_rollback_input_intact": True,
             "a2a_pending_kinds": ["deployment_confirmation", "sk-fixture"],
             "repl_image_keys": ["initial", "sk-fixture"],
             "private": "sk-fixture",
@@ -326,6 +327,7 @@ def test_live_public_summary_filters_runner_diagnostics() -> None:
         "persisted_aliyun_publicly_attributed": True,
         "repl_selection_submitted_count": 1,
         "repl_step_started_ids": ["solution_planning_and_selection"],
+        "repl_first_rollback_input_intact": True,
         "a2a_pending_kinds": ["deployment_confirmation"],
         "repl_image_keys": ["initial"],
     }

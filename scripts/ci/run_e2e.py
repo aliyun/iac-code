@@ -492,6 +492,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 diagnostics[key] = count
         for key in (
             "repl_solution_summary_changed", "repl_effective_parameters_changed",
+            "repl_first_rollback_input_intact",
             "persisted_aliyun_tool_publicly_seen", "persisted_aliyun_publicly_attributed",
             "text_has_vpc_marker",
             "cleanup_prompt_active", "cleanup_first_ros_not_found",

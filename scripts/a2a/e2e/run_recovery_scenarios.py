@@ -740,7 +740,7 @@ class ScenarioHarness:
             return prompt
         if prompt not in {
             self.args.initial_prompt, self.args.selection_prompt, ASK_TRIGGER_PROMPT,
-            ASK_FIRST_ANSWER, ASK_SECOND_ANSWER, ROLLBACK_PROMPT, IMAGE_TEXT_PROMPT,
+            ASK_FIRST_ANSWER, ASK_SECOND_ANSWER, ROLLBACK_PROMPT, IMAGE_TEXT_PROMPT, IMAGE_INTERRUPT_PROMPT,
         }:
             return prompt
         stack_name = self.owned_stack_names[0]

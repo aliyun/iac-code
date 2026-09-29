@@ -2772,6 +2772,20 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
         runtime, "repl_step_started_ids",
         [event.get("step_id") for event in display_events if event.get("type") == "step_started"],
     )
+    if getattr(getattr(runtime, "spec", None), "profile", None) == "interrupt_rollback":
+        confirmation_inputs = [
+            event.get("payload", {}).get("selected_value")
+            for event in display_events
+            if event.get("type") == "user_input_received"
+            and isinstance(event.get("payload"), dict)
+            and event["payload"].get("kind") == "deployment_confirmation"
+        ]
+        _record_diagnostic(
+            runtime, "repl_first_rollback_input_intact",
+            bool(confirmation_inputs)
+            and isinstance(confirmation_inputs[0], str)
+            and all(marker in confirmation_inputs[0] for marker in ("改需求", "安全组", "不创建")),
+        )
     _common_pipeline_checks(runtime, display_events + pty.events + [{"transcript": normalized}])
     runtime.checks["REPL transcript captured"] = bool(normalized.strip())
     unexpected_exit = any(
