@@ -2808,8 +2808,9 @@ def _repl_wait_selection(
     after_restart: bool = False,
     await_controls: bool = False,
     terminal_offset: int | None = None,
+    timeout: float | None = None,
 ) -> None:
-    runtime.repl_candidate_wait_count += 1
+    occurrence = runtime.repl_candidate_wait_count + 1
     offset = (
         (0 if await_controls else len(getattr(pty, "transcript", "")))
         if terminal_offset is None else terminal_offset
@@ -2817,8 +2818,8 @@ def _repl_wait_selection(
     event, path = _wait_repl_display_event(
         runtime,
         event_type="candidate_selection_ready",
-        occurrence=runtime.repl_candidate_wait_count,
-        timeout=runtime.args.stream_timeout,
+        occurrence=occurrence,
+        timeout=runtime.args.stream_timeout if timeout is None else timeout,
         # Always drain the PTY while the model renders the candidate screen;
         # otherwise a full terminal buffer can block the durable event itself.
         drain_output=getattr(pty, "drain_output", None),
@@ -2848,12 +2849,13 @@ def _repl_wait_selection(
         drain_output = getattr(pty, "drain_output", None)
         if callable(drain_output):
             drain_output()
+    runtime.repl_candidate_wait_count = occurrence
     pty.events.append(
         {
             "type": "display-event",
             "description": "selling_solution_first candidate selection",
             "event_type": event.get("type"),
-            "occurrence": runtime.repl_candidate_wait_count,
+            "occurrence": occurrence,
             "path": str(path),
             "at": utc_now(),
         }
@@ -3561,13 +3563,31 @@ def _run_repl_waiting_resume_all(runtime: ScenarioRuntime, pty: Any) -> None:
     )
 
 
+def _repl_wait_selection_after_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
+    try:
+        _repl_wait_selection(pty, runtime, timeout=min(runtime.args.stream_timeout, 360.0))
+    except TimeoutError:
+        if _repl_active_deploy_step(runtime):
+            raise
+        # The changed goal is persisted and Step 3 has not started. Resume
+        # the planning attempt once instead of waiting for a silent model call.
+        _record_diagnostic(runtime, "repl_step1_stall_restarts", 1)
+        terminal_offset = len(pty.transcript)
+        pty.terminate(force=True)
+        pty.spawn(extra_args=["--continue"])
+        _repl_wait_selection(pty, runtime, after_restart=True, terminal_offset=terminal_offset)
+        missed_check = f"REPL display candidate_selection_ready occurrence {runtime.repl_candidate_wait_count} observed"
+        runtime.checks.pop(missed_check, None)
+        runtime.checks.pop("REPL display matched at least once before timeout", None)
+
+
 def _run_repl_interrupt_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
     _repl_submit_initial_prompt(pty, runtime)
     _repl_wait_selection(pty, runtime)
     _repl_select_current(pty)
     _repl_wait_confirmation(pty, runtime)
     _repl_choose_direct_input(runtime, pty, "我改需求了：只创建安全组，不创建 VPC 或 VSwitch；请重新规划。")
-    _repl_wait_selection(pty, runtime)
+    _repl_wait_selection_after_rollback(runtime, pty)
     _repl_select_current(pty)
     _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime, recover_stalled_step=True)
     pty.send("\r", label="confirmation-confirm")

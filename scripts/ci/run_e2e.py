@@ -482,7 +482,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "ros_deploy_event_count", "public_tool_event_count",
             "public_journal_aliyun_count", "repl_confirmation_count", "candidate_option_count",
             "repl_selection_ready_count", "repl_selection_submitted_count", "repl_step_started_count",
-            "repl_step2_stall_restarts",
+            "repl_step1_stall_restarts", "repl_step2_stall_restarts",
             "text_exit_code", "text_output_length",
             "cleanup_turn_event_count", "cleanup_turn_cleanup_event_count", "cleanup_target_count",
             "cleanup_ledger_pending_count", "cleanup_delete_tool_use_count", "cleanup_get_tool_use_count",

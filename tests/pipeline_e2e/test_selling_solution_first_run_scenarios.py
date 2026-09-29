@@ -1888,6 +1888,66 @@ def test_repl_selection_after_restart_waits_for_live_controls(
     assert runtime.repl_candidate_wait_count == 1
 
 
+def test_repl_selection_timeout_keeps_occurrence_for_retry(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=9.0), repl_candidate_wait_count=1)
+    pty = argparse.Namespace(events=[], transcript="")
+
+    def wait_for_display(*_args, **kwargs):
+        assert kwargs["occurrence"] == 2
+        assert kwargs["timeout"] == 4.0
+        raise TimeoutError("stalled")
+
+    monkeypatch.setattr(runner, "_wait_repl_display_event", wait_for_display)
+
+    with pytest.raises(TimeoutError, match="stalled"):
+        runner._repl_wait_selection(pty, runtime, timeout=4.0)
+
+    assert runtime.repl_candidate_wait_count == 1
+
+
+def test_repl_post_rollback_selection_resumes_stalled_planning_once(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[object] = []
+
+    class Pty:
+        transcript = "prior terminal output"
+
+        def terminate(self, *, force):
+            calls.append(("terminate", force))
+
+        def spawn(self, *, extra_args):
+            calls.append(("spawn", extra_args))
+
+    def wait_selection(_pty, runtime, **kwargs):
+        calls.append(("wait", kwargs))
+        if len([item for item in calls if item[0] == "wait"]) == 1:
+            raise TimeoutError("stalled")
+        runtime.repl_candidate_wait_count += 1
+
+    runtime = argparse.Namespace(
+        args=argparse.Namespace(stream_timeout=900.0),
+        repl_candidate_wait_count=1,
+        checks={"REPL display candidate_selection_ready occurrence 2 observed": False},
+        diagnostics={},
+    )
+    monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
+    monkeypatch.setattr(runner, "_repl_active_deploy_step", lambda _runtime: False)
+
+    runner._repl_wait_selection_after_rollback(runtime, Pty())
+
+    assert calls == [
+        ("wait", {"timeout": 360.0}),
+        ("terminate", True),
+        ("spawn", ["--continue"]),
+        ("wait", {"after_restart": True, "terminal_offset": len(Pty.transcript)}),
+    ]
+    assert runtime.diagnostics["repl_step1_stall_restarts"] == 1
+    assert runtime.checks == {}
+
+
 def test_repl_candidate_waiting_restart_uses_durable_events_and_handoff_delay(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
