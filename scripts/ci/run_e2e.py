@@ -481,6 +481,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "confirmation_event_count", "ros_deploy_event_count", "public_tool_event_count",
             "public_journal_aliyun_count", "repl_confirmation_count", "candidate_option_count",
             "text_exit_code", "text_output_length",
+            "cleanup_turn_event_count", "cleanup_turn_cleanup_event_count", "cleanup_target_count",
+            "cleanup_ledger_pending_count", "cleanup_delete_tool_use_count", "cleanup_get_tool_use_count",
         ):
             count = raw_diagnostics.get(key)
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
@@ -489,11 +491,14 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "repl_solution_summary_changed", "repl_effective_parameters_changed",
             "persisted_aliyun_tool_publicly_seen",
             "text_has_vpc_marker",
+            "cleanup_prompt_active", "cleanup_first_ros_not_found",
         ):
             if isinstance(raw_diagnostics.get(key), bool):
                 diagnostics[key] = raw_diagnostics[key]
         pending_kinds = raw_diagnostics.get("a2a_pending_kinds")
-        allowed_pending = {"none", "ask_user_question", "candidate_select", "candidate_selection", "deployment_confirmation"}
+        allowed_pending = {
+            "none", "ask_user_question", "candidate_select", "candidate_selection", "deployment_confirmation",
+        }
         if isinstance(pending_kinds, list):
             diagnostics["a2a_pending_kinds"] = [
                 kind for kind in pending_kinds if isinstance(kind, str) and kind in allowed_pending
@@ -507,6 +512,20 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             diagnostics["repl_image_keys"] = [
                 key for key in image_keys if isinstance(key, str) and key in allowed_images
             ][:16]
+        allowed_cleanup_states = {"pending", "started", "in_progress", "completed", "failed", "unknown"}
+        allowed_ros_states = {
+            "CREATE_COMPLETE", "DELETE_STARTED", "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED", "unknown",
+        }
+        for key in ("cleanup_first_ledger_status", "cleanup_first_snapshot_status"):
+            if raw_diagnostics.get(key) in allowed_cleanup_states:
+                diagnostics[key] = raw_diagnostics[key]
+        if raw_diagnostics.get("cleanup_first_ros_status") in allowed_ros_states:
+            diagnostics["cleanup_first_ros_status"] = raw_diagnostics["cleanup_first_ros_status"]
+        allowed_task_states = {
+            "TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "unknown",
+        }
+        if raw_diagnostics.get("cleanup_turn_terminal_state") in allowed_task_states:
+            diagnostics["cleanup_turn_terminal_state"] = raw_diagnostics["cleanup_turn_terminal_state"]
         if diagnostics:
             public["diagnostics"] = diagnostics
     if isinstance(raw_progress, dict):

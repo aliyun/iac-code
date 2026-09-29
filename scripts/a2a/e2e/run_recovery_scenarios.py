@@ -604,6 +604,7 @@ class ScenarioHarness:
         self.checks: dict[str, bool] = {}
         self.cleanup_status = "not-needed"
         self.cleanup_diagnostic: dict[str, Any] = {}
+        self.diagnostics: dict[str, Any] = {}
         self.summaries: dict[str, Any] = {}
         self.snapshots: dict[str, Any] = {}
         self.failure_stage = ""
@@ -874,6 +875,7 @@ class ScenarioHarness:
             **asdict(result),
             "cleanup_status": self.cleanup_status,
             "cleanup_diagnostic": self.cleanup_diagnostic,
+            "diagnostics": self.diagnostics,
             "a2a_states": [state for summary in self.summaries.values() for state in summary.status_states][-12:],
             "terminal_markers": _terminal_markers(self.summaries.values()),
             "control_state": _control_state_diagnostic(self.run_dir, self.context_id, self.pipeline_task_id),
@@ -2208,6 +2210,12 @@ def _run_rollback_step5_cleanup(
         h.checks["ROS second stack retained"] = bool(second_stack_id) and _ros_stack_retained(
             ros_states.get(second_stack_id, {})
         )
+        if isinstance(getattr(h, "diagnostics", None), dict):
+            h.diagnostics.update(
+                _rollback_cleanup_diagnostics(
+                    h, cleanup_summary, first_stack_id, cleanup_stack_ids, after_cleanup, ros_states
+                )
+            )
 
     return _run_with_harness(args, scenario, callback)
 
@@ -3702,6 +3710,69 @@ def _cleanup_resource_completed(resource: dict[str, Any] | None) -> bool:
     cleanup_status = resource.get("cleanupStatus") or resource.get("cleanup_status") or resource.get("status")
     stack_status = resource.get("stackStatus") or resource.get("progressStatus") or resource.get("progress_status")
     return cleanup_status == "completed" and stack_status == "DELETE_COMPLETE"
+
+
+def _rollback_cleanup_diagnostics(
+    h: ScenarioHarness,
+    cleanup_summary: StreamSummary,
+    first_stack_id: str | None,
+    cleanup_stack_ids: list[str],
+    after_cleanup: Any,
+    ros_states: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    resources = _cleanup_ledger_items(h, "cleanup_resources")
+    tool_uses = _cleanup_ledger_items(h, "tool_uses")
+    first_ledger = next(
+        (
+            item for item in resources if _string_from_mapping(item, "resource_id", "resourceId") == first_stack_id
+        ),
+        None,
+    )
+    first_snapshot = _cleanup_resource_for_stack(after_cleanup, first_stack_id)
+    first_ros = ros_states.get(first_stack_id, {}) if first_stack_id else {}
+    allowed_cleanup_statuses = {"pending", "started", "in_progress", "completed", "failed", "unknown"}
+    allowed_ros_statuses = {
+        "CREATE_COMPLETE", "DELETE_STARTED", "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED",
+    }
+
+    def status(value: Any, allowed: set[str]) -> str:
+        return value if isinstance(value, str) and value in allowed else "unknown"
+
+    try:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        cwd, session_id = _pipeline_session_identity(h)
+        active_prompt = any(
+            is_active_cleanup_prompt_message(message) for message in SessionStorage().load(cwd, session_id)
+        )
+    except Exception:
+        active_prompt = False
+    return {
+        "cleanup_turn_event_count": cleanup_summary.event_count,
+        "cleanup_turn_cleanup_event_count": sum(
+            event_type in {"cleanup_started", "cleanup_progress", "cleanup_completed", "cleanup_failed"}
+            for event_type in cleanup_summary.pipeline_event_types
+        ),
+        "cleanup_target_count": len(cleanup_stack_ids),
+        "cleanup_ledger_pending_count": sum(
+            item.get("cleanup_status") != "completed" for item in resources if item.get("cleanup_required") is not False
+        ),
+        "cleanup_delete_tool_use_count": sum(item.get("action") == "DeleteStack" for item in tool_uses),
+        "cleanup_get_tool_use_count": sum(item.get("action") == "GetStack" for item in tool_uses),
+        "cleanup_prompt_active": active_prompt,
+        "cleanup_turn_terminal_state": status(
+            cleanup_summary.last_status_state,
+            {"TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"},
+        ),
+        "cleanup_first_ledger_status": status(
+            first_ledger.get("cleanup_status") if first_ledger else None, allowed_cleanup_statuses
+        ),
+        "cleanup_first_snapshot_status": status(
+            first_snapshot.get("cleanupStatus") if first_snapshot else None, allowed_cleanup_statuses
+        ),
+        "cleanup_first_ros_status": status(first_ros.get("status"), allowed_ros_statuses),
+        "cleanup_first_ros_not_found": first_ros.get("not_found") is True,
+    }
 
 
 def _snapshot_cleanup(response: Any) -> dict[str, Any]:

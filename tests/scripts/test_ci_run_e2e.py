@@ -171,6 +171,31 @@ def test_live_public_summary_keeps_only_bounded_headless_diagnostics() -> None:
     }
 
 
+def test_live_public_summary_keeps_only_fixed_rollback_cleanup_diagnostics() -> None:
+    public = run_e2e._public_live_summary({
+        "diagnostics": {
+            "cleanup_turn_event_count": 12,
+            "cleanup_delete_tool_use_count": 0,
+            "cleanup_prompt_active": True,
+            "cleanup_first_ledger_status": "pending",
+            "cleanup_first_ros_status": "CREATE_COMPLETE",
+            "cleanup_turn_terminal_state": "TASK_STATE_INPUT_REQUIRED",
+            "cleanup_target_id": "secret-stack-id",
+            "cleanup_first_ledger_error": "secret provider response",
+            "cleanup_first_snapshot_status": "secret provider response",
+        },
+    })
+    assert public is not None
+    assert public["diagnostics"] == {
+        "cleanup_turn_event_count": 12,
+        "cleanup_delete_tool_use_count": 0,
+        "cleanup_prompt_active": True,
+        "cleanup_first_ledger_status": "pending",
+        "cleanup_first_ros_status": "CREATE_COMPLETE",
+        "cleanup_turn_terminal_state": "TASK_STATE_INPUT_REQUIRED",
+    }
+
+
 def test_live_public_summary_keeps_only_safe_cleanup_diagnostic() -> None:
     public = run_e2e._public_live_summary({
         "cleanup_diagnostic": {
