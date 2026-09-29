@@ -2960,6 +2960,7 @@ def test_repl_multimodal_handoff_waits_for_normal_prompt_before_image_followup(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
+    generated_images: dict[str, str] = {}
 
     class Pty:
         def __init__(self) -> None:
@@ -2995,12 +2996,12 @@ def test_repl_multimodal_handoff_waits_for_normal_prompt_before_image_followup(
         calls.append(("direct-image", key, text))
         pty.events.append({"type": "paste-image-fixture", "image_key": key})
 
+    def submit_generated_image(_runtime, _pty, key: str, text: str, *, label: str) -> None:
+        generated_images[key] = text
+        submit_image(_pty, key, label=label)
+
     monkeypatch.setattr(runner, "_repl_submit_image_fixture", submit_image)
-    monkeypatch.setattr(
-        runner,
-        "_repl_submit_generated_image",
-        lambda _runtime, _pty, key, text, *, label: submit_image(_pty, key, label=label),
-    )
+    monkeypatch.setattr(runner, "_repl_submit_generated_image", submit_generated_image)
     monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
     monkeypatch.setattr(
         runner,
@@ -3026,6 +3027,7 @@ def test_repl_multimodal_handoff_waits_for_normal_prompt_before_image_followup(
     )
     assert "第一个已有 VPC" in initial_confirmation[3]
     assert "不要再次询问" in initial_confirmation[3]
+    assert all(marker in generated_images["selection"] for marker in ("VpcId", "问我选哪一个", "不要自行选择"))
     handoff_index = calls.index(("expect", "multimodal pipeline handoff", 9.0))
     ready_index = calls.index("normal-prompt-ready")
     followup_index = calls.index(("image", "normal-followup", "normal-followup-image-enter"))

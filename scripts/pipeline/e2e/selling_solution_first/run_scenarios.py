@@ -3636,13 +3636,21 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         pty,
         "initial",
         "使用一个已有 VPC 创建 VSwitch。架构规划阶段先给出方案。"
-        "我还没有选定 VPC；方案选定后，请列出可用 VPC 并问我选哪一个。"
+        "VpcId 是必须由我确认的外部参数；我还没有选定 VPC。"
+        "方案选定后，请列出可用 VPC 并问我选哪一个。"
         "在我回答前不能生成模板，也不能替我选择 VPC。"
         "可用区和网段可以推荐合法且低成本的默认值。",
         label="initial-image-enter",
     )
     _repl_wait_selection(pty, runtime)
-    _repl_submit_image_fixture(pty, "selection", label="selection-image-enter")
+    _repl_submit_generated_image(
+        runtime,
+        pty,
+        "selection",
+        "我选择当前候选方案，但还没有选 VPC。VpcId 必须由我明确提供；"
+        "先列出可用 VPC 并问我选哪一个，等我回答后再生成模板。不要自行选择 VPC。",
+        label="selection-image-enter",
+    )
     _repl_wait_multimodal_confirmation(
         runtime,
         pty,
