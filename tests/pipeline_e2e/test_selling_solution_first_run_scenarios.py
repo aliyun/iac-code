@@ -3162,6 +3162,34 @@ def test_public_a2a_tool_use_ids_ignores_non_tool_payloads(runner: ModuleType) -
     assert runner._public_a2a_tool_use_ids([attributed, text_only]) == {"call-1"}
 
 
+def test_public_a2a_attribution_ignores_artifact_reference_but_checks_tool_event(runner: ModuleType) -> None:
+    def envelope(event_type: str, tool_name: str | None = None):
+        data = {"toolUseId": "call-1"}
+        if tool_name is not None:
+            data["toolName"] = tool_name
+        return {"metadata": {"iac_code": {"pipeline": {"eventType": event_type, "data": data}}}}
+
+    artifact = envelope("artifact_created")
+    public_tool = envelope("tool_result", "aliyun_api")
+    misattributed_tool = envelope("tool_result", "ros_deploy")
+
+    assert runner._public_a2a_tool_use_ids([artifact]) == {"call-1"}
+    assert runner._public_a2a_tool_events_for_id([artifact], "call-1") == []
+    assert runner._public_a2a_tool_events_for_id([artifact, public_tool], "call-1") == [
+        {"toolUseId": "call-1", "toolName": "aliyun_api"},
+    ]
+    assert runner._public_a2a_tool_events_for_id([misattributed_tool], "call-1") == [
+        {"toolUseId": "call-1", "toolName": "ros_deploy"},
+    ]
+    assert runner._public_aliyun_attribution_consistent(runner._public_a2a_tool_events_for_id([artifact], "call-1"))
+    assert runner._public_aliyun_attribution_consistent(
+        runner._public_a2a_tool_events_for_id([artifact, public_tool], "call-1")
+    )
+    assert not runner._public_aliyun_attribution_consistent(
+        runner._public_a2a_tool_events_for_id([misattributed_tool], "call-1")
+    )
+
+
 def test_repl_question_waits_for_actual_input_prompt(runner: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, object]] = []
 

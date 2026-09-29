@@ -1095,6 +1095,25 @@ def _public_a2a_tool_use_ids(values: Sequence[Any]) -> set[str]:
     return ids
 
 
+def _public_a2a_tool_events_for_id(values: Sequence[Any], tool_use_id: str) -> list[dict[str, Any]]:
+    """Find exposed tool events; an artifact reference alone is not a tool event."""
+
+    extract = _legacy_a2a_module()._extract_pipeline_envelopes
+    events: list[dict[str, Any]] = []
+    for value in values:
+        for envelope in extract(value):
+            if envelope.get("eventType") not in {"tool_started", "tool_result"}:
+                continue
+            data = envelope.get("data")
+            if isinstance(data, dict) and data.get("toolUseId") == tool_use_id:
+                events.append(data)
+    return events
+
+
+def _public_aliyun_attribution_consistent(events: Sequence[dict[str, Any]]) -> bool:
+    return all(str(item.get("toolName") or "").lower() == "aliyun_api" for item in events)
+
+
 def _walk(value: Any) -> Iterator[tuple[str, Any]]:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -5070,21 +5089,24 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
     _record_diagnostic(runtime, "public_tool_names", sorted(set(tools)))
     journal_tools = _public_journal_tool_names(runtime.paths.config_dir)
     _record_diagnostic(runtime, "public_journal_aliyun_count", journal_tools.count("aliyun_api"))
+    public_aliyun_tool_events: list[dict[str, Any]] = []
     if runtime.spec.surface is Surface.A2A and persisted_tool_use_id:
+        public_aliyun_tool_events = _public_a2a_tool_events_for_id(values, persisted_tool_use_id)
+        _record_diagnostic(runtime, "persisted_aliyun_public_tool_event_count", len(public_aliyun_tool_events))
         _record_diagnostic(
             runtime, "persisted_aliyun_tool_publicly_seen",
             persisted_tool_use_id in _public_a2a_tool_use_ids(values),
         )
         _record_diagnostic(
             runtime, "persisted_aliyun_publicly_attributed",
-            any(
-                isinstance(item, dict)
-                and item.get("toolUseId") == persisted_tool_use_id
-                and str(item.get("toolName") or "").lower() == "aliyun_api"
-                for value in values for _, item in _walk(value)
-            ),
+            bool(public_aliyun_tool_events) and _public_aliyun_attribution_consistent(public_aliyun_tool_events),
         )
-    runtime.checks["public events preserve Aliyun tool attribution"] = "aliyun_api" in tools
+    # Candidate sub-pipeline tool calls may be private while their artifacts
+    # still carry the toolUseId. Require the name only on public tool events.
+    runtime.checks["public events preserve Aliyun tool attribution"] = (
+        _public_aliyun_attribution_consistent(public_aliyun_tool_events)
+        if runtime.spec.surface is Surface.A2A and persisted_tool_use_id else "aliyun_api" in tools
+    )
     if "aliyun_api" not in tools:
         runtime.notes.append("public tool attribution observed: " + ", ".join(sorted(set(tools))))
     if runtime.spec.case_id in {"A01", "W01"}:

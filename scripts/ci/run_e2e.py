@@ -480,7 +480,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         for key in (
             "confirmation_event_count", "unstructured_confirmation_count", "image_confirmation_count",
             "ros_deploy_event_count", "public_tool_event_count",
-            "public_journal_aliyun_count", "repl_confirmation_count", "candidate_option_count",
+            "public_journal_aliyun_count", "persisted_aliyun_public_tool_event_count",
+            "repl_confirmation_count", "candidate_option_count",
             "repl_selection_ready_count", "repl_selection_submitted_count", "repl_step_started_count",
             "repl_step1_stall_restarts", "repl_step2_stall_restarts",
             "text_exit_code", "text_output_length",

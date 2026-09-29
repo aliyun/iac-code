@@ -1319,7 +1319,9 @@ def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
         control = _backup_delay_control_path(h)
         initial_stream = h.start_stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
         started, initial_streams = _wait_for_backup_start_with_intervening_asks(
-            h, control, initial_stream, timeout=args.event_timeout
+            h, control, initial_stream,
+            # Real Step 1 planning may exceed the shared 240s event timeout.
+            timeout=max(args.event_timeout, min(args.stream_timeout, 600.0)),
         )
         h.snapshots["backup_delay_started"] = started
         h.checks["input_required backup delay started"] = started.get("delaySeconds") == BACKUP_DELAY_SECONDS
@@ -2565,6 +2567,8 @@ def _wait_for_backup_start_with_intervening_asks(
             handled.add(id(stream))
             kind = _latest_input_required_kind_from_events(stream.events)
             if kind != "ask_user_question":
+                if all(item.done for item in streams):
+                    raise RuntimeError("initial A2A stream ended before backup delay without a clarification question")
                 continue
             if len(streams) > 4:
                 raise RuntimeError("too many intervening questions before backup delay")

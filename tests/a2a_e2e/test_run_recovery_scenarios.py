@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _load_runner():
     path = Path(__file__).resolve().parents[2] / "scripts" / "a2a" / "e2e" / "run_recovery_scenarios.py"
@@ -1196,6 +1198,34 @@ def test_selection_during_backup_configures_e2e_only_delay(tmp_path: Path) -> No
     )
     assert arm["scenario"] == runner.SELECTION_DURING_BACKUP_SCENARIO
     assert arm["delaySeconds"] == 10.0
+
+
+def test_selection_during_backup_allows_real_step1_planning_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = _load_runner()
+    observed: dict[str, object] = {}
+
+    class StopAfterTimeoutProbeError(Exception):
+        pass
+
+    class Harness:
+        def start_stream(self, **_kwargs):
+            return object()
+
+    def wait_for_backup(_h, _control, _stream, *, timeout):
+        observed["timeout"] = timeout
+        raise StopAfterTimeoutProbeError
+
+    monkeypatch.setattr(runner, "_run_with_harness", lambda _args, _scenario, callback: callback(Harness()))
+    monkeypatch.setattr(runner, "_backup_delay_control_path", lambda _h: tmp_path)
+    monkeypatch.setattr(runner, "_wait_for_backup_start_with_intervening_asks", wait_for_backup)
+    args = SimpleNamespace(initial_prompt="test", event_timeout=240.0, stream_timeout=1800.0)
+
+    with pytest.raises(StopAfterTimeoutProbeError):
+        runner.run_selection_during_backup(args, runner.SELECTION_DURING_BACKUP_SCENARIO)
+
+    assert observed["timeout"] == 600.0
 
 
 def test_backup_delay_sitecustomize_delays_armed_input_required_backup(tmp_path: Path) -> None:
