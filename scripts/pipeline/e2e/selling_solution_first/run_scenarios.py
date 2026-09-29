@@ -2054,6 +2054,35 @@ def _first_pending_resource_option_id_from_data(pending: dict[str, Any]) -> str:
     return ""
 
 
+def _wait_a2a_backup_window_started(
+    runtime: ScenarioRuntime, a2a: Any, control: Path, stream: Any, checkpoint: int
+) -> dict[str, Any]:
+    """Stop waiting if the active A2A stream ends or makes no progress."""
+
+    started_at = time.monotonic()
+    deadline = started_at + runtime.args.stream_timeout
+    last_progress_at = started_at
+    seen_events = len(stream.events)
+    while time.monotonic() < deadline:
+        if _backup_delay_marker(control, "started").is_file():
+            return a2a._wait_for_backup_delay_marker(control, "started", timeout=1.0)
+        if stream.done:
+            raise RuntimeError(f"backup window {checkpoint} stream ended before delay started")
+        event_count = len(stream.events)
+        if event_count > seen_events:
+            seen_events = event_count
+            last_progress_at = time.monotonic()
+        idle_seconds = time.monotonic() - last_progress_at
+        if idle_seconds >= 600.0:
+            runtime.watchdog = {
+                "state": "no_output", "action": "early_abort",
+                "waitingFor": "A2A backup delay marker", "elapsedSeconds": round(idle_seconds, 1), "cue": "none",
+            }
+            raise TimeoutError(f"backup window {checkpoint} had no stream progress for 600s")
+        time.sleep(0.2)
+    raise TimeoutError(f"backup window {checkpoint} did not reach input-required backup before timeout")
+
+
 def _run_a2a_input_during_backup(
     runtime: ScenarioRuntime,
     harness: Any,
@@ -2085,13 +2114,7 @@ def _run_a2a_input_during_backup(
             # response would necessarily miss the backup window. The mirrored
             # pipeline snapshot is already authoritative at this point, so read it
             # after the delay marker and use its pendingInput to prepare the request.
-            started = a2a._wait_for_backup_delay_marker(
-                control,
-                "started",
-                # Reaching the next waiting boundary can include a real LLM turn.
-                # The short delay-sized timeout only applies after the marker exists.
-                timeout=runtime.args.stream_timeout,
-            )
+            started = _wait_a2a_backup_window_started(runtime, a2a, control, current, control_index)
             pending_state = harness.fetch_state(f"backup-window-{control_index:02d}-pending")
             observed_step, observed_kind, pending_data = _pending_from_pipeline_state(pending_state)
             if not observed_step or not observed_kind:

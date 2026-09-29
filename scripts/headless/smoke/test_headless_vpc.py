@@ -28,6 +28,7 @@ PASS = "[PASS]"
 FAIL = "[FAIL]"
 INFO = "[INFO]"
 HEADLESS_WORKSPACE = "."
+TEXT_DIAGNOSTICS: dict[str, int | bool] = {}
 
 
 def run_headless(output_format: str, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
@@ -64,6 +65,13 @@ def run_headless(output_format: str, extra_args: list[str] | None = None) -> sub
 def test_text_output():
     print("\n=== Test 1: headless text output ===")
     result = run_headless("text")
+    TEXT_DIAGNOSTICS.update(
+        text_exit_code=result.returncode,
+        text_output_length=len(result.stdout.strip()),
+        text_has_vpc_marker=any(
+            keyword in result.stdout.upper() for keyword in ("VPC", "VPCNAME", "CIDRBLOCK", "ROSTEMPLATE")
+        ),
+    )
 
     if result.returncode != 0:
         print(f"{FAIL} Process exited with non-zero code: {result.returncode}")
@@ -226,7 +234,11 @@ def main():
 
     if args.run_dir is not None:
         (args.run_dir / "summary.json").write_text(
-            json.dumps({"passed": all_pass, "checks": results}, ensure_ascii=False, indent=2) + "\n",
+            json.dumps(
+                {"passed": all_pass, "checks": results, "diagnostics": TEXT_DIAGNOSTICS},
+                ensure_ascii=False,
+                indent=2,
+            ) + "\n",
             encoding="utf-8",
         )
     sys.exit(0 if all_pass else 1)

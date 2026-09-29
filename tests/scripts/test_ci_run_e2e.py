@@ -154,6 +154,23 @@ def test_live_public_summary_keeps_safe_failure_location_only() -> None:
     assert "error_site" not in unsafe
 
 
+def test_live_public_summary_keeps_only_bounded_headless_diagnostics() -> None:
+    public = run_e2e._public_live_summary({
+        "diagnostics": {
+            "text_exit_code": 0,
+            "text_output_length": 241,
+            "text_has_vpc_marker": False,
+            "text_output": "sk-fixture",
+        },
+    })
+    assert public is not None
+    assert public["diagnostics"] == {
+        "text_exit_code": 0,
+        "text_output_length": 241,
+        "text_has_vpc_marker": False,
+    }
+
+
 def test_live_public_summary_keeps_only_safe_cleanup_diagnostic() -> None:
     public = run_e2e._public_live_summary({
         "cleanup_diagnostic": {

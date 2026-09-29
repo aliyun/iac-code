@@ -480,6 +480,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         for key in (
             "confirmation_event_count", "ros_deploy_event_count", "public_tool_event_count",
             "public_journal_aliyun_count", "repl_confirmation_count", "candidate_option_count",
+            "text_exit_code", "text_output_length",
         ):
             count = raw_diagnostics.get(key)
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
@@ -487,6 +488,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         for key in (
             "repl_solution_summary_changed", "repl_effective_parameters_changed",
             "persisted_aliyun_tool_publicly_seen",
+            "text_has_vpc_marker",
         ):
             if isinstance(raw_diagnostics.get(key), bool):
                 diagnostics[key] = raw_diagnostics[key]

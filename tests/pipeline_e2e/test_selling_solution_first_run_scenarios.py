@@ -522,24 +522,45 @@ def test_backup_delay_uses_artifact_directory_for_multiple_windows(
     assert runner._backup_delay_marker(second, "arm").is_file()
 
 
-def test_backup_window_wait_allows_a_full_llm_turn(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_backup_window_wait_reads_started_marker(
+    runner: ModuleType, tmp_path: Path
 ) -> None:
-    class MarkerRequestedError(Exception):
-        pass
+    control = tmp_path / "control"
+    runner._backup_delay_marker(control, "started").write_text("{}", encoding="utf-8")
+    started = {"delaySeconds": 10}
 
-    def wait_for_marker(_control: Path, marker: str, *, timeout: float) -> None:
+    def wait_for_marker(_control: Path, marker: str, *, timeout: float) -> dict:
         assert marker == "started"
-        assert timeout == 1800.0
-        raise MarkerRequestedError
+        assert timeout == 1.0
+        return started
 
     runtime = argparse.Namespace(args=argparse.Namespace(timeout=240.0, stream_timeout=1800.0))
-    harness = argparse.Namespace(start_stream=lambda **_kwargs: object())
     a2a = argparse.Namespace(_wait_for_backup_delay_marker=wait_for_marker)
-    monkeypatch.setattr(runner, "_initial_prompt", lambda _runtime: "test prompt")
+    stream = argparse.Namespace(events=[], done=False)
 
-    with pytest.raises(MarkerRequestedError):
-        runner._run_a2a_input_during_backup(runtime, harness, a2a, object(), tmp_path / "control")
+    assert runner._wait_a2a_backup_window_started(runtime, a2a, control, stream, 1) is started
+
+
+def test_backup_window_wait_stops_when_stream_ends(runner: ModuleType, tmp_path: Path) -> None:
+    runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=1800.0))
+    stream = argparse.Namespace(events=[], done=True)
+
+    with pytest.raises(RuntimeError, match="stream ended before delay started"):
+        runner._wait_a2a_backup_window_started(runtime, object(), tmp_path / "control", stream, 3)
+
+
+def test_backup_window_wait_aborts_after_silent_stream(runner: ModuleType, tmp_path: Path, monkeypatch) -> None:
+    now = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: now.__setitem__(0, now[0] + 601.0))
+    runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=1800.0), watchdog=None)
+    stream = argparse.Namespace(events=[], done=False)
+
+    with pytest.raises(TimeoutError, match="no stream progress"):
+        runner._wait_a2a_backup_window_started(runtime, object(), tmp_path / "control", stream, 3)
+
+    assert runtime.watchdog["state"] == "no_output"
+    assert runtime.watchdog["waitingFor"] == "A2A backup delay marker"
 
 
 @pytest.mark.parametrize("state", ["TASK_STATE_FAILED", "TASK_STATE_CANCELED"])

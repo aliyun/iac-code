@@ -2063,6 +2063,7 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
             self.snapshots = {}
             self.stream_calls: list[dict] = []
             self.started_streams: list[str] = []
+            self.cleanup_reads = 0
 
         def stream(self, *, prompt: str, name: str, task_id: str | None = None, **_kwargs):
             self.stream_calls.append({"prompt": prompt, "name": name, "task_id": task_id})
@@ -2110,6 +2111,9 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
             return FakeStream(summary, events=events)
 
         def fetch_state(self, name: str):
+            if name == "after-cleanup":
+                self.cleanup_reads += 1
+            cleanup_done = self.cleanup_reads > 1
             snapshot = {
                 "snapshot": {
                     "status": "completed",
@@ -2121,8 +2125,8 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
                                 "resourceType": "stack",
                                 "resourceId": "stack-1",
                                 "regionId": "cn-hangzhou",
-                                "cleanupStatus": "completed",
-                                "stackStatus": "DELETE_COMPLETE",
+                                "cleanupStatus": "completed" if cleanup_done else "running",
+                                "stackStatus": "DELETE_COMPLETE" if cleanup_done else "DELETE_IN_PROGRESS",
                             }
                         ],
                     },
@@ -2167,11 +2171,12 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
     monkeypatch.setattr(
         runner,
         "_capture_ros_stack_states",
-        lambda _h, stack_ids, name: {
-            "stack-1": {"status": "DELETE_COMPLETE"},
+        lambda h, stack_ids, name: {
+            "stack-1": {"status": "DELETE_COMPLETE" if h.cleanup_reads > 1 else "DELETE_IN_PROGRESS"},
             "stack-2": {"status": "CREATE_COMPLETE"},
         },
     )
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
 
     args = SimpleNamespace(
         event_timeout=1,
@@ -2192,6 +2197,7 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
     assert harness.checks["ROS first rollback stack deleted"] is True
     assert harness.checks["ROS rollback cleanup stacks deleted"] is True
     assert harness.checks["ROS second stack retained"] is True
+    assert harness.snapshots["cleanup_verify_attempts"] == 2
 
 
 def test_rollback_step5_cleanup_recovery_uses_tool_safe_recovery_prompt(monkeypatch, tmp_path: Path) -> None:

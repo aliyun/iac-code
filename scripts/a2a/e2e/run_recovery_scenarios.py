@@ -2172,7 +2172,25 @@ def _run_rollback_step5_cleanup(
         h.checks["cleanup normal turn used normal task"] = cleanup_summary.task_id != h.pipeline_task_id
 
         h.failure_stage = "cleanup_verify"
-        after_cleanup = h.fetch_state("after-cleanup")
+        # The normal turn can finish while ROS is still deleting the rollback
+        # stack. Verify the same completion criteria after bounded polling.
+        verify_deadline = time.monotonic() + min(args.event_timeout, 180.0)
+        verify_attempt = 0
+        ros_stack_ids = _unique_strings([*cleanup_stack_ids, second_stack_id])
+        while True:
+            verify_attempt += 1
+            after_cleanup = h.fetch_state("after-cleanup")
+            ros_states = _capture_ros_stack_states(h, ros_stack_ids, "after-cleanup")
+            if bool(cleanup_stack_ids) and all(
+                _cleanup_resource_completed(_cleanup_resource_for_stack(after_cleanup, stack_id))
+                and _ros_stack_deleted(ros_states.get(stack_id, {}))
+                for stack_id in cleanup_stack_ids
+            ):
+                break
+            if time.monotonic() >= verify_deadline:
+                break
+            time.sleep(min(10.0, max(0.0, verify_deadline - time.monotonic())))
+        h.snapshots["cleanup_verify_attempts"] = verify_attempt
         cleanup_resource = _cleanup_resource_for_stack(after_cleanup, first_stack_id)
         h.checks["first rollback stack cleanup completed in snapshot"] = _cleanup_resource_completed(cleanup_resource)
         h.checks["rollback cleanup stacks completed in snapshot"] = bool(cleanup_stack_ids) and all(
@@ -2183,12 +2201,6 @@ def _run_rollback_step5_cleanup(
             bool(second_stack_id) and _cleanup_resource_for_stack(after_cleanup, second_stack_id) is None
         )
 
-        ros_stack_ids = _unique_strings([*cleanup_stack_ids, second_stack_id])
-        ros_states = _capture_ros_stack_states(
-            h,
-            ros_stack_ids,
-            "after-cleanup",
-        )
         h.checks["ROS first rollback stack deleted"] = _ros_stack_deleted(ros_states.get(first_stack_id, {}))
         h.checks["ROS rollback cleanup stacks deleted"] = bool(cleanup_stack_ids) and all(
             _ros_stack_deleted(ros_states.get(stack_id, {})) for stack_id in cleanup_stack_ids
