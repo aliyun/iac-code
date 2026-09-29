@@ -3063,7 +3063,7 @@ def _observe_repl_wait(
         # Ignore a prior cloud operation retained in the PTY tail. Only output
         # emitted during this wait may extend the cloud idle allowance.
         recent_output = str(getattr(pty, "transcript", ""))[transcript_offset:][-2000:]
-        cloud_wait = bool(
+        cloud_wait = _repl_active_deploy_step(runtime) or bool(
             re.search(
                 r"(?i)Deploying\s*\(|CreateStack|ROS Deploy|CREATE_IN_PROGRESS|DELETE_IN_PROGRESS|回滚清理",
                 recent_output,
@@ -3097,6 +3097,22 @@ def _observe_repl_wait(
                     runtime.watchdog = diagnoses[-1]
         return True
     return diagnosis_attempted
+
+
+def _repl_active_deploy_step(runtime: ScenarioRuntime) -> bool:
+    paths = getattr(runtime, "paths", None)
+    if not isinstance(getattr(paths, "config_dir", None), Path):
+        return False
+    active = False
+    for event in _read_repl_display_events(runtime):
+        event_type = event.get("type")
+        if event_type == "step_started" and event.get("step_id") == NEW_STEPS[2]:
+            active = True
+        elif event_type in {"step_completed", "step_failed"} and event.get("step_id") == NEW_STEPS[2]:
+            active = False
+        elif event_type in {"pipeline_completed", "pipeline_failed"}:
+            active = False
+    return active
 
 
 def _wait_repl_display_event(

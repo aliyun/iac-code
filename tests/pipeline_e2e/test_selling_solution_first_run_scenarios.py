@@ -2212,6 +2212,32 @@ def test_repl_file_wait_uses_output_idle_guard(
         assert runtime.watchdog is None
 
 
+def test_repl_file_wait_ignores_old_cloud_text_but_keeps_active_deploy(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pty = argparse.Namespace(_last_output_at=0.0, transcript="CreateStack", events=[], _wait_diagnoses=[])
+    runtime = argparse.Namespace(watchdog=None)
+    monkeypatch.setattr(
+        runner, "_legacy_repl_module",
+        lambda: argparse.Namespace(WAIT_IDLE_SECONDS=600.0, WAIT_CLOUD_IDLE_SECONDS=1500.0),
+    )
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 601.0)
+    with pytest.raises(TimeoutError, match="no terminal output"):
+        runner._observe_repl_wait(
+            pty, runtime, description="confirmation", started=0.0,
+            transcript_offset=len(pty.transcript), diagnosis_attempted=False,
+        )
+
+    display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text('{"type":"step_started","step_id":"deploying"}\n', encoding="utf-8")
+    runtime.paths = argparse.Namespace(config_dir=tmp_path)
+    assert runner._observe_repl_wait(
+        pty, runtime, description="pipeline completed", started=0.0,
+        transcript_offset=len(pty.transcript), diagnosis_attempted=True,
+    ) is True
+
+
 def test_repl_file_wait_records_advisory_diagnosis(
     runner: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
