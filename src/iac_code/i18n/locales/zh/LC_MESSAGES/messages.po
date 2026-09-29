@@ -4193,11 +4193,12 @@ msgstr "- 恢复清理时，仍然只处理此提示中列出的资源；不要�
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
-"- Prefer available ROS stack tools for deletion; if using aliyun_api, "
-"call DeleteStack first, then repeatedly call GetStack to check status."
+"- Use the ros_stack tool for DeleteStack. Do not use aliyun_api for "
+"DeleteStack when ros_stack is available; use aliyun_api GetStack to check"
+" status until DELETE_COMPLETE."
 msgstr ""
-"- 删除时优先使用可用的 ROS 资源栈工具；如果使用 aliyun_api，请先调用 DeleteStack，然后反复调用 GetStack "
-"检查状态。"
+"- 使用 ros_stack 工具执行 DeleteStack。ros_stack 可用时不要通过 aliyun_api 调用 "
+"DeleteStack；使用 aliyun_api GetStack 检查状态，直到 DELETE_COMPLETE。"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""

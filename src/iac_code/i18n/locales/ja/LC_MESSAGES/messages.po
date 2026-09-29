@@ -4229,11 +4229,13 @@ msgstr "- クリーンアップを再開するときも、このプロンプト�
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
-"- Prefer available ROS stack tools for deletion; if using aliyun_api, "
-"call DeleteStack first, then repeatedly call GetStack to check status."
+"- Use the ros_stack tool for DeleteStack. Do not use aliyun_api for "
+"DeleteStack when ros_stack is available; use aliyun_api GetStack to check"
+" status until DELETE_COMPLETE."
 msgstr ""
-"- 削除には利用可能な ROS スタックツールを優先してください。aliyun_api を使う場合は、最初に DeleteStack "
-"を呼び出し、その後 GetStack を繰り返し呼び出して状態を確認してください。"
+"- DeleteStack には ros_stack ツールを使用してください。ros_stack が利用可能な場合、aliyun_api で "
+"DeleteStack を呼び出さないでください。aliyun_api GetStack で DELETE_COMPLETE "
+"になるまで状態を確認してください。"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""

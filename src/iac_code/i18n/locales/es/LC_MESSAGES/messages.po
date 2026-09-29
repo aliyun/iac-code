@@ -4438,12 +4438,13 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
-"- Prefer available ROS stack tools for deletion; if using aliyun_api, "
-"call DeleteStack first, then repeatedly call GetStack to check status."
+"- Use the ros_stack tool for DeleteStack. Do not use aliyun_api for "
+"DeleteStack when ros_stack is available; use aliyun_api GetStack to check"
+" status until DELETE_COMPLETE."
 msgstr ""
-"- Prefiera las herramientas de stack ROS disponibles para eliminar; si "
-"usa aliyun_api, llame primero a DeleteStack y luego llame repetidamente a"
-" GetStack para comprobar el estado."
+"- Use la herramienta ros_stack para DeleteStack. Si ros_stack está "
+"disponible, no use aliyun_api para DeleteStack; use aliyun_api GetStack "
+"para comprobar el estado hasta DELETE_COMPLETE."
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
