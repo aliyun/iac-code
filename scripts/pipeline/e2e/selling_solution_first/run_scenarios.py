@@ -2741,6 +2741,31 @@ def _repl_submit_generated_image(
     pty.send("\r", label=label)
 
 
+def _repl_submit_multimodal_selection(
+    runtime: ScenarioRuntime, pty: Any, *, label: str, text: str | None = None
+) -> None:
+    """Keep the image input until the candidate selection is durably accepted."""
+
+    count_submissions = getattr(_legacy_repl_module(), "_repl_selection_submission_count", None)
+    submitted_before = count_submissions(pty) if callable(count_submissions) else None
+    for attempt in range(1, 4):
+        attempt_label = label if attempt == 1 else f"{label}-retry-{attempt}"
+        if text is None:
+            _repl_submit_image_fixture(pty, "selection", label=attempt_label)
+        else:
+            _repl_submit_generated_image(runtime, pty, "selection", text, label=attempt_label)
+        if submitted_before is None:
+            return
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            pty.drain_output()
+            if count_submissions(pty) > submitted_before:
+                _record_diagnostic(runtime, "repl_selection_image_retries", attempt - 1)
+                return
+            time.sleep(0.1)
+    raise TimeoutError("multimodal selection image was not accepted after three submissions")
+
+
 def _repl_choose_direct_image(runtime: ScenarioRuntime, pty: Any, key: str, text: str) -> None:
     _repl_focus_confirmation_input(runtime, pty)
     _repl_paste_generated_image(runtime, pty, key, text)
@@ -2791,7 +2816,41 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
         runtime, "repl_step_started_ids",
         [event.get("step_id") for event in display_events if event.get("type") == "step_started"],
     )
+    if getattr(getattr(runtime, "spec", None), "profile", None) == "multimodal":
+        _record_diagnostic(runtime, "repl_image_keys", sorted({
+            str(event.get("image_key")) for event in pty.events
+            if isinstance(event, dict) and event.get("type") == "paste-image-fixture"
+        }))
+        failed_expects = [
+            str(event.get("description") or "") for event in pty.events
+            if isinstance(event, dict) and event.get("type") == "expect" and event.get("passed") is False
+        ]
+        if failed_expects:
+            description = failed_expects[-1]
+            if description.startswith("initial image ask or confirmation"):
+                phase = "initial_image_input"
+            elif description.startswith("adjustment image ask or confirmation"):
+                phase = "adjustment_image_input"
+            elif description.startswith("rollback image ask or confirmation"):
+                phase = "rollback_image_input"
+            elif description == "multimodal pipeline handoff":
+                phase = "pipeline_handoff"
+            elif description == "normal image follow-up response":
+                phase = "normal_followup"
+            else:
+                phase = "other"
+            _record_diagnostic(runtime, "repl_failed_wait_phase", phase)
     if getattr(getattr(runtime, "spec", None), "profile", None) == "interrupt_rollback":
+        step2_paths = _repl_step_transcript_paths(runtime, NEW_STEPS[1])
+        step2_tool_names = [
+            str(item.get("name") or "").lower()
+            for path in step2_paths for value in _read_json_lines(path)
+            for item in [value, *(child for _, child in _walk(value))]
+            if isinstance(item, dict) and item.get("type") == "tool_use" and isinstance(item.get("name"), str)
+        ]
+        _record_diagnostic(runtime, "repl_step2_attempt_count", len(step2_paths))
+        _record_diagnostic(runtime, "repl_step2_tool_use_count", len(step2_tool_names))
+        _record_diagnostic(runtime, "repl_step2_tool_use_names", sorted(set(step2_tool_names)))
         confirmation_inputs = [
             event.get("payload", {}).get("selected_value")
             for event in display_events
@@ -3451,6 +3510,30 @@ def _repl_natural_adjusted_cidr(runtime: ScenarioRuntime) -> str:
     return str(list(reserved.subnets(new_prefix=reserved.prefixlen + 1))[1])
 
 
+def _repl_wait_normal_resume_confirmation(pty: Any, runtime: ScenarioRuntime) -> None:
+    """Select a fresh candidate if planning replaces the selected candidate."""
+
+    for reselect_count in range(3):
+        try:
+            _repl_wait_confirmation(pty, runtime)
+            return
+        except RuntimeError:
+            watchdog = getattr(runtime, "watchdog", None)
+            ready_count = sum(
+                event.get("type") == "candidate_selection_ready" for event in _read_repl_display_events(runtime)
+            )
+            if (
+                reselect_count >= 2 or not isinstance(watchdog, dict)
+                or watchdog.get("state") != "waiting_for_input" or watchdog.get("cue") != "candidate_controls"
+                or ready_count <= runtime.repl_candidate_wait_count
+            ):
+                raise
+            _repl_wait_selection(pty, runtime)
+            _repl_select_current(pty)
+            _record_diagnostic(runtime, "repl_normal_resume_reselections", reselect_count + 1)
+            watchdog["action"] = "observe"
+
+
 def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
     profile = runtime.spec.profile
     _repl_submit_initial_prompt(pty, runtime)
@@ -3493,7 +3576,10 @@ def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
             reject_confirmation=True,
         )
         pty.sendline(runtime.args.cleanup_zone_id or "cn-hangzhou-h")
-    _repl_wait_confirmation(pty, runtime)
+    if profile == "normal_resume":
+        _repl_wait_normal_resume_confirmation(pty, runtime)
+    else:
+        _repl_wait_confirmation(pty, runtime)
     if profile == "natural_adjust":
         _repl_choose_direct_input(
             runtime, pty, f"把 VSwitch 网段调整为 {_repl_natural_adjusted_cidr(runtime)}，重新 Preview 和询价。"
@@ -3662,13 +3748,14 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         label="initial-image-enter",
     )
     _repl_wait_selection(pty, runtime)
-    _repl_submit_generated_image(
+    _repl_submit_multimodal_selection(
         runtime,
         pty,
-        "selection",
-        "我选择当前候选方案，但还没有选 VPC。VpcId 必须由我明确提供；"
-        "先列出可用 VPC 并问我选哪一个，等我回答后再生成模板。不要自行选择 VPC。",
         label="selection-image-enter",
+        text=(
+            "我选择当前候选方案，但还没有选 VPC。VpcId 必须由我明确提供；"
+            "先列出可用 VPC 并问我选哪一个，等我回答后再生成模板。不要自行选择 VPC。"
+        ),
     )
     _repl_wait_multimodal_confirmation(
         runtime,
@@ -3700,7 +3787,7 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         "我改需求了：使用已有 VPC 创建一个安全组，不创建 VSwitch。请重新规划。",
     )
     _repl_wait_multimodal_selection(runtime, pty, phase="rollback")
-    _repl_submit_image_fixture(pty, "selection", label="rollback-selection-image-enter")
+    _repl_submit_multimodal_selection(runtime, pty, label="rollback-selection-image-enter")
     _repl_wait_multimodal_confirmation(
         runtime,
         pty,
@@ -5093,6 +5180,9 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
     if runtime.spec.surface is Surface.A2A and persisted_tool_use_id:
         public_aliyun_tool_events = _public_a2a_tool_events_for_id(values, persisted_tool_use_id)
         _record_diagnostic(runtime, "persisted_aliyun_public_tool_event_count", len(public_aliyun_tool_events))
+        _record_diagnostic(runtime, "persisted_aliyun_public_tool_names", sorted({
+            str(item.get("toolName") or "none").lower() for item in public_aliyun_tool_events
+        }))
         _record_diagnostic(
             runtime, "persisted_aliyun_tool_publicly_seen",
             persisted_tool_use_id in _public_a2a_tool_use_ids(values),

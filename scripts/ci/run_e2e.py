@@ -483,7 +483,9 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "public_journal_aliyun_count", "persisted_aliyun_public_tool_event_count",
             "repl_confirmation_count", "candidate_option_count",
             "repl_selection_ready_count", "repl_selection_submitted_count", "repl_step_started_count",
-            "repl_step1_stall_restarts", "repl_step2_stall_restarts",
+            "repl_step1_stall_restarts", "repl_step2_stall_restarts", "repl_selection_image_retries",
+            "repl_normal_resume_reselections",
+            "repl_step2_attempt_count", "repl_step2_tool_use_count",
             "text_exit_code", "text_output_length",
             "cleanup_turn_event_count", "cleanup_turn_cleanup_event_count", "cleanup_target_count",
             "cleanup_ledger_pending_count", "cleanup_delete_tool_use_count", "cleanup_get_tool_use_count",
@@ -518,6 +520,21 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             diagnostics["public_tool_names"] = [
                 name for name in public_tool_names if isinstance(name, str) and name in allowed_tool_names
             ][:16]
+        persisted_tool_names = raw_diagnostics.get("persisted_aliyun_public_tool_names")
+        if isinstance(persisted_tool_names, list):
+            diagnostics["persisted_aliyun_public_tool_names"] = [
+                name for name in persisted_tool_names
+                if isinstance(name, str) and name in allowed_tool_names | {"none"}
+            ][:16]
+        step2_tool_names = raw_diagnostics.get("repl_step2_tool_use_names")
+        allowed_step2_tools = allowed_tool_names | {
+            "ros_preview_template", "ros_estimate_template_cost", "ros_get_template_parameter_constraints",
+            "ros_validate_template", "complete_step", "ask_user_question", "read_file",
+        }
+        if isinstance(step2_tool_names, list):
+            diagnostics["repl_step2_tool_use_names"] = [
+                name for name in step2_tool_names if isinstance(name, str) and name in allowed_step2_tools
+            ][:16]
         repl_step_ids = raw_diagnostics.get("repl_step_started_ids")
         allowed_repl_steps = {
             "solution_planning_and_selection", "materialize_selected_candidate", "deploying",
@@ -535,6 +552,12 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             diagnostics["repl_image_keys"] = [
                 key for key in image_keys if isinstance(key, str) and key in allowed_images
             ][:16]
+        failed_wait_phase = raw_diagnostics.get("repl_failed_wait_phase")
+        if failed_wait_phase in {
+            "initial_image_input", "adjustment_image_input", "rollback_image_input",
+            "pipeline_handoff", "normal_followup", "other",
+        }:
+            diagnostics["repl_failed_wait_phase"] = failed_wait_phase
         allowed_cleanup_states = {"pending", "started", "in_progress", "completed", "failed", "unknown"}
         allowed_ros_states = {
             "CREATE_COMPLETE", "DELETE_STARTED", "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED", "unknown",

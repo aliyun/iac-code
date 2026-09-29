@@ -2568,6 +2568,27 @@ def test_repl_generated_image_uses_separate_enter_after_refresh(
     ]
 
 
+def test_repl_multimodal_selection_retries_until_durable_submission(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    labels: list[str] = []
+    counts = iter((1, 2))
+    ticks = iter((0.0, 6.0, 10.0, 11.0))
+    runtime = argparse.Namespace(diagnostics={})
+    pty = argparse.Namespace(drain_output=lambda: None)
+    monkeypatch.setattr(
+        runner, "_legacy_repl_module",
+        lambda: argparse.Namespace(_repl_selection_submission_count=lambda _pty: next(counts)),
+    )
+    monkeypatch.setattr(runner, "_repl_submit_image_fixture", lambda _pty, _key, *, label: labels.append(label))
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+
+    runner._repl_submit_multimodal_selection(runtime, pty, label="rollback-selection-image-enter")
+
+    assert labels == ["rollback-selection-image-enter", "rollback-selection-image-enter-retry-2"]
+    assert runtime.diagnostics["repl_selection_image_retries"] == 1
+
+
 def test_repl_confirmation_records_action_count_from_display(
     runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2782,6 +2803,36 @@ def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
     ]
     assert runtime.diagnostics["repl_step2_stall_restarts"] == 1
     assert "REPL display user_input_required occurrence 1 observed" not in runtime.checks
+
+
+def test_normal_resume_selects_new_candidate_after_input_watchdog(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    runtime = argparse.Namespace(repl_candidate_wait_count=1, diagnostics={}, watchdog=None)
+
+    def wait_confirmation(_pty, target):
+        calls.append("confirmation")
+        if calls.count("confirmation") == 1:
+            target.watchdog = {"state": "waiting_for_input", "cue": "candidate_controls", "action": "early_abort"}
+            raise RuntimeError("candidate controls need input")
+
+    def wait_selection(_pty, target):
+        calls.append("selection")
+        target.repl_candidate_wait_count = 2
+
+    monkeypatch.setattr(runner, "_repl_wait_confirmation", wait_confirmation)
+    monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
+    monkeypatch.setattr(runner, "_repl_select_current", lambda _pty: calls.append("submit"))
+    monkeypatch.setattr(runner, "_read_repl_display_events", lambda _runtime: [
+        {"type": "candidate_selection_ready"}, {"type": "candidate_selection_ready"},
+    ])
+
+    runner._repl_wait_normal_resume_confirmation(object(), runtime)
+
+    assert calls == ["confirmation", "selection", "submit", "confirmation"]
+    assert runtime.diagnostics["repl_normal_resume_reselections"] == 1
+    assert runtime.watchdog["action"] == "observe"
 
 
 def test_repl_image_lifecycle_requires_initial_vpc_question(runner: ModuleType) -> None:
