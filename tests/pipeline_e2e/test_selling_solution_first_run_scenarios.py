@@ -367,6 +367,27 @@ def test_a2a_image_interrupt_only_uses_rollback_image_once(runner: ModuleType) -
     assert json.loads(second_confirmation[0])["action"] == "confirm"
 
 
+def test_a2a_image_interrupt_instruction_keeps_target_inside_image(runner: ModuleType) -> None:
+    runtime = argparse.Namespace(
+        spec=argparse.Namespace(profile="image_interrupt"),
+        event=lambda *args, **kwargs: None,
+    )
+    calls: list[dict[str, str]] = []
+
+    class Harness:
+        def stream_image_text(self, **kwargs):
+            calls.append(kwargs)
+            return argparse.Namespace(context_id="ctx", task_id="task", last_input_required_step_id="")
+
+    runner._a2a_turn(
+        runtime, Harness(), prompt="create security group", name="interrupt", image_key="rollback-interrupt"
+    )
+
+    assert calls[0]["text"] == "create security group"
+    assert "security group" not in calls[0]["prompt"].lower()
+    assert "不是确认部署" in calls[0]["prompt"]
+
+
 def test_backup_window_reads_pending_input_from_prepublication_snapshot(runner: ModuleType) -> None:
     state = {
         "snapshot": {

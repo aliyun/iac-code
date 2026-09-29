@@ -1319,7 +1319,14 @@ def _a2a_turn(
     runtime.event("a2a-turn-started", name=name, image=bool(image_key))
     identity = {"task_id": task_id} if task_id is not None else {}
     if image_key:
-        summary = harness.stream_image_text(text=prompt, image_key=image_key, name=name, **identity)
+        image_instruction = (
+            {"prompt": _legacy_a2a_module().IMAGE_INTERRUPT_PROMPT}
+            if runtime.spec.profile == "image_interrupt" and image_key == "rollback-interrupt"
+            else {}
+        )
+        summary = harness.stream_image_text(
+            text=prompt, image_key=image_key, name=name, **identity, **image_instruction
+        )
     else:
         summary = harness.stream(prompt=prompt, name=name, **identity)
     runtime.event(
@@ -2761,6 +2768,10 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
         ("step_started", "repl_step_started_count"),
     ):
         _record_diagnostic(runtime, key, sum(event.get("type") == event_type for event in display_events))
+    _record_diagnostic(
+        runtime, "repl_step_started_ids",
+        [event.get("step_id") for event in display_events if event.get("type") == "step_started"],
+    )
     _common_pipeline_checks(runtime, display_events + pty.events + [{"transcript": normalized}])
     runtime.checks["REPL transcript captured"] = bool(normalized.strip())
     unexpected_exit = any(

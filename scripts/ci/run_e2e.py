@@ -515,6 +515,14 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             diagnostics["public_tool_names"] = [
                 name for name in public_tool_names if isinstance(name, str) and name in allowed_tool_names
             ][:16]
+        repl_step_ids = raw_diagnostics.get("repl_step_started_ids")
+        allowed_repl_steps = {
+            "solution_planning_and_selection", "materialize_selected_candidate", "deploying",
+        }
+        if isinstance(repl_step_ids, list):
+            diagnostics["repl_step_started_ids"] = [
+                step for step in repl_step_ids if isinstance(step, str) and step in allowed_repl_steps
+            ][:16]
         image_keys = raw_diagnostics.get("repl_image_keys")
         allowed_images = {
             "initial", "selection", "ask-first-answer", "ask-second-answer", "confirmation-adjust",

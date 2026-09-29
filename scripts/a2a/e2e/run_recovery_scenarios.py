@@ -127,6 +127,10 @@ MULTIMODAL_SCENARIOS = frozenset(
     }
 )
 IMAGE_TEXT_PROMPT = "请读取图片中的文字，并将图片中的文字作为本轮用户输入执行。"
+IMAGE_INTERRUPT_PROMPT = (
+    "请先读取图片里的新要求。本轮图片是目标变更，不是确认部署；"
+    "先按图片中的目标重新规划，不得沿用旧目标直接部署。"
+)
 STATIC_TEXT_IMAGE_FIXTURE_ROOT = E2E_SCRIPTS_DIR / "fixtures" / "text-images"
 STATIC_TEXT_IMAGE_FIXTURES = {
     "initial": DEFAULT_INITIAL_PROMPT,
@@ -1754,6 +1758,7 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
             text=ROLLBACK_PROMPT,
             image_key="rollback-interrupt",
             name="02-rollback-image-interrupt",
+            prompt=IMAGE_INTERRUPT_PROMPT,
         )
         _wait_any(
             [*observed_streams, rollback],
