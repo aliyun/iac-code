@@ -3538,8 +3538,9 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         runtime,
         pty,
         "initial",
-        "选择一个已有 VPC 创建一个 VSwitch。架构规划阶段先直接给出方案；"
-        "方案选定后、写模板前必须列出可用 VPC 并向我提问，由我选择，不能代选。"
+        "使用一个已有 VPC 创建 VSwitch。架构规划阶段先给出方案。"
+        "我还没有选定 VPC；方案选定后，请列出可用 VPC 并问我选哪一个。"
+        "在我回答前不能生成模板，也不能替我选择 VPC。"
         "可用区和网段可以推荐合法且低成本的默认值。",
         label="initial-image-enter",
     )
@@ -3600,22 +3601,20 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         if isinstance(event, dict) and event.get("type") == "paste-image-fixture"
     }
     _record_diagnostic(runtime, "repl_image_keys", sorted(observed_keys))
-    # The model may proceed directly to confirmation in one phase. Require an
-    # image at every fixed boundary and at least one actual question boundary,
-    # without requiring a question in a phase where none was presented.
+    # The initial request explicitly forbids selecting a VPC for the user.
+    # Its first question and image answer are part of this case's acceptance.
     runtime.checks["REPL full image lifecycle exercised"] = _multimodal_image_lifecycle_complete(observed_keys)
 
 
 def _multimodal_image_lifecycle_complete(observed_keys: set[str]) -> bool:
     return {
         "initial",
+        "ask-first-answer",
         "selection",
         "confirmation-adjust",
         "rollback-interrupt",
         "normal-followup",
-    }.issubset(observed_keys) and bool(
-        observed_keys & {"ask-first-answer", "ask-second-answer", "rollback-ask-answer"}
-    )
+    }.issubset(observed_keys)
 
 
 def _repl_wait_multimodal_selection(runtime: ScenarioRuntime, pty: Any, *, phase: str) -> None:
