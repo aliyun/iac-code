@@ -485,6 +485,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "repl_selection_ready_count", "repl_selection_submitted_count", "repl_step_started_count",
             "repl_step1_stall_restarts", "repl_step2_stall_restarts", "repl_selection_image_retries",
             "repl_normal_resume_reselections",
+            "repl_step1_attempt_count", "repl_step1_tool_use_count",
             "repl_step2_attempt_count", "repl_step2_tool_use_count",
             "text_exit_code", "text_output_length",
             "cleanup_turn_event_count", "cleanup_turn_cleanup_event_count", "cleanup_target_count",
@@ -540,15 +541,18 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 category for category in tool_name_categories
                 if isinstance(category, str) and category in allowed_name_categories
             ][:8]
-        step2_tool_names = raw_diagnostics.get("repl_step2_tool_use_names")
-        allowed_step2_tools = allowed_tool_names | {
+        allowed_step_tools = allowed_tool_names | {
             "ros_preview_template", "ros_estimate_template_cost", "ros_get_template_parameter_constraints",
             "ros_validate_template", "complete_step", "ask_user_question", "read_file",
+            "show_architecture_plan", "show_candidate_detail",
         }
-        if isinstance(step2_tool_names, list):
-            diagnostics["repl_step2_tool_use_names"] = [
-                name for name in step2_tool_names if isinstance(name, str) and name in allowed_step2_tools
-            ][:16]
+        for step_index in (1, 2):
+            key = f"repl_step{step_index}_tool_use_names"
+            step_tool_names = raw_diagnostics.get(key)
+            if isinstance(step_tool_names, list):
+                diagnostics[key] = [
+                    name for name in step_tool_names if isinstance(name, str) and name in allowed_step_tools
+                ][:16]
         repl_step_ids = raw_diagnostics.get("repl_step_started_ids")
         allowed_repl_steps = {
             "solution_planning_and_selection", "materialize_selected_candidate", "deploying",

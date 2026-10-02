@@ -1110,8 +1110,10 @@ def _public_a2a_tool_events_for_id(values: Sequence[Any], tool_use_id: str) -> l
     return events
 
 
-def _public_aliyun_attribution_consistent(events: Sequence[dict[str, Any]]) -> bool:
-    return all(str(item.get("toolName") or "").lower() == "aliyun_api" for item in events)
+def _public_aliyun_attribution_consistent(
+    events: Sequence[dict[str, Any]], expected_tool_name: str = "aliyun_api"
+) -> bool:
+    return all(str(item.get("toolName") or "").lower() == expected_tool_name.lower() for item in events)
 
 
 def _public_tool_name_category(value: Any) -> str:
@@ -2854,16 +2856,17 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
                 phase = "other"
             _record_diagnostic(runtime, "repl_failed_wait_phase", phase)
     if getattr(getattr(runtime, "spec", None), "profile", None) == "interrupt_rollback":
-        step2_paths = _repl_step_transcript_paths(runtime, NEW_STEPS[1])
-        step2_tool_names = [
-            str(item.get("name") or "").lower()
-            for path in step2_paths for value in _read_json_lines(path)
-            for item in [value, *(child for _, child in _walk(value))]
-            if isinstance(item, dict) and item.get("type") == "tool_use" and isinstance(item.get("name"), str)
-        ]
-        _record_diagnostic(runtime, "repl_step2_attempt_count", len(step2_paths))
-        _record_diagnostic(runtime, "repl_step2_tool_use_count", len(step2_tool_names))
-        _record_diagnostic(runtime, "repl_step2_tool_use_names", sorted(set(step2_tool_names)))
+        for step_index in (1, 2):
+            step_paths = _repl_step_transcript_paths(runtime, NEW_STEPS[step_index - 1])
+            step_tool_names = [
+                str(item.get("name") or "").lower()
+                for path in step_paths for value in _read_json_lines(path)
+                for item in [value, *(child for _, child in _walk(value))]
+                if isinstance(item, dict) and item.get("type") == "tool_use" and isinstance(item.get("name"), str)
+            ]
+            _record_diagnostic(runtime, f"repl_step{step_index}_attempt_count", len(step_paths))
+            _record_diagnostic(runtime, f"repl_step{step_index}_tool_use_count", len(step_tool_names))
+            _record_diagnostic(runtime, f"repl_step{step_index}_tool_use_names", sorted(set(step_tool_names)))
         confirmation_inputs = [
             event.get("payload", {}).get("selected_value")
             for event in display_events
@@ -3720,12 +3723,16 @@ def _run_repl_waiting_resume_all(runtime: ScenarioRuntime, pty: Any) -> None:
 
 def _repl_wait_selection_after_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
     try:
-        _repl_wait_selection(pty, runtime, timeout=min(runtime.args.stream_timeout, 360.0))
+        _repl_wait_selection(pty, runtime)
     except TimeoutError:
-        if _repl_active_deploy_step(runtime):
+        watchdog = getattr(runtime, "watchdog", None)
+        if (
+            _repl_active_deploy_step(runtime) or not isinstance(watchdog, dict)
+            or watchdog.get("state") != "no_output"
+        ):
             raise
-        # The changed goal is persisted and Step 3 has not started. Resume
-        # the planning attempt once instead of waiting for a silent model call.
+        # Only resume after both PTY output and durable planning progress stop.
+        # A fixed wall-clock cutoff can kill an active candidate sub-pipeline.
         _record_diagnostic(runtime, "repl_step1_stall_restarts", 1)
         terminal_offset = len(pty.transcript)
         pty.terminate(force=True)
@@ -5192,9 +5199,11 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
             values.append(json.loads(web_payload_path.read_text(encoding="utf-8")))
     forbidden_values = _copied_credential_values(runtime)
     persisted_tool_use_id = ""
+    persisted_tool_name = ""
     try:
         persisted_path, tool_result = contract.find_latest_aliyun_tool_result(runtime.paths.config_dir)
         persisted_tool_use_id = str(tool_result.get("tool_use_id") or "")
+        persisted_tool_name = contract.find_persisted_tool_name(persisted_path, persisted_tool_use_id)
         content = tool_result.get("content")
         metadata = tool_result.get("metadata")
         if not isinstance(content, str) or not isinstance(metadata, dict):
@@ -5242,12 +5251,15 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         )
         _record_diagnostic(
             runtime, "persisted_aliyun_publicly_attributed",
-            bool(public_aliyun_tool_events) and _public_aliyun_attribution_consistent(public_aliyun_tool_events),
+            bool(public_aliyun_tool_events) and bool(persisted_tool_name)
+            and _public_aliyun_attribution_consistent(public_aliyun_tool_events, persisted_tool_name),
         )
-    # Candidate sub-pipeline tool calls may be private while their artifacts
-    # still carry the toolUseId. Require the name only on public tool events.
+    # Aliyun transport metadata also belongs to delegated ROS tools. Compare
+    # exposed events to the actual invoking tool in the persisted transcript.
+    # Candidate sub-pipeline artifacts alone do not expose a tool event.
     runtime.checks["public events preserve Aliyun tool attribution"] = (
-        _public_aliyun_attribution_consistent(public_aliyun_tool_events)
+        bool(persisted_tool_name)
+        and _public_aliyun_attribution_consistent(public_aliyun_tool_events, persisted_tool_name)
         if runtime.spec.surface is Surface.A2A and persisted_tool_use_id else "aliyun_api" in tools
     )
     if "aliyun_api" not in tools:

@@ -1932,6 +1932,7 @@ def test_repl_post_rollback_selection_resumes_stalled_planning_once(
         repl_candidate_wait_count=1,
         checks={"REPL display candidate_selection_ready occurrence 2 observed": False},
         diagnostics={},
+        watchdog={"state": "no_output"},
     )
     monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
     monkeypatch.setattr(runner, "_repl_active_deploy_step", lambda _runtime: False)
@@ -1939,13 +1940,33 @@ def test_repl_post_rollback_selection_resumes_stalled_planning_once(
     runner._repl_wait_selection_after_rollback(runtime, Pty())
 
     assert calls == [
-        ("wait", {"timeout": 360.0}),
+        ("wait", {}),
         ("terminate", True),
         ("spawn", ["--continue"]),
         ("wait", {"after_restart": True, "terminal_offset": len(Pty.transcript)}),
     ]
     assert runtime.diagnostics["repl_step1_stall_restarts"] == 1
     assert runtime.checks == {}
+
+
+def test_repl_post_rollback_selection_does_not_restart_active_planning(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = argparse.Namespace(
+        args=argparse.Namespace(stream_timeout=900.0),
+        repl_candidate_wait_count=1,
+        watchdog={"state": "running"},
+    )
+
+    def wait_selection(*_args, **kwargs):
+        assert kwargs == {}
+        raise TimeoutError("overall deadline")
+
+    monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
+    monkeypatch.setattr(runner, "_repl_active_deploy_step", lambda _runtime: False)
+
+    with pytest.raises(TimeoutError, match="overall deadline"):
+        runner._repl_wait_selection_after_rollback(runtime, object())
 
 
 def test_repl_candidate_waiting_restart_uses_durable_events_and_handoff_delay(
@@ -3274,9 +3295,51 @@ def test_public_a2a_attribution_ignores_artifact_reference_but_checks_tool_event
     assert not runner._public_aliyun_attribution_consistent(
         runner._public_a2a_tool_events_for_id([misattributed_tool], "call-1")
     )
+    delegated_tool = envelope("tool_result", "ros_preview_template")
+    delegated_events = runner._public_a2a_tool_events_for_id([delegated_tool], "call-1")
+    assert runner._public_aliyun_attribution_consistent(delegated_events, "ros_preview_template")
+    assert not runner._public_aliyun_attribution_consistent(delegated_events, "ros_validate_template")
     assert runner._public_tool_name_category("aliyun_api") == "aliyun_api_alias"
     assert runner._public_tool_name_category("ros_preview_template") == "other_tool_name"
     assert runner._public_tool_name_category(None) == "missing"
+
+
+@pytest.mark.parametrize("public_name,passed", [("ros_validate_template", True), ("aliyun_api", False)])
+def test_public_contract_audit_preserves_actual_delegated_tool_identity(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public_name: str, passed: bool
+) -> None:
+    config_dir = tmp_path / "config"
+    transcript = config_dir / "projects" / "project" / "session" / "session.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("\n".join(json.dumps(row) for row in [
+        {"role": "assistant", "content": [{
+            "type": "tool_use", "id": "cloud-call", "name": "ros_validate_template",
+        }]},
+        {"role": "user", "content": [{
+            "type": "tool_result", "tool_use_id": "cloud-call", "content": '{"Parameters": []}',
+            "metadata": {"aliyun_http": {
+                "contract_version": "aliyun_body_v1", "product": "ros", "version": "2019-09-10",
+                "action": "ValidateTemplate", "status": 200, "response_mode": "json", "body_format": "json",
+            }},
+        }]},
+    ]), encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir()
+    runtime = argparse.Namespace(
+        paths=argparse.Namespace(config_dir=config_dir, run_dir=tmp_path, artifacts_dir=artifacts_dir),
+        spec=argparse.Namespace(surface=runner.Surface.A2A, case_id="A02"),
+        checks={}, diagnostics={}, notes=[],
+    )
+    events = [{"metadata": {"iac_code": {"pipeline": {
+        "eventType": event_type, "data": {"toolUseId": "cloud-call", "toolName": public_name},
+    }}}} for event_type in ("tool_started", "tool_result")]
+    monkeypatch.setattr(runner, "_all_event_values", lambda _path: events)
+    monkeypatch.setattr(runner, "_copied_credential_values", lambda _runtime: [])
+
+    runner.run_public_contract_audit(runtime)
+
+    assert runtime.checks["Aliyun business body and public payload contract passed"] is True
+    assert runtime.checks["public events preserve Aliyun tool attribution"] is passed
 
 
 def test_repl_question_waits_for_actual_input_prompt(runner: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
