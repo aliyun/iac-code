@@ -3100,16 +3100,27 @@ def _repl_wait_ask(
     *,
     description: str,
     reject_confirmation: bool = False,
+    allow_captured_prompt: bool = False,
 ) -> None:
     # Question wording is model-generated and must not be constrained by a list
     # of Chinese keywords. The actual console-input prompt is the durable UI
     # boundary and also prevents an answer from racing the preceding key reader.
     patterns = REPL_ASK_INPUT_READY_PATTERNS + (REPL_CONFIRMATION_INPUT_READY_PATTERNS if reject_confirmation else ())
-    matched = pty.expect_any(
-        patterns,
-        description=f"{description} input ready",
-        timeout=runtime.args.stream_timeout,
-    )
+    matched = None
+    if allow_captured_prompt:
+        # The durable pending-question checkpoint can be observed after the
+        # polling drain already consumed its prompt. Check the current tail.
+        time.sleep(0.25)
+        pty.drain_output()
+        rendered = _legacy_repl_module()._normalize_transcript(getattr(pty, "transcript", ""))
+        if re.search(r"[ \t]+>[ \t]*$", rendered):
+            matched = REPL_ASK_INPUT_READY_PATTERNS[0]
+    if matched is None:
+        matched = pty.expect_any(
+            patterns,
+            description=f"{description} input ready",
+            timeout=runtime.args.stream_timeout,
+        )
     if reject_confirmation and matched in REPL_CONFIRMATION_INPUT_READY_PATTERNS:
         raise RuntimeError(f"deployment confirmation appeared before {description}")
     # Cancelling the candidate key task cannot cancel a read_key() already
@@ -3278,6 +3289,7 @@ def _wait_repl_display_event(
     predicate: Callable[[dict[str, Any]], bool] | None = None,
     check_before_drain: bool = False,
     pty: Any | None = None,
+    alternate_input: Callable[[], tuple[dict[str, Any], Path] | None] | None = None,
 ) -> tuple[dict[str, Any], Path]:
     started = time.monotonic()
     deadline = started + timeout
@@ -3312,6 +3324,10 @@ def _wait_repl_display_event(
                     f"REPL pipeline reached terminal display event {terminal_event.get('type')!r} "
                     f"before {event_type!r} occurrence {occurrence}"
                 )
+        if alternate_input is not None:
+            pending = alternate_input()
+            if pending is not None:
+                return pending
         if drain_output is not None and check_before_drain:
             drain_output()
         if pty is not None:
@@ -3460,6 +3476,37 @@ def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input
     )
 
 
+def _pending_repl_parameter_question(
+    runtime: ScenarioRuntime, answered_tool_ids: set[str]
+) -> tuple[dict[str, Any], Path] | None:
+    """Native ask_user_question is persisted in meta, not the display journal."""
+
+    for path in sorted((runtime.paths.config_dir / "projects").glob("*/*/pipeline/meta.yaml")):
+        try:
+            metadata = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(metadata, dict) or metadata.get("current_step") != NEW_STEPS[1]:
+            continue
+        execution = metadata.get("execution")
+        if not isinstance(execution, dict) or execution.get("pending_input_kind") != "ask_user_question":
+            continue
+        pending = execution.get("pending_ask_user_question_input")
+        if not isinstance(pending, dict) or isinstance(pending.get("answer"), dict):
+            continue
+        tool_id = pending.get("toolUseId") or pending.get("tool_use_id")
+        if not isinstance(tool_id, str) or not tool_id or tool_id in answered_tool_ids:
+            continue
+        return {
+            "type": "user_input_required", "step_id": NEW_STEPS[1],
+            "payload": {
+                "kind": "ask_user_question", "tool_use_id": tool_id,
+                "allow_free_text": pending.get("allowFreeText", pending.get("allow_free_text", True)),
+            },
+        }, path
+    return None
+
+
 def _repl_wait_confirmation_after_optional_parameter_asks(
     pty: Any, runtime: ScenarioRuntime, *, recover_stalled_step: bool = False
 ) -> None:
@@ -3472,10 +3519,10 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
     if not selection_indexes:
         raise RuntimeError("candidate selection was not persisted before Step 2 input")
     selection_index = selection_indexes[-1]
-    prior_inputs = sum(
-        event.get("type") == "user_input_required" and event.get("step_id") == NEW_STEPS[1]
-        for event in display_events[:selection_index]
+    confirmation_occurrence = 1 + sum(
+        _is_repl_deployment_confirmation(event) for event in display_events[:selection_index]
     )
+    answered_tool_ids: set[str] = set()
     restarted = False
     for input_index in range(1, 5):
         while True:
@@ -3483,12 +3530,13 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
                 event, _ = _wait_repl_display_event(
                     runtime,
                     event_type="user_input_required",
-                    occurrence=prior_inputs + input_index,
+                    occurrence=confirmation_occurrence,
                     timeout=runtime.args.stream_timeout,
                     drain_output=getattr(pty, "drain_output", None),
-                    predicate=lambda item: item.get("step_id") == NEW_STEPS[1],
+                    predicate=_is_repl_deployment_confirmation,
                     check_before_drain=True,
                     pty=pty,
+                    alternate_input=lambda: _pending_repl_parameter_question(runtime, answered_tool_ids),
                 )
                 break
             except TimeoutError:
@@ -3506,7 +3554,7 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
                 pty.terminate(force=True)
                 pty.spawn(extra_args=["--continue"])
                 watchdog["action"] = "observe"
-                missed_check = f"REPL display user_input_required occurrence {prior_inputs + input_index} observed"
+                missed_check = f"REPL display user_input_required occurrence {confirmation_occurrence} observed"
                 runtime.checks.pop(missed_check, None)
                 runtime.checks.pop("REPL display matched at least once before timeout", None)
         if _is_repl_deployment_confirmation(event):
@@ -3515,9 +3563,15 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
         payload = event.get("payload")
         if not isinstance(payload, dict) or payload.get("kind") != "ask_user_question":
             raise RuntimeError("unexpected Step 2 input kind before deployment confirmation")
-        _repl_wait_ask(pty, runtime, description=f"Step 2 parameter ask #{input_index}")
-        answer = runtime.args.cleanup_vpc_id or "请使用上面列出的第一个可用杭州 VPC"
+        _repl_wait_ask(pty, runtime, description=f"Step 2 parameter ask #{input_index}", allow_captured_prompt=True)
+        answer = (
+            (runtime.args.cleanup_vpc_id or "请使用上面列出的第一个可用杭州 VPC")
+            if payload.get("allow_free_text", True) else "1"
+        )
         _repl_submit_line_input(pty, answer, label=f"step2-parameter-answer-{input_index}")
+        if isinstance(payload.get("tool_use_id"), str):
+            answered_tool_ids.add(payload["tool_use_id"])
+        _record_diagnostic(runtime, "repl_native_parameter_asks", input_index)
     raise RuntimeError("Step 2 did not reach deployment confirmation after four parameter asks")
 
 

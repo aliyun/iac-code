@@ -485,6 +485,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "repl_selection_ready_count", "repl_selection_submitted_count", "repl_step_started_count",
             "repl_step1_stall_restarts", "repl_step2_stall_restarts", "repl_selection_image_retries",
             "repl_normal_resume_reselections",
+            "repl_native_parameter_asks",
             "repl_step1_attempt_count", "repl_step1_tool_use_count",
             "repl_step2_attempt_count", "repl_step2_tool_use_count",
             "text_exit_code", "text_output_length",

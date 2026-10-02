@@ -2771,7 +2771,8 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
     )
     monkeypatch.setattr(
         runner, "_read_repl_display_events", lambda _runtime: [
-            {"type": "user_input_required", "step_id": runner.NEW_STEPS[1]},
+            {"type": "user_input_required", "step_id": runner.NEW_STEPS[1],
+             "payload": {"kind": "deployment_confirmation"}},
             {"type": "candidate_selection_submitted"},
         ],
     )
@@ -2781,7 +2782,8 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
 
     monkeypatch.setattr(runner, "_wait_repl_display_event", wait_input)
     monkeypatch.setattr(
-        runner, "_repl_wait_ask", lambda _pty, _runtime, *, description: calls.append(("ask", description)),
+        runner, "_repl_wait_ask",
+        lambda _pty, _runtime, *, description, allow_captured_prompt: calls.append(("ask", description)),
     )
     monkeypatch.setattr(
         runner,
@@ -2800,9 +2802,64 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
         ("durable", 2),
         ("ask", "Step 2 parameter ask #1"),
         ("answer", "vpc-test", "step2-parameter-answer-1"),
-        ("durable", 3),
+        ("durable", 2),
         ("confirmation", False),
     ]
+
+
+def test_repl_step2_wait_observes_native_question_outside_display_journal(
+    runner: ModuleType, tmp_path: Path
+) -> None:
+    meta = tmp_path / "projects" / "project" / "session" / "pipeline" / "meta.yaml"
+    meta.parent.mkdir(parents=True)
+    state = {
+        "current_step": runner.NEW_STEPS[1],
+        "execution": {
+            "pending_input_kind": "ask_user_question",
+            "pending_ask_user_question_input": {
+                "toolUseId": "parameter-call", "question": "Which VPC?", "options": [],
+                "allowFreeText": True,
+            },
+        },
+    }
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    runtime = argparse.Namespace(paths=argparse.Namespace(config_dir=tmp_path), checks={})
+    answered: set[str] = set()
+
+    event, path = runner._wait_repl_display_event(
+        runtime, event_type="user_input_required", occurrence=2, timeout=1,
+        predicate=runner._is_repl_deployment_confirmation,
+        alternate_input=lambda: runner._pending_repl_parameter_question(runtime, answered),
+    )
+
+    assert path == meta
+    assert event["payload"] == {
+        "kind": "ask_user_question", "tool_use_id": "parameter-call", "allow_free_text": True,
+    }
+    answered.add("parameter-call")
+    assert runner._pending_repl_parameter_question(runtime, answered) is None
+    answered.clear()
+    state["execution"]["pending_ask_user_question_input"]["answer"] = {"free_text": "vpc-test"}
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    assert runner._pending_repl_parameter_question(runtime, answered) is None
+    state["execution"]["pending_ask_user_question_input"].pop("answer")
+    state["current_step"] = runner.NEW_STEPS[0]
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    assert runner._pending_repl_parameter_question(runtime, answered) is None
+
+
+def test_repl_parameter_question_accepts_prompt_already_drained(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[object] = []
+    pty = argparse.Namespace(transcript="● Ask user question: Which VPC?\n  > ",
+                             drain_output=lambda: calls.append("drain"))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=1))
+
+    runner._repl_wait_ask(pty, runtime, description="parameter question", allow_captured_prompt=True)
+
+    assert calls == ["drain", "drain"]
 
 
 def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
