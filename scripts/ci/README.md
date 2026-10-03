@@ -13,7 +13,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite full --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --list --suite all
 ```
 
-`fast` 包含 6 个 A2A、REPL、Web API 确定性契约用例，包含修复后的 `e3a-recovery`；`full` 共 42 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 在已完成回合的安全交接点验证重启恢复；执行中快照的接管由执行控制拒绝。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
+`fast` 包含 7 个 A2A、REPL、Web API 确定性契约用例；`full` 共 43 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
 
 所有用例子进程都设置 `IAC_CODE_TELEMETRY_E2E_USER_ID`，保证遥测中的 `user.id` 带有 `e2e`，供报表排除测试流量；真实用例同时在复制后的 `settings.yml` 中保留或写入该 ID。入口清除继承的 OTLP 导出目标。仅 A2A、REPL、Web 契约及 Selling、只读 canary 等明确使用 `ObserveCapture` 验证埋点的用例设置 `IAC_CODE_TELEMETRY_LOCAL_ONLY=1`，只向本机临时接收器发送；其他用例不配置本机接收器，使用正常远端遥测。即使源码版的 `__release_date__` 为空，显式的 E2E 用户 ID 也允许这些普通用例正常上报。
 
@@ -65,7 +65,13 @@ REPL 旧场景的 PTY 等待每 10 秒检查一次，每 60 秒在单用例的 s
 
 先按 `report.md` 找到失败用例与首次失败检查，再看对应的 `ci-result.json`、场景 `summary.json`、日志和源码。Agent 应做有界复现，明确归类为产品缺陷、用例/断言缺陷、环境/凭证故障、云资源清理故障或超时，并写出证据、受影响场景和建议修复。真实云用例不要为了复现自动再次创建资源；先核对残留资源与清理结果。报告里的“初步线索”只是索引，不能替代复盘结论。
 
-总入口目前登记 145 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
+总入口目前登记 146 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
+
+### 验收边界
+
+R12 的两次 interrupt 回滚须在当前 REPL 中正常推进；规划停滞或等待超时直接失败，保留失败检查并执行原有资源清理，不额外强杀重启来救援通过。显式测试退出、崩溃及 `--continue` 的恢复用例仍按各自场景执行。
+
+A01/A24 的公开工具归属审计要求存在与实际持久化调用 ID 对应的 `tool_started` 或 `tool_result`，并核对调用工具名称；空事件、错误名称和仅有 artifact 引用均失败。只公开 artifact 的契约须独立验证 artifact，不能计为工具归属检查通过。
 
 ### 真实用例的问答驱动
 

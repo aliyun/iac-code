@@ -2066,7 +2066,7 @@ def test_repl_selection_timeout_keeps_occurrence_for_retry(
     assert runtime.repl_candidate_wait_count == 1
 
 
-def test_repl_post_rollback_selection_resumes_stalled_planning_once(
+def test_repl_post_rollback_selection_preserves_stall_failure_without_restart(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
@@ -2096,19 +2096,14 @@ def test_repl_post_rollback_selection_resumes_stalled_planning_once(
     monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
     monkeypatch.setattr(runner, "_repl_active_deploy_step", lambda _runtime: False)
 
-    runner._repl_wait_selection_after_rollback(runtime, Pty())
+    with pytest.raises(TimeoutError, match="stalled"):
+        runner._repl_wait_selection_after_rollback(runtime, Pty())
 
-    answer = calls[0][1].pop("clarification_answer")
-    assert "只在杭州创建一个最小测试安全组" in answer
-    assert calls[3][1].pop("clarification_answer") == answer
-    assert calls == [
-        ("wait", {}),
-        ("terminate", True),
-        ("spawn", ["--continue"]),
-        ("wait", {"after_restart": True, "terminal_offset": len(Pty.transcript)}),
-    ]
-    assert runtime.diagnostics["repl_step1_stall_restarts"] == 1
-    assert runtime.checks == {}
+    assert len(calls) == 1
+    assert calls[0][0] == "wait"
+    assert "只在杭州创建一个最小测试安全组" in calls[0][1]["clarification_answer"]
+    assert runtime.diagnostics == {}
+    assert runtime.checks == {"REPL display candidate_selection_ready occurrence 2 observed": False}
 
 
 def test_repl_post_rollback_selection_does_not_restart_active_planning(
@@ -3171,7 +3166,7 @@ def test_repl_rollback_selection_answers_durable_native_question_before_selectio
     assert runtime.diagnostics["repl_step1_clarification_asks"] == 1
 
 
-def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
+def test_repl_post_rollback_confirmation_preserves_stall_failure_without_restart(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
@@ -3212,18 +3207,13 @@ def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
         lambda _pty, _runtime, *, require_input_ready: calls.append(("confirmation", require_input_ready)),
     )
 
-    runner._repl_wait_confirmation_after_optional_parameter_asks(Pty(), runtime, recover_stalled_step=True)
+    with pytest.raises(TimeoutError, match="stalled"):
+        runner._repl_wait_confirmation_after_optional_parameter_asks(Pty(), runtime)
 
-    assert calls == [
-        ("wait", 900.0, 1),
-        ("terminate", True),
-        ("spawn", ["--continue"]),
-        ("wait", 900.0, 1),
-        ("confirmation", False),
-    ]
-    assert runtime.diagnostics["repl_step2_stall_restarts"] == 1
-    assert runtime.watchdog["action"] == "observe"
-    assert "REPL display user_input_required occurrence 1 observed" not in runtime.checks
+    assert calls == [("wait", 900.0, 1)]
+    assert runtime.diagnostics == {}
+    assert runtime.watchdog["action"] == "early_abort"
+    assert runtime.checks == {"REPL display user_input_required occurrence 1 observed": False}
 
 
 def test_normal_resume_selects_new_candidate_after_input_watchdog(
@@ -3654,7 +3644,9 @@ def test_public_a2a_attribution_ignores_artifact_reference_but_checks_tool_event
     assert runner._public_a2a_tool_events_for_id([misattributed_tool], "call-1") == [
         {"toolUseId": "call-1", "toolName": "ros_deploy"},
     ]
-    assert runner._public_aliyun_attribution_consistent(runner._public_a2a_tool_events_for_id([artifact], "call-1"))
+    assert not runner._public_aliyun_attribution_consistent(
+        runner._public_a2a_tool_events_for_id([artifact], "call-1")
+    )
     assert runner._public_aliyun_attribution_consistent(
         runner._public_a2a_tool_events_for_id([artifact, public_tool], "call-1")
     )
@@ -3670,9 +3662,19 @@ def test_public_a2a_attribution_ignores_artifact_reference_but_checks_tool_event
     assert runner._public_tool_name_category(None) == "missing"
 
 
-@pytest.mark.parametrize("public_name,passed", [("ros_validate_template", True), ("aliyun_api", False)])
+@pytest.mark.parametrize(
+    "public_name,event_types,passed",
+    [
+        ("ros_validate_template", ("tool_started", "tool_result"), True),
+        ("aliyun_api", ("tool_started", "tool_result"), False),
+        (None, ("tool_started", "tool_result"), False),
+        ("ros_validate_template", (), False),
+        ("ros_validate_template", ("artifact_created",), False),
+    ],
+)
 def test_public_contract_audit_preserves_actual_delegated_tool_identity(
-    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, public_name: str, passed: bool
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    public_name: str | None, event_types: tuple[str, ...], passed: bool,
 ) -> None:
     config_dir = tmp_path / "config"
     transcript = config_dir / "projects" / "project" / "session" / "session.jsonl"
@@ -3698,7 +3700,7 @@ def test_public_contract_audit_preserves_actual_delegated_tool_identity(
     )
     events = [{"metadata": {"iac_code": {"pipeline": {
         "eventType": event_type, "data": {"toolUseId": "cloud-call", "toolName": public_name},
-    }}}} for event_type in ("tool_started", "tool_result")]
+    }}}} for event_type in event_types]
     monkeypatch.setattr(runner, "_all_event_values", lambda _path: events)
     monkeypatch.setattr(runner, "_copied_credential_values", lambda _runtime: [])
 

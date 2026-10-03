@@ -105,6 +105,10 @@ class CloudCredentialSetupError(RuntimeError):
 
 FAST_CASES = (
     Case("a2a-recovery-contract", "scripts/a2a/e2e/run_contract_scenarios.py", ("--scenario", "e3a-recovery"), 480),
+    Case(
+        "a2a-handoff-recovery-contract", "scripts/a2a/e2e/run_contract_scenarios.py",
+        ("--scenario", "e3a-handoff-recovery"), 480,
+    ),
     Case("a2a-success-contract", "scripts/a2a/e2e/run_contract_scenarios.py", ("--scenario", "e3b-success"), 480),
     Case("a2a-cancel-contract", "scripts/a2a/e2e/run_contract_scenarios.py", ("--scenario", "e3b-cancel"), 480),
     Case("repl-normal-contract", "scripts/repl/e2e/run_contract_scenarios.py", (), 360),

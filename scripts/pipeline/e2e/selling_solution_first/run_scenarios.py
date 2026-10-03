@@ -1125,7 +1125,11 @@ def _public_a2a_tool_events_for_id(values: Sequence[Any], tool_use_id: str) -> l
 def _public_aliyun_attribution_consistent(
     events: Sequence[dict[str, Any]], expected_tool_name: str = "aliyun_api"
 ) -> bool:
-    return all(str(item.get("toolName") or "").lower() == expected_tool_name.lower() for item in events)
+    # A public tool contract requires evidence, not just the absence of a
+    # conflicting name. Artifact references do not substitute for tool events.
+    return bool(events) and all(
+        str(item.get("toolName") or "").lower() == expected_tool_name.lower() for item in events
+    )
 
 
 def _public_tool_name_category(value: Any) -> str:
@@ -3795,9 +3799,7 @@ def _pending_repl_input_before_confirmation(
     return None
 
 
-def _repl_wait_confirmation_after_optional_parameter_asks(
-    pty: Any, runtime: ScenarioRuntime, *, recover_stalled_step: bool = False
-) -> None:
+def _repl_wait_confirmation_after_optional_parameter_asks(pty: Any, runtime: ScenarioRuntime) -> None:
     """Follow this selection's durable Step 2 inputs, ignoring stale terminal redraws."""
 
     display_events = _read_repl_display_events(runtime)
@@ -3812,41 +3814,19 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
         1 + sum(_is_repl_deployment_confirmation(event) for event in display_events[:selection_index]),
     )
     answered_tool_ids: set[str] = set()
-    restarted = False
     reselections = 0
     for input_index in range(1, 9):
-        while True:
-            try:
-                event, question_path = _wait_repl_display_event(
-                    runtime,
-                    event_type="user_input_required",
-                    occurrence=confirmation_occurrence,
-                    timeout=runtime.args.stream_timeout,
-                    drain_output=getattr(pty, "drain_output", None),
-                    predicate=_is_repl_deployment_confirmation,
-                    check_before_drain=True,
-                    pty=pty,
-                    alternate_input=lambda: _pending_repl_input_before_confirmation(runtime, answered_tool_ids),
-                )
-                break
-            except TimeoutError:
-                watchdog = getattr(runtime, "watchdog", None)
-                if (
-                    not recover_stalled_step or restarted or _repl_active_deploy_step(runtime)
-                    or not isinstance(watchdog, dict) or watchdog.get("state") != "no_output"
-                ):
-                    raise
-                # Resume only after both terminal and durable step records
-                # have stopped changing. Step 2 may legitimately work for
-                # many minutes without printing to the terminal.
-                restarted = True
-                _record_diagnostic(runtime, "repl_step2_stall_restarts", 1)
-                pty.terminate(force=True)
-                pty.spawn(extra_args=["--continue"])
-                watchdog["action"] = "observe"
-                missed_check = f"REPL display user_input_required occurrence {confirmation_occurrence} observed"
-                runtime.checks.pop(missed_check, None)
-                runtime.checks.pop("REPL display matched at least once before timeout", None)
+        event, question_path = _wait_repl_display_event(
+            runtime,
+            event_type="user_input_required",
+            occurrence=confirmation_occurrence,
+            timeout=runtime.args.stream_timeout,
+            drain_output=getattr(pty, "drain_output", None),
+            predicate=_is_repl_deployment_confirmation,
+            check_before_drain=True,
+            pty=pty,
+            alternate_input=lambda: _pending_repl_input_before_confirmation(runtime, answered_tool_ids),
+        )
         if _is_repl_deployment_confirmation(event):
             if runtime.spec.profile == "step2_parameter":
                 _verify_required_parameter_confirmation(runtime, event.get("payload") or {})
@@ -4076,28 +4056,9 @@ def _repl_wait_selection_after_rollback(runtime: ScenarioRuntime, pty: Any) -> N
         "本次只在杭州创建一个最小测试安全组；不创建 VPC、VSwitch、ECS 或公网资源。"
         "如果需要 VPC，请复用上面列出的第一个已有杭州 VPC。其他参数使用测试默认值。"
     )
-    try:
-        _repl_wait_selection(pty, runtime, clarification_answer=clarification_answer)
-    except TimeoutError:
-        watchdog = getattr(runtime, "watchdog", None)
-        if (
-            _repl_active_deploy_step(runtime) or not isinstance(watchdog, dict)
-            or watchdog.get("state") != "no_output"
-        ):
-            raise
-        # Only resume after both PTY output and durable planning progress stop.
-        # A fixed wall-clock cutoff can kill an active candidate sub-pipeline.
-        _record_diagnostic(runtime, "repl_step1_stall_restarts", 1)
-        terminal_offset = len(pty.transcript)
-        pty.terminate(force=True)
-        pty.spawn(extra_args=["--continue"])
-        _repl_wait_selection(
-            pty, runtime, after_restart=True, terminal_offset=terminal_offset,
-            clarification_answer=clarification_answer,
-        )
-        missed_check = f"REPL display candidate_selection_ready occurrence {runtime.repl_candidate_wait_count} observed"
-        runtime.checks.pop(missed_check, None)
-        runtime.checks.pop("REPL display matched at least once before timeout", None)
+    # This case verifies rollback progress without an additional crash/restart.
+    # Propagate stalls to run_one_scenario so failure and teardown are preserved.
+    _repl_wait_selection(pty, runtime, clarification_answer=clarification_answer)
 
 
 def _run_repl_interrupt_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
@@ -4108,7 +4069,7 @@ def _run_repl_interrupt_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
     _repl_choose_direct_input(runtime, pty, "我改需求了：只创建安全组，不创建 VPC 或 VSwitch；请重新规划。")
     _repl_wait_selection_after_rollback(runtime, pty)
     _repl_select_current(pty)
-    _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime, recover_stalled_step=True)
+    _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
     pty.send("\r", label="confirmation-confirm")
     _wait_repl_transcript_tool_use(
         pty,
@@ -5703,7 +5664,9 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         )
     # Aliyun transport metadata also belongs to delegated ROS tools. Compare
     # exposed events to the actual invoking tool in the persisted transcript.
-    # Candidate sub-pipeline artifacts alone do not expose a tool event.
+    # These public-tool audit cases require an exposed event for this call.
+    # An artifact-only contract must be audited separately, not reported here
+    # as a successful tool-attribution check.
     runtime.checks["public events preserve Aliyun tool attribution"] = (
         bool(persisted_tool_name)
         and _public_aliyun_attribution_consistent(public_aliyun_tool_events, persisted_tool_name)

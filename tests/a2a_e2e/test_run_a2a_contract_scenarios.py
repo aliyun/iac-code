@@ -11,12 +11,13 @@ from scripts.a2a.e2e.run_contract_scenarios import (
 )
 
 
-def test_contract_runner_exposes_the_three_required_a2a_scenarios() -> None:
+def test_contract_runner_preserves_running_crash_and_separate_handoff_recovery() -> None:
     args = parse_args([])
 
     assert args.scenario is None
     assert SCENARIOS == {
-        "e3a-recovery": "scenario1",
+        "e3a-recovery": "fault-after-snapshot",
+        "e3a-handoff-recovery": "scenario1",
         "e3b-success": "contract-graceful-success",
         "e3b-cancel": "contract-graceful-cancel",
     }

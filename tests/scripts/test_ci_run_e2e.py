@@ -44,9 +44,12 @@ def test_default_selection_is_allowlisted_and_credential_free() -> None:
 def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> None:
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
-    assert len(full) == 42
+    assert len(full) == 43
     assert len(live) == 103
-    assert len(run_e2e.CASES) == 145
+    assert len(run_e2e.CASES) == 146
+    recovery = {case.name: case for case in full if "recovery-contract" in case.name}
+    assert recovery["a2a-recovery-contract"].args == ("--scenario", "e3a-recovery")
+    assert recovery["a2a-handoff-recovery-contract"].args == ("--scenario", "e3a-handoff-recovery")
     assert {case.name for case in live if case.live_runner.startswith("legacy_a2a")} == {
         "a2a-recovery-" + name for name in run_e2e.A2A_RECOVERY_SCENARIOS
     }
@@ -579,7 +582,7 @@ def test_child_environment_removes_cloud_and_provider_credentials(
     assert "IAC_CODE_TELEMETRY_LOCAL_ONLY" not in env
     local_env = run_e2e._case_env(tmp_path, run_e2e.FAST_CASES[0], user_id)
     assert local_env["IAC_CODE_TELEMETRY_LOCAL_ONLY"] == "1"
-    assert sum(case.script in run_e2e.LOCAL_TELEMETRY_SCRIPTS for case in run_e2e.CASES) == 49
+    assert sum(case.script in run_e2e.LOCAL_TELEMETRY_SCRIPTS for case in run_e2e.CASES) == 50
 
 
 def test_e2e_settings_id_is_preserved_or_generated(tmp_path: Path) -> None:
