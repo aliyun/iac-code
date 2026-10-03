@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -409,13 +410,26 @@ async def _vpc_with_vswitch(pending: Mapping[str, Any]) -> tuple[str, str, int]:
     raise AssertionError("none of the queried VPCs contains a selectable VSwitch")
 
 
+class _SelectorAssociationMismatchError(AssertionError):
+    def __init__(self, metadata: object) -> None:
+        super().__init__("the VSwitch selector did not preserve the selected VPC as VpcId metadata")
+        value = metadata.get('VpcId') if isinstance(metadata, Mapping) else None
+        self.diagnostics = {
+            'selector_vpc_present': isinstance(value, str) and bool(value),
+            'selector_vpc_matches_selected': False,
+            'selector_vpc_has_resource_id_shape': isinstance(value, str) and bool(
+                re.fullmatch(r'vpc-[a-zA-Z0-9]+', value)
+            ),
+        }
+
+
 async def _query_real_vswitch(pending: Mapping[str, Any], *, expected_vpc_id: str) -> tuple[str, str, int]:
     selector = pending.get("selector")
     if not isinstance(selector, Mapping) or selector.get("id") != VSWITCH_SELECTOR_ID:
         raise AssertionError("LLM did not request the expected vpc.vswitch selector")
     metadata = selector.get("associationPropertyMetadata")
     if not isinstance(metadata, Mapping) or metadata.get("VpcId") != expected_vpc_id:
-        raise AssertionError("the VSwitch selector did not preserve the selected VPC as VpcId metadata")
+        raise _SelectorAssociationMismatchError(metadata)
     service, values, projected = await _query_candidates(
         pending,
         operation_key=VSWITCH_QUERY_OPERATION_KEY,
@@ -935,6 +949,8 @@ def main() -> None:
             "passed": False, "scenario": args.scenario,
             "error_type": type(exc).__name__, "error_site": error_site,
         }
+        if isinstance(exc, _SelectorAssociationMismatchError):
+            failure['diagnostics'] = exc.diagnostics
         if isinstance(exc, _TurnNotReadyError):
             failure["a2a_states"] = exc.states
             failure["a2a_phase"] = "next-turn" if exc.name == "next turn" else "answer"

@@ -17,8 +17,18 @@ from scripts.a2a.e2e.resource_selector.run_live_resource_selector import (
     _iac_code_values,
     _resource_selection_inputs,
     _selection_response,
+    _SelectorAssociationMismatchError,
     _wait_for_released_execution,
 )
+
+
+@pytest.mark.parametrize('value,present,shape', [(None, False, False), ('private-label', True, False),
+                                                ('vpc-private', True, True)])
+def test_selector_mismatch_diagnostics_never_export_the_value(value, present, shape):
+    error = _SelectorAssociationMismatchError({'VpcId': value})
+    assert error.diagnostics == {'selector_vpc_present': present, 'selector_vpc_matches_selected': False,
+                                 'selector_vpc_has_resource_id_shape': shape}
+    assert 'private' not in json.dumps(error.diagnostics)
 
 
 def _live_enabled() -> bool:

@@ -35,13 +35,45 @@ COMPLETION_ERROR_PATTERNS = {
 }
 
 
-def _completion_failure_facts(root: Path) -> dict[str, Any]:
+def _evidence_paths(root: Path, pattern: str, runtime_config_dir: Path | None) -> list[Path]:
+    paths: dict[Path, Path] = {}
+    for base in (root, runtime_config_dir):
+        if base is None:
+            continue
+        for path in base.rglob(pattern):
+            paths.setdefault(path.resolve(), path)
+            if len(paths) >= 60:
+                return list(paths.values())
+    return list(paths.values())
+
+
+def _schema_property_names() -> set[str]:
+    """Only names in the repository's public schema can leave the CI host."""
+    path = Path(__file__).resolve().parents[2] / 'src/iac_code/pipeline/selling_solution_first/pipeline.yaml'
+    pending = [yaml.safe_load(path.read_text(encoding='utf-8'))]
+    names: set[str] = set()
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            properties = value.get('properties')
+            if isinstance(properties, dict):
+                names.update(k for k in properties if isinstance(k, str))
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return names
+
+
+def _completion_failure_facts(root: Path, runtime_config_dir: Path | None = None) -> dict[str, Any]:
     """Project only fixed failure codes and schema validators, never tool result bodies."""
     codes: Counter[str] = Counter()
     validators: set[str] = set()
+    missing_fields: set[str] = set()
+    schema_fields: set[str] = set()
+    allowed_fields = _schema_property_names()
     failed_calls = 0
     allowed_validators = {"required", "type", "oneOf", "anyOf", "enum", "const", "minItems", "additionalProperties"}
-    for path in list(root.rglob("transcripts/*/session.jsonl"))[:30]:
+    for path in _evidence_paths(root, "transcripts/*/session.jsonl", runtime_config_dir)[:30]:
         if path.stat().st_size > 20_000_000:
             continue
         calls: set[str] = set()
@@ -66,11 +98,26 @@ def _completion_failure_facts(root: Path) -> dict[str, Any]:
                         codes[code] += 1
                 validators.update(v for v in re.findall(r'"validator"\s*:\s*"([A-Za-z]+)"', text)
                                   if v in allowed_validators)
+                # A single validation error is plain jsonschema text, without
+                # the structured multi-error envelope. Keep its public field
+                # name and validator without copying values or messages.
+                required = re.findall(r"'([A-Za-z_][A-Za-z_0-9]*)' is a required property", text)
+                if required:
+                    validators.add('required')
+                    missing_fields.update(set(required).intersection(allowed_fields))
+                if 'is not of type' in text:
+                    validators.add('type')
+                for pointer in re.findall(r'"path"\s*:\s*"([^"]*)"', text):
+                    schema_fields.update(set(pointer.split('/')).intersection(allowed_fields))
     facts: dict[str, Any] = {"complete_step_error_count": min(failed_calls, 10000)}
     if codes:
         facts["completion_error_codes"] = dict(codes)
     if validators:
         facts["completion_schema_validators"] = sorted(validators)
+    if missing_fields:
+        facts['completion_schema_missing_fields'] = sorted(missing_fields)[:20]
+    if schema_fields:
+        facts['completion_schema_fields'] = sorted(schema_fields)[:20]
     return facts
 
 
@@ -88,7 +135,9 @@ def _known_wait(value: Any) -> str | None:
     return None
 
 
-def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, Any]:
+def collect_live_diagnostics(
+    root: Path, summary: dict[str, Any], *, runtime_config_dir: Path | None = None,
+) -> dict[str, Any]:
     from scripts.a2a.debugger import _extract_pipeline_envelopes
 
     facts: dict[str, Any] = {}
@@ -207,7 +256,7 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
     facts["a2a_event_counts"] = {key: min(value, 10000) for key, value in sorted(counts.items())}
     facts["candidate_marker_without_event"] = marker_present and not counts["candidate_step_started"]
 
-    for meta in root.rglob("pipeline/meta.yaml"):
+    for meta in _evidence_paths(root, "pipeline/meta.yaml", runtime_config_dir):
         try:
             state = yaml.safe_load(meta.read_text(encoding="utf-8"))
         except (OSError, yaml.YAMLError):
@@ -227,6 +276,7 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
         step = state.get("current_step")
         if step in {
             "solution_planning_and_selection", "materialize_selected_candidate", "deploying", "confirm_and_select",
+            "intent_parsing", "architecture_design", "architecture_detail",
         }:
             facts["pending_step"] = step
         execution = state.get("execution")
@@ -239,5 +289,5 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
             question = execution.get("pending_ask_user_question_input")
             if isinstance(question, dict):
                 facts["pending_question_answered"] = isinstance(question.get("answer"), dict)
-    facts.update(_completion_failure_facts(root))
+    facts.update(_completion_failure_facts(root, runtime_config_dir))
     return facts

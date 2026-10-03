@@ -2999,6 +2999,20 @@ def test_finish_pipeline_answers_clarification_inside_selection_step_before_foll
     assert calls == [{'prompt': '只创建安全组，不创建VSwitch', 'name': 'answer-after-resume-1'}]
 
 
+def test_target_diagnostics_distinguish_deploying_step_from_handoff_without_raw_values():
+    runner = _load_runner()
+    context = {'deployment': {'resources_created': ['ALIYUN::ECS::SecurityGroup'], 'stack_id': 'private-stack'}}
+    state = {'snapshot': {
+        'steps': [{'id': 'deploying', 'status': 'completed', 'conclusion': {'resource_type': 'VSwitch'}}],
+        'normalHandoff': {'summary': 'Included context:\n' + json.dumps(context) + '\n\nUse this context'},
+    }}
+    h = SimpleNamespace(diagnostics={})
+    runner._record_final_target_diagnostics(h, state)
+    assert h.diagnostics == {'final_target_step_security_group': False, 'final_target_step_vswitch': True,
+                             'final_target_handoff_security_group': True, 'final_target_handoff_vswitch': False}
+    assert 'private' not in json.dumps(h.diagnostics)
+
+
 def test_complete_pipeline_answers_selection_clarification_before_acceptance(tmp_path, monkeypatch):
     runner = _load_runner()
     initial = runner.StreamSummary(name='initial', prompt='goal', status_states=['TASK_STATE_INPUT_REQUIRED'],

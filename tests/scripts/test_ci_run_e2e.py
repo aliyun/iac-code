@@ -526,6 +526,25 @@ def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
     }
 
 
+def test_question_contract_diagnostics_drop_unapproved_labels_and_private_values():
+    public = run_e2e._public_live_summary({'diagnostics': {
+        'question_driver_question_subjects': ['scale', 'private-question'],
+        'question_driver_available_fact_keys': ['goal', 'private-fact'],
+        'question_driver_selected_fact_keys': ['purpose', 'private-fact'],
+        'question_driver_option_count': 2,
+        'question_driver_option_selected': False,
+        'question_driver_free_text_allowed': True,
+        'selector_vpc_matches_selected': False,
+    }})
+    assert public['diagnostics'] == {
+        'question_driver_question_subjects': ['scale'], 'question_driver_available_fact_keys': ['goal'],
+        'question_driver_selected_fact_keys': ['purpose'], 'question_driver_option_count': 2,
+        'question_driver_option_selected': False, 'question_driver_free_text_allowed': True,
+        'selector_vpc_matches_selected': False,
+    }
+    assert 'private' not in json.dumps(public)
+
+
 def test_question_diagnostics_export_fixed_categories_without_history_or_model_text():
     public = run_e2e._public_live_summary({'diagnostics': {
         'question_driver_supplement_count': 2, 'question_driver_goal_reset_count': 1,

@@ -1818,6 +1818,7 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
         _finish_pipeline_after_possible_input(h, resumed, args, input_prompt=ROLLBACK_PROMPT)
         h.checks["pipeline completed after image interrupt recovery"] = _completed_snapshot_or_stream(h, resumed)
         final_state = h.fetch_state("after-image-interrupt-completion")
+        _record_final_target_diagnostics(h, final_state)
         h.diagnostics["final_target_security_group"] = _has_any_marker(
             _final_deployment_evidence(final_state), SECURITY_GROUP_MARKERS
         )
@@ -1910,6 +1911,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
         h.failure_stage = "verify"
         h.checks["pipeline completed after rollback recovery"] = _completed_snapshot_or_stream(h, resumed)
         final_state = h.fetch_state("after-rollback-completion")
+        _record_final_target_diagnostics(h, final_state)
         final_deploying = _final_deployment_evidence(final_state)
         h.checks["final deploying target is security group"] = _has_any_marker(
             final_deploying,
@@ -3175,6 +3177,21 @@ def _step_evidence(response: Any, step_id: str) -> str:
     if not matches:
         return ""
     return json.dumps(matches[-1], ensure_ascii=False, default=str)
+
+
+def _record_final_target_diagnostics(h: Any, response: Any) -> None:
+    diagnostics = getattr(h, 'diagnostics', None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = h.diagnostics = {}
+    step = _step_evidence(response, 'deploying')
+    context = _handoff_context(response) or {}
+    handoff = json.dumps({
+        'selected_plan': _final_selected_plan_evidence_value(context.get('selected_plan')),
+        'deployment': _final_target_evidence_value(context.get('deployment')),
+    }, ensure_ascii=False)
+    for source, text in (('step', step), ('handoff', handoff)):
+        for target, markers in (('security_group', SECURITY_GROUP_MARKERS), ('vswitch', VSWITCH_MARKERS)):
+            diagnostics['final_target_' + source + '_' + target] = _has_any_marker(text, markers)
 
 
 def _final_deployment_evidence(response: Any) -> str:

@@ -122,3 +122,32 @@ def test_cleanup_subprocess_diagnostics_export_only_known_fields(tmp_path):
     assert facts['cleanup_attempt_diagnostics'] == [{
         'stage': 'get_stack', 'status': 'DELETE_IN_PROGRESS', 'errorType': 'TimeoutError', 'code': 'unknown'}]
     assert 'private-' not in json.dumps(facts)
+
+
+def test_external_runtime_checkpoint_and_single_schema_error_are_projected_once(tmp_path):
+    reports = tmp_path / 'reports'
+    reports.mkdir()
+    runtime = tmp_path / 'runtime'
+    meta = runtime / 'projects/p/s/pipeline/meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text(yaml.safe_dump({'status': 'waiting_input', 'current_step': 'architecture_design',
+        'execution': {'pending_input_kind': 'ask_user_question',
+                      'pending_ask_user_question_input': {'question': 'private-question'}}}), encoding='utf-8')
+    transcript = meta.parent / 'transcripts/step/session.jsonl'
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(json.dumps({'content': [
+        {'type': 'tool_use', 'id': 'private-id', 'name': 'complete_step'},
+        {'type': 'tool_result', 'tool_use_id': 'private-id', 'is_error': True,
+         'content': "'hard_constraints' is a required property; 'private-secret' is a required property "
+                    '{"path":"/candidates/private-id/resource_intents","validator":"type"}'}
+    ]}) + '\n', encoding='utf-8')
+    facts = collect_live_diagnostics(reports, {}, runtime_config_dir=runtime)
+    assert facts['pending_step'] == 'architecture_design'
+    assert facts['pending_input_kind'] == 'ask_user_question'
+    assert facts['complete_step_error_count'] == 1
+    assert facts['completion_schema_validators'] == ['required', 'type']
+    assert facts['completion_schema_missing_fields'] == ['hard_constraints']
+    assert facts['completion_schema_fields'] == ['candidates', 'resource_intents']
+    assert 'private-' not in json.dumps(facts)
+    same_roots = collect_live_diagnostics(tmp_path, {}, runtime_config_dir=runtime)
+    assert same_roots['complete_step_error_count'] == 1

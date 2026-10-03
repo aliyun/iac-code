@@ -528,6 +528,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "question_driver_answer_count", "question_driver_llm_count", "question_driver_facts_fallback_count",
             "question_driver_new_count", "question_driver_supplement_count", "question_driver_repeat_count",
             "question_driver_goal_reset_count",
+            "question_driver_option_count",
             "repl_supplemental_reselections",
             "canary_aliyun_call_count", "canary_allowed_call_count", "canary_wrong_action_count",
             "canary_wrong_params_count",
@@ -559,8 +560,29 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                     'cidr', 'stack_name', 'other',
                 }
             })[:10]
+        for key, allowed in {
+            'question_driver_question_subjects': {
+                'cloud_vendor', 'region', 'purpose', 'scale', 'budget', 'architecture',
+                'vpc_id', 'zone_id', 'cidr', 'stack_name',
+            },
+            'question_driver_available_fact_keys': {
+                'goal', 'region', 'purpose', 'workload', 'resource_scope', 'constraints',
+                'vpc_id', 'zone_id', 'cidr', 'stack_name',
+            },
+            'question_driver_selected_fact_keys': {
+                'goal', 'region', 'purpose', 'workload', 'resource_scope', 'constraints',
+                'vpc_id', 'zone_id', 'cidr', 'stack_name',
+            },
+        }.items():
+            values = raw_diagnostics.get(key)
+            if isinstance(values, list):
+                diagnostics[key] = sorted({v for v in values if isinstance(v, str) and v in allowed})
         for key in (
             "question_driver_budget_exhausted", "final_target_security_group", "final_target_vswitch",
+            "question_driver_option_selected", "question_driver_free_text_allowed",
+            "selector_vpc_present", "selector_vpc_matches_selected", "selector_vpc_has_resource_id_shape",
+            "final_target_step_security_group", "final_target_step_vswitch",
+            "final_target_handoff_security_group", "final_target_handoff_vswitch",
             "repl_solution_summary_changed", "repl_effective_parameters_changed",
             "repl_first_rollback_input_intact",
             "repl_pending_question_answered",
@@ -1166,7 +1188,14 @@ def run_case(
     )
     if case.suite == "live":
         try:
-            failure_evidence = collect_live_diagnostics(script_dir, summary) if isinstance(summary, dict) else {}
+            runtime_config_dir = config_dir
+            if case.live_runner == 'repl':
+                runtime_config_dir = config_dir / '.e2e-runs' / script_dir.name
+            elif case.live_runner == 'selector':
+                runtime_config_dir = script_dir / '.runtime-config'
+            failure_evidence = collect_live_diagnostics(
+                script_dir, summary, runtime_config_dir=runtime_config_dir,
+            ) if isinstance(summary, dict) else {}
         except (OSError, ValueError, TypeError):
             failure_evidence = {"unavailable": True}
         summary = _public_live_summary(summary, cleanup_status)

@@ -286,3 +286,20 @@ def test_network_fixture_code_skips_temporary_vpc_even_when_listed_first(monkeyp
     monkeypatch.setattr(sys, 'argv', ['fixture', '10.250.1.0/24'])
     exec(driver._NETWORK_FACTS_CODE, {})
     assert json.loads(capsys.readouterr().out)['vpc_id'] == 'vpc-stable'
+
+
+def test_missing_detail_records_only_fixed_question_contract(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, '_select_facts', lambda *_: {
+        'fact_keys': ['purpose', 'private-secret'], 'option_id': 'private-option', 'missing_fields': ['other']})
+    diagnostics = {}
+    with pytest.raises(RuntimeError, match='unavailable case facts'):
+        driver.answer_question(tmp_path, {'question': 'AWS 预算和并发规模? private-secret',
+            'options': [{'id': 'private-option', 'label': 'private-label'}]},
+            {'goal': '只询价', 'purpose': 'private-purpose'}, {}, diagnostics)
+    assert diagnostics['question_driver_question_subjects'] == ['budget', 'cloud_vendor', 'scale']
+    assert diagnostics['question_driver_available_fact_keys'] == ['goal', 'purpose']
+    assert diagnostics['question_driver_selected_fact_keys'] == ['purpose']
+    assert diagnostics['question_driver_option_count'] == 1
+    assert diagnostics['question_driver_option_selected'] is True
+    assert diagnostics['question_driver_free_text_allowed'] is True
+    assert 'private-' not in json.dumps(diagnostics)

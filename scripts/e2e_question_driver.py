@@ -23,6 +23,18 @@ FACT_FIELDS = frozenset({
     'vpc_id', 'zone_id', 'cidr', 'stack_name',
 })
 QUESTION_TYPES = frozenset({'new', 'supplement', 'repeat'})
+QUESTION_SUBJECT_PATTERNS = {
+    'cloud_vendor': r'AWS|Amazon|阿里云|云厂商|cloud provider',
+    'region': r'地域|地区|region',
+    'purpose': r'用途|业务|产品|应用|purpose|workload',
+    'scale': r'规模|用户数|并发|流量|QPS|负载|scale|traffic',
+    'budget': r'预算|费用|成本|budget|cost',
+    'architecture': r'架构|拓扑|组件|architecture|topology',
+    'vpc_id': r'VpcId|VPC.?ID|已有.?VPC|选择.*VPC',
+    'zone_id': r'ZoneId|可用区|zone',
+    'cidr': r'CidrBlock|网段|CIDR',
+    'stack_name': r'StackName|栈名',
+}
 
 
 @dataclass
@@ -214,6 +226,25 @@ def answer_question(config_dir: Path, pending: dict[str, Any], facts: dict[str, 
                     diagnostics['question_driver_resolved_fields'] = sorted(resolved)
             if fields:
                 diagnostics['question_driver_missing_fields'] = fields
+                # Fixed categories make a missing "other" detail reviewable
+                # without exporting the question, options, answers or IDs.
+                diagnostics['question_driver_question_subjects'] = sorted(
+                    key for key, pattern in QUESTION_SUBJECT_PATTERNS.items() if re.search(pattern, question, re.I)
+                )
+                diagnostics['question_driver_available_fact_keys'] = sorted(set(facts).intersection(FACT_FIELDS))
+                selected_keys = chosen.get('fact_keys')
+                diagnostics['question_driver_selected_fact_keys'] = sorted(
+                    {key for key in selected_keys if isinstance(key, str) and key in facts and key in FACT_FIELDS}
+                ) if isinstance(selected_keys, list) else []
+                options = [x for x in pending.get('options', []) if isinstance(x, dict)]
+                diagnostics['question_driver_option_count'] = min(len(options), 10000)
+                diagnostics['question_driver_option_selected'] = any(
+                    option.get('id') == chosen.get('option_id') for option in options
+                    if isinstance(option.get('id'), str) and option['id']
+                )
+                diagnostics['question_driver_free_text_allowed'] = (
+                    pending.get('allowFreeText', pending.get('allow_free_text', True)) is not False
+                )
                 raise RuntimeError('question requires unavailable case facts: ' + ', '.join(fields))
     allow_text = pending.get('allowFreeText', pending.get('allow_free_text', True)) is not False
     keys = chosen.get('fact_keys') if isinstance(chosen, dict) else None
