@@ -496,6 +496,7 @@ def test_a2a_image_interrupt_instruction_keeps_target_inside_image(runner: Modul
     runtime = argparse.Namespace(
         spec=argparse.Namespace(profile="image_interrupt"),
         event=lambda *args, **kwargs: None,
+        stack_name="iac-e2e-ssf-a2a-image-interrupt-handoff-abc12345",
     )
     calls: list[dict[str, str]] = []
 
@@ -511,6 +512,8 @@ def test_a2a_image_interrupt_instruction_keeps_target_inside_image(runner: Modul
     assert calls[0]["text"] == "create security group"
     assert "security group" not in calls[0]["prompt"].lower()
     assert "不是确认部署" in calls[0]["prompt"]
+    assert f"`{runtime.stack_name}`" in calls[0]["prompt"]
+    assert "后续重新规划、参数确认和部署都必须保留" in calls[0]["prompt"]
 
 
 def test_backup_window_reads_pending_input_from_prepublication_snapshot(runner: ModuleType) -> None:

@@ -1375,8 +1375,14 @@ def _a2a_turn(
     runtime.event("a2a-turn-started", name=name, image=bool(image_key))
     identity = {"task_id": task_id} if task_id is not None else {}
     if image_key:
+        # The changed goal stays in the image. The exact test identity is
+        # transport metadata: image wrapping/OCR must not change ownership.
         image_instruction = (
-            {"prompt": _legacy_a2a_module().IMAGE_INTERRUPT_PROMPT}
+            {"prompt": (
+                _legacy_a2a_module().IMAGE_INTERRUPT_PROMPT
+                + f"\n\nE2E 资源归属约束：本轮 ROS StackName 必须精确等于 `{runtime.stack_name}`；"
+                "此名称是测试标识，后续重新规划、参数确认和部署都必须保留，不能从图片推断或改写。"
+            )}
             if runtime.spec.profile == "image_interrupt" and image_key == "rollback-interrupt"
             else {}
         )
