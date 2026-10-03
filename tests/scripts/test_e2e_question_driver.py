@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -244,3 +245,44 @@ def test_existing_facts_do_not_trigger_resolver(tmp_path, monkeypatch):
     monkeypatch.setattr(driver, '_select_facts', lambda *_: {'fact_keys': ['goal']})
     driver.answer_question(tmp_path, {'question': '用途?'}, {'goal': '仅规划'}, {}, {},
         fact_resolver=lambda _: pytest.fail('must not fetch unrequested network facts'))
+
+
+def test_fixture_selection_excludes_vpcs_owned_by_other_tests(monkeypatch):
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.cloud.aliyun import ros_client
+    calls = []
+    class Client:
+        def list_stacks(self, request):
+            calls.append(request)
+            return SimpleNamespace(body=SimpleNamespace(stacks=[
+                SimpleNamespace(stack_name='iac-e2e-owned', stack_id='stack-1', status='DELETE_FAILED'),
+                SimpleNamespace(stack_name='unowned', stack_id='other', status='CREATE_COMPLETE')]))
+        def list_stack_resources(self, request):
+            assert request.stack_id == 'stack-1'
+            return SimpleNamespace(body=SimpleNamespace(to_map=lambda: {'Resources': [
+                {'ResourceType': 'ALIYUN::ECS::VPC', 'Status': 'DELETE_FAILED', 'PhysicalResourceId': 'vpc-temporary'},
+                {'ResourceType': 'ALIYUN::ECS::VSwitch', 'Status': 'CREATE_COMPLETE', 'PhysicalResourceId': 'vsw-1'},
+                {'ResourceType': 'ALIYUN::ECS::VPC', 'Status': 'DELETE_COMPLETE', 'PhysicalResourceId': 'vpc-gone'},
+            ]}))
+    monkeypatch.setattr(cloud_credentials, 'CloudCredentials', lambda: SimpleNamespace(
+        get_provider=lambda _: SimpleNamespace(region_id='cn-hangzhou')))
+    monkeypatch.setattr(ros_client.RosClientFactory, 'create', lambda *_: Client())
+    assert driver.temporary_e2e_vpc_ids() == {'vpc-temporary'}
+    assert calls[0].stack_name == ['iac-e2e-*']
+
+
+def test_network_fixture_code_skips_temporary_vpc_even_when_listed_first(monkeypatch, capsys):
+    from scripts.repl.e2e import run_pipeline_scenarios as repl
+    monkeypatch.setattr(driver, 'temporary_e2e_vpc_ids', lambda: {'vpc-temporary'})
+    def api(_product, action, params):
+        if action == 'DescribeVpcs':
+            return {'Vpcs': {'Vpc': [{'VpcId': v, 'CidrBlock': '10.250.0.0/16'}
+                                     for v in ('vpc-temporary', 'vpc-stable')]}}
+        if action == 'DescribeZones':
+            return {'Zones': {'Zone': [{'ZoneId': 'cn-hangzhou-i'}]}}
+        assert params['VpcId'] == 'vpc-stable'
+        return {'VSwitches': {'VSwitch': []}}
+    monkeypatch.setattr(repl, '_call_aliyun_api', api)
+    monkeypatch.setattr(sys, 'argv', ['fixture', '10.250.1.0/24'])
+    exec(driver._NETWORK_FACTS_CODE, {})
+    assert json.loads(capsys.readouterr().out)['vpc_id'] == 'vpc-stable'

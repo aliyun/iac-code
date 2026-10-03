@@ -75,6 +75,10 @@ def _install_flow_fake_pty(
     *,
     scenario: str = "scenario1",
 ) -> None:
+    monkeypatch.setattr(runner, "_discover_scenario_stack_resources", lambda *_: [])
+    monkeypatch.setattr(runner, "network_facts", lambda *_: {
+        "vpc_id": "vpc-fixture", "zone_id": "cn-hangzhou-i", "cidr": "10.250.1.0/24"})
+
     class FakePty:
         def __init__(self, *, args, run_dir, cwd, env):
             self.args = args
@@ -219,6 +223,7 @@ def _install_flow_fake_pty(
 
 
 def _install_cleanup_teardown_fakes(monkeypatch, runner, run_dir: Path) -> list[str]:
+    monkeypatch.setattr(runner, "_discover_scenario_stack_resources", lambda *_: [])
     deleted_stack_ids: list[str] = []
 
     def fake_fresh_ros_stack_state(_pty, stack_id: str) -> dict[str, object]:
@@ -257,6 +262,7 @@ def _install_observed_stack_teardown_fakes(
     *,
     stack_name: str = "vswitch-in-existing-vpc",
 ) -> list[str]:
+    monkeypatch.setattr(runner, "_discover_scenario_stack_resources", lambda *_: [])
     deleted_stack_ids: list[str] = []
 
     def fake_fresh_ros_stack_state(_pty, stack_id: str) -> dict[str, object]:
@@ -1016,6 +1022,7 @@ def test_discover_cleanup_network_target_excludes_prior_scenario_cidrs(monkeypat
         }
 
     monkeypatch.setattr(runner, "_call_aliyun_api", call_api)
+    monkeypatch.setattr(runner, "temporary_e2e_vpc_ids", lambda: set())
 
     target = runner._discover_cleanup_network_target(excluded_cidrs={"192.168.255.0/24", "192.168.254.0/24"})
 
@@ -2394,6 +2401,9 @@ def test_run_with_pty_writes_acceptance_checks_after_callback_failure(monkeypatc
         raise RuntimeError("boom")
 
     monkeypatch.setattr(runner, "ReplPty", FakePty)
+    monkeypatch.setattr(runner, "_discover_scenario_stack_resources", lambda *_: [])
+    monkeypatch.setattr(runner, "network_facts", lambda *_: {
+        "vpc_id": "vpc-fixture", "zone_id": "cn-hangzhou-i", "cidr": "10.250.1.0/24"})
     args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
 
     assert runner._run_with_pty(args, "scenario1", callback) == 1
@@ -2458,6 +2468,8 @@ def test_scenario1_runs_expected_terminal_flow(monkeypatch, tmp_path: Path) -> N
             actions.append(("terminate", str(force)))
 
     monkeypatch.setattr(runner, "ReplPty", FakePty)
+    monkeypatch.setattr(runner, "network_facts", lambda *_: {
+        "vpc_id": "vpc-fixture", "zone_id": "cn-hangzhou-i", "cidr": "10.250.1.0/24"})
     args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
     stack_owned_initial = runner._stack_creating_prompt(args.initial_prompt, tmp_path, "scenario1")
     _install_observed_stack_teardown_fakes(
@@ -3887,3 +3899,31 @@ def test_candidate_controls_already_drained_require_real_unsubmitted_display_bou
     assert runner._durable_candidate_boundary(pty) is None
     with pytest.raises(AssertionError, match='controls already consumed'):
         runner._expect_candidate_selection_ready(pty, args)
+
+
+def test_teardown_discovers_owned_stack_when_tool_never_wrote_ledger(monkeypatch, tmp_path):
+    runner = _load_runner()
+    name = runner._scenario_stack_name(tmp_path, 'scenario1')
+    deleted = _install_observed_stack_teardown_fakes(monkeypatch, runner, stack_name=name)
+    monkeypatch.setattr(runner, '_discover_scenario_stack_resources', lambda *_: [
+        {'resource_id': 'unrecorded-stack', 'resource_name': name}])
+    pty = SimpleNamespace(run_dir=tmp_path, env={}, cleanup_ledger={'observed_resources': []})
+    checks = {}
+    runner._teardown_real_cloud_scenario_resources(args=runner.parse_args([]), scenario='scenario1',
+                                                 pty=pty, checks=checks, notes=[])
+    assert deleted == ['unrecorded-stack']
+    assert checks['teardown: observed ROS stacks deleted'] is True
+    assert 'teardown: no observed ROS stacks leaked' not in checks
+
+
+def test_run_owned_discovery_rejects_neighbor_names_and_deleted_stacks(monkeypatch, tmp_path):
+    runner = _load_runner()
+    base = runner._scenario_stack_name(tmp_path, 'scenario1')
+    def api(_product, _action, params):
+        assert params['StackName'] == [base + '*']
+        return {'Stacks': [{'StackName': n, 'StackId': n, 'Status': status} for n, status in [
+            (base, 'CREATE_COMPLETE'), (base + '-suffix', 'CREATE_COMPLETE'),
+            (base + 'different', 'CREATE_COMPLETE'), ('unowned', 'CREATE_COMPLETE'), (base, 'DELETE_COMPLETE')]]}
+    monkeypatch.setattr(runner, '_call_aliyun_api', api)
+    assert [r['resource_name'] for r in runner._discover_scenario_stack_resources(tmp_path, 'scenario1')] == [
+        base, base + '-suffix']

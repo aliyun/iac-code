@@ -34,9 +34,11 @@ if str(REPO_ROOT) not in sys.path:
 from scripts.e2e_question_driver import (  # noqa: E402
     answer_question,
     case_facts,
+    network_facts,
     pending_native_question,
     question_conversation,
     question_identity,
+    temporary_e2e_vpc_ids,
     wait_native_question_ack,
 )
 from scripts.repl.e2e.wait_diagnosis import diagnose_wait  # noqa: E402
@@ -948,6 +950,7 @@ def _run_with_pty(
     passed = False
     acceptance_applied = False
     teardown_applied = False
+    child_stopped = False
 
     try:
         if args.source_config_dir:
@@ -957,20 +960,31 @@ def _run_with_pty(
             # initial prompt. Only this run's isolated configuration is written.
             instruction_name = "IAC-CODE-E2E.md"
             stack_name = _scenario_stack_name(run_dir, scenario)
+            fixture = network_facts(args.python, env, REPO_ROOT, "10.250.1.0/24")
+            pty.network_fixture_facts = fixture
             runtime_paths.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             (runtime_paths.config_dir / instruction_name).write_text(
                 "# E2E resource identity\n"
                 f"本次 ROS StackName 必须等于 `{stack_name}` 或以 `{stack_name}-` 开头。"
                 "这是跨阶段必须保留的测试身份。\n"
                 "不得生成其它名称、复用已有 Stack，或删除本次测试之外的资源。\n",
+                # Fixture identity is setup data, not an acceptance exception.
                 encoding="utf-8",
             )
+            with (runtime_paths.config_dir / instruction_name).open("a", encoding="utf-8") as instruction:
+                instruction.write(
+                    "复用已有 VPC 时，只能使用独立测试夹具 VpcId=`" + fixture["vpc_id"]
+                    + "`、ZoneId=`" + fixture["zone_id"] + "`。不得使用其它 E2E Stack 创建的临时 VPC。\n"
+                )
             env["IAC_CODE_INSTRUCTION_MEMORY_FILE"] = instruction_name
             _write_json(run_dir / "owned-stack-names.json", [stack_name])
         pty.spawn()
         callback(pty, checks)
         _apply_acceptance_checks(scenario, args, pty, checks)
         acceptance_applied = True
+        if not args.leave_running:
+            pty.terminate()
+            child_stopped = True
         _teardown_real_cloud_scenario_resources(args=args, scenario=scenario, pty=pty, checks=checks, notes=notes)
         teardown_applied = True
         passed = all(checks.values()) if checks else True
@@ -987,6 +1001,9 @@ def _run_with_pty(
                 notes.append(f"acceptance check failed: {type(exc).__name__}: {exc}")
         if acceptance_applied and not teardown_applied:
             try:
+                if not args.leave_running and not child_stopped:
+                    pty.terminate()
+                    child_stopped = True
                 _teardown_real_cloud_scenario_resources(
                     args=args,
                     scenario=scenario,
@@ -1001,7 +1018,7 @@ def _run_with_pty(
                 notes.append(f"final teardown failed: {type(exc).__name__}: {exc}")
                 if passed:
                     passed = False
-        if not args.leave_running:
+        if not args.leave_running and not child_stopped:
             try:
                 pty.terminate()
             except BaseException as exc:
@@ -1509,9 +1526,12 @@ def _find_available_vswitch_cidr(vpc_cidr: str, used_cidrs: Iterable[str]) -> st
 
 
 def _discover_cleanup_network_target(*, excluded_cidrs: Iterable[str] = ()) -> CleanupNetworkTarget:
+    excluded_vpcs = temporary_e2e_vpc_ids()
     vpcs_data = _call_aliyun_api("vpc", "DescribeVpcs", {"PageSize": 50})
     for vpc in _nested_api_items(vpcs_data, "Vpcs", "Vpc"):
         vpc_id = str(vpc.get("VpcId") or "")
+        if vpc_id in excluded_vpcs:
+            continue
         vpc_cidr = str(vpc.get("CidrBlock") or "")
         if not vpc_id or not vpc_cidr or str(vpc.get("Status") or "") != "Available":
             continue
@@ -2226,6 +2246,25 @@ def _teardown_cleanup_scenario_resources(
         notes.append(f"final teardown deleted ROS stacks: {', '.join(deleted_stack_ids)}")
 
 
+def _discover_scenario_stack_resources(run_dir: Path, scenario: str) -> list[dict[str, str]]:
+    """Find exact run-owned Stack names even if a tool never wrote its ledger."""
+    base = _scenario_stack_name(run_dir, scenario)
+    resources = []
+    for page in range(1, 21):
+        response = _call_aliyun_api("ROS", "ListStacks", {
+            "StackName": [base + "*"], "PageSize": 50, "PageNumber": page,
+        })
+        batch = _nested_api_items(response, "Stacks", "Stack")
+        for stack in batch:
+            name, stack_id = stack.get("StackName"), stack.get("StackId")
+            if (isinstance(name, str) and _is_scenario_stack_name(run_dir, scenario, name)
+                and isinstance(stack_id, str) and stack_id and stack.get("Status") != "DELETE_COMPLETE"):
+                resources.append({"resource_id": stack_id, "resource_name": name})
+        if len(batch) < 50:
+            return resources
+    raise RuntimeError("run-owned Stack discovery exceeded bounded pagination")
+
+
 def _teardown_real_cloud_scenario_resources(
     *,
     args: argparse.Namespace,
@@ -2242,13 +2281,18 @@ def _teardown_real_cloud_scenario_resources(
         return
 
     resources = _observed_create_stack_resources(pty)
+    run_dir = Path(getattr(pty, "run_dir", ""))
+    if scenario in STACK_CREATING_SCENARIOS:
+        observed_ids = {_string_from_mapping(item, "resource_id", "resourceId", "stack_id", "stackId")
+                        for item in resources}
+        resources.extend(item for item in _discover_scenario_stack_resources(run_dir, scenario)
+                         if item["resource_id"] not in observed_ids)
     if not resources:
         checks["teardown: no observed ROS stacks leaked"] = True
         return
 
     deletion_failures: list[str] = []
     deleted_stack_ids: list[str] = []
-    run_dir = Path(getattr(pty, "run_dir", ""))
     expected_scenario_stack_name = _scenario_stack_name(run_dir, scenario)
     for resource in resources:
         stack_id = _string_from_mapping(resource, "resource_id", "resourceId", "stack_id", "stackId")
@@ -2742,8 +2786,10 @@ def _answer_legacy_repl_question(pty: ReplPty, args: argparse.Namespace) -> None
     if getattr(pty, 'scenario', '') in STACK_CREATING_SCENARIOS:
         if _scenario_stack_name(pty.run_dir, pty.scenario) not in goal:
             goal += '。' + _stack_name_constraint(pty.run_dir, pty.scenario)
-    facts = case_facts(goal, {'stack_name': _scenario_stack_name(pty.run_dir, pty.scenario)}
-                       if getattr(pty, 'scenario', '') in STACK_CREATING_SCENARIOS else None)
+    supplied = dict(getattr(pty, 'network_fixture_facts', {}))
+    if getattr(pty, 'scenario', '') in STACK_CREATING_SCENARIOS:
+        supplied['stack_name'] = _scenario_stack_name(pty.run_dir, pty.scenario)
+    facts = case_facts(goal, supplied)
     context = question_conversation(pty)
     answer, _ = answer_question(config_dir, question, facts, counts, diagnostics, conversation=context)
     if question.get("allowFreeText", question.get("allow_free_text", True)) is False:

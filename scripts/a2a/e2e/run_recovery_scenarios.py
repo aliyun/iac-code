@@ -83,7 +83,7 @@ from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session  #
 from iac_code.services.session_storage import SessionStorage  # noqa: E402
 from iac_code.utils.project_paths import get_projects_dir  # noqa: E402
 from iac_code.utils.public_paths import redact_known_public_paths  # noqa: E402
-from scripts.e2e_question_driver import answer_question, case_facts, question_conversation  # noqa: E402
+from scripts.e2e_question_driver import answer_question, case_facts, network_facts, question_conversation  # noqa: E402
 
 ASK_TRIGGER_PROMPT = "我有个产品要上线"
 ASK_FIRST_ANSWER = "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。"
@@ -617,6 +617,20 @@ class ScenarioHarness:
         self.failure_stage = ""
 
     def preflight(self) -> None:
+        if getattr(self.args, "ci_teardown", False) and getattr(self.args, "allow_real_cloud", False):
+            fixture = network_facts(self.args.python, self.server_env, Path(self.server_cwd), "10.250.1.0/24")
+            self.network_fixture_facts = fixture
+            config_dir = Path(self.server_env["IAC_CODE_CONFIG_DIR"])
+            instruction_name = "IAC-CODE-E2E.md"
+            (config_dir / instruction_name).write_text(
+                "# E2E fixture isolation\n"
+                "如需复用已有 VPC，只能使用独立测试夹具 VpcId=`" + fixture["vpc_id"]
+                + "`、ZoneId=`" + fixture["zone_id"] + "`。不得复用其它 E2E Stack 创建的临时 VPC。\n"
+                + "创建 Stack 时名称必须精确使用本次归属列表，不能追加日期或其它后缀："
+                + ", ".join(self.owned_stack_names) + "。具体使用哪个名称以当前用户请求为准。\n",
+                encoding="utf-8",
+            )
+            self.server_env["IAC_CODE_INSTRUCTION_MEMORY_FILE"] = instruction_name
         if self.args.skip_preflight:
             self.notes.append("LLM preflight skipped")
             return
@@ -2540,7 +2554,8 @@ def _answer_pending_legacy_question(h: ScenarioHarness, summary: StreamSummary, 
     if not isinstance(diagnostics, dict):
         diagnostics = h.diagnostics = {}
     config_dir = Path(h.server_env["IAC_CODE_CONFIG_DIR"])
-    response, _ = answer_question(config_dir, pending, case_facts(goal), counts, diagnostics,
+    response, _ = answer_question(config_dir, pending, case_facts(goal, getattr(h, "network_fixture_facts", {})),
+                                  counts, diagnostics,
                                   conversation=question_conversation(h))
     return response
 

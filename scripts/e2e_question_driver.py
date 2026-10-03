@@ -267,13 +267,52 @@ def _remember_answer(context: QuestionConversation, pending: dict[str, Any], ans
     del context.turns[:-6]
 
 
+def temporary_e2e_vpc_ids() -> set[str]:
+    """Exclude VPCs whose lifetime belongs to another test's ROS Stack."""
+    from alibabacloud_ros20190910 import models
+
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+
+    credential = CloudCredentials().get_provider('aliyun')
+    if credential is None:
+        raise RuntimeError('cloud credential unavailable for fixture ownership check')
+    client = RosClientFactory.create(credential, credential.region_id)
+    excluded = set()
+    for page in range(1, 21):
+        response = client.list_stacks(models.ListStacksRequest(
+            region_id=credential.region_id, stack_name=['iac-e2e-*'], page_number=page, page_size=50,
+            status=['CREATE_COMPLETE', 'CREATE_IN_PROGRESS', 'CREATE_FAILED', 'DELETE_FAILED', 'DELETE_IN_PROGRESS',
+                    'UPDATE_COMPLETE', 'UPDATE_IN_PROGRESS', 'UPDATE_FAILED', 'ROLLBACK_COMPLETE',
+                    'ROLLBACK_IN_PROGRESS', 'ROLLBACK_FAILED'],
+        )).body
+        stacks = response.stacks or []
+        for stack in stacks:
+            if not str(stack.stack_name or '').startswith('iac-e2e-') or stack.status == 'DELETE_COMPLETE':
+                continue
+            resources = client.list_stack_resources(models.ListStackResourcesRequest(
+                region_id=credential.region_id, stack_id=stack.stack_id,
+            )).body.to_map().get('Resources', [])
+            for resource in resources:
+                if (resource.get('ResourceType') in {'ALIYUN::ECS::VPC', 'ALIYUN::VPC::VPC'}
+                    and resource.get('Status') != 'DELETE_COMPLETE' and resource.get('PhysicalResourceId')):
+                    excluded.add(str(resource['PhysicalResourceId']))
+        if len(stacks) < 50:
+            return excluded
+    raise RuntimeError('fixture ownership scan exceeded bounded pagination')
+
+
 _NETWORK_FACTS_CODE = r'''
 import ipaddress, itertools, json, sys
+from scripts.e2e_question_driver import temporary_e2e_vpc_ids
 from scripts.repl.e2e.run_pipeline_scenarios import _call_aliyun_api, _nested_api_items
+excluded = temporary_e2e_vpc_ids()
 vpcs = _nested_api_items(_call_aliyun_api('vpc', 'DescribeVpcs', {'PageSize': 50}), 'Vpcs', 'Vpc')
 zones = _nested_api_items(_call_aliyun_api('vpc', 'DescribeZones', {}), 'Zones', 'Zone')
 zone = next((x.get('ZoneId') for x in zones if str(x.get('ZoneId', '')).startswith('cn-hangzhou-')), None)
 for vpc in vpcs:
+    if vpc.get('VpcId') in excluded:
+        continue
     network = ipaddress.ip_network(vpc.get('CidrBlock', ''), strict=False)
     if network.version != 4 or network.prefixlen > 24 or not vpc.get('VpcId') or not zone:
         continue

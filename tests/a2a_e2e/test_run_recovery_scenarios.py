@@ -2997,3 +2997,18 @@ def test_finish_pipeline_answers_clarification_inside_selection_step_before_foll
     assert final is done
     assert final.normal_handoff_ready
     assert calls == [{'prompt': '只创建安全组，不创建VSwitch', 'name': 'answer-after-resume-1'}]
+
+
+def test_ci_preflight_pins_stable_fixture_without_changing_initial_case_goal(monkeypatch, tmp_path):
+    runner = _load_runner()
+    config = tmp_path / 'config'
+    config.mkdir()
+    harness = SimpleNamespace(args=SimpleNamespace(ci_teardown=True, allow_real_cloud=True,
+        skip_preflight=True, python='python'), server_env={'IAC_CODE_CONFIG_DIR': str(config)},
+        server_cwd=str(tmp_path), notes=[], owned_stack_names=['iac-e2e-owned-main'])
+    monkeypatch.setattr(runner, 'network_facts', lambda *_: {
+        'vpc_id': 'vpc-stable-fixture', 'zone_id': 'cn-hangzhou-i', 'cidr': '10.250.1.0/24'})
+    runner.ScenarioHarness.preflight(harness)
+    assert harness.network_fixture_facts['vpc_id'] == 'vpc-stable-fixture'
+    assert '不得复用其它 E2E Stack 创建的临时 VPC' in (config / 'IAC-CODE-E2E.md').read_text(encoding='utf-8')
+    assert harness.server_env['IAC_CODE_INSTRUCTION_MEMORY_FILE'] == 'IAC-CODE-E2E.md'
