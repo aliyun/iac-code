@@ -602,7 +602,7 @@ def test_candidate_selection_uses_semantic_controls_without_waiting_for_stale_ra
     descriptions: list[str] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             descriptions.append(description)
             return patterns[0]
 
@@ -625,7 +625,7 @@ def test_candidate_selection_falls_back_to_raw_marker_when_semantic_controls_are
     descriptions: list[str] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             descriptions.append(description)
             return patterns[0]
 
@@ -2443,7 +2443,7 @@ def test_scenario1_runs_expected_terminal_flow(monkeypatch, tmp_path: Path) -> N
             actions.append(("sendline", text))
             self.events.append({"type": "sendline", "text": text, "transcript_offset": self.transcript.find(text)})
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             actions.append(("expect", description))
             return patterns[0]
 
@@ -3690,6 +3690,42 @@ def test_candidate_wait_handles_extra_question_before_selection(monkeypatch):
         pty, SimpleNamespace(stream_timeout=1), description='candidate selection visible'
     )
     assert calls == ['answered', 'ready']
+
+
+@pytest.mark.parametrize('cleanup', [False, True])
+def test_candidate_wait_answers_durable_question_when_heading_was_drained(tmp_path, monkeypatch, cleanup):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text(runner.yaml.safe_dump({'status': 'running', 'execution': {
+        'pending_input_kind': 'ask_user_question', 'pending_ask_user_question_input': {
+            'toolUseId': 'question-fixture', 'question': '确认用途?', 'allowFreeText': True}}}), encoding='utf-8')
+    calls = []
+    def expect(_patterns, **kwargs):
+        boundary = kwargs.get('state_check')
+        if not calls:
+            assert callable(boundary), 'terminal heading already consumed: checkpoint must drive the wait'
+            return boundary()
+        return runner.CANDIDATE_SELECTION_PATTERNS[0]
+    pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)}, expect_any=expect)
+    def answer(*_):
+        calls.append('answered')
+        meta.write_text('status: running\nexecution: {}\n', encoding='utf-8')
+    monkeypatch.setattr(runner, '_answer_legacy_repl_question', answer)
+    monkeypatch.setattr(runner, '_expect_candidate_selection_ready', lambda *_a, **_kw: calls.append('ready'))
+    wait = (runner._expect_candidate_selection_after_optional_asks if cleanup
+            else runner._expect_candidate_selection)
+    wait(pty, SimpleNamespace(stream_timeout=1), description='candidate selection visible')
+    assert calls == ['answered', 'ready']
+
+
+def test_candidate_checkpoint_cannot_treat_early_completion_as_selection(tmp_path):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n', encoding='utf-8')
+    with pytest.raises(RuntimeError, match='completed before candidate selection'):
+        runner._durable_candidate_boundary(SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)}))
 
 
 @pytest.mark.parametrize('status,handoff,expected_error', [

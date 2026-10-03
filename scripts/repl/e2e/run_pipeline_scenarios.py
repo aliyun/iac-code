@@ -2682,6 +2682,7 @@ def _expect_candidate_selection(
         matched = pty.expect_any(
             CANDIDATE_SELECTION_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS,
             description=description, timeout=args.stream_timeout,
+            state_check=lambda: _durable_candidate_boundary(pty),
         )
         if matched in CANDIDATE_SELECTION_PATTERNS:
             _expect_candidate_selection_ready(pty, args, require_live_refresh=require_live_refresh)
@@ -2762,6 +2763,13 @@ def _durable_completion_boundary(pty: ReplPty) -> str | None:
     return None
 
 
+def _durable_candidate_boundary(pty: ReplPty) -> str | None:
+    boundary = _durable_completion_boundary(pty)
+    if boundary in PIPELINE_FULLY_COMPLETED_PATTERNS:
+        raise RuntimeError("pipeline completed before candidate selection")
+    return boundary
+
+
 def _expect_candidate_selection_ready(
     pty: ReplPty,
     args: argparse.Namespace,
@@ -2799,6 +2807,7 @@ def _expect_candidate_selection_after_optional_asks(
             CANDIDATE_SELECTION_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS,
             description=description,
             timeout=args.stream_timeout,
+            state_check=lambda: _durable_candidate_boundary(pty),
         )
         if matched in CANDIDATE_SELECTION_PATTERNS:
             _expect_candidate_selection_ready(pty, args)
