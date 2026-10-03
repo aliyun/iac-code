@@ -1483,7 +1483,7 @@ def _a2a_plan(runtime: ScenarioRuntime) -> A2AConversationPlan:
     elif profile == "image_interrupt":
         plan.image_kinds = {"deployment_confirmation"}
         plan.confirmation_answers = [
-            "我改需求了：只创建安全组，请回到方案规划重新选择。",
+            _rollback_new_intent(runtime),
             _confirmation_payload("confirm"),
         ]
         plan.candidate_answers = [_candidate_payload(0), _candidate_payload(0)]
@@ -3253,6 +3253,42 @@ def _repl_submit_line_input(pty: Any, text: str, *, label: str) -> None:
     pty.send("\r", label=f"{label}-enter")
 
 
+def _repl_submit_restored_parameter_answer(pty: Any, runtime: ScenarioRuntime, text: str) -> None:
+    pending = _pending_repl_parameter_question(runtime, set())
+    if pending is None:
+        raise RuntimeError("restored Step 2 question checkpoint was not observed")
+    event, path = pending
+    tool_id = event["payload"]["tool_use_id"]
+    _repl_submit_line_input(pty, text, label="restored-step2-ask-answer")
+    # Enter is asynchronous. Until its checkpoint acknowledges this answer,
+    # the next wait can mistake the same question for a new parameter ask and
+    # wait for a prompt that the first answer already consumed.
+    deadline = time.monotonic() + min(20.0, runtime.args.stream_timeout)
+    while time.monotonic() < deadline:
+        pty.drain_output()
+        try:
+            state = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            time.sleep(0.1)
+            continue
+        execution = state.get("execution") if isinstance(state, dict) else None
+        if isinstance(execution, dict):
+            question = execution.get("pending_ask_user_question_input")
+            same_question = (
+                state.get("current_step") == NEW_STEPS[1]
+                and execution.get("pending_input_kind") == "ask_user_question"
+                and isinstance(question, dict)
+                and (question.get("toolUseId") or question.get("tool_use_id")) == tool_id
+                and not isinstance(question.get("answer"), dict)
+            )
+            if not same_question:
+                runtime.checks["restored Step 2 answer acknowledged"] = True
+                return
+        time.sleep(0.1)
+    runtime.checks["restored Step 2 answer acknowledged"] = False
+    raise TimeoutError("timed out waiting for restored Step 2 answer acknowledgement")
+
+
 def _repl_durable_progress_signature(runtime: ScenarioRuntime) -> tuple[tuple[str, int, int], ...]:
     config_dir = getattr(getattr(runtime, "paths", None), "config_dir", None)
     if not isinstance(config_dir, Path):
@@ -3834,10 +3870,9 @@ def _run_repl_waiting_resume_all(runtime: ScenarioRuntime, pty: Any) -> None:
     _restart_repl_at_waiting(pty, REPL_SELECTION_PATTERNS, runtime, "candidate selection")
     _repl_select_current(pty)
     _restart_repl_at_waiting(pty, REPL_ASK_INPUT_READY_PATTERNS, runtime, "Step 2 parameter ask")
-    _repl_submit_line_input(
-        pty,
+    _repl_submit_restored_parameter_answer(
+        pty, runtime,
         runtime.args.cleanup_vpc_id or "请只读查询账号已有 VPC 并使用测试可用项",
-        label="restored-step2-ask-answer",
     )
     _restart_repl_at_waiting(pty, REPL_CONFIRMATION_PATTERNS, runtime, "deployment confirmation")
     _repl_choose_direct_input(runtime, pty, "取消，不创建任何云资源。")

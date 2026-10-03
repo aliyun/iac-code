@@ -478,6 +478,7 @@ def test_a2a_image_interrupt_only_uses_rollback_image_once(runner: ModuleType) -
     runtime = argparse.Namespace(
         spec=runner.SCENARIO_BY_NAME["a2a-image-interrupt-handoff"],
         cidr="10.250.0.0/24",
+        stack_name="iac-e2e-image-interrupt-test",
         args=argparse.Namespace(cleanup_vpc_id="", cleanup_zone_id=""),
     )
     plan = runner._a2a_plan(runtime)
@@ -486,6 +487,7 @@ def test_a2a_image_interrupt_only_uses_rollback_image_once(runner: ModuleType) -
     second_confirmation = runner._a2a_response_for_pending(runtime, "deployment_confirmation", plan)
 
     assert first_confirmation[1] == "rollback-interrupt"
+    assert "最终 ROS StackName 仍必须使用 iac-e2e-image-interrupt-test" in first_confirmation[0]
     assert second_confirmation[1] == ""
     assert json.loads(second_confirmation[0])["action"] == "confirm"
 
@@ -3048,6 +3050,46 @@ def test_repl_step2_wait_observes_native_question_outside_display_journal(
     state["current_step"] = runner.NEW_STEPS[0]
     meta.write_text(yaml.safe_dump(state), encoding="utf-8")
     assert runner._pending_repl_parameter_question(runtime, answered) is None
+
+
+@pytest.mark.parametrize("acknowledged", [True, False])
+def test_restored_question_answer_waits_for_checkpoint_ack_before_next_question(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, acknowledged: bool,
+) -> None:
+    meta = tmp_path / "projects/p/s/pipeline/meta.yaml"
+    meta.parent.mkdir(parents=True)
+    state = {"current_step": runner.NEW_STEPS[1], "execution": {
+        "pending_input_kind": "ask_user_question", "pending_ask_user_question_input": {
+            "toolUseId": "restored-parameter-call", "allowFreeText": True,
+        },
+    }}
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    runtime = SimpleNamespace(paths=SimpleNamespace(config_dir=tmp_path),
+                              args=SimpleNamespace(stream_timeout=0.05), checks={})
+    drains: list[int] = []
+    sent: list[str] = []
+
+    class Pty:
+        def send(self, text, *, label):
+            sent.append(label)
+
+        def drain_output(self):
+            drains.append(1)
+            if acknowledged and len(drains) == 3:
+                state["execution"]["pending_input_kind"] = None
+                state["execution"]["pending_ask_user_question_input"] = None
+                meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    if acknowledged:
+        runner._repl_submit_restored_parameter_answer(Pty(), runtime, "vpc-test")
+        assert len(drains) == 3
+        assert runner._pending_repl_parameter_question(runtime, set()) is None
+    else:
+        with pytest.raises(TimeoutError, match="answer acknowledgement"):
+            runner._repl_submit_restored_parameter_answer(Pty(), runtime, "vpc-test")
+    assert runtime.checks["restored Step 2 answer acknowledged"] is acknowledged
+    assert sent == ["restored-step2-ask-answer-paste", "restored-step2-ask-answer-enter"]
 
 
 def test_repl_parameter_question_accepts_prompt_already_drained(

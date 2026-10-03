@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -20,7 +21,22 @@ KNOWN_WAITS = {
     "Step 1 ask before restart", "Step 1 ask restored", "Step 2 parameter ask before restart",
     "Step 2 parameter ask restored", "deployment confirmation before restart",
     "deployment confirmation restored", "restored deployment confirmation selector ready",
+    "restored Step 2 answer acknowledgement",
 }
+
+
+def _known_wait(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    if value in KNOWN_WAITS:
+        return value
+    for pattern, label in (
+        (r"Step 2 parameter ask #[1-4] input ready", "Step 2 parameter question input ready"),
+        (r"deployment confirmation selector ready #[1-9][0-9]?", "deployment confirmation selector ready"),
+    ):
+        if re.fullmatch(pattern, value):
+            return label
+    return None
 
 
 def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, Any]:
@@ -29,6 +45,9 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
     facts: dict[str, Any] = {}
     abort = summary.get("abort_reason") or summary.get("error") or ""
     if isinstance(abort, str):
+        wait = _known_wait(abort.rsplit("timed out waiting for ", 1)[-1])
+        if wait:
+            facts["failed_wait"] = wait
         for kind in ("TimeoutError", "RuntimeError", "ValueError", "PermissionError", "ConnectionError"):
             if abort.startswith(kind + ":"):
                 facts["abort_type"] = kind
@@ -61,6 +80,21 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
                 ) if marker in text), "other")
                 categories[category] += 1
             facts["cleanup_failure_categories"] = dict(categories)
+            resources = value.get("resources")
+            manifests = list(root.rglob("owned-stack-names.json"))
+            if isinstance(resources, list) and len(manifests) == 1:
+                try:
+                    names = json.loads(manifests[0].read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    names = None
+                if isinstance(names, list) and all(isinstance(name, str) for name in names):
+                    facts["cleanup_missing_name_count"] = min(sum(
+                        isinstance(item, dict) and not item.get("stackName") for item in resources
+                    ), 10000)
+                    facts["cleanup_unexpected_name_count"] = min(sum(
+                        isinstance(item, dict) and bool(item.get("stackName")) and item["stackName"] not in names
+                        for item in resources
+                    ), 10000)
     codes: set[str] = set()
     for log in root.rglob("cleanup-*.log"):
         text = log.read_text(encoding="utf-8", errors="replace")
@@ -81,8 +115,9 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
                 except ValueError:
                     continue
                 if isinstance(value, dict) and value.get("type") == "expect" and value.get("passed") is False:
-                    if value.get("description") in KNOWN_WAITS:
-                        facts["failed_wait"] = value["description"]
+                    wait = _known_wait(value.get("description"))
+                    if wait:
+                        facts["failed_wait"] = wait
                 for envelope in _extract_pipeline_envelopes(value):
                     kind = envelope.get("eventType")
                     if kind in {"candidate_step_started", "step_started", "input_received"}:
@@ -117,6 +152,8 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
             kind = execution.get("pending_input_kind")
             if kind in {"ask_user_question", "candidate_selection", "deployment_confirmation"}:
                 facts["pending_input_kind"] = kind
+            elif not kind:
+                facts["pending_input_kind"] = "none"
             question = execution.get("pending_ask_user_question_input")
             if isinstance(question, dict):
                 facts["pending_question_answered"] = isinstance(question.get("answer"), dict)

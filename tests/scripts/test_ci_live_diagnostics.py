@@ -59,3 +59,28 @@ def test_diagnostics_report_durable_unanswered_input_and_image_confirmation(tmp_
     assert facts["pending_question_answered"] is False
     assert facts["a2a_event_counts"] == {"input_received": 1, "confirmation_free_text": 1, "confirmation_image": 1}
     assert "private-" not in json.dumps(facts)
+
+
+def test_diagnostics_normalize_numbered_waits_and_count_missing_or_unexpected_stack_names(tmp_path: Path) -> None:
+    (tmp_path / "owned-stack-names.json").write_text(json.dumps(["private-owned-name"]), encoding="utf-8")
+    (tmp_path / "cleanup-result.json").write_text(json.dumps({"resources": [
+        {"stackId": "private-id1", "stackName": ""},
+        {"stackId": "private-id2", "stackName": "private-unexpected-name"},
+        {"stackId": "private-id3", "stackName": "private-owned-name"},
+    ]}), encoding="utf-8")
+    (tmp_path / "repl-events.jsonl").write_text(json.dumps({
+        "type": "expect", "passed": False, "description": "Step 2 parameter ask #1 input ready",
+    }), encoding="utf-8")
+    facts = collect_live_diagnostics(tmp_path, {})
+    assert facts["failed_wait"] == "Step 2 parameter question input ready"
+    assert facts["cleanup_missing_name_count"] == 1
+    assert facts["cleanup_unexpected_name_count"] == 1
+    assert "private-" not in json.dumps(facts)
+    (tmp_path / "repl-events.jsonl").unlink()
+    facts = collect_live_diagnostics(tmp_path, {"error": (
+        "TimeoutError: timed out waiting for deployment confirmation selector ready #1"
+    )})
+    assert facts["failed_wait"] == "deployment confirmation selector ready"
+    assert "failed_wait" not in collect_live_diagnostics(tmp_path, {"error": (
+        "TimeoutError: timed out waiting for Step 2 parameter ask #1 input ready private-key"
+    )})
