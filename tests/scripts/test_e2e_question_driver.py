@@ -303,3 +303,69 @@ def test_missing_detail_records_only_fixed_question_contract(tmp_path, monkeypat
     assert diagnostics['question_driver_option_selected'] is True
     assert diagnostics['question_driver_free_text_allowed'] is True
     assert 'private-' not in json.dumps(diagnostics)
+
+
+def test_literal_qualitative_scale_budget_and_cloud_are_available_without_invention():
+    goal = '小团队 Node.js 电商 API；只规划阿里云杭州低成本网络；本轮不部署'
+    facts = driver.case_facts(goal)
+    assert facts['scale'] == '小团队 Node.js 电商 API'
+    assert facts['budget'] == '只规划阿里云杭州低成本网络'
+    assert facts['cloud_vendor'] == '只规划阿里云杭州低成本网络'
+    assert 'QPS' not in json.dumps(facts) and '人民币' not in json.dumps(facts)
+    aws = driver.case_facts('为 AWS 创建 Amazon VPC；不使用阿里云，也不生成 ROS 模板')
+    assert 'AWS' in aws['cloud_vendor']
+    assert aws['constraints'] == '不使用阿里云，也不生成 ROS 模板'
+    unspecified = driver.case_facts('创建 VSwitch')
+    assert not {'scale', 'budget', 'cloud_vendor', 'region'}.intersection(unspecified)
+
+
+def test_missing_future_region_is_reviewed_against_current_grounded_cloud_option(tmp_path, monkeypatch):
+    calls = []
+    def choose(_config, pending, facts):
+        calls.append(pending)
+        if len(calls) == 1:
+            return {'fact_keys': ['goal'], 'option_id': 'aws', 'missing_fields': ['region']}
+        assert pending['_fact_selection_review']['missing_fields'] == ['region']
+        assert facts['goal'] == 'AWS VPC；不使用阿里云，也不生成 ROS 模板'
+        return {'fact_keys': ['cloud_vendor'], 'option_id': 'aws', 'missing_fields': []}
+    monkeypatch.setattr(driver, '_select_facts', choose)
+    diagnostics, counts = {}, {}
+    answer, _ = driver.answer_question(tmp_path, {'question': '请选择云厂商',
+        'options': [{'id': 'aws', 'label': 'Amazon AWS'}, {'id': 'aliyun', 'label': '阿里云'}]},
+        driver.case_facts('AWS VPC；不使用阿里云，也不生成 ROS 模板'), counts, diagnostics)
+    assert '当前问题选择：Amazon AWS' in answer
+    assert '不生成 ROS 模板' in answer and 'us-east' not in answer
+    assert len(calls) == 2 and sum(counts.values()) == 1
+    assert diagnostics['question_driver_review_count'] == 1
+    assert diagnostics['question_driver_answer_count'] == 1
+
+
+def test_scale_review_can_use_existing_small_team_fact_without_a_numeric_capacity(tmp_path, monkeypatch):
+    calls = []
+    def choose(_config, pending, facts):
+        calls.append(pending)
+        if len(calls) == 1:
+            return {'fact_keys': list(facts), 'missing_fields': ['other']}
+        assert '小团队' in facts['scale']
+        return {'fact_keys': ['purpose', 'scale', 'budget'], 'missing_fields': []}
+    monkeypatch.setattr(driver, '_select_facts', choose)
+    goal = '小团队 Node.js 电商 API，只规划阿里云杭州低成本网络，本轮不部署、不创建资源'
+    answer, _ = driver.answer_question(tmp_path, {'question': '产品用途和预期规模?'},
+                                       driver.case_facts(goal), {}, {})
+    assert answer == goal
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize('review', [None, {}, {'fact_keys': ['invented'], 'missing_fields': []},
+    {'fact_keys': ['goal'], 'missing_fields': ['region']}])
+def test_missing_review_cannot_fall_back_or_keep_retrying_when_fact_is_unavailable(tmp_path, monkeypatch, review):
+    calls = []
+    def choose(*_args):
+        calls.append(True)
+        return {'fact_keys': ['goal'], 'missing_fields': ['region']} if len(calls) == 1 else review
+    monkeypatch.setattr(driver, '_select_facts', choose)
+    diagnostics = {}
+    with pytest.raises(RuntimeError, match='unavailable case facts: region'):
+        driver.answer_question(tmp_path, {'question': '必须指定部署地域'}, {'goal': '创建网络'}, {}, diagnostics)
+    assert len(calls) == 2 and diagnostics['question_driver_review_count'] == 1
+    assert 'question_driver_answer_count' not in diagnostics

@@ -527,7 +527,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         for key in (
             "question_driver_answer_count", "question_driver_llm_count", "question_driver_facts_fallback_count",
             "question_driver_new_count", "question_driver_supplement_count", "question_driver_repeat_count",
-            "question_driver_goal_reset_count",
+            "question_driver_goal_reset_count", "question_driver_review_count",
             "question_driver_option_count",
             "repl_supplemental_reselections",
             "canary_aliyun_call_count", "canary_allowed_call_count", "canary_wrong_action_count",
@@ -556,7 +556,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         if isinstance(missing_fields, list):
             diagnostics['question_driver_missing_fields'] = sorted({
                 value for value in missing_fields if isinstance(value, str) and value in {
-                    'region', 'purpose', 'workload', 'resource_scope', 'constraints', 'vpc_id', 'zone_id',
+                    'cloud_vendor', 'region', 'purpose', 'workload', 'scale', 'budget',
+                    'resource_scope', 'constraints', 'vpc_id', 'zone_id',
                     'cidr', 'stack_name', 'other',
                 }
             })[:10]
@@ -566,11 +567,13 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 'vpc_id', 'zone_id', 'cidr', 'stack_name',
             },
             'question_driver_available_fact_keys': {
-                'goal', 'region', 'purpose', 'workload', 'resource_scope', 'constraints',
+                'goal', 'cloud_vendor', 'region', 'purpose', 'workload', 'scale', 'budget',
+                'resource_scope', 'constraints',
                 'vpc_id', 'zone_id', 'cidr', 'stack_name',
             },
             'question_driver_selected_fact_keys': {
-                'goal', 'region', 'purpose', 'workload', 'resource_scope', 'constraints',
+                'goal', 'cloud_vendor', 'region', 'purpose', 'workload', 'scale', 'budget',
+                'resource_scope', 'constraints',
                 'vpc_id', 'zone_id', 'cidr', 'stack_name',
             },
         }.items():

@@ -19,7 +19,7 @@ from scripts.repl.e2e.wait_diagnosis import BAILIAN_CHAT_URL, DIAGNOSIS_MODEL, _
 MAX_QUESTIONS = 12
 MAX_REPEATS = 3
 FACT_FIELDS = frozenset({
-    'goal', 'region', 'purpose', 'workload', 'resource_scope', 'constraints',
+    'goal', 'cloud_vendor', 'region', 'purpose', 'workload', 'scale', 'budget', 'resource_scope', 'constraints',
     'vpc_id', 'zone_id', 'cidr', 'stack_name',
 })
 QUESTION_TYPES = frozenset({'new', 'supplement', 'repeat'})
@@ -72,11 +72,14 @@ def case_facts(goal: str, supplied: dict[str, str] | None = None) -> dict[str, s
     clauses = [s.strip() for s in re.split(r'[；;。\n]', goal) if s.strip()]
     facts = {'goal': goal}
     for key, pattern in (
+        ('cloud_vendor', r'AWS|Amazon|阿里云|Alibaba Cloud'),
         ('region', r'杭州|cn-hangzhou|地域|region'),
         ('purpose', r'用途|测试|验证|电商|上线|小团队'),
         ('workload', r'Node\.js|API|应用|电商|Nginx'),
+        ('scale', r'小团队|规模|用户数|并发|流量|QPS|负载|scale|traffic'),
+        ('budget', r'低成本|预算|费用|成本|budget|cost'),
         ('resource_scope', r'VSwitch|vswitch|交换机|安全组|security.?group|云网络|vpc'),
-        ('constraints', r'必须|不得|不要|禁止|仅|只|不部署|不创建|不改变|本轮|低成本'),
+        ('constraints', r'必须|不得|不要|禁止|仅|只|不部署|不创建|不改变|不使用|不生成|本轮|低成本'),
     ):
         values = [s for s in clauses if re.search(pattern, s, re.I)]
         if values:
@@ -125,6 +128,9 @@ def _select_facts(config_dir: Path, pending: dict[str, Any], facts: dict[str, st
             for turn in pending.get('_conversation', [])[-6:] if isinstance(turn, dict)
         ],
     }
+    review = pending.get('_fact_selection_review')
+    if isinstance(review, dict):
+        payload['fact_selection_review'] = review
     request = {
         'model': DIAGNOSIS_MODEL, 'reasoning_effort': 'low', 'max_tokens': 512,
         'messages': [
@@ -140,8 +146,14 @@ def _select_facts(config_dir: Path, pending: dict[str, Any], facts: dict[str, st
                 'Use option_id when an actual option answers the question and agrees with the supplied goal. '
                 'Do not authorize deployment, deletion, permissions, cancellation or reselection. '
                 'If a required detail is absent, return missing_fields using only '
-                'region,purpose,workload,resource_scope,constraints,vpc_id,zone_id,cidr,stack_name,other. '
+                'cloud_vendor,region,purpose,workload,scale,budget,resource_scope,constraints,'
+                'vpc_id,zone_id,cidr,stack_name,other. '
                 'Do not treat optional details as required. Missing fields are never invented. '
+                'Qualitative scale and budget facts are valid; never turn them into invented QPS or prices. '
+                'A fact_selection_review asks you to reconsider a missing-field decision exactly once. '
+                'Check the current question, its real options and the literal supplied facts. '
+                'Do not require details for future questions. An option that answers the current question '
+                'does not require unrelated facts, but keep genuinely missing required details in missing_fields. '
                 'If a supplied constraint explicitly delegates selection or generation to the product, '
                 'select that constraint as the answer. Keep every supplied constraint intact.'
             )},
@@ -200,6 +212,31 @@ def answer_question(config_dir: Path, pending: dict[str, Any], facts: dict[str, 
             diagnostics['question_driver_goal_reset_count'] = diagnostics.get('question_driver_goal_reset_count', 0) + 1
         pending = {**pending, '_conversation': conversation.turns}
     chosen = _select_facts(config_dir, pending, facts)
+    if isinstance(chosen, dict) and isinstance(chosen.get('missing_fields'), list):
+        missing = [k for k in chosen['missing_fields'] if not isinstance(k, str) or k not in facts]
+        if missing:
+            # A helper's missing-field verdict is advisory. Recheck it once
+            # against the same facts and question; never supply a made-up value.
+            option_ids = {x.get('id') for x in pending.get('options', [])
+                          if isinstance(x, dict) and isinstance(x.get('id'), str)}
+            selected = chosen.get('fact_keys')
+            selected_option = chosen.get('option_id')
+            review = {
+                'fact_keys': [k for k in selected if isinstance(k, str) and k in facts]
+                if isinstance(selected, list) else [],
+                'missing_fields': sorted({k if isinstance(k, str) and k in FACT_FIELDS else 'other'
+                                          for k in missing}),
+                'option_id': selected_option
+                if isinstance(selected_option, str) and selected_option in option_ids else '',
+            }
+            diagnostics['question_driver_review_count'] = diagnostics.get('question_driver_review_count', 0) + 1
+            reconsidered = _select_facts(config_dir, {**pending, '_fact_selection_review': review}, facts)
+            if (isinstance(reconsidered, dict)
+                and isinstance(reconsidered.get('fact_keys'), list) and reconsidered['fact_keys']
+                and all(isinstance(k, str) and k in facts for k in reconsidered['fact_keys'])
+                and isinstance(reconsidered.get('missing_fields'), list)
+                and all(isinstance(k, str) for k in reconsidered['missing_fields'])):
+                chosen = reconsidered
     if isinstance(chosen, dict):
         question_type = chosen.get('question_type')
         if isinstance(question_type, str) and question_type in QUESTION_TYPES:

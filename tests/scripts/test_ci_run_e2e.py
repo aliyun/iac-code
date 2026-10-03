@@ -534,6 +534,9 @@ def test_question_contract_diagnostics_drop_unapproved_labels_and_private_values
         'question_driver_option_count': 2,
         'question_driver_option_selected': False,
         'question_driver_free_text_allowed': True,
+        'question_driver_review_count': 1,
+        'question_driver_missing_fields': ['scale', 'budget', 'cloud_vendor', 'private-label'],
+        'question_driver_review': {'raw': 'private-label'},
         'selector_vpc_matches_selected': False,
     }})
     assert public['diagnostics'] == {
@@ -541,6 +544,8 @@ def test_question_contract_diagnostics_drop_unapproved_labels_and_private_values
         'question_driver_selected_fact_keys': ['purpose'], 'question_driver_option_count': 2,
         'question_driver_option_selected': False, 'question_driver_free_text_allowed': True,
         'selector_vpc_matches_selected': False,
+        'question_driver_review_count': 1,
+        'question_driver_missing_fields': ['budget', 'cloud_vendor', 'scale'],
     }
     assert 'private' not in json.dumps(public)
 
