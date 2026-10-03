@@ -32,19 +32,23 @@ def _stack_body(client: Any, models: Any, stack_id: str, region: str) -> dict[st
         raise
 
 
-def _named_stacks(client: Any, models: Any, name: str, region: str) -> list[Any]:
+def _named_stacks(client: Any, models: Any, name: str, region: str, *, prefix: bool = False) -> list[Any]:
     stacks: list[Any] = []
     page = 1
     page_size = 50
-    while True:
+    while page <= 20:
         response = client.list_stacks(
-            models.ListStacksRequest(region_id=region, stack_name=[name], page_number=page, page_size=page_size)
+            models.ListStacksRequest(region_id=region, stack_name=[name + "*" if prefix else name],
+                                    page_number=page, page_size=page_size)
         ).body
         batch = response.stacks or []
-        stacks.extend(item for item in batch if item.stack_name == name)
+        stacks.extend(item for item in batch if (
+            str(item.stack_name or "").startswith(name) if prefix else item.stack_name == name
+        ))
         if len(batch) < page_size:
             return stacks
         page += 1
+    raise RuntimeError("E2E Stack lookup exceeded bounded pagination")
 
 
 def cleanup_owned_stacks(run_dir: Path, *, timeout: float = 840) -> dict[str, Any]:
@@ -112,6 +116,20 @@ def cleanup_owned_stacks(run_dir: Path, *, timeout: float = 840) -> dict[str, An
                 failures.append(stack_id + ": cleanup timeout")
             if stack_id not in deleted:
                 remaining.append(stack_id)
+    # The model can violate an exact name instruction by adding a suffix.
+    # Such resources are not authorized for deletion by this manifest, but
+    # an empty exact-name lookup must not report that cleanup succeeded.
+    try:
+        scoped_stacks = _named_stacks(client, ros_models, "iac-e2e-" + run_id + "-", region, prefix=True)
+        for listed in scoped_stacks:
+            if listed.stack_name in names:
+                continue
+            body = _stack_body(client, ros_models, listed.stack_id, region)
+            if body is not None and body.get("Status") != "DELETE_COMPLETE":
+                failures.append("unexpected run-scoped Stack outside exact ownership manifest")
+                remaining.append(listed.stack_id)
+    except Exception as exc:
+        raise CleanupOperationError("run_scope_audit", exc) from exc
     result = {
         "status": "failed" if failures or remaining else "completed",
         "deletedStackIds": deleted,

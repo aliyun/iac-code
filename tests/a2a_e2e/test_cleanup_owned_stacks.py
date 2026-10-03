@@ -38,7 +38,7 @@ def test_cleanup_deletes_only_exact_named_stack(tmp_path: Path, monkeypatch: pyt
 
     class Client:
         def list_stacks(self, request):
-            assert request.stack_name == [name]
+            assert request.stack_name in ([name], ["iac-e2e-123456789abc-*"])
             assert request.page_size == 50
             return SimpleNamespace(body=SimpleNamespace(stacks=[
                 SimpleNamespace(stack_name=name, stack_id="owned-id"),
@@ -116,3 +116,25 @@ def test_cleanup_reports_safe_list_failure_stage(tmp_path: Path, monkeypatch: py
     assert captured.value.cause_type == "CloudError"
     assert captured.value.sdk_code == "Throttling"
     assert "private provider response" not in str(captured.value)
+
+
+def test_empty_exact_lookup_cannot_hide_stack_with_unapproved_suffix(tmp_path, monkeypatch):
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+    name = 'iac-e2e-123456789abc-main'
+    _manifest(tmp_path, [name])
+    class Client:
+        def list_stacks(self, _request):
+            return SimpleNamespace(body=SimpleNamespace(stacks=[
+                SimpleNamespace(stack_name=name + '-unapproved', stack_id='unexpected-id')]))
+        def get_stack(self, _request):
+            return SimpleNamespace(body=SimpleNamespace(to_map=lambda: {
+                'StackName': name + '-unapproved', 'Status': 'CREATE_COMPLETE'}))
+        def delete_stack(self, _request):
+            pytest.fail('exact ownership protection must not be broadened')
+    monkeypatch.setattr(CloudCredentials, 'get_provider', lambda *_: SimpleNamespace(region_id='cn-hangzhou'))
+    monkeypatch.setattr(RosClientFactory, 'create', lambda *_: Client())
+    result = cleanup_owned_stacks(tmp_path)
+    assert result['status'] == 'failed'
+    assert result['remainingStackIds'] == ['unexpected-id']
+    assert result['failures'] == ['unexpected run-scoped Stack outside exact ownership manifest']
