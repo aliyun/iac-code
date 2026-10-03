@@ -20,9 +20,11 @@ from iac_code.providers.base import (
     Provider,
     ToolDefinition,
 )
+from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.providers.request_headers import get_provider_request_headers, merge_provider_request_headers
 from iac_code.providers.request_logging import log_provider_request_policy
 from iac_code.providers.request_policy import bool_or_none, positive_int_or_none
+from iac_code.providers.responses_codec import ResponsesConfigurationError
 from iac_code.providers.streaming import OpenAIStreamResponseAdapter
 from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
 from iac_code.types.stream_events import (
@@ -352,6 +354,18 @@ class OpenAIProvider(Provider):
         max_tokens: int,
         context: ChatRequestContext,
     ) -> dict[str, Any]:
+        if tools:
+            descriptor = PROVIDER_REGISTRY.get(self._PROVIDER_KEY)
+            model_entry = (
+                next((entry for entry in descriptor.models if entry.id == self._model), None) if descriptor else None
+            )
+            if model_entry is not None and model_entry.chat_completions_tool_efforts is not None:
+                spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
+                effort = self._build_thinking_kwargs().get("reasoning_effort", spec.default_effort_value)
+                if effort not in model_entry.chat_completions_tool_efforts:
+                    raise ResponsesConfigurationError(
+                        "This tool request requires apiMode=responses for the selected reasoning effort."
+                    )
         kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": self._build_api_messages(messages, system, cache_policy=context.cache_policy),

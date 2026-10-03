@@ -86,8 +86,11 @@ providers:
 |---|---|---|
 | `thinkingEnabled` | Proveedor o modelo | Interruptor booleano opcional de thinking. `true` pide a proveedores/modelos compatibles que lo habiliten; `false` pide deshabilitarlo; si se omite, conserva el valor predeterminado del proveedor/modelo. |
 | `thinkingBudget` | Proveedor o modelo | Presupuesto de reasoning/thinking como entero positivo, enviado a los proveedores que lo admiten. |
-| `maxCompletionTokens` | Proveedor o modelo | Valor entero positivo que anula `max_completion_tokens` para proveedores/modelos que usan ese campo de solicitud. |
+| `maxCompletionTokens` | Proveedor o modelo | Entero positivo que anula el límite de salida: `max_completion_tokens` para proveedores Chat compatibles o `max_output_tokens` para Responses. |
 | `effort` | Proveedor o modelo | Anulación opcional del effort de thinking, solo para modelos que admiten control de effort. |
+| `apiMode` | Solo modelo | `chat_completions` o `responses`; si se omite, se usa el protocolo predeterminado del modelo. Consulte los [proveedores LLM](./llm-providers.md) para conocer los proveedores y modelos compatibles. |
+
+Para Responses, configure `apiMode` solo en `providers.<provider>.models.<model>`. `effort` se envía como `reasoning.effort`; `thinkingBudget` no se envía a esta API. `maxCompletionTokens` establece el límite total de salida, incluidos los tokens de razonamiento, y debe ser al menos `16` para DashScope Responses. Los nombres de los campos de `settings.yml` no cambian al cambiar de protocolo.
 
 Los valores válidos a nivel de modelo bajo `providers.<provider>.models.<model>` anulan los valores a nivel de proveedor. Los valores numéricos no válidos se ignoran, por lo que IaC Code recurre al valor del proveedor o a la política integrada del modelo.
 

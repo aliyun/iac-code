@@ -770,6 +770,10 @@ msgid "Permission denied."
 msgstr "Zugriff verweigert."
 
 #: src/iac_code/agent/agent_loop.py
+msgid "Responses input exceeds the safe context budget after local compaction."
+msgstr "Die Responses-Eingabe überschreitet nach der lokalen Komprimierung weiterhin das sichere Kontextlimit."
+
+#: src/iac_code/agent/agent_loop.py
 msgid ""
 "select_cloud_resource must be called alone. Retry it as a standalone tool"
 " call; no tool in this batch was executed."
@@ -14940,3 +14944,208 @@ msgstr "Bash zulassen?"
 
 #~ msgid "--interrupt-ttl must be a positive integer."
 #~ msgstr "--interrupt-ttl muss eine positive Ganzzahl sein."
+
+#: src/iac_code/providers/manager.py
+msgid "Model apiMode must be chat_completions or responses."
+msgstr "apiMode des Modells muss chat_completions oder responses sein."
+
+#: src/iac_code/providers/openai_provider.py
+msgid ""
+"This tool request requires apiMode=responses for the selected reasoning "
+"effort."
+msgstr ""
+"Diese Werkzeuganfrage erfordert apiMode=responses für die gewählte "
+"Denkintensität."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses function call is missing its call_id or name."
+msgstr "Dem Responses-Funktionsaufruf fehlt call_id oder der Name."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an unknown local function."
+msgstr "Responses hat eine unbekannte lokale Funktion zurückgegeben."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an unfinished function call."
+msgstr "Responses hat einen unvollendeten Funktionsaufruf zurückgegeben."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses function arguments are not complete JSON."
+msgstr "Die Funktionsargumente von Responses sind kein vollständiges JSON."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses function arguments must be a JSON object."
+msgstr "Die Funktionsargumente von Responses müssen ein JSON-Objekt sein."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses history contains duplicate call IDs."
+msgstr "Der Responses-Verlauf enthält doppelte Aufruf-IDs."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses tool result has no unique preceding call."
+msgstr ""
+"Das Responses-Werkzeugergebnis hat keinen eindeutig zugehörigen vorherigen "
+"Aufruf."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses history contains a function call without its result."
+msgstr "Der Responses-Verlauf enthält einen Funktionsaufruf ohne Ergebnis."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses history contains an unsupported output item."
+msgstr "Der Responses-Verlauf enthält ein nicht unterstütztes Ausgabeelement."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses image input requires a user image data URL."
+msgstr "Die Bildeingabe von Responses benötigt eine Daten-URL eines Benutzerbildes."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses received an unsupported input content block."
+msgstr "Responses hat einen nicht unterstützten Eingabeinhaltsblock erhalten."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an invalid response."
+msgstr "Responses hat eine ungültige Antwort zurückgegeben."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses did not complete successfully."
+msgstr "Responses wurde nicht erfolgreich abgeschlossen."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an unsupported output item type."
+msgstr "Responses hat einen nicht unterstützten Ausgabeelementtyp zurückgegeben."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned unsupported message content."
+msgstr "Responses hat nicht unterstützte Nachrichteninhalte zurückgegeben."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned duplicate function call IDs."
+msgstr "Responses hat doppelte Funktionsaufruf-IDs zurückgegeben."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an incomplete tool turn."
+msgstr "Responses hat eine unvollständige Runde von Werkzeugaufrufen zurückgegeben."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned no assistant content or function calls."
+msgstr "Responses hat weder Assistenteninhalte noch Funktionsaufrufe zurückgegeben."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses changed a completed function call."
+msgstr "Responses hat einen abgeschlossenen Funktionsaufruf geändert."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses sent events after its terminal response."
+msgstr "Responses hat nach seiner abschließenden Antwort weitere Ereignisse gesendet."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses terminal response dropped a streamed item."
+msgstr ""
+"Die abschließende Responses-Antwort hat ein im Stream übertragenes Element "
+"ausgelassen."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses terminal item identity differs from its stream."
+msgstr ""
+"Die Identität des endgültigen Responses-Elements unterscheidet sich von der "
+"im Stream."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses changed a function identity."
+msgstr "Responses hat die Identität einer Funktion geändert."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses final function arguments differ from their stream."
+msgstr ""
+"Die endgültigen Funktionsargumente von Responses unterscheiden sich von "
+"denen im Stream."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses terminal content differs from its stream."
+msgstr "Der endgültige Inhalt von Responses unterscheidet sich vom Streaminhalt."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses terminal response dropped a streamed function call."
+msgstr ""
+"Die abschließende Responses-Antwort hat einen im Stream übertragenen "
+"Funktionsaufruf ausgelassen."
+
+#: src/iac_code/providers/responses_codec.py
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses input exceeds the model context limit."
+msgstr "Die Responses-Eingabe überschreitet die Kontextgrenze des Modells."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses generation failed."
+msgstr "Die Responses-Generierung ist fehlgeschlagen."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses stream contains an invalid or duplicate item index."
+msgstr "Der Responses-Stream enthält einen ungültigen oder doppelten Elementindex."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses stream contains an invalid local function call."
+msgstr "Der Responses-Stream enthält einen ungültigen lokalen Funktionsaufruf."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses stream contains duplicate function call IDs."
+msgstr "Der Responses-Stream enthält doppelte Funktionsaufruf-IDs."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses arguments do not match a preceding function item."
+msgstr ""
+"Die Responses-Argumente stimmen nicht mit einem vorherigen "
+"Funktionsaufrufelement überein."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses arguments changed after function completion."
+msgstr "Responses hat die Argumente nach Abschluss des Funktionsaufrufs geändert."
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses completed an unknown output item."
+msgstr "Responses hat ein unbekanntes Ausgabeelement abgeschlossen."
+
+#: src/iac_code/providers/responses_provider.py
+msgid ""
+"Responses API is supported only for OpenAI and standard DashScope in this "
+"release."
+msgstr ""
+"In dieser Version wird die Responses API nur für OpenAI und Standard-"
+"DashScope unterstützt."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "This DashScope model is not registered for Responses API."
+msgstr "Dieses DashScope-Modell ist nicht für die Responses API registriert."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses API requires a supported HTTPS base URL."
+msgstr "Die Responses API benötigt eine unterstützte HTTPS-Basis-URL."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "This base URL is not registered for Responses API."
+msgstr "Diese Basis-URL ist nicht für die Responses API registriert."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "The selected reasoning effort is not supported by this Responses model."
+msgstr "Dieses Responses-Modell unterstützt die gewählte Denkintensität nicht."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses max_output_tokens must be a positive integer."
+msgstr "max_output_tokens für Responses muss eine positive ganze Zahl sein."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses stream ended without a terminal response."
+msgstr "Der Responses-Stream wurde ohne abschließende Antwort beendet."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "DashScope Responses max_output_tokens must be at least 16."
+msgstr "max_output_tokens für DashScope Responses muss mindestens 16 betragen."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses API requires a valid HTTP or HTTPS base URL."
+msgstr "Die Responses API benötigt eine gültige HTTP- oder HTTPS-Basis-URL."
+
+#: src/iac_code/providers/manager.py
+msgid "Responses API requires an OpenAI-style provider."
+msgstr "Die Responses API benötigt einen Anbieter mit OpenAI-Protokoll."

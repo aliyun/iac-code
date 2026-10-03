@@ -359,6 +359,7 @@ def _error_event_from_exception(exc: BaseException) -> ErrorEvent:
         error=summary,
         is_retryable=False,
         error_id=failure.error_id,
+        context_limit_exceeded=getattr(exc, "context_limit_exceeded", False) is True,
         i18n_message_id=message_id if isinstance(message_id, str) else None,
         i18n_message_args=dict(message_args) if isinstance(message_args, dict) else None,
     )
@@ -511,6 +512,13 @@ def create_provider(
         provider_cfg = get_provider_config(provider_key)
     else:
         provider_cfg = copy.deepcopy(provider_config_override)
+    model_cfg = _get_model_provider_config(provider_cfg, model)
+    model_entry = next((entry for entry in desc.models if entry.id == model), None)
+    api_mode = model_cfg.get("apiMode", model_entry.api_mode if model_entry is not None else "chat_completions")
+    if not isinstance(api_mode, str) or api_mode not in {"chat_completions", "responses"}:
+        from iac_code.providers.responses_codec import ResponsesConfigurationError
+
+        raise ResponsesConfigurationError("Model apiMode must be chat_completions or responses.")
     saved_base = provider_cfg.get("apiBase")
     configured_base_url = saved_base if isinstance(saved_base, str) and saved_base else None
     effective_base_url = base_url or configured_base_url or desc.base_url
@@ -563,15 +571,32 @@ def create_provider(
         if wire_desc is not None:
             provider_class_path = wire_desc.provider_class
     provider_cls = _import_provider_class(provider_class_path)
-    if _should_use_qwen_provider(provider_cls, model):
+    from iac_code.providers.openai_provider import OpenAIProvider
+
+    responses_cls = None
+    uses_dashscope_responses = False
+    if api_mode == "responses":
+        from iac_code.providers.responses_codec import ResponsesConfigurationError
+        from iac_code.providers.responses_provider import (
+            DashScopeResponsesProvider,
+            ResponsesProvider,
+            validate_responses_endpoint,
+        )
+
+        if not issubclass(provider_cls, OpenAIProvider):
+            raise ResponsesConfigurationError("Responses API requires an OpenAI-style provider.")
+        validate_responses_endpoint(effective_base_url)
+        uses_dashscope_responses = (
+            wire_provider_key in DASHSCOPE_WIRE_PROVIDER_KEYS or is_bailian_compatible_endpoint(effective_base_url)
+        )
+        responses_cls = DashScopeResponsesProvider if uses_dashscope_responses else ResponsesProvider
+    elif _should_use_qwen_provider(provider_cls, model):
         from iac_code.providers.qwen_provider import QwenProvider
 
         provider_cls = QwenProvider
     request_policy_kwargs: dict[str, Any] = {}
     if thinking_enabled is not None:
         request_policy_kwargs["thinking_enabled"] = thinking_enabled
-    from iac_code.providers.openai_provider import OpenAIProvider
-
     if issubclass(provider_cls, OpenAIProvider):
         if thinking_budget is not None:
             request_policy_kwargs["thinking_budget"] = thinking_budget
@@ -579,7 +604,7 @@ def create_provider(
             request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
         from iac_code.providers.qwen_provider import QwenProvider
 
-        if issubclass(provider_cls, QwenProvider):
+        if issubclass(provider_cls, QwenProvider) or uses_dashscope_responses:
             request_policy_kwargs["thinking_intent"] = thinking_intent
     else:
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -588,14 +613,19 @@ def create_provider(
             request_policy_kwargs["thinking_budget"] = thinking_budget
         if max_completion_tokens is not None and issubclass(provider_cls, AnthropicProvider):
             request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
-    provider = provider_cls(
-        model=model,
-        api_key=api_key or None,
-        base_url=effective_base_url,
-        effort=effort,
-        provider_key=wire_provider_key,
+    provider_kwargs: dict[str, Any] = {
+        "model": model,
+        "api_key": api_key or None,
+        "base_url": effective_base_url,
+        "effort": effort,
+        "provider_key": wire_provider_key,
         **request_policy_kwargs,
-    )
+    }
+    provider = provider_cls(**provider_kwargs)
+    if responses_cls is not None:
+        # Preserve provider-specific client setup, including local keys and headers.
+        provider = responses_cls(client=provider._client, **provider_kwargs)
+        setattr(provider, "_responses_transport_name", provider_class_path.rsplit(".", 1)[-1])
     setattr(provider, "_logical_provider_key", provider_key)
     endpoint_url = _provider_endpoint_url(provider) or effective_base_url
     setattr(provider, "_session_endpoint_origin", sanitize_endpoint_origin(endpoint_url))
@@ -828,6 +858,11 @@ def _telemetry_provider_name(provider: Any) -> str:
         return "dashscope"
     if _is_bailian_compatible_endpoint(_provider_endpoint_url(provider)):
         return "dashscope"
+    transport_name = _string_provider_attr(provider, "_responses_transport_name")
+    if transport_name is not None:
+        return transport_name.replace("Provider", "").lower()
+    if wire_provider_key == "openai" and getattr(provider, "api_mode", None) == "responses":
+        return "openai"
     return type(provider).__name__.replace("Provider", "").lower()
 
 
@@ -1665,6 +1700,12 @@ class ProviderManager:
                         message_id=msg_id,
                         affected_tool_use_ids=outcome.orphaned_tool_use_ids.get(msg_id, []),
                     )
+            if (
+                stream_failure_exception is not None
+                and getattr(stream_failure_exception, "context_limit_exceeded", False) is True
+            ):
+                yield _error_event_from_exception(stream_failure_exception)
+                return
             if isinstance(stream_failure_exception, UnsafeStreamProtocolError):
                 span_name = f"{Spans.LLM_CHAT} {model}"
                 session_id = _safe_session_id()
@@ -1915,6 +1956,7 @@ class ProviderManager:
             yield MessageEndEvent(
                 stop_reason=response.stop_reason,
                 usage=response.usage,
+                provider_metadata=response.provider_metadata,
                 usage_attribution=attribution,
             )
 

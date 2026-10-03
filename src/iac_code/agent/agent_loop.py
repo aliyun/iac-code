@@ -67,6 +67,7 @@ from iac_code.types.stream_events import (
     TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY,
     CloudResourceSelectionEvent,
     CompactionEvent,
+    ErrorEvent,
     MessageEndEvent,
     PermissionRequestEvent,
     PermissionWaitOutcome,
@@ -843,14 +844,14 @@ class AgentLoop:
         return tool_definitions
 
     @staticmethod
-    def _provider_message_from_api(api_message: dict[str, Any]):
+    def _provider_message_from_api(api_message: dict[str, Any], metadata: dict[str, Any] | None = None):
         from iac_code.providers.base import ContentBlock
         from iac_code.providers.base import Message as ProviderMessage
 
         role = api_message["role"]
         content = api_message["content"]
         if isinstance(content, str):
-            return ProviderMessage(role=role, content=content)
+            return ProviderMessage(role=role, content=content, metadata=dict(metadata or {}))
         if isinstance(content, list):
             blocks = []
             for block in content:
@@ -875,14 +876,14 @@ class AgentLoop:
                             ),
                         )
                     )
-            return ProviderMessage(role=role, content=blocks)
+            return ProviderMessage(role=role, content=blocks, metadata=dict(metadata or {}))
         return None
 
     def _get_provider_messages(self):
         """Convert context manager messages to provider Message format."""
         provider_messages = []
         for message in self.context_manager.get_context_messages():
-            provider_message = self._provider_message_from_api(message.to_api_format())
+            provider_message = self._provider_message_from_api(message.to_api_format(), message.metadata)
             if provider_message is not None:
                 provider_messages.append(provider_message)
         return provider_messages
@@ -901,7 +902,7 @@ class AgentLoop:
         unmatched: dict[str, deque[str]] = defaultdict(deque)
         telemetry_messages: list[TelemetryInputMessage] = []
         for message in self.context_manager.get_context_messages():
-            provider_message = self._provider_message_from_api(message.to_api_format())
+            provider_message = self._provider_message_from_api(message.to_api_format(), message.metadata)
             if provider_message is not None:
                 provider_messages.append(provider_message)
             if isinstance(message.content, str):
@@ -1914,9 +1915,53 @@ class AgentLoop:
 
     async def _stream_provider_with_execution_control(self, **kwargs: Any) -> AsyncGenerator[StreamEvent, None]:
         async with execution_activity("llm"):
-            async with aclosing(self._stream_provider(**kwargs)) as provider_stream:
-                async for event in provider_stream:
-                    yield event
+            for attempt in range(2):
+                provider = getattr(kwargs.get("lease"), "provider", None)
+                ratio = getattr(provider, "input_window_ratio", 1.0)
+                if isinstance(ratio, (int, float)) and ratio < 1.0:
+                    # Bailian can silently drop input at ~80% of its window.
+                    # Proactive compaction already ran; reject an oversized tail
+                    # rather than sending a known over-budget tool/history chain.
+                    output_limit = getattr(provider, "_max_completion_tokens", None) or 8192
+                    if self.context_manager.get_total_tokens() + output_limit > self.context_manager.context_window:
+                        self._release_request_lease(
+                            kwargs.get("request_manager") or self._provider_manager, kwargs.get("lease")
+                        )
+                        message_id = "Responses input exceeds the safe context budget after local compaction."
+                        yield ErrorEvent(
+                            error=_("Responses input exceeds the safe context budget after local compaction."),
+                            is_retryable=False,
+                            i18n_message_id=message_id,
+                        )
+                        return
+                context_error: ErrorEvent | None = None
+                async with aclosing(self._stream_provider(**kwargs)) as provider_stream:
+                    async for event in provider_stream:
+                        if isinstance(event, ErrorEvent) and event.context_limit_exceeded and attempt == 0:
+                            context_error = event
+                        else:
+                            yield event
+                if context_error is None:
+                    return
+                yield CompactionEvent(phase="started")
+                compact_event = await self._auto_compact(kwargs.get("request_manager"))
+                if compact_event is None:
+                    yield CompactionEvent(phase="failed", reason="no_result")
+                    yield context_error
+                    return
+                yield compact_event
+                lease, system, tools = self._prepare_request_lease(
+                    kwargs.get("request_manager") or self._provider_manager,
+                    base_system_prompt=kwargs["system"],
+                )
+                try:
+                    messages, telemetry = self._get_provider_messages_with_telemetry()
+                except BaseException:
+                    self._release_request_lease(kwargs.get("request_manager") or self._provider_manager, lease)
+                    raise
+                kwargs.update(
+                    lease=lease, messages=messages, system=system, tools=tools or None, telemetry_messages=telemetry
+                )
 
     async def _execute_tool_batch_with_execution_control(
         self,
@@ -1950,6 +1995,8 @@ class AgentLoop:
                 effective_model = get_model_name() if callable(get_model_name) else None
             if isinstance(effective_model, str) and effective_model:
                 self.context_manager.set_model(effective_model)
+            ratio = getattr(getattr(lease, "provider", None), "input_window_ratio", 1.0)
+            self.context_manager.set_input_window_ratio(ratio if isinstance(ratio, (int, float)) else 1.0)
             self.context_manager.set_system_prompt(effective_system)
             self.context_manager.set_tool_definitions(tool_definitions)
             self._sync_tool_system_prompt(effective_system, tools=tools)
@@ -2011,7 +2058,13 @@ class AgentLoop:
 
             # Auto-compact if needed
             try:
-                needs_compaction = self.context_manager.needs_compaction()
+                provider = getattr(lease, "provider", None)
+                ratio = getattr(provider, "input_window_ratio", 1.0)
+                if isinstance(ratio, (int, float)) and ratio < 1.0:
+                    output_limit = getattr(provider, "_max_completion_tokens", None) or 8192
+                    needs_compaction = self.context_manager.needs_compaction(reserved_output_tokens=output_limit)
+                else:
+                    needs_compaction = self.context_manager.needs_compaction()
             except BaseException:
                 self._release_request_lease(request_manager, lease)
                 raise
@@ -2047,6 +2100,7 @@ class AgentLoop:
                 thinking_blocks_by_index: dict[int, dict[str, Any]] = {}
                 message_ended = False
                 turn_stop_reason = "stop"
+                turn_provider_metadata: dict[str, Any] = {}
 
                 try:
                     provider_messages, telemetry_messages = self._get_provider_messages_with_telemetry()
@@ -2132,9 +2186,11 @@ class AgentLoop:
                             pending_tool_uses_by_id.clear()
                             text_chunks.clear()
                             thinking_blocks_by_index.clear()
+                            turn_provider_metadata.clear()
                         elif isinstance(event, MessageEndEvent):
                             message_ended = True
                             turn_stop_reason = event.stop_reason
+                            turn_provider_metadata = dict(event.provider_metadata)
 
                 if not message_ended:
                     self._accepting_injected_user_messages = False
@@ -2184,15 +2240,14 @@ class AgentLoop:
                         )
                 self._accepting_injected_user_messages = bool(completed_tools) and _turn < self._max_turns - 1
 
-                if assistant_blocks:
-                    self.context_manager.add_assistant_message(assistant_blocks)
+                if assistant_blocks or turn_provider_metadata:
+                    assistant_message = self.context_manager.add_assistant_message(assistant_blocks)
+                    assistant_message.metadata.update(turn_provider_metadata)
                     if self._session_storage:
-                        from iac_code.agent.message import Message
-
                         self._session_storage.append(
                             self._cwd,
                             self._session_id,
-                            Message(role="assistant", content=assistant_blocks),
+                            assistant_message,
                             git_branch=self._current_git_branch,
                         )
 

@@ -86,8 +86,11 @@ providers:
 |---|---|---|
 | `thinkingEnabled` | Provider or model | Optional boolean thinking switch. `true` asks supported providers/models to enable thinking; `false` asks them to disable it; omitted preserves the provider/model default. |
 | `thinkingBudget` | Provider or model | Positive integer reasoning/thinking budget passed to providers that support it. |
-| `maxCompletionTokens` | Provider or model | Positive integer `max_completion_tokens` override for providers/models that use that request field. |
+| `maxCompletionTokens` | Provider or model | Positive integer output-limit override: `max_completion_tokens` for applicable Chat providers, or `max_output_tokens` for Responses. |
 | `effort` | Provider or model | Optional thinking effort override for models that support effort control. |
+| `apiMode` | Model only | `chat_completions` or `responses`; omitted uses the model’s built-in protocol default. See [LLM providers](./llm-providers.md) for supported providers and models. |
+
+For Responses, configure `apiMode` only under `providers.<provider>.models.<model>`. `effort` maps to `reasoning.effort`; `thinkingBudget` is not sent to this API. `maxCompletionTokens` sets the total output limit, including reasoning tokens, and must be at least `16` for DashScope Responses. The `settings.yml` field names stay the same when switching protocols.
 
 Model-level values under `providers.<provider>.models.<model>` override provider-level values when they are valid. Invalid numeric values are ignored, so IaC Code falls back to the provider-level value or built-in model policy.
 

@@ -8,7 +8,14 @@ from typing import Any
 from loguru import logger
 
 _LOG_PREFIX = "[provider-request-policy]"
-_REQUEST_KEYS: tuple[str, ...] = ("stream", "max_tokens", "max_completion_tokens", "reasoning_effort")
+_REQUEST_KEYS: tuple[str, ...] = (
+    "stream",
+    "max_tokens",
+    "max_completion_tokens",
+    "reasoning_effort",
+    "max_output_tokens",
+    "store",
+)
 _EXTRA_BODY_KEYS: tuple[str, ...] = ("enable_thinking", "thinking_budget", "thinking")
 _THINKING_KEYS: tuple[str, ...] = ("type", "budget_tokens")
 
@@ -35,6 +42,9 @@ class ProviderRequestLogSanitizer:
         thinking = self._sanitize_thinking(self._kwargs.get("thinking"))
         if thinking:
             request["thinking"] = thinking
+        reasoning = self._kwargs.get("reasoning")
+        if isinstance(reasoning, dict) and "effort" in reasoning:
+            request["reasoning"] = {"effort": self._json_scalar(reasoning["effort"])}
 
         return {
             "provider": self._provider_key,

@@ -10,6 +10,9 @@ class ModelEntry:
     id: str
     is_default: bool = False
     support_multimodal: bool = False
+    api_mode: str = "chat_completions"
+    # None: no additional restriction; (): no Chat tools; otherwise allowed wire efforts.
+    chat_completions_tool_efforts: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -121,9 +124,13 @@ PROVIDER_REGISTRY: dict[str, ProviderDescriptor] = {
         provider_class="iac_code.providers.openai_provider.OpenAIProvider",
         base_url=None,
         models=[
-            # GPT-6 Astra requires the Responses API for tool calling. Keep the
-            # Chat-Completions-based iac-code adapter on GPT-5.6 Sol by default.
-            ModelEntry("gpt-6-astra", support_multimodal=True),
+            ModelEntry("gpt-6-astra", support_multimodal=True, api_mode="responses", chat_completions_tool_efforts=()),
+            ModelEntry(
+                "gpt-6-sol", support_multimodal=True, api_mode="responses", chat_completions_tool_efforts=("none",)
+            ),
+            ModelEntry(
+                "gpt-6-luna", support_multimodal=True, api_mode="responses", chat_completions_tool_efforts=("none",)
+            ),
             ModelEntry("gpt-5.6-sol", is_default=True, support_multimodal=True),
             ModelEntry("gpt-5.6", support_multimodal=True),
             ModelEntry("gpt-5.6-terra", support_multimodal=True),

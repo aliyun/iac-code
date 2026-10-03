@@ -76,3 +76,29 @@ CLI arguments > environment variables > configuration files
 | `IAC_CODE_MODEL` | Nome do modelo |
 | `IAC_CODE_BASE_URL` | Substitui o endpoint de API do provedor ativo; tem precedência sobre o `apiBase` salvo e a URL padrão integrada |
 | `IAC_CODE_API_KEY` | Chave de API do provedor |
+
+## Responses API
+
+Os provedores que usam o protocolo OpenAI utilizam Chat Completions por padrão. Um modelo pode ter Responses como protocolo padrão integrado quando suas chamadas de ferramentas exigem isso. Os protocolos padrão e as restrições de ferramentas em Chat são mantidos no catálogo integrado de modelos; não há uma lista separada nesta página. Os provedores Anthropic continuam usando o protocolo Messages atual.
+
+Os provedores que utilizam o protocolo OpenAI podem selecionar Responses explicitamente para cada modelo, incluindo Azure OpenAI, `openai_compatible` e DashScope Token Plan. Configure `apiBase` com a URL base de um serviço que ofereça suporte a Responses. Para Azure OpenAI, use a URL base com `/openai/v1/` e defina `model` como o nome da implantação.
+
+[Azure OpenAI](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle) e [DashScope Token Plan](https://help.aliyun.com/en/model-studio/codex) documentam o suporte a Responses para determinados endpoints e modelos. Nos endpoints compatíveis personalizados e nos planos de programação, o suporte depende do serviço utilizado. [Alibaba Cloud Coding Plan](https://help.aliyun.com/en/model-studio/coding-plan-faq) informa explicitamente que não oferece suporte a Responses. Selecionar Responses para um serviço ou modelo incompatível faz a solicitação retornar um erro; o IaC Code não muda automaticamente para Chat.
+
+Para usar Responses com um modelo Qwen compatível, adicione esta configuração no nível do modelo em `settings.yml` e substitua `<model-id>` pelo ID real do modelo:
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: <model-id>
+    models:
+      <model-id>:
+        apiMode: responses
+```
+
+Defina `apiMode` como `chat_completions` para voltar ao protocolo anterior. Se o campo for omitido, será usado o protocolo padrão integrado do modelo; para modelos do DashScope padrão, ele continua sendo Chat Completions. A configuração se aplica apenas ao modelo indicado no provedor indicado.
+
+Se você selecionar Chat explicitamente, o modelo deve oferecer suporte a chamadas de ferramentas com o nível de raciocínio escolhido. Use Responses quando a API Chat do modelo não oferecer suporte a essa combinação.
+
+Consulte a [configuração de execução](./runtime-configuration.md) para ver os parâmetros de requisição e os limites de saída.

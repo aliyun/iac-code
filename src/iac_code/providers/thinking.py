@@ -444,6 +444,10 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     },
     "openai": {
         "gpt-6-astra": ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_GPT6_EFFORTS, EffortLevel.MEDIUM),
+        "gpt-6-sol": ThinkingSpec(ThinkingFamily.OPENAI, (EffortLevel.NONE, *_OPENAI_GPT6_EFFORTS), EffortLevel.MEDIUM),
+        "gpt-6-luna": ThinkingSpec(
+            ThinkingFamily.OPENAI, (EffortLevel.NONE, *_OPENAI_GPT6_EFFORTS), EffortLevel.MEDIUM
+        ),
         "gpt-5.6": _OPENAI_GPT56_SPEC,
         "gpt-5.6-sol": _OPENAI_GPT56_SPEC,
         "gpt-5.6-terra": _OPENAI_GPT56_SPEC,

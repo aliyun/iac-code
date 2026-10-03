@@ -86,8 +86,11 @@ providers:
 |---|---|---|
 | `thinkingEnabled` | Provider またはモデル | 任意の boolean thinking スイッチ。`true` は対応する provider/model に thinking の有効化を要求し、`false` は無効化を要求します。省略時は provider/model のデフォルトを維持します。 |
 | `thinkingBudget` | Provider またはモデル | 正の整数の reasoning/thinking 予算。対応している provider に渡されます。 |
-| `maxCompletionTokens` | Provider またはモデル | `max_completion_tokens` を使う provider/model 向けの、正の整数の上書き値。 |
+| `maxCompletionTokens` | プロバイダーまたはモデル | 正の整数で出力上限を上書きします。対応する Chat プロバイダーでは `max_completion_tokens`、Responses では `max_output_tokens` を使います。 |
 | `effort` | Provider またはモデル | thinking effort の任意の上書き値。effort 制御に対応したモデルでのみ有効です。 |
+| `apiMode` | モデルのみ | `chat_completions` または `responses`。省略時はモデルに組み込まれたデフォルトのプロトコルを使います。対応するプロバイダーとモデルは [LLM プロバイダー](./llm-providers.md)を参照してください。 |
+
+Responses の `apiMode` は、`providers.<provider>.models.<model>` の下にのみ設定します。`effort` は `reasoning.effort` として送信され、`thinkingBudget` はこの API に送信されません。`maxCompletionTokens` は推論トークンを含む総出力上限を設定し、DashScope Responses では `16` 以上が必要です。プロトコルを切り替えても、`settings.yml` のフィールド名は変わりません。
 
 `providers.<provider>.models.<model>` 以下のモデル単位の有効な値は、provider 単位の値を上書きします。無効な数値は無視されるため、IaC Code は provider 単位の値または組み込みのモデルポリシーにフォールバックします。
 
