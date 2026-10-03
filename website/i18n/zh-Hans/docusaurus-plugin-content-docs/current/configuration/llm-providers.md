@@ -76,3 +76,27 @@ CLI 参数 > 环境变量 > 配置文件
 | `IAC_CODE_MODEL` | 模型名称 |
 | `IAC_CODE_BASE_URL` | 当前激活 Provider 的 API 端点覆盖；优先于配置文件中的 `apiBase` 和内置默认 URL |
 | `IAC_CODE_API_KEY` | 提供商 API Key |
+
+## Responses API
+
+使用 OpenAI 风格协议的提供商默认走 Chat Completions。已登记的 OpenAI 模型 `gpt-6-astra`、`gpt-6-sol` 和 `gpt-6-luna` 默认走 Responses API。Anthropic 提供商继续使用原有的 Messages 协议。
+
+目前 Responses 仅支持 OpenAI 官方端点，以及已核验的标准百炼端点和模型，例如 `qwen3.8-max`。Azure OpenAI、`openai_compatible`、百炼 Token Plan 和 CodingPlan 提供商不支持该切换。
+
+要让某个 Qwen 模型改用 Responses，在 `settings.yml` 中添加模型级配置：
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: qwen3.8-max
+    models:
+      qwen3.8-max:
+        apiMode: responses
+```
+
+把 `apiMode` 改为 `chat_completions` 即可切回；省略该项则使用模型内置的默认协议，标准百炼模型仍默认为 Chat Completions。该配置只作用于指定提供商下的指定模型。
+
+若显式让 GPT-6 使用 Chat，Astra 不能调用工具；Sol 和 Luna 仅在 `effort: none` 时能调用工具。开启推理的工具调用应使用 Responses。
+
+请求参数和输出限制见[运行配置](./runtime-configuration.md)。

@@ -1,12 +1,15 @@
+from dataclasses import replace
+
 import pytest
 
 from iac_code.providers.anthropic_provider import AnthropicProvider
 from iac_code.providers.manager import create_provider
 from iac_code.providers.openai_provider import OpenAIProvider
 from iac_code.providers.qwen_provider import QwenProvider
+from iac_code.providers.registry import PROVIDER_REGISTRY, ModelEntry
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.providers.responses_provider import DashScopeResponsesProvider, ResponsesProvider
-from iac_code.providers.thinking import get_thinking_spec
+from iac_code.providers.thinking import MODEL_THINKING, EffortLevel, ThinkingFamily, ThinkingSpec, get_thinking_spec
 from iac_code.services.context_manager import get_context_window_config
 from tests.providers.test_openai_responses_provider import TOOLS
 
@@ -54,20 +57,78 @@ def test_unsupported_responses_provider_or_model_fails(key, model):
 @pytest.mark.parametrize(
     "model,effort,allowed",
     [
+        ("gpt-6-astra", None, False),
         ("gpt-6-astra", "none", False),
+        ("gpt-6-astra", "high", False),
+        ("gpt-6-sol", None, False),
         ("gpt-6-sol", "high", False),
         ("gpt-6-sol", "none", True),
+        ("gpt-6-luna", None, False),
+        ("gpt-6-luna", "high", False),
         ("gpt-6-luna", "none", True),
     ],
 )
-def test_gpt6_forced_chat_checks_tool_restrictions(model, effort, allowed):
+@pytest.mark.parametrize("streaming", [False, True])
+def test_gpt6_forced_chat_checks_tool_restrictions(model, effort, allowed, streaming):
     p = create("openai", model, {"effort": effort, "models": {model: {"apiMode": "chat_completions"}}})
-    context = p._create_chat_request_context(streaming=False)
+    context = p._create_chat_request_context(streaming=streaming)
+    assert "tools" not in p._build_chat_completion_kwargs([], "system", None, 100, context)
     if allowed:
         assert p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)["reasoning_effort"] == "none"
     else:
         with pytest.raises(ValueError, match="requires apiMode=responses"):
             p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)
+
+
+@pytest.mark.parametrize(
+    "tool_efforts,effort,allowed",
+    [
+        (None, "high", True),
+        ((), None, False),
+        (("none",), None, False),
+        (("none",), "none", True),
+        (("high",), "high", True),
+    ],
+)
+def test_chat_tool_restrictions_follow_model_configuration(monkeypatch, tool_efforts, effort, allowed):
+    model = "test-configured-model"
+    monkeypatch.setitem(
+        PROVIDER_REGISTRY,
+        "openai",
+        replace(
+            PROVIDER_REGISTRY["openai"],
+            models=[ModelEntry(model, chat_completions_tool_efforts=tool_efforts)],
+        ),
+    )
+    monkeypatch.setitem(
+        MODEL_THINKING["openai"],
+        model,
+        ThinkingSpec(
+            ThinkingFamily.OPENAI, (EffortLevel.NONE, EffortLevel.MEDIUM, EffortLevel.HIGH), EffortLevel.MEDIUM
+        ),
+    )
+    p = OpenAIProvider(model, client=object(), effort=effort)
+    context = p._create_chat_request_context(streaming=False)
+    if allowed:
+        assert p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)["tools"]
+    else:
+        with pytest.raises(ValueError, match="requires apiMode=responses"):
+            p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)
+
+
+@pytest.mark.parametrize(
+    "key,model",
+    [
+        ("openai", "gpt-5.6-sol"),
+        ("openai", "test-unknown-model"),
+        ("openai_compatible", "gpt-6-astra"),
+        ("azure_openai", "gpt-6-astra"),
+    ],
+)
+def test_chat_tool_restrictions_do_not_affect_other_models_or_providers(key, model):
+    p = OpenAIProvider(model, client=object(), provider_key=key, effort="high")
+    context = p._create_chat_request_context(streaming=False)
+    assert p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)["tools"]
 
 
 def test_gpt6_astra_responses_cannot_disable_reasoning():

@@ -12,6 +12,7 @@ from iac_code.providers.openai_provider import OpenAIProvider
 from iac_code.providers.request_headers import get_provider_request_headers
 from iac_code.providers.request_logging import log_provider_request_policy
 from iac_code.providers.responses_codec import (
+    ResponsesConfigurationError,
     ResponsesContextLimitError,
     ResponsesProtocolError,
     ResponsesStreamAdapter,
@@ -71,14 +72,20 @@ _DASHSCOPE_REGIONS = {
 
 def validate_responses_endpoint(provider_key: str, base_url: str | None, model: str) -> None:
     if provider_key not in {"openai", "dashscope"}:
-        raise ValueError("Responses API is supported only for OpenAI and standard DashScope in this release.")
+        raise ResponsesConfigurationError(
+            "Responses API is supported only for OpenAI and standard DashScope in this release."
+        )
     if provider_key == "dashscope" and model not in DASHSCOPE_RESPONSES_MODELS:
-        raise ValueError("This DashScope model is not registered for Responses API.")
-    endpoint = urlsplit(base_url or "https://api.openai.com/v1")
+        raise ResponsesConfigurationError("This DashScope model is not registered for Responses API.")
+    try:
+        endpoint = urlsplit(base_url or "https://api.openai.com/v1")
+        port = endpoint.port
+    except ValueError as error:
+        raise ResponsesConfigurationError("Responses API requires a supported HTTPS base URL.") from error
     if endpoint.scheme != "https" or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
-        raise ValueError("Responses API requires a supported HTTPS base URL.")
-    if endpoint.port not in {None, 443}:
-        raise ValueError("Responses API requires a supported HTTPS base URL.")
+        raise ResponsesConfigurationError("Responses API requires a supported HTTPS base URL.")
+    if port not in {None, 443}:
+        raise ResponsesConfigurationError("Responses API requires a supported HTTPS base URL.")
     host = endpoint.hostname or ""
     if provider_key == "openai":
         supported = host == "api.openai.com" and endpoint.path.rstrip("/") == "/v1"
@@ -94,7 +101,7 @@ def validate_responses_endpoint(provider_key: str, base_url: str | None, model: 
             )
         ) and endpoint.path.rstrip("/") == "/compatible-mode/v1"
     if not supported:
-        raise ValueError("This base URL is not registered for Responses API.")
+        raise ResponsesConfigurationError("This base URL is not registered for Responses API.")
 
 
 class ResponsesProvider(OpenAIProvider):
@@ -125,7 +132,9 @@ class ResponsesProvider(OpenAIProvider):
             effort = spec.default_effort_value
         if effort is not None and spec.effort_values and effort not in spec.effort_values:
             if effort == "none":
-                raise ValueError("The selected reasoning effort is not supported by this Responses model.")
+                raise ResponsesConfigurationError(
+                    "The selected reasoning effort is not supported by this Responses model."
+                )
             effort = spec.default_effort_value
         return effort
 
@@ -140,7 +149,7 @@ class ResponsesProvider(OpenAIProvider):
     ) -> dict[str, Any]:
         limit = self._max_completion_tokens or max_tokens
         if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
-            raise ValueError("Responses max_output_tokens must be a positive integer.")
+            raise ResponsesConfigurationError("Responses max_output_tokens must be a positive integer.")
         kwargs: dict[str, Any] = {
             "model": self._model,
             "input": encode_input(messages, self._responses_identity),
@@ -257,5 +266,5 @@ class DashScopeResponsesProvider(ResponsesProvider):
     def _build_responses_kwargs(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         result = super()._build_responses_kwargs(*args, **kwargs)
         if result["max_output_tokens"] < 16:
-            raise ValueError("DashScope Responses max_output_tokens must be at least 16.")
+            raise ResponsesConfigurationError("DashScope Responses max_output_tokens must be at least 16.")
         return result

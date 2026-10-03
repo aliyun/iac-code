@@ -86,8 +86,11 @@ providers:
 |---|---|---|
 | `thinkingEnabled` | Provider 或模型 | 可选的布尔 thinking 开关。`true` 表示请求支持的 provider/model 开启 thinking；`false` 表示请求关闭；省略时保留 provider/model 默认行为。 |
 | `thinkingBudget` | Provider 或模型 | 正整数 reasoning/thinking 预算，会传给支持该参数的 provider。 |
-| `maxCompletionTokens` | Provider 或模型 | 正整数 `max_completion_tokens` 覆盖值，用于采用该请求字段的 provider/model。 |
+| `maxCompletionTokens` | 提供商或模型 | 正整数输出上限覆盖值：适用的 Chat 提供商使用 `max_completion_tokens`，Responses 使用 `max_output_tokens`。 |
 | `effort` | Provider 或模型 | 可选 thinking effort 覆盖值，仅对支持 effort 控制的模型生效。 |
+| `apiMode` | 仅模型级 | `chat_completions` 或 `responses`；省略时使用模型内置的默认协议。支持范围见 [LLM 提供商](./llm-providers.md)。 |
+
+使用 Responses 时，`apiMode` 只能配置在 `providers.<provider>.models.<model>` 下。`effort` 映射为 `reasoning.effort`，`thinkingBudget` 不会发送给此 API。`maxCompletionTokens` 设置包含推理 token 在内的总输出上限，DashScope Responses 要求至少为 `16`。切换协议后，`settings.yml` 中的字段名称保持一致。
 
 `providers.<provider>.models.<model>` 下的模型级有效值会覆盖 provider 级值。无效数值会被忽略，IaC Code 会回退到 provider 级值或内置模型策略。
 

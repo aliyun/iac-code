@@ -179,6 +179,8 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
 - 增删 `ModelEntry`，保持官方 model ID 原样。
 - 每个非空 provider 最多一个 `is_default=True`。
 - 仅在当前接入路径确实支持图片输入时设置 `support_multimodal=True`。
+- 核验每个模型的 `api_mode` 和 `chat_completions_tool_efforts`，按“Responses API 与 Chat 工具调用限制”
+  一节维护协议选择与工具调用限制。
 - 检查 `base_url`、`provider_class`、`qwenpaw_provider_ids` 和 `qwenpaw_chat_model`。
 - 模型顺序通常为推荐默认、当前主力、较旧兼容模型；不要把已弃用模型放到默认位。
 
@@ -192,8 +194,8 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
 6. 是否存在同 endpoint、同协议、能力足够的 fallback。
 7. 在以上条件都满足时，再参考厂商的默认/推荐模型。
 
-模型可以先进入可选目录但暂不成为默认。例如旗舰模型若只有 Responses API 才支持工具调用，而当前
-adapter 仍使用 Chat Completions，就应保留当前可工作的默认模型，并把 Responses adapter 作为独立需求。
+模型可以先进入可选目录但暂不成为默认。当前已支持按模型选择 Responses API；需要该协议的模型应
+声明 `api_mode="responses"`，再完成上述门禁。不能只加入模型 ID，仍让它进入默认 Chat 工具调用路径。
 标准百炼和 Token Plan 的目录、生命周期与 endpoint 不同，因此可以有不同默认模型。
 
 新增 provider 或全新模型前缀时，还要检查
@@ -226,6 +228,41 @@ adapter 仍使用 Chat Completions，就应保留当前可工作的默认模型�
 
 特别注意：能力声明只描述“支持什么”，实际请求格式由 provider adapter 组装。
 
+### Responses API 与 Chat 工具调用限制
+
+一次模型更新要分别核验默认协议、显式切换协议后的可用性，以及思考模式与工具调用的组合：
+
+- `registry.py` 的 `ModelEntry.api_mode` 是未配置时的默认协议，默认值为 `chat_completions`。
+  当前 OpenAI 的 `gpt-6-astra/sol/luna` 声明为 `responses`；其他模型保持原默认协议。
+- 用户可在 `settings.yml` 的 `providers.<key>.models.<model_id>.apiMode` 设置
+  `chat_completions` 或 `responses`。默认协议不等于另一个协议也支持该模型的全部能力。
+- `ModelEntry.chat_completions_tool_efforts` 声明 Chat 工具调用允许的实际 `reasoning_effort`：
+  `None` 表示不添加此项限制，空元组 `()` 表示不允许 Chat 工具调用，`("none",)` 表示仅在关闭
+  reasoning 时允许。当前 Astra 使用 `()`，Sol/Luna 使用 `("none",)`；该声明按 provider 和精确
+  model ID 生效，不应自动复制到 Azure、兼容端点或其他 provider。
+- `openai_provider.py` 读取上述声明，并用归一化后的 effort 校验工具请求；无工具的 Chat 请求不受
+  此限制。新增或替换模型时更新声明，不要在 adapter 中再添加模型 ID 集合、代际前缀或模型名分支。
+  `thinking.py` 中的允许值和默认 effort 也必须同步，否则省略 effort 时会按错误默认值校验。
+- 当前 Responses 路径仅开放官方 OpenAI 和标准 DashScope 已核验端点。
+  [`responses_provider.py`](../src/iac_code/providers/responses_provider.py) 中的
+  `DASHSCOPE_RESPONSES_MODELS` 与 `validate_responses_endpoint()` 分别维护百炼支持的精确模型 ID 和
+  endpoint 范围；新增 Qwen 模型要独立核验 Responses 文档，不能因为 Chat 目录存在就自动加入。
+  标准百炼模型仍默认使用 Chat，只有用户显式配置才切换；Token Plan/Coding Plan 不自动继承支持。
+- Responses 的 effort、输出限制、工具 schema 和输入窗口规则由 `responses_provider.py` 组装。
+  更新时核对 `_responses_effort()`、`max_output_tokens` 和 DashScope 输入窗口比例，不能直接复制
+  Chat 的 `enable_thinking`、`thinking_budget` 或 `max_completion_tokens` 请求字段。
+- [`responses_codec.py`](../src/iac_code/providers/responses_codec.py) 维护 Responses input/output 与
+  SSE 转换。只更新已有格式下的模型能力时，应更新配置；官方协议本身变化时才修改 codec/adapter。
+- 用户可见的 Responses 错误使用 `ResponsesConfigurationError`、`ResponsesProtocolError` 或
+  `ResponsesContextLimitError`，首个参数保持英文字符串字面量；`babel.cfg` 已登记这些提取关键词。
+  补齐六套 `messages.po` 并编译，保留英文 `i18n_message_id`，使 A2A 可以按调用者语言重新翻译。
+- 配置方法或支持范围变化时，同步更新网站的 `configuration/llm-providers.md` 和
+  `configuration/runtime-configuration.md`，覆盖英文及 `zh-Hans/es/fr/de/ja/pt` 六套本地化文档。
+
+至少补充默认路由、显式切换、默认/关闭/开启 effort 的 Chat 工具调用、无工具请求，以及同名模型在
+其他 provider 下不受影响的离线用例。Responses 路径还要覆盖连续工具轮次、会话恢复和协议切换后的
+历史回传。下文的日期附录记录当时状态，其中“固定 Chat”“Responses 另行实现”不代表当前实现。
+
 ### 请求协议与响应解析
 
 根据证据修改对应 adapter：
@@ -233,6 +270,7 @@ adapter 仍使用 Chat Completions，就应保留当前可工作的默认模型�
 | 协议变化 | 常见文件 |
 | --- | --- |
 | OpenAI `reasoning_effort`、completion token | `openai_provider.py` |
+| OpenAI / DashScope Responses 路由、请求与 SSE | `registry.py`、`manager.py`、`responses_provider.py`、`responses_codec.py` |
 | Anthropic adaptive thinking、legacy budget | `anthropic_provider.py` |
 | DashScope `enable_thinking`、budget、显式缓存 | `dashscope_provider.py` |
 | Kimi 分版本 thinking 行为 | `kimi_provider.py` |
@@ -260,7 +298,8 @@ adapter 仍使用 Chat Completions，就应保留当前可工作的默认模型�
 
 | Provider/接入方式 | 典型形态 | 维护注意点 |
 | --- | --- | --- |
-| OpenAI 官方 | `reasoning_effort` | effort 枚举随模型代际变化 |
+| OpenAI 官方 Chat | `reasoning_effort` | effort 枚举与工具调用限制按模型声明 |
+| OpenAI / DashScope Responses | `input`、`reasoning.effort`、`max_output_tokens` | 按模型配置选择；工具与历史使用 Responses item 格式 |
 | Anthropic 新模型 | `thinking.type=adaptive` + `output_config.effort` | 部分模型 adaptive always-on，旧模型仍使用 `budget_tokens` |
 | DashScope 兼容端点 | `extra_body.enable_thinking`，部分模型再带 budget/effort | 托管的 Kimi/GLM 也按 DashScope 协议处理 |
 | Kimi 官方 | 新旧代际可能分别使用 `reasoning_effort`、always-on 或 `extra_body.thinking` | 必须逐模型核验 |
@@ -326,10 +365,10 @@ registry 会驱动多个入口，更新后至少检查：
 
 ### 必测内容
 
-1. registry：新增/移除模型、默认模型、多模态标记、区域/套餐差异。
+1. registry：新增/移除模型、默认模型、多模态标记、区域/套餐差异、`api_mode` 和 Chat 工具 effort 限制。
 2. thinking registry：family、effort 枚举、默认值、budget 和 fallback。
 3. adapter wire format：开启、关闭、默认、非法 effort，以及代际差异。
-4. manager：降级映射和 provider 选择。
+4. manager：降级映射、provider 选择、默认协议及模型级 `apiMode` 覆盖。
 5. UI/auth：终端和 Web 的默认模型、可选模型、effort 标准值、翻译和长列表交互是否一致。
 6. telemetry：新增模型不会被清洗为 `other`。
 7. opaque metadata：流式、非流式、会话序列化、下一轮回传和公开输出隔离。
@@ -340,6 +379,9 @@ registry 会驱动多个入口，更新后至少检查：
 tests/providers/test_provider_model_research_updates.py
 tests/providers/test_thinking_registry.py
 tests/providers/test_openai_provider.py
+tests/providers/test_responses_routing.py
+tests/providers/test_openai_responses_provider.py
+tests/providers/test_dashscope_responses_provider.py
 tests/providers/test_anthropic_provider.py
 tests/providers/test_dashscope_provider.py
 tests/providers/test_deepseek_provider.py
@@ -347,6 +389,7 @@ tests/providers/test_manager.py
 tests/providers/test_new_providers.py
 tests/agent/test_message.py
 tests/agent/test_agent_loop_new.py
+tests/agent/test_responses_session.py
 tests/services/test_token_counter.py
 tests/services/test_context_manager.py
 tests/commands/test_auth_basics.py
@@ -415,6 +458,8 @@ git diff HEAD -- iac-code-rs
 - preview、deprecated、alias 和 dated snapshot 没有混为一谈。
 - 产品版本名、控制台显示名和实际 API model ID 没有混为一谈。
 - 同名模型在不同 provider 下的思考协议没有被错误复用。
+- 新模型的默认 `api_mode`、显式协议切换和 `chat_completions_tool_efforts` 已独立核验；adapter 中没有
+  新增模型名单判断。新增百炼 Responses 模型已同步其支持列表，未外推到套餐或未核验端点。
 - effort 的 UI 标准值、wire alias、默认值和关闭语义已经分别验证。
 - 新模型已加入遥测白名单和必要的降级链。
 - 终端与 Web 的 model/effort 选择器均已验证，新增标签在所有 locale 中有正确翻译。

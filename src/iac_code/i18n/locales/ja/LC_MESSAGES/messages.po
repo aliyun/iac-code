@@ -13728,3 +13728,184 @@ msgstr "Bash を許可しますか？"
 
 #~ msgid "--interrupt-ttl must be a positive integer."
 #~ msgstr "--interrupt-ttl は正の整数で指定してください。"
+
+#: src/iac_code/providers/manager.py
+msgid "Model apiMode must be chat_completions or responses."
+msgstr "モデルの apiMode は chat_completions または responses にする必要があります。"
+
+#: src/iac_code/providers/openai_provider.py
+msgid ""
+"This tool request requires apiMode=responses for the selected reasoning "
+"effort."
+msgstr "選択された推論強度でのツールリクエストには apiMode=responses が必要です。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses function call is missing its call_id or name."
+msgstr "Responses の関数呼び出しに call_id または名前がありません。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an unknown local function."
+msgstr "Responses が不明なローカル関数を返しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an unfinished function call."
+msgstr "Responses が未完了の関数呼び出しを返しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses function arguments are not complete JSON."
+msgstr "Responses の関数引数が完全な JSON ではありません。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses function arguments must be a JSON object."
+msgstr "Responses の関数引数は JSON オブジェクトにする必要があります。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses history contains duplicate call IDs."
+msgstr "Responses の履歴に重複した呼び出し ID が含まれています。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses tool result has no unique preceding call."
+msgstr "Responses のツール結果に一意に対応する先行呼び出しがありません。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses history contains a function call without its result."
+msgstr "Responses の履歴に結果のない関数呼び出しが含まれています。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses history contains an unsupported output item."
+msgstr "Responses の履歴に未対応の出力項目が含まれています。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses image input requires a user image data URL."
+msgstr "Responses の画像入力にはユーザー画像の data URL が必要です。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses received an unsupported input content block."
+msgstr "Responses が未対応の入力コンテンツブロックを受信しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an invalid response."
+msgstr "Responses が無効な応答を返しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses did not complete successfully."
+msgstr "Responses が正常に完了しませんでした。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an unsupported output item type."
+msgstr "Responses が未対応の出力項目タイプを返しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned unsupported message content."
+msgstr "Responses が未対応のメッセージ内容を返しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned duplicate function call IDs."
+msgstr "Responses が重複した関数呼び出し ID を返しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned an incomplete tool turn."
+msgstr "Responses が未完了のツール呼び出しターンを返しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses returned no assistant content or function calls."
+msgstr "Responses がアシスタントの内容も関数呼び出しも返しませんでした。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses changed a completed function call."
+msgstr "Responses が完了済みの関数呼び出しを変更しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses sent events after its terminal response."
+msgstr "Responses が最終応答の後にイベントを送信しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses terminal response dropped a streamed item."
+msgstr "Responses の最終応答にストリームで送信された項目が含まれていません。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses terminal item identity differs from its stream."
+msgstr "Responses の最終項目の識別情報がストリーム内の項目と一致しません。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses changed a function identity."
+msgstr "Responses が関数の識別情報を変更しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses final function arguments differ from their stream."
+msgstr "Responses の最終的な関数引数がストリーム内の引数と一致しません。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses terminal content differs from its stream."
+msgstr "Responses の最終的な内容がストリーム内の内容と一致しません。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses terminal response dropped a streamed function call."
+msgstr "Responses の最終応答にストリームで送信された関数呼び出しが含まれていません。"
+
+#: src/iac_code/providers/responses_codec.py
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses input exceeds the model context limit."
+msgstr "Responses の入力がモデルのコンテキスト上限を超えています。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses generation failed."
+msgstr "Responses の生成に失敗しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses stream contains an invalid or duplicate item index."
+msgstr "Responses のストリームに無効または重複した項目インデックスが含まれています。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses stream contains an invalid local function call."
+msgstr "Responses のストリームに無効なローカル関数呼び出しが含まれています。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses stream contains duplicate function call IDs."
+msgstr "Responses のストリームに重複した関数呼び出し ID が含まれています。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses arguments do not match a preceding function item."
+msgstr "Responses の引数が先行する関数呼び出し項目と一致しません。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses arguments changed after function completion."
+msgstr "Responses が関数呼び出しの完了後に引数を変更しました。"
+
+#: src/iac_code/providers/responses_codec.py
+msgid "Responses completed an unknown output item."
+msgstr "Responses が不明な出力項目を完了しました。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid ""
+"Responses API is supported only for OpenAI and standard DashScope in this "
+"release."
+msgstr "このバージョンの Responses API は、OpenAI と標準の DashScope のみ対応しています。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid "This DashScope model is not registered for Responses API."
+msgstr "この DashScope モデルは Responses API の対応モデルとして登録されていません。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses API requires a supported HTTPS base URL."
+msgstr "Responses API には、対応している HTTPS ベース URL が必要です。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid "This base URL is not registered for Responses API."
+msgstr "このベース URL は Responses API の対応 URL として登録されていません。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid "The selected reasoning effort is not supported by this Responses model."
+msgstr "この Responses モデルは選択された推論強度に対応していません。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses max_output_tokens must be a positive integer."
+msgstr "Responses の max_output_tokens は正の整数にする必要があります。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses stream ended without a terminal response."
+msgstr "Responses のストリームが最終応答なしで終了しました。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid "DashScope Responses max_output_tokens must be at least 16."
+msgstr "DashScope Responses の max_output_tokens は 16 以上にする必要があります。"

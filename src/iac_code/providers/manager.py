@@ -516,7 +516,9 @@ def create_provider(
     model_entry = next((entry for entry in desc.models if entry.id == model), None)
     api_mode = model_cfg.get("apiMode", model_entry.api_mode if model_entry is not None else "chat_completions")
     if not isinstance(api_mode, str) or api_mode not in {"chat_completions", "responses"}:
-        raise ValueError("Model apiMode must be chat_completions or responses.")
+        from iac_code.providers.responses_codec import ResponsesConfigurationError
+
+        raise ResponsesConfigurationError("Model apiMode must be chat_completions or responses.")
     saved_base = provider_cfg.get("apiBase")
     configured_base_url = saved_base if isinstance(saved_base, str) and saved_base else None
     effective_base_url = base_url or configured_base_url or desc.base_url

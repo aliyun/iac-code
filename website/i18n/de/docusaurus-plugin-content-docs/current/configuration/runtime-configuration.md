@@ -86,8 +86,11 @@ providers:
 |---|---|---|
 | `thinkingEnabled` | Provider oder Modell | Optionaler boolescher Thinking-Schalter. `true` fordert unterstützte Provider/Modelle auf, Thinking zu aktivieren; `false` fordert die Deaktivierung an; ausgelassen bleibt der Provider-/Model-Default erhalten. |
 | `thinkingBudget` | Provider oder Modell | Positives ganzzahliges Budget für Reasoning/Thinking, das an Provider übergeben wird, die es unterstützen. |
-| `maxCompletionTokens` | Provider oder Modell | Positiver ganzzahliger Überschreibungswert für `max_completion_tokens` bei Providern/Modellen, die dieses Anfragefeld verwenden. |
+| `maxCompletionTokens` | Anbieter oder Modell | Positive ganze Zahl als Ausgabelimit: `max_completion_tokens` für entsprechende Chat-Anbieter oder `max_output_tokens` für Responses. |
 | `effort` | Provider oder Modell | Optionale Überschreibung des Thinking-Aufwands; nur wirksam bei Modellen, die Effort-Steuerung unterstützen. |
+| `apiMode` | Nur Modell | `chat_completions` oder `responses`; ohne Angabe gilt das integrierte Standardprotokoll des Modells. Unterstützte Anbieter und Modelle stehen unter [LLM-Anbieter](./llm-providers.md). |
+
+Für Responses wird `apiMode` nur unter `providers.<provider>.models.<model>` konfiguriert. `effort` wird als `reasoning.effort` übertragen; `thinkingBudget` wird nicht an diese API gesendet. `maxCompletionTokens` legt das gesamte Ausgabelimit einschließlich Reasoning-Tokens fest und muss für DashScope Responses mindestens `16` betragen. Die Feldnamen in `settings.yml` bleiben beim Protokollwechsel gleich.
 
 Gültige modellbezogene Werte unter `providers.<provider>.models.<model>` überschreiben providerbezogene Werte. Ungültige numerische Werte werden ignoriert, sodass IaC Code auf den providerbezogenen Wert oder die eingebaute Modellrichtlinie zurückfällt.
 

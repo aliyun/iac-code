@@ -6,6 +6,7 @@ import copy
 import json
 from typing import Any
 
+from iac_code.i18n import _
 from iac_code.providers.base import Message, NonStreamingResponse, ToolDefinition
 from iac_code.types.stream_events import (
     StreamEvent,
@@ -24,11 +25,30 @@ _OUTPUT_TYPES = {"message", "reasoning", "function_call"}
 class ResponsesProtocolError(RuntimeError):
     """A response cannot be represented by the local agent contract."""
 
+    def __init__(self, message_id: str) -> None:
+        self.i18n_message_id = message_id
+        self.i18n_message_args: dict[str, Any] | None = None
+        super().__init__(_(message_id))
+
+
+class ResponsesConfigurationError(ValueError):
+    """A Responses configuration error with a deferred translation ID."""
+
+    def __init__(self, message_id: str) -> None:
+        self.i18n_message_id = message_id
+        self.i18n_message_args: dict[str, Any] | None = None
+        super().__init__(_(message_id))
+
 
 class ResponsesContextLimitError(RuntimeError):
     """Ask the owning agent to compact local history before one retry."""
 
     context_limit_exceeded = True
+
+    def __init__(self, message_id: str) -> None:
+        self.i18n_message_id = message_id
+        self.i18n_message_args: dict[str, Any] | None = None
+        super().__init__(_(message_id))
 
 
 def plain(value: Any) -> Any:

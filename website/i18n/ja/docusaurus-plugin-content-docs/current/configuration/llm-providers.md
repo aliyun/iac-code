@@ -76,3 +76,27 @@ CLI 引数 > 環境変数 > 設定ファイル
 | `IAC_CODE_MODEL` | モデル名 |
 | `IAC_CODE_BASE_URL` | 現在アクティブなプロバイダーの API エンドポイントを上書きします。保存済みの `apiBase` と組み込みの既定 URL より優先されます |
 | `IAC_CODE_API_KEY` | プロバイダー API キー |
+
+## Responses API
+
+OpenAI 形式のプロトコルを使うプロバイダーは、デフォルトで Chat Completions を使用します。登録済みの OpenAI モデル `gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna` は、デフォルトで Responses API を使用します。Anthropic プロバイダーは従来の Messages プロトコルを引き続き使用します。
+
+現在 Responses を利用できるのは、OpenAI 公式エンドポイントと、検証済みの標準 DashScope エンドポイントおよびモデル（`qwen3.8-max` など）です。Azure OpenAI、`openai_compatible`、DashScope Token Plan、CodingPlan プロバイダーは、この切り替えに対応していません。
+
+Qwen モデルで Responses を使うには、`settings.yml` に次のモデル単位の設定を追加します。
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: qwen3.8-max
+    models:
+      qwen3.8-max:
+        apiMode: responses
+```
+
+元に戻すには、`apiMode` を `chat_completions` に変更します。省略すると、モデルに組み込まれたデフォルトのプロトコルが使われます。標準 DashScope モデルのデフォルトは引き続き Chat Completions です。この設定は、指定したプロバイダーの指定したモデルにのみ適用されます。
+
+GPT-6 で明示的に Chat を選択した場合、Astra はツールを呼び出せません。Sol と Luna は `effort: none` の場合のみツールを呼び出せます。推論を有効にしたツール呼び出しには Responses を使用してください。
+
+リクエスト設定と出力上限は[実行時の設定](./runtime-configuration.md)を参照してください。

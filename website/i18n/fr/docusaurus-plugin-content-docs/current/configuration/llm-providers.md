@@ -76,3 +76,27 @@ CLI arguments > environment variables > configuration files
 | `IAC_CODE_MODEL` | Nom du modèle |
 | `IAC_CODE_BASE_URL` | Remplace le point de terminaison API du fournisseur actif ; prioritaire sur l’`apiBase` enregistré et l’URL intégrée par défaut |
 | `IAC_CODE_API_KEY` | Clé API du fournisseur |
+
+## Responses API
+
+Les fournisseurs utilisant le protocole OpenAI emploient Chat Completions par défaut. Les modèles OpenAI enregistrés `gpt-6-astra`, `gpt-6-sol` et `gpt-6-luna` utilisent Responses API par défaut. Les fournisseurs Anthropic conservent leur protocole Messages actuel.
+
+Responses est actuellement disponible pour le point de terminaison officiel d’OpenAI ainsi que les points de terminaison et modèles vérifiés de DashScope standard, comme `qwen3.8-max`. Azure OpenAI, `openai_compatible`, DashScope Token Plan et les fournisseurs CodingPlan ne prennent pas en charge ce changement.
+
+Pour utiliser Responses avec un modèle Qwen, ajoutez ce réglage au niveau du modèle dans `settings.yml` :
+
+```yaml
+activeProvider: dashscope
+providers:
+  dashscope:
+    model: qwen3.8-max
+    models:
+      qwen3.8-max:
+        apiMode: responses
+```
+
+Définissez `apiMode` sur `chat_completions` pour revenir au protocole précédent. En l’omettant, vous utilisez le protocole intégré par défaut du modèle ; pour les modèles DashScope standard, il reste Chat Completions. Le réglage s’applique uniquement au modèle indiqué pour le fournisseur indiqué.
+
+Si vous choisissez explicitement Chat pour GPT-6, Astra ne peut pas appeler d’outils ; Sol et Luna peuvent le faire uniquement avec `effort: none`. Utilisez Responses pour les appels d’outils avec raisonnement activé.
+
+Consultez la [configuration d’exécution](./runtime-configuration.md) pour les paramètres de requête et les limites de sortie.
