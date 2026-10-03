@@ -145,9 +145,32 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
                         for item in resources
                     ), 10000)
     codes: set[str] = set()
+    cleanup_attempts: list[dict[str, str]] = []
     for log in root.rglob("cleanup-*.log"):
         text = log.read_text(encoding="utf-8", errors="replace")
         codes.update(code for code in KNOWN_CODES if code in text)
+        for line in text.splitlines():
+            try:
+                value = json.loads(line)
+            except ValueError:
+                continue
+            item = value.get("cleanupDiagnostic") if isinstance(value, dict) else None
+            if not isinstance(item, dict):
+                continue
+            projected = {}
+            for key, allowed in {
+                "stage": {"get_stack", "delete_stack"},
+                "errorType": {"TimeoutError", "RuntimeError", "ConnectionError", "PermissionError", "SDKError"},
+                "code": {*KNOWN_CODES, "unknown"},
+                "status": {"CREATE_COMPLETE", "CREATE_IN_PROGRESS", "CREATE_FAILED", "DELETE_IN_PROGRESS",
+                           "DELETE_FAILED", "DELETE_COMPLETE", "ROLLBACK_IN_PROGRESS", "ROLLBACK_COMPLETE", "unknown"},
+            }.items():
+                if isinstance(item.get(key), str) and item[key] in allowed:
+                    projected[key] = item[key]
+            if projected:
+                cleanup_attempts.append(projected)
+    if cleanup_attempts:
+        facts["cleanup_attempt_diagnostics"] = cleanup_attempts[:16]
     if codes:
         facts["cleanup_known_codes"] = sorted(codes)
 

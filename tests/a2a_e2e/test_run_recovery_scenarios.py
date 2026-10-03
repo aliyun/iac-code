@@ -2793,6 +2793,9 @@ def test_rollback_accepts_security_group_deployment_from_handoff(monkeypatch) ->
             self.checks: dict[str, bool] = {}
             self.run_dir = Path("/tmp/fake")
 
+        def _ci_owned_prompt(self, text):
+            return text
+
         def start_stream(self, **_kwargs):
             return SimpleNamespace()
 
@@ -2815,6 +2818,7 @@ def test_rollback_accepts_security_group_deployment_from_handoff(monkeypatch) ->
     finish_kwargs: list[dict] = []
 
     def fake_finish_pipeline_after_possible_input(*_args, **kwargs):
+        assert _args[0].current_goal == runner.ROLLBACK_PROMPT
         finish_kwargs.append(kwargs)
 
     monkeypatch.setattr(runner, "_run_with_harness", fake_run_with_harness)

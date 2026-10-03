@@ -110,3 +110,15 @@ def test_completion_diagnostics_export_only_fixed_codes_and_validators(tmp_path)
     assert facts['complete_step_error_count'] == 1
     assert facts['completion_schema_validators'] == ['required']
     assert 'private-secret' not in json.dumps(facts)
+
+
+def test_cleanup_subprocess_diagnostics_export_only_known_fields(tmp_path):
+    (tmp_path / 'cleanup-private-stack.log').write_text(json.dumps({'cleanupDiagnostic': {
+        'stage': 'get_stack', 'status': 'DELETE_IN_PROGRESS', 'errorType': 'TimeoutError',
+        'code': 'unknown', 'stackId': 'private-stack', 'message': 'private-secret',
+    }}) + '\n' + json.dumps({'cleanupDiagnostic': {'stage': 'private-secret', 'status': 'private-stack'}}),
+        encoding='utf-8')
+    facts = collect_live_diagnostics(tmp_path, {})
+    assert facts['cleanup_attempt_diagnostics'] == [{
+        'stage': 'get_stack', 'status': 'DELETE_IN_PROGRESS', 'errorType': 'TimeoutError', 'code': 'unknown'}]
+    assert 'private-' not in json.dumps(facts)

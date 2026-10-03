@@ -3865,3 +3865,25 @@ def test_semantic_hint_cannot_satisfy_an_unmatched_acceptance_pattern(tmp_path, 
                        description='normal follow-up answered created VSwitch', timeout=1)
     assert pty._wait_diagnoses[-1]['semanticHint'] == 'expected_target_mentioned'
     assert not any(e.get('type') == 'expect' and e.get('passed') is True for e in pty.events)
+
+
+def test_candidate_controls_already_drained_require_real_unsubmitted_display_boundary(tmp_path, monkeypatch):
+    runner = _load_runner()
+    journal = tmp_path / 'projects/p/s/pipeline/display.jsonl'
+    journal.parent.mkdir(parents=True)
+    journal.write_text(json.dumps({'type': 'candidate_selection_ready'}) + '\n', encoding='utf-8')
+    class Pty:
+        env = {'IAC_CODE_CONFIG_DIR': str(tmp_path)}
+        transcript = 'Press number keys to select a candidate. Enter to confirm'
+        def expect_optional(self, *_args, **_kwargs):
+            raise AssertionError('controls already consumed')
+    monkeypatch.setattr(runner.time, 'sleep', lambda _: None)
+    pty = Pty()
+    args = runner.parse_args(['--allow-real-cloud'])
+    assert runner._durable_candidate_boundary(pty) in runner.CANDIDATE_SELECTION_PATTERNS
+    runner._expect_candidate_selection_ready(pty, args)
+    journal.write_text(journal.read_text() + json.dumps({'type': 'candidate_selection_submitted'}) + '\n',
+                       encoding='utf-8')
+    assert runner._durable_candidate_boundary(pty) is None
+    with pytest.raises(AssertionError, match='controls already consumed'):
+        runner._expect_candidate_selection_ready(pty, args)

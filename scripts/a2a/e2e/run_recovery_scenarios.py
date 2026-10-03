@@ -1835,6 +1835,9 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
             name_prefix="initial-running",
         )
         h.failure_stage = "rollback_completion"
+        # This fixture phrase does not contain the harness's generic intent-change
+        # markers. Supplemental questions must still use the new target after restart.
+        h.current_goal = h._ci_owned_prompt(ROLLBACK_PROMPT)
         rollback = h.start_stream(prompt=ROLLBACK_PROMPT, name="02-rollback-interrupt")
         _wait_any(
             [*observed_streams, rollback],

@@ -2857,6 +2857,12 @@ def _durable_candidate_boundary(pty: ReplPty) -> str | None:
     boundary = _durable_completion_boundary(pty)
     if boundary in PIPELINE_FULLY_COMPLETED_PATTERNS:
         raise RuntimeError("pipeline completed before candidate selection")
+    if boundary is None:
+        config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+        progress = _display_progress(config_dir)
+        if (_pending_repl_input_kind(config_dir) == "candidate_selection"
+            or progress.get("candidate_selection_ready", 0) > progress.get("candidate_selection_submitted", 0)):
+            return CANDIDATE_SELECTION_PATTERNS[0]
     return boundary
 
 
@@ -2866,6 +2872,16 @@ def _expect_candidate_selection_ready(
     *,
     require_live_refresh: bool = False,
 ) -> None:
+    # expect_any may find the durable checkpoint only after drain_output has
+    # consumed the renderer hint. Re-reading pexpect would wait for a prompt
+    # that is already on screen. Require the current candidate boundary and
+    # its captured controls together; a stale heading alone is insufficient.
+    config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+    if config_path and not require_live_refresh and _durable_candidate_boundary(pty) in CANDIDATE_SELECTION_PATTERNS:
+        if any(re.search(pattern, _normalize_transcript(pty.transcript[-4000:]))
+               for pattern in CANDIDATE_SELECTION_READY_PATTERNS):
+            time.sleep(0.25)
+            return
     controls_ready = pty.expect_optional(
         CANDIDATE_SELECTION_READY_PATTERNS,
         description="candidate selection controls ready",

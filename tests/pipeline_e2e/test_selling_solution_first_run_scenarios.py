@@ -4092,3 +4092,67 @@ def test_goal_override_rebuilds_scope_without_reusing_old_target_clauses(runner,
     assert facts_seen[0]['resource_scope'] == '只创建安全组，不创建 VSwitch'
     assert '部署旧 VSwitch' not in facts_seen[0]['constraints']
     assert facts_seen[0]['vpc_id'] == 'vpc-fixture'
+
+
+@pytest.mark.parametrize('profile', ['backup_restore', 'waiting_resume', 'input_during_backup'])
+def test_recovery_answers_use_fixture_target_instead_of_vague_initial_question(runner, profile):
+    runtime = SimpleNamespace(spec=SimpleNamespace(profile=profile), cidr='192.168.12.0/24', stack_name='iac-e2e-fake')
+    facts = runner._question_facts(runtime)
+    assert '创建一个 VSwitch' in facts['goal']
+    assert 'user_required' in facts['goal']
+    assert '不部署' in facts['goal']
+    assert '我有个产品要上线' not in facts['goal']
+    assert 'vpc_id' not in facts  # Still must exercise the Step 2 question.
+
+
+def test_rollback_stream_updates_question_goal_before_recovery(runner, monkeypatch):
+    runtime = SimpleNamespace(stack_name='iac-e2e-owned', current_goal='创建 VSwitch')
+    monkeypatch.setattr(runner, '_advance_a2a_to_pending', lambda *_args, **_kwargs: None)
+    plan = SimpleNamespace(confirmation_answers=[])
+    class Harness:
+        def start_stream(self, **kwargs):
+            assert runtime.current_goal == kwargs['prompt']
+            assert '只创建一个安全组' in runtime.current_goal
+            raise ValueError('boundary verified')
+    with pytest.raises(ValueError, match='boundary verified'):
+        runner._run_a2a_rollback_recovery(runtime, Harness(), object(), plan, runner.NEW_STEPS[0])
+
+
+def test_rollback_question_facts_include_existing_vpc_without_changing_new_target(runner, monkeypatch):
+    runtime = SimpleNamespace(spec=SimpleNamespace(profile='rollback_step1'), stack_name='iac-e2e-owned',
+                              cidr='192.168.12.0/24', current_goal='只创建安全组，不创建 VSwitch', env={},
+                              args=SimpleNamespace(python='python'))
+    monkeypatch.setattr(runner, 'network_facts', lambda *_args: {
+        'vpc_id': 'vpc-fixture', 'zone_id': 'cn-hangzhou-i', 'cidr': '192.168.12.0/24'})
+    facts = runner._question_facts(runtime)
+    assert facts['goal'] == runtime.current_goal
+    assert facts['vpc_id'] == 'vpc-fixture'
+
+
+def test_cleanup_stops_on_delete_failed_instead_of_reissuing_for_fifteen_minutes(
+    runner, tmp_path, monkeypatch, capsys,
+):
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.cloud.aliyun import ros_client
+    manifest = tmp_path / 'stack.json'
+    manifest.write_text(json.dumps({'stackId': 'private-stack', 'stackName': 'iac-e2e-owned'}), encoding='utf-8')
+    class Client:
+        deletes = 0
+        def get_stack(self, _request):
+            return SimpleNamespace(body=SimpleNamespace(to_map=lambda: {
+                'StackName': 'iac-e2e-owned', 'Status': 'DELETE_FAILED' if self.deletes else 'CREATE_COMPLETE'}))
+        def delete_stack(self, _request):
+            self.deletes += 1
+    client = Client()
+    monkeypatch.setattr(cloud_credentials, 'CloudCredentials', lambda: SimpleNamespace(
+        get_provider=lambda _: SimpleNamespace(region_id='cn-hangzhou')))
+    monkeypatch.setattr(ros_client.RosClientFactory, 'create', lambda *_args: client)
+    monkeypatch.setattr(sys, 'argv', ['cleanup', str(manifest)])
+    monkeypatch.setattr(time, 'sleep', lambda _: None)
+    with pytest.raises(RuntimeError, match='deletion failed after accepted delete'):
+        exec(runner._CLOUD_CLEANUP_CODE, {})
+    assert client.deletes == 1
+    diagnostic = json.loads(capsys.readouterr().out)['cleanupDiagnostic']
+    assert diagnostic['status'] == 'DELETE_FAILED'
+    assert diagnostic['stage'] == 'get_stack'
+    assert 'private-stack' not in json.dumps(diagnostic)

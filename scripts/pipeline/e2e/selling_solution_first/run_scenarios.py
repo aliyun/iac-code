@@ -1371,7 +1371,7 @@ def _question_facts(runtime: ScenarioRuntime) -> dict[str, str]:
     if not isinstance(facts, dict):
         facts = runtime.question_facts = {}
     profile = runtime.spec.profile
-    if profile == "step2_parameter" and "vpc_id" not in facts:
+    if (profile == "step2_parameter" or profile.startswith("rollback")) and "vpc_id" not in facts:
         supplied = {
             "vpc_id": getattr(runtime.args, "cleanup_vpc_id", ""),
             "zone_id": getattr(runtime.args, "cleanup_zone_id", ""),
@@ -1391,6 +1391,14 @@ def _question_facts(runtime: ScenarioRuntime) -> dict[str, str]:
         goal = (
             "只在杭州复用指定已有 VPC 创建 VSwitch；VpcId 和 ZoneId 必须逐项分别询问，"
             "每次只回答当前参数。两个答案收齐后进行 Preview 和询价，本轮不部署。"
+        )
+    elif profile in {"backup_restore", "input_during_backup", "waiting_resume"}:
+        # The vague initial prompt establishes the first question boundary.
+        # Answers describe the actual fixture goal, not that initial request to ask questions.
+        goal = (
+            "为阿里云杭州的测试应用复用已有 VPC 创建一个 VSwitch；先规划可选方案，"
+            "实现阶段 VpcId 为 user_required，必须向我询问，不能自行查询或默认选择。"
+            "可用区和其他非必填参数使用低成本推荐；本轮仅 Preview 和询价，不部署。"
         )
     facts["goal"] = getattr(runtime, "current_goal", "") or goal
     facts.setdefault("cidr", runtime.cidr)
@@ -1922,6 +1930,7 @@ def _run_a2a_rollback_recovery(
     )
     del confirmation
     new_intent = _rollback_new_intent(runtime)
+    runtime.current_goal = new_intent
     if plan.confirmation_answers:
         plan.confirmation_answers.pop(0)
     step1_stream = harness.start_stream(prompt=new_intent, name="rollback-new-intent-step1")
@@ -4027,9 +4036,11 @@ def _run_repl_waiting_resume_all(runtime: ScenarioRuntime, pty: Any) -> None:
     runtime.args.stream_timeout = min(runtime.args.stream_timeout, 600.0)
     _repl_submit_initial_prompt(pty, runtime)
     _restart_repl_at_waiting(pty, REPL_ASK_INPUT_READY_PATTERNS, runtime, "Step 1 ask")
-    _repl_submit_line_input(
-        pty,
-        "在杭州复用已有 VPC 创建一个 VSwitch；实现阶段再询问 VPC ID。",
+    pending = _pending_repl_parameter_question(runtime, set(), step_id=NEW_STEPS[0])
+    if pending is None:
+        raise RuntimeError("restored Step 1 question has no pending checkpoint")
+    _repl_submit_question_answer(
+        pty, runtime, _answer_runtime_question(runtime, pending[0]["payload"]), pending,
         label="restored-step1-ask-answer",
     )
     _restart_repl_at_waiting(pty, REPL_SELECTION_PATTERNS, runtime, "candidate selection")
@@ -5272,35 +5283,66 @@ def stack_not_found(exc):
     codes = ("entitynotexist.stack", "notfound.stack", "stacknotfound")
     return str(getattr(exc, "code", "")).lower() in codes or any(code in str(exc).lower() for code in codes)
 
-deadline = time.monotonic() + 900
-while time.monotonic() < deadline:
-    try:
-        actual = client.get_stack(request).body.to_map()
-    except Exception as exc:
-        if stack_not_found(exc):
-            print(json.dumps({"deleted": True, "notFound": True}))
-            raise SystemExit(0)
-        raise
-    if actual.get("StackName") != expected:
-        raise RuntimeError("Stack ownership mismatch; refusing delete")
-    status = actual.get("Status", "")
-    if status == "DELETE_COMPLETE":
-        print(json.dumps({"deleted": True, "status": status}))
-        raise SystemExit(0)
-    if status == "DELETE_IN_PROGRESS" or (isinstance(status, str) and status.endswith("_IN_PROGRESS")):
-        time.sleep(5)
-        continue
-    try:
-        client.delete_stack(ros_models.DeleteStackRequest(stack_id=stack_id, region_id=region))
-    except Exception as exc:
-        if stack_not_found(exc):
-            print(json.dumps({"deleted": True, "notFound": True}))
-            raise SystemExit(0)
-        message = str(exc).lower()
-        if "actioninprogress" not in message and "action in progress" not in message:
+diagnostic = {"stage": "get_stack", "status": "unknown"}
+def cleanup():
+    deadline = time.monotonic() + 900
+    delete_submitted = False
+    while time.monotonic() < deadline:
+        try:
+            diagnostic["stage"] = "get_stack"
+            actual = client.get_stack(request).body.to_map()
+        except Exception as exc:
+            if stack_not_found(exc):
+                print(json.dumps({"deleted": True, "notFound": True}))
+                raise SystemExit(0)
             raise
-    time.sleep(5)
-raise TimeoutError("timed out waiting for ROS Stack deletion")
+        if actual.get("StackName") != expected:
+            raise RuntimeError("Stack ownership mismatch; refusing delete")
+        status = actual.get("Status", "")
+        diagnostic["status"] = status if status in {
+            "CREATE_COMPLETE", "CREATE_IN_PROGRESS", "CREATE_FAILED", "DELETE_IN_PROGRESS", "DELETE_FAILED",
+            "DELETE_COMPLETE", "ROLLBACK_IN_PROGRESS", "ROLLBACK_COMPLETE",
+        } else "unknown"
+        if status == "DELETE_COMPLETE":
+            print(json.dumps({"deleted": True, "status": status}))
+            raise SystemExit(0)
+        if status == "DELETE_FAILED" and delete_submitted:
+            # Reissuing the same failed deletion for fifteen minutes cannot
+            # resolve its dependency. Preserve failure and diagnose the resource.
+            raise RuntimeError("ROS Stack deletion failed after accepted delete")
+        if status == "DELETE_IN_PROGRESS" or (isinstance(status, str) and status.endswith("_IN_PROGRESS")):
+            time.sleep(5)
+            continue
+        if delete_submitted:
+            time.sleep(5)
+            continue
+        try:
+            diagnostic["stage"] = "delete_stack"
+            client.delete_stack(ros_models.DeleteStackRequest(stack_id=stack_id, region_id=region))
+            delete_submitted = True
+        except Exception as exc:
+            if stack_not_found(exc):
+                print(json.dumps({"deleted": True, "notFound": True}))
+                raise SystemExit(0)
+            message = str(exc).lower()
+            if "actioninprogress" not in message and "action in progress" not in message:
+                raise
+        time.sleep(5)
+    raise TimeoutError("timed out waiting for ROS Stack deletion")
+
+try:
+    cleanup()
+except Exception as exc:
+    # Raw traceback remains private. Export only fixed stages/statuses and a known SDK code.
+    diagnostic["errorType"] = type(exc).__name__ if type(exc).__name__ in {
+        "TimeoutError", "RuntimeError", "ConnectionError", "PermissionError"} else "SDKError"
+    code = str(getattr(exc, "code", ""))
+    diagnostic["code"] = code if code in {
+        "Forbidden", "Forbidden.RAM", "SecurityTokenExpired", "InvalidAccessKeyId.NotFound",
+        "ActionInProgress", "Throttling", "Throttling.User", "DeleteFailed", "DependencyViolation"} else "unknown"
+    print(json.dumps({"cleanupDiagnostic": diagnostic}), flush=True)
+    raise
+
 """
 
 
