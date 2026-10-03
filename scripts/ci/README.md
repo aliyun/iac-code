@@ -13,7 +13,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite full --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --list --suite all
 ```
 
-`fast` 包含 6 个 A2A、REPL、Web API 确定性契约用例，包含修复后的 `e3a-recovery`；`full` 共 42 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 在已完成回合的安全交接点验证重启恢复；执行中快照的接管由执行控制拒绝。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract`。`--jobs` 限定为 1–8，默认 3。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
+`fast` 包含 6 个 A2A、REPL、Web API 确定性契约用例，包含修复后的 `e3a-recovery`；`full` 共 42 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 在已完成回合的安全交接点验证重启恢复；执行中快照的接管由执行控制拒绝。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
 
 所有用例子进程都设置 `IAC_CODE_TELEMETRY_E2E_USER_ID`，保证遥测中的 `user.id` 带有 `e2e`，供报表排除测试流量；真实用例同时在复制后的 `settings.yml` 中保留或写入该 ID。入口清除继承的 OTLP 导出目标。仅 A2A、REPL、Web 契约及 Selling、只读 canary 等明确使用 `ObserveCapture` 验证埋点的用例设置 `IAC_CODE_TELEMETRY_LOCAL_ONLY=1`，只向本机临时接收器发送；其他用例不配置本机接收器，使用正常远端遥测。即使源码版的 `__release_date__` 为空，显式的 E2E 用户 ID 也允许这些普通用例正常上报。
 
@@ -28,6 +28,30 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite live --jobs 4 \
 默认三文件模式下，凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 103 个：42 个 selling flow A2A/REPL 场景、8 个只读资源选择、16 个 REPL 旧场景、33 个 A2A 恢复场景、3 个 VPC 模板 smoke、1 个只读云 API canary。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety`、`live-repl` 或 `live-smoke`，也可用 `--case` 指定单个用例。三个 VPC smoke 只接收 LLM 与 settings 配置，使用隔离的 HOME，不接收云凭证；它们验证生成模板，不创建 VPC。并行 selling 场景各用独立的 `10.250.0.0/16` 子网池，避免独立进程重复预留同一 VSwitch CIDR；原 runner 单独运行仍沿用原池。31 个旧 A2A 恢复场景在 CI 中使用本次运行专属的 StackName，并在结束时核验和删除该名称下的 Stack；硬超时后由独立清理进程再次尝试。selling、REPL 旧用例和 A2A 恢复用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组。硬超时不代表清理成功，需检查报告和测试账号残留资源。
 
 CI 可改用 `--cloud-credential-helper /path/to/helper.py`，此时源目录只需 LLM 凭证和 `settings.yml`。Helper 接口为 `cloud --output <目标 .cloud-credentials.yml 路径>`；它在每个真实云用例开始前调用，长用例每 10 分钟调用一次，异常清理前也会再次调用。若 helper 需要独立 Python 环境，传 `--cloud-credential-python /path/to/python`。Helper 必须原子地写入私有权限文件，且不得在标准输出或错误输出打印凭证。模板 smoke 不调用 helper。本地原有的三文件运行方式继续支持。
+
+## 真实用例的模型池与思考强度
+
+真实套件默认采用滚动调度：文本用例使用 `deepseek-v4-flash-0731`、`glm-5.2-fast-preview`、`glm-5.3-prime`、`deepseek-v4.1-flash`，每模型最多两个用例；多模态用例使用 `qwen3.8-max`、`qwen3.8-max-0902`、`qwen3.8-flash`、`qwen3.8-omni-flash`，每模型最多一个用例。两类模型池不能互相借用，总共最多 12 个用例。仅有文本用例待运行时最多八个；仅有多模态用例时最多四个。
+
+用例完成并结束清理后立即补位。模型额度或资源锁不可用的用例在待执行队列中等待，不占 worker；五条共享清理锁的用例继续互斥。每个用例在整个运行、重启恢复和清理期间保持同一个模型，隔离配置中的 `modelFallbackEnabled: false` 禁止自动模型降级。模型的请求重试继续由产品处理，失败不会改用另一个模型掩盖结果。
+
+默认思考强度为 `low`。Qwen Flash 用 `thinkingBudget: 2048` 控制思考，此时不传 effort，避免 effort 覆盖预算。只改每个用例的配置副本，不改传入的配置目录或本机配置；`userID` 仍须包含 `e2e`。结构化报告、HTML、Markdown 和 JUnit 都记录分配模型与思考策略。
+
+```bash
+# 同类型模型各自有额度，总并发仍受 --jobs 限制
+uv run --no-sync python scripts/ci/run_e2e.py --suite live --jobs 16 \
+  --text-model-jobs 3 --multimodal-model-jobs 1 \
+  --credential-source-dir /path/to/test-config --allow-cloud-write
+
+# 失败复测沿用报告中的原模型
+uv run --no-sync python scripts/ci/run_e2e.py --case ssf-a2a-happy-multi-plan \
+  --text-model glm-5.2-fast-preview --jobs 1 \
+  --credential-source-dir /path/to/test-config --allow-cloud-write
+```
+
+`--text-model`、`--multimodal-model` 可重复使用以限制模型池。使用其他 provider 时加 `--no-model-pool` 沿用原来的模型配置。`--text-model-jobs` 和 `--multimodal-model-jobs` 可选 1–3；GLM Prime 始终最多两个测试用例，另预留一个跨进程共享的等待诊断位置。诊断位置忙时直接跳过本次建议，不等待，不影响场景判定。
+
+这些额度限制的是同时运行的用例，不是所有内部模型请求；实际 RPM/TPM 也受同账号其他调用影响。提高并发后需观察真实限流和运行机资源，不能根据小型请求探针保证长用例吞吐。
 
 ## CI 接入
 

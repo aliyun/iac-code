@@ -80,3 +80,32 @@ def test_diagnosis_accepts_fenced_json_response(tmp_path, monkeypatch) -> None:
     assert wait_diagnosis.diagnose_wait(tmp_path, expected="prompt", transcript="waiting") == {
         "state": "unknown", "confidence": 0.5,
     }
+
+
+def test_busy_shared_diagnosis_slot_never_waits_or_calls_llm(tmp_path, monkeypatch) -> None:
+    slot = tmp_path / "slot"
+    slot.mkdir()
+    monkeypatch.setenv("IAC_CODE_E2E_DIAGNOSIS_LOCK", str(slot))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("busy advisory slot must skip the network")
+
+    monkeypatch.setattr(wait_diagnosis, "_diagnose_wait", forbidden)
+    assert wait_diagnosis.diagnose_wait(tmp_path, expected="prompt", transcript="waiting")["failure"] == "busy"
+    assert slot.is_dir()
+
+
+def test_shared_diagnosis_slot_releases_on_failure(tmp_path, monkeypatch) -> None:
+    slot = tmp_path / "slot"
+    monkeypatch.setenv("IAC_CODE_E2E_DIAGNOSIS_LOCK", str(slot))
+
+    def fail(*args, **kwargs):
+        assert slot.is_dir()
+        raise RuntimeError("fixture")
+
+    monkeypatch.setattr(wait_diagnosis, "_diagnose_wait", fail)
+    import pytest
+
+    with pytest.raises(RuntimeError, match="fixture"):
+        wait_diagnosis.diagnose_wait(tmp_path, expected="prompt", transcript="waiting")
+    assert not slot.exists()

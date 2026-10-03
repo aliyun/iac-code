@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -52,6 +53,22 @@ def _safe_excerpt(config_dir: Path, transcript: str) -> str:
 
 
 def diagnose_wait(config_dir: Path, *, expected: str, transcript: str) -> dict[str, Any] | None:
+    """Skip instead of queuing when the shared advisory diagnosis slot is busy."""
+    lock = os.environ.get("IAC_CODE_E2E_DIAGNOSIS_LOCK")
+    if not lock:
+        return _diagnose_wait(config_dir, expected=expected, transcript=transcript)
+    slot = Path(lock)
+    try:
+        slot.mkdir(mode=0o700)
+    except OSError:
+        return {"state": "unavailable", "confidence": 0.0, "failure": "busy"}
+    try:
+        return _diagnose_wait(config_dir, expected=expected, transcript=transcript)
+    finally:
+        slot.rmdir()
+
+
+def _diagnose_wait(config_dir: Path, *, expected: str, transcript: str) -> dict[str, Any] | None:
     """Return a fixed-schema hint; API failures never affect the E2E outcome."""
     credentials = _mapping(config_dir / ".credentials.yml")
     key = credentials.get("dashscope")

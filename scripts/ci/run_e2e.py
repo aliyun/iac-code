@@ -17,7 +17,6 @@ import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -76,8 +75,11 @@ from iac_code.services.telemetry.identity import E2E_USER_ID_ENV, is_e2e_user_id
 from scripts.a2a.e2e.execution_control.run_execution_control_scenarios import SCENARIO_MODES  # noqa: E402
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import SCENARIOS as SELECTOR_SCENARIOS  # noqa: E402
 from scripts.a2a.e2e.run_recovery_scenarios import _SCENARIOS as A2A_RECOVERY_SCENARIOS  # noqa: E402
+from scripts.a2a.e2e.run_recovery_scenarios import MULTIMODAL_SCENARIOS as A2A_MULTIMODAL_SCENARIOS  # noqa: E402
+from scripts.ci.model_pool import MULTIMODAL_MODELS, TEXT_MODELS, ModelAssignment, scheduled_cases  # noqa: E402
 from scripts.pipeline.e2e.selling_solution_first.run_scenarios import SCENARIOS as SELLING_SCENARIOS  # noqa: E402
 from scripts.repl.e2e.run_pipeline_scenarios import _SCENARIOS as REPL_PIPELINE_SCENARIOS  # noqa: E402
+from scripts.repl.e2e.run_pipeline_scenarios import MULTIMODAL_SCENARIOS as REPL_MULTIMODAL_SCENARIOS  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -93,6 +95,7 @@ class Case:
     live_runner: str = "selling"
     resource_lock: str = ""
     group: str = ""
+    multimodal: bool = False
 
 
 class CloudCredentialSetupError(RuntimeError):
@@ -185,7 +188,7 @@ LIVE_CASES = tuple(
         "ssf-" + spec.name, LIVE_SCRIPT,
         ("--scenario", spec.name, "--cidr-pool", SELLING_CIDR_POOLS[index]), 2700, "live",
         cloud_write=spec.cloud_write, cleanup_grace=900,
-        resource_lock=spec.resource_lock, group=_selling_group(spec),
+        resource_lock=spec.resource_lock, group=_selling_group(spec), multimodal=spec.multimodal,
     )
     for index, spec in enumerate(SELLING_SCENARIOS)
     if spec.surface.value not in {"web", "desktop"}
@@ -200,7 +203,7 @@ LIVE_CASES = tuple(
     Case(
         "repl-pipeline-" + scenario, "scripts/repl/e2e/run_pipeline_scenarios.py",
         ("--scenario", scenario), 2700, "live", cloud_write=True,
-        cleanup_grace=900, live_runner="repl", group="repl",
+        cleanup_grace=900, live_runner="repl", group="repl", multimodal=scenario in REPL_MULTIMODAL_SCENARIOS,
         resource_lock="rollback-stack-cleanup" if "cleanup" in scenario else "",
     )
     for scenario in REPL_PIPELINE_SCENARIOS
@@ -218,6 +221,7 @@ LIVE_CASES = tuple(
         (("--deterministic",) if scenario == "fault-after-snapshot" else ()),
         2700, "live", cloud_write=True,
         cleanup_grace=900, live_runner="legacy_a2a", group="legacy",
+        multimodal=scenario in A2A_MULTIMODAL_SCENARIOS,
     )
     for scenario in A2A_RECOVERY_SCENARIOS
     if scenario not in {"redaction-step4", "iac-code-web-2c4g-step4"}
@@ -265,7 +269,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="fast",
     )
     parser.add_argument("--case", action="append", choices=sorted(case.name for case in CASES))
-    parser.add_argument("--jobs", type=int, default=3, help="Maximum simultaneously running cases")
+    parser.add_argument("--jobs", type=int, help="Maximum running cases (live: 12; offline: 3)")
+    parser.add_argument("--no-model-pool", action="store_true", help="Keep original model selection")
+    parser.add_argument("--text-model", action="append", choices=TEXT_MODELS, help="Restrict text pool; repeatable")
+    parser.add_argument("--multimodal-model", action="append", choices=MULTIMODAL_MODELS,
+                        help="Restrict multimodal pool; repeatable")
+    parser.add_argument("--text-model-jobs", type=int, choices=(1, 2, 3), default=2)
+    parser.add_argument("--multimodal-model-jobs", type=int, choices=(1, 2, 3), default=1)
     parser.add_argument("--run-dir", type=Path, default=REPO_ROOT / "ci-e2e-report")
     parser.add_argument("--credential-source-dir", type=Path)
     parser.add_argument("--cloud-credential-helper", type=Path)
@@ -273,9 +283,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--allow-cloud-write", action="store_true")
     parser.add_argument("--list", action="store_true", help="Show the allowlist and exclusions without running")
     args = parser.parse_args(argv)
-    if args.jobs < 1 or args.jobs > 8:
-        parser.error("--jobs must be between 1 and 8")
     selected = select_cases(args)
+    if args.jobs is None:
+        args.jobs = 12 if any(case.suite == "live" for case in selected) else 3
+    if args.jobs < 1 or args.jobs > 16:
+        parser.error("--jobs must be between 1 and 16")
     if not args.list and any(case.suite == "live" for case in selected):
         if args.credential_source_dir is None:
             parser.error("live cases require --credential-source-dir")
@@ -863,11 +875,41 @@ def _failure_details(summary: dict[str, Any] | None) -> tuple[list[str], list[st
     return failed_checks, notes
 
 
+def _prepare_model_settings(path: Path, assignment: ModelAssignment) -> None:
+    settings = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(settings, dict) or settings.get("activeProvider") != "dashscope":
+        raise ValueError("model pools require DashScope settings; use --no-model-pool for custom providers")
+    effort = None if assignment.thinking_budget else assignment.effort
+    settings["effort"] = effort
+    providers = settings.setdefault("providers", {})
+    provider = providers.setdefault("dashscope", {})
+    provider.update({
+        "model": assignment.model, "effort": effort,
+        "thinkingEnabled": True, "modelFallbackEnabled": False,
+    })
+    # Model-specific saved policies override provider defaults. Override only in
+    # this case's copy, including potential fallback models, never the user's file.
+    policies = provider.setdefault("models", {})
+    for model in TEXT_MODELS + MULTIMODAL_MODELS:
+        policy = policies.setdefault(model, {})
+        policy.update({"effort": assignment.effort, "thinkingEnabled": True, "modelFallbackEnabled": False})
+        policy.pop("thinkingBudget", None)
+    provider.pop("thinkingBudget", None)
+    if assignment.thinking_budget is not None:
+        policies[assignment.model]["effort"] = None
+        policies[assignment.model]["thinkingBudget"] = assignment.thinking_budget
+    path.write_text(yaml.safe_dump(settings, allow_unicode=True), encoding="utf-8")
+    path.chmod(0o600)
+
+
 def run_case(
     case: Case, run_dir: Path, credential_source_dir: Path | None = None,
     cloud_credential_helper: Path | None = None,
     cloud_credential_python: Path | None = None,
+    model_assignment: ModelAssignment | None = None,
 ) -> dict[str, Any]:
+    if model_assignment is not None and model_assignment.multimodal != case.multimodal:
+        raise ValueError("model assignment does not match the case modality")
     case_dir = run_dir / "runs" / case.name
     case_dir.mkdir(parents=True, exist_ok=True)
     (case_dir / "summary.json").unlink(missing_ok=True)
@@ -896,6 +938,12 @@ def run_case(
             shutil.copyfile(credential_source_dir / filename, destination)
             destination.chmod(0o600)
         case_user_id = _prepare_e2e_user_id(source_config_dir / "settings.yml")
+        if model_assignment is not None:
+            _prepare_model_settings(source_config_dir / "settings.yml", model_assignment)
+            if case.live_runner != "smoke":
+                command.extend(("--model", model_assignment.model))
+                if case.live_runner != "canary":
+                    command.extend(("--provider", "dashscope"))
         if case.live_runner != "smoke" and cloud_credential_helper is not None:
             _prepare_cloud_credentials(cloud_credential_helper, source_config_dir, cloud_credential_python)
         if case.live_runner != "smoke":
@@ -903,21 +951,22 @@ def run_case(
         if case.live_runner == "selling":
             command.extend(
                 ("--concurrency", "1", "--inherit-settings", "--credential-source-dir",
-                 str(source_config_dir if cloud_credential_helper is not None else credential_source_dir))
+                 str(source_config_dir))
             )
             if case.cloud_write:
                 command.append("--allow-cloud-write")
         elif case.live_runner == "selector":
             command.extend(("--source-config-dir", str(source_config_dir)))
         elif case.live_runner == "canary":
-            command.extend(("--source-config-dir", str(
-                source_config_dir if cloud_credential_helper is not None else credential_source_dir
-            )))
+            command.extend(("--source-config-dir", str(source_config_dir)))
         elif case.live_runner == "repl":
             command.extend(("--source-config-dir", str(source_config_dir)))
     if case in FAST_CASES or (case.suite == "live" and case.live_runner != "smoke"):
         command.extend(("--python", sys.executable))
     case_env = _case_env(case_dir, case, case_user_id)
+    if model_assignment is not None:
+        case_env.update({"IAC_CODE_PROVIDER": "dashscope", "IAC_CODE_MODEL": model_assignment.model})
+        case_env["IAC_CODE_E2E_DIAGNOSIS_LOCK"] = str(run_dir.resolve() / ".diagnosis-slot")
     if case.live_runner == "smoke":
         isolated_home = case_dir / "home"
         isolated_home.mkdir(mode=0o700, exist_ok=True)
@@ -1023,6 +1072,7 @@ def run_case(
     notes.extend(safe_audit_notes)
     result = {
         "name": case.name,
+        **(model_assignment.report() if model_assignment else {}),
         "status": "passed" if passed else "timeout" if timed_out else "failed",
         "durationSeconds": round(time.monotonic() - started, 2),
         "timeoutSeconds": case.timeout,
@@ -1089,6 +1139,17 @@ def _report_label(value: str | None, labels: dict[str, str]) -> str:
     return labels.get(value, "未知") if value else "—"
 
 
+def _model_label(result: dict[str, Any]) -> str:
+    model = result.get("model")
+    if not model:
+        return "—"
+    thinking = (
+        "预算 {} tokens".format(result["thinkingBudget"])
+        if result.get("thinkingBudget") else str(result.get("reasoningEffort", "—"))
+    )
+    return "{} / {}".format(model, thinking)
+
+
 def _write_junit(run_dir: Path, results: list[dict[str, Any]]) -> None:
     suite = ET.Element(
         "testsuite",
@@ -1103,6 +1164,10 @@ def _write_junit(run_dir: Path, results: list[dict[str, Any]]) -> None:
             ET.SubElement(case, "failure", message=_reason(result), type=result["status"]).text = (
                 result["stderrTail"] or result["stdoutTail"]
             )
+        properties = ET.SubElement(case, "properties")
+        for key in ("model", "modelKind", "reasoningEffort", "thinkingBudget"):
+            if result.get(key) is not None:
+                ET.SubElement(properties, "property", name=key, value=str(result[key]))
         ET.SubElement(case, "system-out").text = result["stdoutTail"]
     ET.indent(suite)
     ET.ElementTree(suite).write(run_dir / "junit.xml", encoding="utf-8", xml_declaration=True)
@@ -1128,14 +1193,15 @@ def _write_reports(run_dir: Path, results: list[dict[str, Any]], elapsed: float)
         "",
         "**{} / {} 通过** · 总耗时 {:.1f} 秒 · 并行执行".format(passed, len(results), elapsed),
         "",
-        "| 用例 | 结果 | 耗时 | 清理 | 初步线索 |",
-        "| --- | --- | ---: | --- | --- |",
+        "| 用例 | 模型 / 思考 | 结果 | 耗时 | 清理 | 初步线索 |",
+        "| --- | --- | --- | ---: | --- | --- |",
     ]
     for result in results:
         reason = "—" if result["status"] == "passed" else _reason(result).replace("|", "\\|").replace("\n", " ")
         lines.append(
-            "| [{}]({}ci-result.json) | {} | {:.1f}s | {} | {} |".format(
-                result["name"], result["artifacts"], _report_label(result["status"], RESULT_LABELS),
+            "| [{}]({}ci-result.json) | {} | {} | {:.1f}s | {} | {} |".format(
+                result["name"], result["artifacts"], _model_label(result),
+                _report_label(result["status"], RESULT_LABELS),
                 result["durationSeconds"], _report_label(result.get("cleanupStatus"), CLEANUP_LABELS), reason,
             )
         )
@@ -1167,10 +1233,10 @@ def _write_reports(run_dir: Path, results: list[dict[str, Any]], elapsed: float)
             else '<a href="{}stdout.log">stdout</a> · <a href="{}stderr.log">stderr</a>'.format(artifact, artifact)
         )
         cards.append(
-            '<details><summary><b>{}</b> · {} · {:.1f}s</summary><p>{}</p>'
+            '<details><summary><b>{}</b> · {} · {:.1f}s</summary><p>{}</p><p>模型 / 思考：{}</p>'
             '<p><a href="{}ci-result.json">结构化结果</a> · {}</p><pre>{}</pre></details>'.format(
                 html.escape(result["name"]), _report_label(result["status"], RESULT_LABELS),
-                result["durationSeconds"], detail,
+                result["durationSeconds"], detail, html.escape(_model_label(result)),
                 artifact, log_links, log,
             )
         )
@@ -1194,64 +1260,58 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     args.run_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
-    locks = {case.resource_lock: threading.Lock() for case in selected if case.resource_lock}
+    def execute(case: Case, assignment: ModelAssignment | None) -> dict[str, Any]:
+        print("START {} · {}".format(case.name, _model_label(assignment.report()) if assignment else "默认模型"),
+              flush=True)
+        return run_case(
+            case, args.run_dir, args.credential_source_dir,
+            args.cloud_credential_helper, args.cloud_credential_python, assignment,
+        )
 
-    def run_with_lock(case: Case) -> dict[str, Any]:
-        lock = locks.get(case.resource_lock)
-        if lock is None:
-            return run_case(
-                case, args.run_dir, args.credential_source_dir,
-                args.cloud_credential_helper, args.cloud_credential_python,
+    completed = {}
+    for case, assignment, future in scheduled_cases(
+        selected, args.jobs, execute, enabled=not args.no_model_pool,
+        text_models=tuple(dict.fromkeys(args.text_model or TEXT_MODELS)),
+        multimodal_models=tuple(dict.fromkeys(args.multimodal_model or MULTIMODAL_MODELS)),
+        text_jobs=args.text_model_jobs, multimodal_jobs=args.multimodal_model_jobs,
+    ):
+        try:
+            result = future.result()
+        except Exception as exc:
+            if case.suite != "live":
+                error = "{}: {}".format(type(exc).__name__, exc)
+            elif isinstance(exc, CloudCredentialSetupError):
+                error = "cloud credential setup failed; inspect CI job log"
+            else:
+                error = "runner exception; inspect CI job log"
+            result = {
+                "name": case.name,
+                **(assignment.report() if assignment else {}),
+                "status": "failed",
+                "durationSeconds": 0,
+                "timeoutSeconds": case.timeout,
+                "returnCode": None,
+                "command": [case.name],
+                "summary": None,
+                "failedChecks": [],
+                "notes": [],
+                "cleanupStatus": "unverified" if case.suite == "live" else None,
+                "error": error,
+                "stdoutTail": "",
+                "stderrTail": "",
+                "live": case.suite == "live",
+                "artifacts": "runs/{}/".format(case.name),
+            }
+            case_dir = args.run_dir / result["artifacts"]
+            case_dir.mkdir(parents=True, exist_ok=True)
+            (case_dir / "ci-result.json").write_text(
+                json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-        with lock:
-            return run_case(
-                case, args.run_dir, args.credential_source_dir,
-                args.cloud_credential_helper, args.cloud_credential_python,
-            )
-
-    with ThreadPoolExecutor(max_workers=min(args.jobs, len(selected))) as pool:
-        futures = {
-            pool.submit(run_with_lock, case): case for case in selected
-        }
-        completed = {}
-        for future in as_completed(futures):
-            case = futures[future]
-            try:
-                result = future.result()
-            except Exception as exc:
-                if case.suite != "live":
-                    error = "{}: {}".format(type(exc).__name__, exc)
-                elif isinstance(exc, CloudCredentialSetupError):
-                    error = "cloud credential setup failed; inspect CI job log"
-                else:
-                    error = "runner exception; inspect CI job log"
-                result = {
-                    "name": case.name,
-                    "status": "failed",
-                    "durationSeconds": 0,
-                    "timeoutSeconds": case.timeout,
-                    "returnCode": None,
-                    "command": [case.name],
-                    "summary": None,
-                    "failedChecks": [],
-                    "notes": [],
-                    "cleanupStatus": "unverified" if case.suite == "live" else None,
-                    "error": error,
-                    "stdoutTail": "",
-                    "stderrTail": "",
-                    "live": case.suite == "live",
-                    "artifacts": "runs/{}/".format(case.name),
-                }
-                case_dir = args.run_dir / result["artifacts"]
-                case_dir.mkdir(parents=True, exist_ok=True)
-                (case_dir / "ci-result.json").write_text(
-                    json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-            completed[result["name"]] = result
-            print(
-                "{} {} ({:.1f}s)".format(result["status"].upper(), result["name"], result["durationSeconds"]),
-                flush=True,
-            )
+        completed[result["name"]] = result
+        print(
+            "{} {} ({:.1f}s)".format(result["status"].upper(), result["name"], result["durationSeconds"]),
+            flush=True,
+        )
     results = [completed[case.name] for case in selected]
     _write_reports(args.run_dir, results, time.monotonic() - started)
     print("报告：{}".format(args.run_dir / "report.md"), flush=True)
