@@ -10,7 +10,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -170,7 +170,8 @@ def _select_facts(config_dir: Path, pending: dict[str, Any], facts: dict[str, st
 
 def answer_question(config_dir: Path, pending: dict[str, Any], facts: dict[str, str],
                     counts: dict[str, int], diagnostics: dict[str, Any], *,
-                    conversation: QuestionConversation | None = None) -> tuple[str, str]:
+                    conversation: QuestionConversation | None = None,
+                    fact_resolver: Callable[[tuple[str, ...]], dict[str, str]] | None = None) -> tuple[str, str]:
     """Return (transport text, fact category); option IDs use the native A2A protocol."""
     question = str(pending.get('question') or '')
     if not question.strip():
@@ -196,6 +197,21 @@ def answer_question(config_dir: Path, pending: dict[str, Any], facts: dict[str, 
         if isinstance(missing, list) and missing:
             fields = sorted({k if isinstance(k, str) and k in FACT_FIELDS else 'other'
                              for k in missing if not isinstance(k, str) or k not in facts})[:10]
+            if fields and fact_resolver is not None:
+                supplied = fact_resolver(tuple(fields))
+                # Resolve only the facts requested by the helper. A provider
+                # cannot replace the scenario goal or inject unrelated answers.
+                resolved = {k: v for k, v in supplied.items()
+                            if k in fields and isinstance(v, str) and v.strip()}
+                facts.update(resolved)
+                keys = chosen.get('fact_keys')
+                chosen = {**chosen, 'fact_keys': list(dict.fromkeys(
+                    (keys if isinstance(keys, list) and all(isinstance(k, str) for k in keys) else [])
+                    + list(resolved)
+                ))}
+                fields = [k for k in fields if k not in facts]
+                if resolved:
+                    diagnostics['question_driver_resolved_fields'] = sorted(resolved)
             if fields:
                 diagnostics['question_driver_missing_fields'] = fields
                 raise RuntimeError('question requires unavailable case facts: ' + ', '.join(fields))

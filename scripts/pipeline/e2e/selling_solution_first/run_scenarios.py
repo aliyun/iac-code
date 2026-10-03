@@ -1405,6 +1405,23 @@ def _question_facts(runtime: ScenarioRuntime) -> dict[str, str]:
     return case_facts(facts['goal'], facts)
 
 
+def _resolve_runtime_question_facts(runtime: ScenarioRuntime, requested: tuple[str, ...]) -> dict[str, str]:
+    """Resolve fixture parameters on demand, after the question actually asks for them."""
+    if not set(requested).intersection({"vpc_id", "zone_id", "cidr"}):
+        return {}
+    supplied = getattr(runtime, "network_question_facts", None)
+    if not isinstance(supplied, dict):
+        supplied = {
+            "vpc_id": getattr(runtime.args, "cleanup_vpc_id", ""),
+            "zone_id": getattr(runtime.args, "cleanup_zone_id", ""),
+            "cidr": runtime.cidr,
+        }
+        if not supplied["vpc_id"] or not supplied["zone_id"]:
+            supplied = network_facts(runtime.args.python, runtime.env, REPO_ROOT, runtime.cidr)
+        runtime.network_question_facts = supplied
+    return {k: v for k, v in supplied.items() if k in requested}
+
+
 def _answer_runtime_question(
     runtime: ScenarioRuntime, pending: dict[str, Any], *, goal_override: str = ""
 ) -> str:
@@ -1420,8 +1437,11 @@ def _answer_runtime_question(
     counts = getattr(runtime, "question_counts", None)
     if not isinstance(counts, dict):
         counts = runtime.question_counts = {}
-    answer, category = answer_question(runtime.paths.config_dir, driver_pending, facts, counts, runtime.diagnostics,
-                                      conversation=question_conversation(runtime))
+    answer, category = answer_question(
+        runtime.paths.config_dir, driver_pending, facts, counts, runtime.diagnostics,
+        conversation=question_conversation(runtime),
+        fact_resolver=lambda requested: _resolve_runtime_question_facts(runtime, requested),
+    )
     fields = getattr(runtime, "answered_parameter_fields", None)
     if not isinstance(fields, set):
         fields = runtime.answered_parameter_fields = set()
@@ -3136,7 +3156,7 @@ def _repl_wait_selection(
         payload = event.get("payload", {})
         if question_index >= 4 or payload.get("kind") != "ask_user_question":
             raise RuntimeError("candidate planning did not reach selection after four clarification asks")
-        _repl_wait_ask(pty, runtime, description="Step 1 rollback clarification", allow_captured_prompt=True)
+        _repl_wait_ask(pty, runtime, description="Step 1 clarification question", allow_captured_prompt=True)
         answer = _answer_runtime_question(runtime, payload, goal_override=clarification_answer or "")
         if not payload.get("allow_free_text", True):
             answer = str(1 + next(

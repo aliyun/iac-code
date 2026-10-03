@@ -212,3 +212,35 @@ def test_history_payload_is_redacted_without_sending_tool_ids(tmp_path, monkeypa
     driver.answer_question(tmp_path, {'question': '还是什么用途?'}, {'goal': '仅规划', 'purpose': '测试'},
                            {}, diagnostics, conversation=context)
     assert diagnostics['question_driver_repeat_count'] == 1
+
+
+def test_missing_fixture_is_resolved_only_after_helper_requests_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, '_select_facts', lambda _config, _pending, facts: {
+        'fact_keys': ['constraints'], 'missing_fields': ['vpc_id'], 'question_type': 'new'})
+    requested = []
+    def resolve(fields):
+        requested.append(fields)
+        return {'vpc_id': 'vpc-fixture', 'goal': 'deploy everything', 'zone_id': 'unrequested-zone'}
+    counts, diagnostics = {}, {}
+    answer, category = driver.answer_question(tmp_path, {'question': 'VpcId?'},
+        {'goal': '复用已有 VPC，本轮不部署', 'constraints': '本轮不部署'}, counts, diagnostics,
+        fact_resolver=resolve)
+    assert requested == [('vpc_id',)]
+    assert 'vpc-fixture' in answer and '本轮不部署' in answer
+    assert 'deploy everything' not in answer and 'unrequested-zone' not in answer
+    assert category == 'vpc_id'
+    assert sum(counts.values()) == 1
+    assert diagnostics['question_driver_resolved_fields'] == ['vpc_id']
+
+
+def test_unresolved_missing_fact_still_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, '_select_facts', lambda *_: {'missing_fields': ['vpc_id']})
+    with pytest.raises(RuntimeError, match='unavailable case facts: vpc_id'):
+        driver.answer_question(tmp_path, {'question': 'VpcId?'}, {'goal': '仅规划'}, {}, {},
+            fact_resolver=lambda _fields: {'vpc_id': '', 'goal': 'fake replacement'})
+
+
+def test_existing_facts_do_not_trigger_resolver(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, '_select_facts', lambda *_: {'fact_keys': ['goal']})
+    driver.answer_question(tmp_path, {'question': '用途?'}, {'goal': '仅规划'}, {}, {},
+        fact_resolver=lambda _: pytest.fail('must not fetch unrequested network facts'))

@@ -4156,3 +4156,38 @@ def test_cleanup_stops_on_delete_failed_instead_of_reissuing_for_fifteen_minutes
     assert diagnostic['status'] == 'DELETE_FAILED'
     assert diagnostic['stage'] == 'get_stack'
     assert 'private-stack' not in json.dumps(diagnostic)
+
+
+def test_network_question_facts_are_lazy_requested_only_and_cached(runner, monkeypatch):
+    runtime = SimpleNamespace(args=SimpleNamespace(python='python'), env={}, cidr='10.250.1.0/24')
+    calls = []
+    def fetch(*_args):
+        calls.append('read-only')
+        return {'vpc_id': 'vpc-fixture', 'zone_id': 'cn-hangzhou-i', 'cidr': '10.251.1.0/24'}
+    monkeypatch.setattr(runner, 'network_facts', fetch)
+    assert runner._resolve_runtime_question_facts(runtime, ('purpose',)) == {}
+    assert calls == []
+    assert runner._resolve_runtime_question_facts(runtime, ('vpc_id',)) == {'vpc_id': 'vpc-fixture'}
+    assert runner._resolve_runtime_question_facts(runtime, ('zone_id',)) == {'zone_id': 'cn-hangzhou-i'}
+    assert calls == ['read-only']
+    assert runtime.cidr == '10.250.1.0/24'
+
+
+def test_step1_question_wait_records_the_description_required_by_acceptance(runner, tmp_path, monkeypatch):
+    runtime = SimpleNamespace(repl_candidate_wait_count=0, args=SimpleNamespace(stream_timeout=1), diagnostics={})
+    pty = SimpleNamespace(events=[], transcript='', drain_output=lambda: None)
+    question = {'type': 'user_input_required', 'step_id': runner.NEW_STEPS[0],
+                'payload': {'kind': 'ask_user_question', 'tool_use_id': 'question-1'}}
+    candidate = {'type': 'candidate_selection_ready', 'step_id': runner.NEW_STEPS[0]}
+    answers = iter([(question, tmp_path / 'meta.yaml'), (candidate, tmp_path / 'display.jsonl')])
+    monkeypatch.setattr(runner, '_wait_repl_display_event', lambda *_args, **_kwargs: next(answers))
+    def ready(_pty, _runtime, *, description, **_kwargs):
+        pty.events.append({'type': 'expect', 'description': description + ' input ready'})
+    monkeypatch.setattr(runner, '_repl_wait_ask', ready)
+    monkeypatch.setattr(runner, '_answer_runtime_question', lambda *_args, **_kwargs: '仅规划')
+    monkeypatch.setattr(runner, '_repl_submit_question_answer', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner.time, 'sleep', lambda _: None)
+    runner._repl_wait_selection(pty, runtime)
+    assert runner._repl_step1_clarification_checks(pty.events, [])[0] is True
+    # The same prompt after selection must still fail the unchanged ordering check.
+    assert runner._repl_step1_clarification_checks(list(reversed(pty.events)), [])[0] is False
