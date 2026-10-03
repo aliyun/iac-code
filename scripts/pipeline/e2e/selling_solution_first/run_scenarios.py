@@ -2016,6 +2016,33 @@ def _run_a2a_rollback_recovery(
     _continue_a2a_from_summary(runtime, harness, a2a, plan, recovered)
 
 
+def _backup_checkpoint_is_current(primary: Path, backup: Path, session_id: str) -> bool:
+    """A directory may contain an older asynchronously published checkpoint."""
+    from iac_code.services.session_backup import BACKUP_STATE_FILENAME
+    from iac_code.services.session_backup_state import SessionBackupState, SessionBackupStateError
+
+    try:
+        primary_marker = primary / BACKUP_STATE_FILENAME
+        backup_marker = backup / BACKUP_STATE_FILENAME
+        primary_state = SessionBackupState.from_dict(json.loads(primary_marker.read_text(encoding="utf-8")))
+        backup_bytes = backup_marker.read_bytes()
+        backup_state = SessionBackupState.from_dict(json.loads(backup_bytes), shared=True)
+        if (primary_state.session_id != session_id or backup_state.session_id != session_id
+            or primary_state.status != "succeeded" or primary_state.generation == 0
+            or not primary_state.same_lineage(backup_state)):
+            return False
+        for filename in ("meta.yaml", "context.yaml"):
+            if (primary / "pipeline" / filename).read_bytes() != (backup / "pipeline" / filename).read_bytes():
+                return False
+        # Publication writes the commit marker last. Reject a concurrently
+        # changing source or shared checkpoint instead of deleting the primary.
+        return (backup_marker.read_bytes() == backup_bytes
+                and SessionBackupState.from_dict(json.loads(primary_marker.read_text(encoding="utf-8")))
+                .same_lineage(primary_state))
+    except (OSError, ValueError, SessionBackupStateError):
+        return False
+
+
 def _backup_restore_hook(
     runtime: ScenarioRuntime, harness: Any, a2a: Any
 ) -> tuple[Callable[[str, str, Any], bool], set[str]]:
@@ -2037,18 +2064,20 @@ def _backup_restore_hook(
         cwd, session_id = a2a._pipeline_session_identity(harness)
         primary_storage = a2a.SessionStorage(projects_dir=runtime.paths.config_dir / "projects")
         backup_storage = a2a.SessionStorage(projects_dir=runtime.paths.backup_dir / "projects")
+        primary_session = primary_storage.v2_session_dir(cwd, session_id)
+        if primary_session is None or not primary_session.is_dir():
+            raise RuntimeError(f"primary session is unavailable for {key}")
         deadline = time.monotonic() + runtime.args.timeout
         backup_session = None
         while time.monotonic() < deadline:
             backup_session = backup_storage.v2_session_dir(cwd, session_id)
-            if backup_session is not None and backup_session.is_dir():
+            if backup_session is not None and _backup_checkpoint_is_current(
+                primary_session, backup_session, session_id
+            ):
                 break
             time.sleep(0.25)
-        if backup_session is None or not backup_session.is_dir():
-            raise RuntimeError(f"backup session was not written for {key}")
-        primary_session = primary_storage.v2_session_dir(cwd, session_id)
-        if primary_session is None or not primary_session.is_dir():
-            raise RuntimeError(f"primary session is unavailable for {key}")
+        else:
+            raise RuntimeError(f"current backup checkpoint was not published for {key}")
         primary_resolved = primary_session.resolve()
         config_projects = (runtime.paths.config_dir / "projects").resolve()
         if config_projects not in primary_resolved.parents or primary_resolved.name != session_id:

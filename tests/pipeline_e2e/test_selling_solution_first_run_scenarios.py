@@ -4191,3 +4191,27 @@ def test_step1_question_wait_records_the_description_required_by_acceptance(runn
     assert runner._repl_step1_clarification_checks(pty.events, [])[0] is True
     # The same prompt after selection must still fail the unchanged ordering check.
     assert runner._repl_step1_clarification_checks(list(reversed(pty.events)), [])[0] is False
+
+
+def test_backup_directory_does_not_prove_current_checkpoint(runner, tmp_path):
+    from iac_code.services.session_backup_state import SessionBackupState
+    primary, backup = tmp_path / 'primary', tmp_path / 'backup'
+    state = SessionBackupState.bootstrap('session-1', writer_id='writer').committed_next(
+        commit_id='commit-1', reason='pipeline_waiting_input', writer_id='writer', proofs={})
+    for path in (primary, backup):
+        (path / 'pipeline').mkdir(parents=True)
+        (path / '.backup-state.json').write_text(json.dumps(state.to_dict()), encoding='utf-8')
+        (path / 'pipeline/meta.yaml').write_text('current_step: step1\n', encoding='utf-8')
+        (path / 'pipeline/context.yaml').write_text('value: same\n', encoding='utf-8')
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is True
+    newer = state.committed_next(commit_id='commit-2', reason='pipeline_waiting_input', writer_id='writer', proofs={})
+    (primary / '.backup-state.json').write_text(json.dumps(newer.to_dict()), encoding='utf-8')
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is False
+    (backup / '.backup-state.json').write_text(json.dumps(newer.to_dict()), encoding='utf-8')
+    (backup / 'pipeline/meta.yaml').write_text('current_step: stale\n', encoding='utf-8')
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is False
+    (backup / 'pipeline/meta.yaml').write_text('current_step: step1\n', encoding='utf-8')
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is True
+    assert runner._backup_checkpoint_is_current(primary, backup, 'other-session') is False
+    (backup / 'pipeline/context.yaml').unlink()
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is False
