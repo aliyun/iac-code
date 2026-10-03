@@ -33,6 +33,9 @@ PROMPT_MARKER = "[E5_REAL_ALIYUN_READONLY]"
 PROMPT = (
     "这是只读 E2E canary。必须且只能调用一次 aliyun_api：product=vpc，version=2016-04-28，"
     "action=DescribeVpcs，params 仅包含 PageSize=10；禁止调用任何写操作。工具返回后简短回答。"
+    '工具入参必须为 JSON：{"product":"vpc","version":"2016-04-28",'
+    '"action":"DescribeVpcs","params":{"PageSize":10}}。'
+    'PageSize 是整数；RegionId 由运行时配置提供，params 不得加入 RegionId 或 PageNumber。'
     + PROMPT_MARKER
 )
 CONFIG_FILES = (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
@@ -111,6 +114,10 @@ def main(argv: list[str] | None = None) -> int:
             "canary_allowed_call_count": sum(_is_allowed_describe_vpcs(x) for x in tool_uses),
             "canary_wrong_action_count": sum(x.get("action") != "DescribeVpcs" for x in tool_uses),
             "canary_wrong_params_count": sum(x.get("params") != {"PageSize": 10} for x in tool_uses),
+            "canary_wrong_page_size_count": sum(
+                not isinstance(x.get('params'), dict) or x['params'].get('PageSize') != 10 for x in tool_uses),
+            "canary_extra_params_count": sum(
+                len(set(x['params']) - {'PageSize'}) for x in tool_uses if isinstance(x.get('params'), dict)),
         })
         manifest["session_id"] = session_path.parent.name
         manifest["session_path"] = str(session_path)

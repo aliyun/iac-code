@@ -23,6 +23,16 @@ FACT_FIELDS = frozenset({
     'vpc_id', 'zone_id', 'cidr', 'stack_name',
 })
 QUESTION_TYPES = frozenset({'new', 'supplement', 'repeat'})
+NETWORK_DIAGNOSTIC_FILENAME = '.e2e-network-fixture-diagnostic.json'
+NETWORK_KNOWN_CODES = frozenset({
+    'EntityNotExist.Stack', 'NotFound.Stack', 'StackNotFound', 'Throttling', 'Throttling.User',
+    'Throttling.Api', 'InvalidAccessKeyId.NotFound', 'InvalidAccessKeyId', 'SignatureDoesNotMatch',
+    'InvalidSecurityToken.Expired', 'SecurityTokenExpired', 'InvalidSecurityToken', 'Forbidden.RAM',
+})
+NETWORK_FAILURE_CATEGORIES = frozenset({
+    'stack_disappeared', 'throttled', 'credential_rejected', 'credential_unavailable', 'no_fixture',
+    'pagination_limit', 'bootstrap_error', 'provider_timeout', 'subprocess_killed', 'unknown',
+})
 QUESTION_SUBJECT_PATTERNS = {
     'cloud_vendor': r'AWS|Amazon|阿里云|云厂商|cloud provider',
     'region': r'地域|地区|region',
@@ -212,6 +222,7 @@ def answer_question(config_dir: Path, pending: dict[str, Any], facts: dict[str, 
             diagnostics['question_driver_goal_reset_count'] = diagnostics.get('question_driver_goal_reset_count', 0) + 1
         pending = {**pending, '_conversation': conversation.turns}
     chosen = _select_facts(config_dir, pending, facts)
+    unspecified_preferences: list[str] = []
     if isinstance(chosen, dict) and isinstance(chosen.get('missing_fields'), list):
         missing = [k for k in chosen['missing_fields'] if not isinstance(k, str) or k not in facts]
         if missing:
@@ -261,6 +272,27 @@ def answer_question(config_dir: Path, pending: dict[str, Any], facts: dict[str, 
                 fields = [k for k in fields if k not in facts]
                 if resolved:
                     diagnostics['question_driver_resolved_fields'] = sorted(resolved)
+            if fields:
+                keys = chosen.get('fact_keys')
+                option = next((x for x in pending.get('options', []) if isinstance(x, dict)
+                               and x.get('id') == chosen.get('option_id')
+                               and isinstance(x.get('id'), str) and x['id']), None)
+                grounded_option = (
+                    isinstance(keys, list) and bool(keys)
+                    and all(isinstance(k, str) and k in facts for k in keys)
+                    and option is not None and not re.search(
+                        r'部署|删除|取消|授权|重新选择|deploy|delete|cancel|permission|reselect',
+                        str(option.get('label') or ''), re.I,
+                    )
+                )
+                if (pending.get('allowFreeText', pending.get('allow_free_text', True)) is not False
+                    and grounded_option and set(fields) <= {'region', 'purpose', 'workload', 'scale', 'budget'}):
+                    # An actual option can answer the current question while a
+                    # preference remains undecided. State that absence honestly;
+                    # never invent a region, capacity, price or required cloud ID.
+                    unspecified_preferences = fields
+                    diagnostics['question_driver_unspecified_preferences'] = fields
+                    fields = []
             if fields:
                 diagnostics['question_driver_missing_fields'] = fields
                 # Fixed categories make a missing "other" detail reviewable
@@ -317,6 +349,10 @@ def answer_question(config_dir: Path, pending: dict[str, Any], facts: dict[str, 
         values = [facts[k] for k in rendered]
         if option is not None and valid_keys and not control_option and not pending.get('one_parameter_at_a_time'):
             values.append('当前问题选择：' + str(option.get('label') or option_id))
+        if unspecified_preferences:
+            labels = {'region': '地域', 'purpose': '用途', 'workload': '工作负载', 'scale': '规模', 'budget': '预算'}
+            values.append('尚未指定的补充细节：' + '、'.join(labels[k] for k in unspecified_preferences)
+                          + '。不得虚构这些细节的具体值，保持已有目标和约束。')
         answer = '；'.join(dict.fromkeys(values))
         if conversation is not None:
             _remember_answer(conversation, pending, answer, keys)
@@ -335,7 +371,40 @@ def _remember_answer(context: QuestionConversation, pending: dict[str, Any], ans
     del context.turns[:-6]
 
 
+def _write_network_diagnostic(env: dict[str, str], values: dict[str, Any]) -> None:
+    directory = env.get('IAC_CODE_CONFIG_DIR')
+    if not directory:
+        return
+    path = Path(directory) / NETWORK_DIAGNOSTIC_FILENAME
+    try:
+        prior = json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+        prior = prior if isinstance(prior, dict) else {}
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**prior, **values}), encoding='utf-8')
+        path.chmod(0o600)
+    except (OSError, ValueError):
+        pass  # Failure diagnostics cannot change cloud fixture behavior.
+
+
 def temporary_e2e_vpc_ids() -> set[str]:
+    """Rescan if a test stack is deleted between ListStacks and its resource read."""
+    for attempt in range(3):
+        try:
+            return _temporary_e2e_vpc_ids_once()
+        except Exception as exc:
+            code = getattr(exc, 'code', None)
+            if (not isinstance(code, str)
+                or code not in {'EntityNotExist.Stack', 'NotFound.Stack', 'StackNotFound'} or attempt == 2):
+                raise
+            _write_network_diagnostic(dict(os.environ), {
+                'network_fixture_scan_retry_count': attempt + 1,
+                'network_fixture_scan_retry_code': code,
+            })
+            time.sleep(0.25 * (attempt + 1))
+    raise AssertionError('bounded fixture rescan did not return')
+
+
+def _temporary_e2e_vpc_ids_once() -> set[str]:
     """Exclude VPCs whose lifetime belongs to another test's ROS Stack."""
     from alibabacloud_ros20190910 import models
 
@@ -407,9 +476,42 @@ else:
 
 
 def network_facts(python: str, env: dict[str, str], cwd: Path, cidr: str) -> dict[str, str]:
-    result = subprocess.run([*shlex.split(python), '-c', _NETWORK_FACTS_CODE, cidr], cwd=cwd, env=env,
-                            capture_output=True, text=True, encoding='utf-8', timeout=90)
+    directory = env.get('IAC_CODE_CONFIG_DIR')
+    if directory:
+        (Path(directory) / NETWORK_DIAGNOSTIC_FILENAME).unlink(missing_ok=True)
+    try:
+        result = subprocess.run([*shlex.split(python), '-c', _NETWORK_FACTS_CODE, cidr], cwd=cwd, env=env,
+                                capture_output=True, text=True, encoding='utf-8', timeout=90)
+    except subprocess.TimeoutExpired:
+        _write_network_diagnostic(env, {'network_fixture_failure_category': 'provider_timeout'})
+        raise TimeoutError('read-only network fixture discovery exceeded its bounded deadline') from None
     if result.returncode:
+        text = str(getattr(result, 'stderr', '') or '')[-200000:]
+        codes = {code for code in NETWORK_KNOWN_CODES if re.search(r'\b' + re.escape(code) + r'\b', text)}
+        category = 'unknown'
+        if any(code in {'EntityNotExist.Stack', 'NotFound.Stack', 'StackNotFound'} for code in codes):
+            category = 'stack_disappeared'
+        elif any(code.startswith('Throttling') for code in codes):
+            category = 'throttled'
+        elif codes:
+            category = 'credential_rejected'
+        else:
+            for marker, label in (
+                ('no usable existing VPC fixture', 'no_fixture'),
+                ('cloud credential unavailable', 'credential_unavailable'),
+                ('fixture ownership scan exceeded', 'pagination_limit'),
+                ('ModuleNotFoundError', 'bootstrap_error'), ('ImportError', 'bootstrap_error'),
+            ):
+                if marker in text:
+                    category = label
+                    break
+        if result.returncode < 0:
+            category = 'subprocess_killed'
+        _write_network_diagnostic(env, {
+            'network_fixture_failure_category': category,
+            'network_fixture_exit_code': result.returncode,
+            'network_fixture_known_codes': sorted(codes),
+        })
         raise RuntimeError('read-only network fixture discovery failed; raw output kept private')
     try:
         value = json.loads(result.stdout.splitlines()[-1])

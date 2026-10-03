@@ -151,3 +151,34 @@ def test_external_runtime_checkpoint_and_single_schema_error_are_projected_once(
     assert 'private-' not in json.dumps(facts)
     same_roots = collect_live_diagnostics(tmp_path, {}, runtime_config_dir=runtime)
     assert same_roots['complete_step_error_count'] == 1
+
+
+def test_content_blocks_preserve_validation_details_without_python_repr_escaping(tmp_path):
+    path = tmp_path / 'pipeline/transcripts/step/session.jsonl'
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({'content': [
+        {'type': 'tool_use', 'id': 'private-id', 'name': 'complete_step'},
+        {'type': 'tool_result', 'tool_use_id': 'private-id', 'is_error': True,
+         'content': [{'type': 'text', 'text': json.dumps({
+             'error': 'conclusion_schema_validation_failed', 'path': '/candidates/private-id',
+             'validator': 'required', 'message': "'hard_constraints' is a required property"})}]}
+    ]}) + '\n', encoding='utf-8')
+    facts = collect_live_diagnostics(tmp_path, {})
+    assert facts['completion_schema_missing_fields'] == ['hard_constraints']
+    assert facts['completion_schema_fields'] == ['candidates']
+    assert facts['completion_schema_validators'] == ['required']
+    assert 'private' not in json.dumps(facts)
+
+
+def test_network_sidecar_exports_only_fixed_fields(tmp_path):
+    (tmp_path / '.e2e-network-fixture-diagnostic.json').write_text(json.dumps({
+        'network_fixture_failure_category': 'throttled', 'network_fixture_exit_code': 1,
+        'network_fixture_known_codes': ['Throttling', 'private-code'],
+        'network_fixture_scan_retry_count': 2, 'network_fixture_scan_retry_code': 'StackNotFound',
+        'stderr': 'private credential',
+    }), encoding='utf-8')
+    facts = collect_live_diagnostics(tmp_path, {})
+    assert facts['network_fixture_known_codes'] == ['Throttling']
+    assert facts['network_fixture_failure_category'] == 'throttled'
+    assert facts['network_fixture_scan_retry_count'] == 2
+    assert 'private' not in json.dumps(facts)

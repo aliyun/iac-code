@@ -528,11 +528,11 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "question_driver_answer_count", "question_driver_llm_count", "question_driver_facts_fallback_count",
             "question_driver_new_count", "question_driver_supplement_count", "question_driver_repeat_count",
             "question_driver_goal_reset_count", "question_driver_review_count",
-            "question_driver_option_count",
+            "question_driver_option_count", "canary_wrong_page_size_count", "canary_extra_params_count",
             "repl_supplemental_reselections",
             "canary_aliyun_call_count", "canary_allowed_call_count", "canary_wrong_action_count",
             "canary_wrong_params_count",
-            "cleanup_missing_name_count", "cleanup_unexpected_name_count",
+            "cleanup_missing_name_count", "cleanup_unexpected_name_count", "cleanup_unexpected_name_same_case_count",
             "confirmation_event_count", "unstructured_confirmation_count", "image_confirmation_count",
             "ros_deploy_event_count", "public_tool_event_count",
             "public_journal_aliyun_count", "persisted_aliyun_public_tool_event_count",
@@ -562,6 +562,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 }
             })[:10]
         for key, allowed in {
+            'question_driver_unspecified_preferences': {'region', 'purpose', 'workload', 'scale', 'budget'},
             'question_driver_question_subjects': {
                 'cloud_vendor', 'region', 'purpose', 'scale', 'budget', 'architecture',
                 'vpc_id', 'zone_id', 'cidr', 'stack_name',
@@ -597,6 +598,12 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             if isinstance(raw_diagnostics.get(key), bool):
                 diagnostics[key] = raw_diagnostics[key]
         pending_kinds = raw_diagnostics.get("a2a_pending_kinds")
+        failed_checkpoint = raw_diagnostics.get('fault_failed_checkpoint')
+        if isinstance(failed_checkpoint, str) and failed_checkpoint in {
+            'snapshot', 'candidate-selected', 'template-written-validated', 'quote-saved',
+            'confirmation-saved', 'create-stack-returned',
+        }:
+            diagnostics['fault_failed_checkpoint'] = failed_checkpoint
         allowed_pending = {
             "none", "ask_user_question", "candidate_select", "candidate_selection", "deployment_confirmation",
         }

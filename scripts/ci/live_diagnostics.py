@@ -92,7 +92,17 @@ def _completion_failure_facts(root: Path, runtime_config_dir: Path | None = None
                     or not block.get("is_error")):
                     continue
                 failed_calls += 1
-                text = str(block.get("content") or "")
+                content = block.get('content') or ''
+                if isinstance(content, list):
+                    content = '\n'.join(str(x.get('text') or '') for x in content if isinstance(x, dict))
+                text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+                try:
+                    decoded = json.loads(text)
+                except (TypeError, ValueError):
+                    pass
+                else:
+                    if isinstance(decoded, (dict, list)):
+                        text = json.dumps(decoded, ensure_ascii=False)
                 for code, pattern in COMPLETION_ERROR_PATTERNS.items():
                     if re.search(pattern, text, re.I):
                         codes[code] += 1
@@ -193,6 +203,12 @@ def collect_live_diagnostics(
                         isinstance(item, dict) and bool(item.get("stackName")) and item["stackName"] not in names
                         for item in resources
                     ), 10000)
+                    facts['cleanup_unexpected_name_same_case_count'] = min(sum(
+                        isinstance(item, dict) and isinstance(item.get('stackName'), str)
+                        and item['stackName'] not in names
+                        and any(item['stackName'].startswith(name + '-') for name in names)
+                        for item in resources
+                    ), 10000)
     codes: set[str] = set()
     cleanup_attempts: list[dict[str, str]] = []
     for log in root.rglob("cleanup-*.log"):
@@ -289,5 +305,36 @@ def collect_live_diagnostics(
             question = execution.get("pending_ask_user_question_input")
             if isinstance(question, dict):
                 facts["pending_question_answered"] = isinstance(question.get("answer"), dict)
+    from scripts.e2e_question_driver import (
+        NETWORK_DIAGNOSTIC_FILENAME,
+        NETWORK_FAILURE_CATEGORIES,
+        NETWORK_KNOWN_CODES,
+    )
+
+    for path in _evidence_paths(root, NETWORK_DIAGNOSTIC_FILENAME, runtime_config_dir):
+        try:
+            if path.stat().st_size > 4096:
+                continue
+            value = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(value, dict):
+            continue
+        category = value.get('network_fixture_failure_category')
+        if isinstance(category, str) and category in NETWORK_FAILURE_CATEGORIES:
+            facts['network_fixture_failure_category'] = category
+        for key, minimum, maximum in (
+            ('network_fixture_exit_code', -255, 255), ('network_fixture_scan_retry_count', 0, 2),
+        ):
+            count = value.get(key)
+            if isinstance(count, int) and not isinstance(count, bool) and minimum <= count <= maximum:
+                facts[key] = count
+        code = value.get('network_fixture_scan_retry_code')
+        if isinstance(code, str) and code in NETWORK_KNOWN_CODES:
+            facts['network_fixture_scan_retry_code'] = code
+        codes = value.get('network_fixture_known_codes')
+        if isinstance(codes, list):
+            facts['network_fixture_known_codes'] = sorted({
+                c for c in codes if isinstance(c, str) and c in NETWORK_KNOWN_CODES})
     facts.update(_completion_failure_facts(root, runtime_config_dir))
     return facts

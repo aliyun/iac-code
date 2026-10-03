@@ -2546,7 +2546,11 @@ def _kill_restart_at(
         matched = bool(predicate(event, summary))
         return matched
 
-    stream.wait_for(observe, description=checkpoint, timeout=runtime.args.stream_timeout)
+    try:
+        stream.wait_for(observe, description=checkpoint, timeout=runtime.args.stream_timeout)
+    except (RuntimeError, TimeoutError):
+        _record_diagnostic(runtime, 'fault_failed_checkpoint', checkpoint)
+        raise
     if not matched:
         raise RuntimeError("fault checkpoint did not verify a real event")
     runtime.checks[checkpoint + " event verified"] = True
@@ -2675,6 +2679,7 @@ def _run_a2a_rollback_cleanup(
         "我改需求了：停止旧目标，改为只创建一个安全组，不创建 VPC 或 VSwitch。"
         f"新 ROS StackName 必须是 {second_name}；请回滚并清理旧 Stack 后重新规划。"
     )
+    runtime.current_goal = new_intent
     rollback_stream = harness.start_stream(prompt=new_intent, name="cleanup-rollback-new-intent")
     rollback_stream.wait_for(
         _event_contains("rollback_completed"),

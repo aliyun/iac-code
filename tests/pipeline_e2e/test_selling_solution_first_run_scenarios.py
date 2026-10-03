@@ -4215,3 +4215,25 @@ def test_backup_directory_does_not_prove_current_checkpoint(runner, tmp_path):
     assert runner._backup_checkpoint_is_current(primary, backup, 'other-session') is False
     (backup / 'pipeline/context.yaml').unlink()
     assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is False
+def test_rollback_cleanup_question_driver_uses_new_goal_at_direct_stream_boundary(runner, monkeypatch, tmp_path):
+    runtime = SimpleNamespace(
+        spec=SimpleNamespace(profile='rollback_cleanup_recovery'), stack_name='iac-e2e-fixture',
+        owned_stack_names={'iac-e2e-fixture'}, current_goal='原目标创建 VSwitch',
+        question_facts={'vpc_id': 'vpc-fixture', 'zone_id': 'cn-hangzhou-i'}, cidr='10.0.1.0/24',
+        args=SimpleNamespace(stream_timeout=1),
+    )
+    class StopAtRollbackError(RuntimeError):
+        pass
+    class Harness:
+        def start_stream(self, *, prompt, name):
+            if name == 'cleanup-rollback-new-intent':
+                facts = runner._question_facts(runtime)
+                assert facts['goal'] == prompt
+                assert '不创建 VPC 或 VSwitch' in facts['goal']
+                assert 'iac-e2e-fixture-b' in facts['goal']
+                raise StopAtRollbackError
+            return SimpleNamespace(wait_for=lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, '_advance_a2a_to_pending', lambda *_a, **_k: None)
+    plan = SimpleNamespace(confirmation_answers=['confirm'])
+    with pytest.raises(StopAtRollbackError):
+        runner._run_a2a_rollback_cleanup(runtime, Harness(), SimpleNamespace(), plan, recover_cleanup=True)

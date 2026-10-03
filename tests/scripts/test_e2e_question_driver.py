@@ -369,3 +369,79 @@ def test_missing_review_cannot_fall_back_or_keep_retrying_when_fact_is_unavailab
         driver.answer_question(tmp_path, {'question': '必须指定部署地域'}, {'goal': '创建网络'}, {}, diagnostics)
     assert len(calls) == 2 and diagnostics['question_driver_review_count'] == 1
     assert 'question_driver_answer_count' not in diagnostics
+
+
+def test_real_option_can_be_answered_with_an_honest_undecided_preference(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver, '_select_facts', lambda *_: {
+        'fact_keys': ['cloud_vendor'], 'option_id': 'aws', 'missing_fields': ['region']})
+    diagnostics = {}
+    answer, _ = driver.answer_question(tmp_path, {'question': '云厂商?',
+        'options': [{'id': 'aws', 'label': 'Amazon AWS'}]},
+        driver.case_facts('只用 AWS，不使用阿里云，也不生成 ROS 模板'), {}, diagnostics)
+    assert '当前问题选择：Amazon AWS' in answer and '尚未指定的补充细节：地域' in answer
+    assert '不得虚构' in answer and '不使用阿里云' in answer
+    assert diagnostics['question_driver_unspecified_preferences'] == ['region']
+    assert 'us-east' not in answer and 'cn-hangzhou' not in answer
+
+
+@pytest.mark.parametrize('missing', ['vpc_id', 'zone_id', 'cidr', 'stack_name', 'other'])
+def test_option_never_bypasses_a_missing_required_resource_fact(tmp_path, monkeypatch, missing):
+    monkeypatch.setattr(driver, '_select_facts', lambda *_: {
+        'fact_keys': ['goal'], 'option_id': 'existing', 'missing_fields': [missing]})
+    with pytest.raises(RuntimeError, match='unavailable case facts'):
+        driver.answer_question(tmp_path, {'question': '必填参数?',
+            'options': [{'id': 'existing', 'label': '使用已有资源'}]}, {'goal': '只规划'}, {}, {})
+
+
+def test_fixture_ownership_rescans_after_concurrent_stack_deletion(monkeypatch):
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.cloud.aliyun import ros_client
+    class DisappearedError(RuntimeError):
+        code = 'EntityNotExist.Stack'
+    class Client:
+        scans = 0
+        def list_stacks(self, _request):
+            self.scans += 1
+            stack = SimpleNamespace(stack_name='iac-e2e-owned', stack_id='private-id', status='CREATE_COMPLETE')
+            return SimpleNamespace(body=SimpleNamespace(stacks=[stack] if self.scans == 1 else []))
+        def list_stack_resources(self, _request):
+            raise DisappearedError('private SDK payload')
+    client = Client()
+    monkeypatch.setattr(cloud_credentials.CloudCredentials, 'get_provider', lambda *_: SimpleNamespace(
+        region_id='cn-hangzhou'))
+    monkeypatch.setattr(ros_client.RosClientFactory, 'create', lambda *_: client)
+    monkeypatch.setattr(driver.time, 'sleep', lambda _: None)
+    monkeypatch.setattr(driver, '_write_network_diagnostic', lambda *_: None)
+    assert driver.temporary_e2e_vpc_ids() == set()
+    assert client.scans == 2
+
+
+def test_fixture_rescan_is_bounded_and_does_not_retry_authentication_errors(monkeypatch):
+    calls = []
+    class FailureError(RuntimeError):
+        code = 'InvalidAccessKeyId'
+    def scan():
+        calls.append(True)
+        raise FailureError('private')
+    monkeypatch.setattr(driver, '_temporary_e2e_vpc_ids_once', scan)
+    with pytest.raises(FailureError):
+        driver.temporary_e2e_vpc_ids()
+    assert len(calls) == 1
+    FailureError.code = 'StackNotFound'
+    calls.clear()
+    monkeypatch.setattr(driver.time, 'sleep', lambda _: None)
+    monkeypatch.setattr(driver, '_write_network_diagnostic', lambda *_: None)
+    with pytest.raises(FailureError):
+        driver.temporary_e2e_vpc_ids()
+    assert len(calls) == 3
+
+
+def test_network_failure_diagnostic_keeps_only_known_codes_not_private_stderr(tmp_path, monkeypatch):
+    monkeypatch.setattr(driver.subprocess, 'run', lambda *_a, **_k: SimpleNamespace(
+        returncode=1, stdout='private cloud data', stderr='EntityNotExist.Stack private credential'))
+    with pytest.raises(RuntimeError) as error:
+        driver.network_facts('python', {'IAC_CODE_CONFIG_DIR': str(tmp_path)}, tmp_path, '10.0.1.0/24')
+    value = json.loads((tmp_path / driver.NETWORK_DIAGNOSTIC_FILENAME).read_text())
+    assert value == {'network_fixture_failure_category': 'stack_disappeared', 'network_fixture_exit_code': 1,
+                     'network_fixture_known_codes': ['EntityNotExist.Stack']}
+    assert 'private' not in json.dumps(value) and 'credential' not in str(error.value)
