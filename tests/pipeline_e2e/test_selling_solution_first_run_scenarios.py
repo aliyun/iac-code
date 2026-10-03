@@ -2750,6 +2750,52 @@ def test_repl_recovery_confirmation_uses_durable_event_without_rematching_draine
     assert pty.events[0]["event_type"] == "user_input_required"
 
 
+def test_repl_post_rollback_confirmation_does_not_count_received_answers(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    events = [
+        {"type": "candidate_selection_submitted"},
+        {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+            "kind": "deployment_confirmation", "options": [{"action": "confirm"}, {"action": "cancel"}],
+        }},
+        {"type": "user_input_received", "step_id": runner.NEW_STEPS[1], "payload": {
+            "kind": "deployment_confirmation", "selected_value": "change architecture",
+        }},
+        {"type": "candidate_selection_submitted"},
+        {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+            "kind": "deployment_confirmation",
+            "options": [{"action": "confirm"}, {"action": "reselect"}, {"action": "cancel"}],
+        }},
+    ]
+    runtime = argparse.Namespace(
+        paths=argparse.Namespace(config_dir=tmp_path),
+        args=argparse.Namespace(stream_timeout=0.01),
+        checks={}, repl_confirmation_wait_count=1, repl_confirmation_action_count=0,
+    )
+    pty = argparse.Namespace(events=[], drain_output=lambda: None)
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    for occurrence in (2, 3):
+        display.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+        runner._repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+        assert runtime.repl_confirmation_wait_count == occurrence
+        assert runtime.repl_confirmation_action_count == 3
+        assert pty.events[-1]["occurrence"] == occurrence
+        events.extend([
+            {"type": "user_input_received", "step_id": runner.NEW_STEPS[1], "payload": {
+                "kind": "deployment_confirmation", "action": "confirm",
+            }},
+            {"type": "candidate_selection_submitted"},
+            {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+                "kind": "deployment_confirmation",
+                "options": [{"action": "confirm"}, {"action": "reselect"}, {"action": "cancel"}],
+            }},
+        ])
+    assert runtime.checks == {}
+
+
 def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:

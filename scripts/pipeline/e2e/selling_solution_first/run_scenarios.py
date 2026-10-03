@@ -3424,7 +3424,8 @@ def _repl_submit_pipeline_interrupt(pty: Any, runtime: ScenarioRuntime, text: st
 def _is_repl_deployment_confirmation(event: dict[str, Any]) -> bool:
     payload = event.get("payload")
     return (
-        event.get("step_id") == NEW_STEPS[1]
+        event.get("type") == "user_input_required"
+        and event.get("step_id") == NEW_STEPS[1]
         and isinstance(payload, dict)
         and payload.get("kind") == "deployment_confirmation"
     )
