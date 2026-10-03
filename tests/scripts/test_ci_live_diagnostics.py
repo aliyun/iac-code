@@ -90,7 +90,7 @@ def test_completion_diagnostics_export_only_fixed_codes_and_validators(tmp_path)
     meta = tmp_path / 'pipeline' / 'meta.yaml'
     meta.parent.mkdir()
     meta.write_text(yaml.safe_dump({'status': 'failed', 'current_step': 'solution_planning_and_selection',
-        'reason': 'Schema validation failed private-secret', 'normal_handoff': {'status': 'failed'}}))
+        'reason': 'Schema validation failed private-secret', 'normal_handoff': {'status': 'failed'}}), encoding="utf-8")
     transcript = meta.parent / 'transcripts' / 'step1' / 'session.jsonl'
     transcript.parent.mkdir(parents=True)
     rows = [
@@ -102,7 +102,7 @@ def test_completion_diagnostics_export_only_fixed_codes_and_validators(tmp_path)
                       'content': 'completion_input_schema_validation_failed {"validator":"required",'
                                  '"received":"private-secret"}'}]},
     ]
-    transcript.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    transcript.write_text(''.join(json.dumps(row) + '\n' for row in rows), encoding="utf-8")
     facts = collect_live_diagnostics(tmp_path, {})
     assert facts['pipeline_status'] == 'failed'
     assert facts['normal_handoff_status'] == 'failed'

@@ -833,8 +833,7 @@ def test_local_failure_facts_expose_only_fixed_types_and_repo_locations(tmp_path
     (tmp_path / 'server-1.log').write_text(
         'Traceback (most recent call last):\n'
         '  File "/private/worker/src/iac_code/providers/example.py", line 123, in request\n'
-        'ValueError: sk-real-secret-token /private/user/home response-body\n'
-    )
+        'ValueError: sk-real-secret-token /private/user/home response-body\n', encoding="utf-8")
     evidence = runner._local_failure_facts(tmp_path)
     assert evidence['local_error_types'] == ['ValueError']
     assert evidence['local_error_sites'] == ['src/iac_code/providers/example.py:123']

@@ -4046,7 +4046,7 @@ def test_resource_discovery_ignores_documentation_and_correlates_real_cloud_tool
         {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'real-create',
             'content': json.dumps({'stack_id': 'real-stack-id', 'is_success': True})}]},
     ]
-    (tmp_path / 'test.events.jsonl').write_text(''.join(json.dumps(x) + '\n' for x in rows))
+    (tmp_path / 'test.events.jsonl').write_text(''.join(json.dumps(x) + '\n' for x in rows), encoding="utf-8")
     resources = runner.discover_cloud_resources(runtime)
     assert len(resources) == 1
     assert resources[0]['stackId'] == 'real-stack-id'

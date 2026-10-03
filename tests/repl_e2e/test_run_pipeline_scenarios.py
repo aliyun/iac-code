@@ -3702,7 +3702,7 @@ def test_native_completion_wait_rejects_terminal_checkpoint(tmp_path, status, ha
     state = {'status': status}
     if handoff:
         state['normal_handoff'] = {'status': handoff}
-    meta.write_text(runner.yaml.safe_dump(state))
+    meta.write_text(runner.yaml.safe_dump(state), encoding="utf-8")
     pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
     with pytest.raises(RuntimeError, match=expected_error):
         runner._durable_completion_boundary(pty)
@@ -3713,9 +3713,9 @@ def test_native_completion_wait_requires_successful_handoff(tmp_path):
     meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
     meta.parent.mkdir(parents=True)
     pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
-    meta.write_text('status: completed\nnormal_handoff: {status: pending}\n')
+    meta.write_text('status: completed\nnormal_handoff: {status: pending}\n', encoding="utf-8")
     assert runner._durable_completion_boundary(pty) is None
-    meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n')
+    meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n', encoding="utf-8")
     assert runner._durable_completion_boundary(pty) == runner.PIPELINE_FULLY_COMPLETED_PATTERNS[0]
 
 

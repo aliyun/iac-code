@@ -72,7 +72,7 @@ def test_option_answer_uses_an_actual_transport_option_id(tmp_path, monkeypatch)
 
 
 def test_helper_uses_bailian_low_thinking_without_sending_credentials(tmp_path, monkeypatch):
-    (tmp_path / '.credentials.yml').write_text('dashscope: sk-fixture-secret\n')
+    (tmp_path / '.credentials.yml').write_text('dashscope: sk-fixture-secret\n', encoding="utf-8")
     monkeypatch.delenv('IAC_CODE_E2E_DIAGNOSIS_LOCK', raising=False)
     def post(url, **kwargs):
         assert kwargs['json']['model'] == 'glm-5.3-prime'
@@ -92,13 +92,13 @@ def test_native_ack_waits_for_same_question_to_be_consumed(tmp_path, monkeypatch
     question = {'toolUseId': 'question-1', 'question': 'VpcId?'}
     state = {'execution': {'pending_input_kind': 'ask_user_question',
                           'pending_ask_user_question_input': question}}
-    path.write_text(yaml.safe_dump(state))
+    path.write_text(yaml.safe_dump(state), encoding="utf-8")
     drains = []
     def drain():
         drains.append(True)
         if len(drains) == 3:
             state['execution']['pending_ask_user_question_input']['answer'] = {'free_text': 'vpc-fixture'}
-            path.write_text(yaml.safe_dump(state))
+            path.write_text(yaml.safe_dump(state), encoding="utf-8")
     monkeypatch.setattr(driver.time, 'sleep', lambda _: None)
     driver.wait_native_question_ack(path, 'question-1', drain)
     assert len(drains) == 3

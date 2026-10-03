@@ -2974,8 +2974,9 @@ def test_finish_pipeline_answers_clarification_inside_selection_step_before_foll
         pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
     done = runner.StreamSummary(name='done', prompt='answer', status_states=['TASK_STATE_COMPLETED'],
                                pipeline_event_types=['pipeline_completed'], normal_handoff_ready=True)
-    (tmp_path / 'selection.events.jsonl').write_text(json.dumps({'pipeline': {
-        'eventType': 'input_required', 'data': {'kind': 'ask_user_question', 'question': '用途?'}}}) + '\n')
+    (tmp_path / 'selection.events.jsonl').write_text(
+        json.dumps({'pipeline': {'eventType': 'input_required',
+                                'data': {'kind': 'ask_user_question', 'question': '用途?'}}}) + '\n', encoding="utf-8")
     calls = []
     def stream(**kwargs):
         calls.append(kwargs)

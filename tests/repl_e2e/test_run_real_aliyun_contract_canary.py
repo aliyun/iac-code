@@ -101,8 +101,8 @@ def test_canary_deduplicates_persisted_invocation_but_not_separate_calls(tmp_pat
     block = {'type': 'tool_use', 'id': 'call-1', 'name': 'aliyun_api', 'input': {
         'product': 'vpc', 'version': '2016-04-28', 'action': 'DescribeVpcs', 'params': {'PageSize': 10}}}
     rows = [{'content': [block]}, {'content': [block]}]
-    path.write_text(''.join(json.dumps(x) + '\n' for x in rows))
+    path.write_text(''.join(json.dumps(x) + '\n' for x in rows), encoding="utf-8")
     assert len(_aliyun_tool_uses(path)) == 1
     rows.append({'content': [{**block, 'id': 'call-2'}]})
-    path.write_text(''.join(json.dumps(x) + '\n' for x in rows))
+    path.write_text(''.join(json.dumps(x) + '\n' for x in rows), encoding="utf-8")
     assert len(_aliyun_tool_uses(path)) == 2

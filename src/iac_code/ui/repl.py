@@ -21,7 +21,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
@@ -1965,15 +1965,20 @@ class InlineREPL:
         first = user_input.split(None, 1)[0] if user_input else ""
         return first in _PIPELINE_SAFE_COMMANDS
 
-    def _pipeline_memory_content_getter(self) -> None:
+    def _pipeline_memory_content_getter(self) -> Callable[[], str]:
         """Return pipeline prompt memory provider.
 
+        Explicit user/project instruction files apply across pipeline steps.
         Pipeline steps should not receive all auto-memory topic bodies in the
         system prompt. They also intentionally do not receive MemoryRecallService,
         so no side recall is triggered. Relevant topic memories are available
         through the explicit read_memory tool when a step's tool policy allows it.
         """
-        return None
+        def instruction_content() -> str:
+            context = self._refresh_memory_context()
+            return str(getattr(context, "instruction_memory_content", "") or "")
+
+        return instruction_content
 
     def _maybe_block_user_escape(self, user_input: str) -> bool:
         """Return True if the input is a gated escape and we should NOT process it.
