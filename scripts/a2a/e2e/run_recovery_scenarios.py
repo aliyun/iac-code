@@ -83,7 +83,7 @@ from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session  #
 from iac_code.services.session_storage import SessionStorage  # noqa: E402
 from iac_code.utils.project_paths import get_projects_dir  # noqa: E402
 from iac_code.utils.public_paths import redact_known_public_paths  # noqa: E402
-from scripts.e2e_question_driver import answer_question  # noqa: E402
+from scripts.e2e_question_driver import answer_question, case_facts, question_conversation  # noqa: E402
 
 ASK_TRIGGER_PROMPT = "我有个产品要上线"
 ASK_FIRST_ANSWER = "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。"
@@ -666,6 +666,9 @@ class ScenarioHarness:
         task_id: str | None = None,
         images: list[dict[str, Any]] | None = None,
     ) -> StreamSummary:
+        if prompt in {ASK_FIRST_ANSWER, ASK_SECOND_ANSWER}:
+            self.current_goal = self._ci_owned_prompt(
+                ASK_FIRST_ANSWER + ('\n' + ASK_SECOND_ANSWER if prompt == ASK_SECOND_ANSWER else ''))
         prompt = self._ci_owned_prompt(prompt)
         if context_id == "" or "我改需求" in prompt or "停止旧目标" in prompt:
             self.current_goal = prompt
@@ -713,6 +716,9 @@ class ScenarioHarness:
         images: list[dict[str, Any]] | None = None,
         wait_for_identity: bool = True,
     ) -> BackgroundStream:
+        if prompt in {ASK_FIRST_ANSWER, ASK_SECOND_ANSWER}:
+            self.current_goal = self._ci_owned_prompt(
+                ASK_FIRST_ANSWER + ('\n' + ASK_SECOND_ANSWER if prompt == ASK_SECOND_ANSWER else ''))
         prompt = self._ci_owned_prompt(prompt)
         if context_id == "" or "我改需求" in prompt or "停止旧目标" in prompt:
             self.current_goal = prompt
@@ -2531,7 +2537,8 @@ def _answer_pending_legacy_question(h: ScenarioHarness, summary: StreamSummary, 
     if not isinstance(diagnostics, dict):
         diagnostics = h.diagnostics = {}
     config_dir = Path(h.server_env["IAC_CODE_CONFIG_DIR"])
-    response, _ = answer_question(config_dir, pending, {"goal": goal}, counts, diagnostics)
+    response, _ = answer_question(config_dir, pending, case_facts(goal), counts, diagnostics,
+                                  conversation=question_conversation(h))
     return response
 
 
@@ -2647,9 +2654,10 @@ def _wait_for_backup_start_with_intervening_asks(
             if len(streams) > 4:
                 raise RuntimeError("too many intervening questions before backup delay")
             h.notes.append(f"answered intervening ask_user_question before backup delay: {stream.name}")
+            response = _answer_pending_legacy_question(h, stream.summary, h.current_goal)
             streams.append(
                 h.start_stream(
-                    prompt=INTERVENING_ASK_ANSWER,
+                    prompt=response,
                     name=f"01-initial-answer-ask-{len(streams)}",
                 )
             )

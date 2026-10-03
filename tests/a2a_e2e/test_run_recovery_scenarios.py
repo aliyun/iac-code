@@ -1264,30 +1264,36 @@ def test_backup_delay_sitecustomize_delays_armed_input_required_backup(tmp_path:
     assert finished["succeeded"] is True
 
 
-def test_backup_delay_wait_answers_step1_question_before_marker(tmp_path: Path) -> None:
+def test_backup_delay_wait_answers_step1_question_before_marker(tmp_path: Path, monkeypatch) -> None:
     runner = _load_runner()
     control = tmp_path / "backup-delay"
     initial = SimpleNamespace(
         name="initial", done=True,
         events=[{"eventType": "input_required", "data": {"kind": "ask_user_question"}}],
+        summary=SimpleNamespace(name="initial"),
     )
     answer = SimpleNamespace(name="answer", done=False, events=[])
 
     class Harness:
         notes: list[str] = []
+        current_goal = '已有 VPC 创建 VSwitch'
 
         def start_stream(self, *, prompt: str, name: str):
-            assert prompt == runner.INTERVENING_ASK_ANSWER
+            assert prompt == 'grounded question answer'
             assert name == "01-initial-answer-ask-1"
             runner._write_json(runner._backup_delay_marker_path(control, "started"), {"delaySeconds": 10.0})
             return answer
 
+    calls = []
+    monkeypatch.setattr(runner, '_answer_pending_legacy_question',
+                        lambda h, s, goal: calls.append((s.name, goal)) or 'grounded question answer')
     marker, streams = runner._wait_for_backup_start_with_intervening_asks(
         Harness(), control, initial, timeout=1.0
     )
 
     assert marker["delaySeconds"] == 10.0
     assert streams == [initial, answer]
+    assert calls == [('initial', Harness.current_goal)]
 
 
 def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(

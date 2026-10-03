@@ -477,6 +477,22 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             }
             if isinstance(cue, str) and cue in {"ask_question", "candidate_controls", "repl_prompt", "none"}:
                 watchdog["cue"] = cue
+            input_kind = raw_watchdog.get('inputKind')
+            if isinstance(input_kind, str) and input_kind in {
+                'clarification', 'candidate_selection', 'deployment_confirmation', 'permission',
+                'normal_chat', 'none', 'unknown',
+            }:
+                watchdog['inputKind'] = input_kind
+            handler = raw_watchdog.get('suggestedHandler')
+            if isinstance(handler, str) and handler in {
+                'question_driver', 'scenario_selection', 'scenario_confirmation', 'scenario_permission', 'none',
+            }:
+                watchdog['suggestedHandler'] = handler
+            hint = raw_watchdog.get('semanticHint')
+            if isinstance(hint, str) and hint in {
+                'expected_target_mentioned', 'different_target_mentioned', 'insufficient_evidence', 'none',
+            }:
+                watchdog['semanticHint'] = hint
     raw_progress = summary.get("progress")
     allowed_progress = {
         "candidate_selection_ready", "candidate_selection_submitted", "user_input_required", "user_input_received",
@@ -506,6 +522,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         diagnostics: dict[str, Any] = {}
         for key in (
             "question_driver_answer_count", "question_driver_llm_count", "question_driver_facts_fallback_count",
+            "question_driver_new_count", "question_driver_supplement_count", "question_driver_repeat_count",
+            "question_driver_goal_reset_count",
             "repl_supplemental_reselections",
             "canary_aliyun_call_count", "canary_allowed_call_count", "canary_wrong_action_count",
             "canary_wrong_params_count",
@@ -529,6 +547,14 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             count = raw_diagnostics.get(key)
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
                 diagnostics[key] = count
+        missing_fields = raw_diagnostics.get('question_driver_missing_fields')
+        if isinstance(missing_fields, list):
+            diagnostics['question_driver_missing_fields'] = sorted({
+                value for value in missing_fields if isinstance(value, str) and value in {
+                    'region', 'purpose', 'workload', 'resource_scope', 'constraints', 'vpc_id', 'zone_id',
+                    'cidr', 'stack_name', 'other',
+                }
+            })[:10]
         for key in (
             "question_driver_budget_exhausted", "final_target_security_group", "final_target_vswitch",
             "repl_solution_summary_changed", "repl_effective_parameters_changed",
@@ -1176,6 +1202,11 @@ def _reason(result: dict[str, Any]) -> str:
         reason = result["error"]
     elif result.get("cleanupStatus") == "failed":
         reason = "测试资源清理失败；检查 CI 作业日志和云账号残留资源"
+    elif isinstance(result.get('summary'), dict) and result['summary'].get('diagnostics', {}).get(
+        'question_driver_missing_fields'
+    ):
+        fields = result['summary']['diagnostics']['question_driver_missing_fields']
+        reason = '澄清问题缺少用例事实：' + ', '.join(fields)
     elif isinstance(result.get("summary"), dict) and isinstance(result["summary"].get("watchdog"), dict) and (
         result["summary"]["watchdog"].get("action") == "early_abort"
     ):

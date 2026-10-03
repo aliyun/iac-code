@@ -475,7 +475,7 @@ def test_initial_prompt_wait_does_not_match_generic_angle_bracket() -> None:
     observed_patterns: list[tuple[str, ...]] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             observed_patterns.append(patterns)
             return patterns[0]
 
@@ -493,7 +493,7 @@ def test_initial_prompt_waits_for_prompt_toolkit_ready_sequence() -> None:
     descriptions: list[str] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             descriptions.append(description)
             return patterns[0]
 
@@ -2197,7 +2197,7 @@ def test_post_rollback_security_group_target_waits_for_slow_candidate_evaluation
     observed_timeouts: list[float] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             observed_timeouts.append(timeout)
             return patterns[0]
 
@@ -2712,7 +2712,7 @@ def test_rollback_step3_sends_rollback_prompt_without_waiting_for_visible_interr
             offset = self.transcript.find("● Intent parsing (1/5)") if text == args.rollback_prompt else 0
             self.events.append({"type": "sendline", "text": text, "transcript_offset": offset})
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             if description in {"candidate evaluation activity visible", "interrupt input visible"}:
                 raise AssertionError(description)
             actions.append(("expect", description))
@@ -2770,7 +2770,7 @@ def test_rollback_step3_waits_for_interrupt_text_input_ready_after_escape(monkey
             offset = self.transcript.find("● Intent parsing (1/5)") if text == args.rollback_prompt else 0
             self.events.append({"type": "sendline", "text": text, "transcript_offset": offset})
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             actions.append(("expect", description))
             return patterns[0]
 
@@ -3259,7 +3259,7 @@ def test_first_stack_create_uses_display_deploy_event_when_terminal_marker_is_ab
         transcript = ""
         events: list[dict[str, object]] = []
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             assert patterns == runner.CREATE_STACK_STARTED_PATTERNS
             assert description == "first stack create started"
             display.write_text('{"type":"tool_used","payload":{"name":"ros_deploy"}}\n', encoding="utf-8")
@@ -3287,7 +3287,7 @@ def test_first_stack_create_rejects_deploy_event_after_step_completed(tmp_path: 
         transcript = ""
         events: list[dict[str, object]] = []
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             raise AssertionError("the completed deployment must be detected before waiting on PTY")
 
     with pytest.raises(RuntimeError, match="ROS deployment finished before rollback interrupt"):
@@ -3406,7 +3406,7 @@ def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch
         def expect_optional(self, patterns, *, description, timeout):
             return True
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             raise AssertionError("buffered prompt marker should avoid another blocking expect")
 
     pty = FakePty()
@@ -3437,7 +3437,7 @@ def test_raw_input_ready_ignores_buffered_marker_before_requested_offset() -> No
         def drain_output(self) -> None:
             return None
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             self.expected = True
             return patterns[0]
 
@@ -3467,7 +3467,7 @@ def test_expect_any_since_accepts_buffered_cleanup_start_after_offset() -> None:
         def drain_output(self) -> None:
             return None
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             raise AssertionError("buffered cleanup marker should avoid another blocking expect")
 
     pty = FakePty()
@@ -3499,7 +3499,7 @@ def test_expect_any_since_prefers_earliest_buffered_event_over_pattern_order() -
         def drain_output(self) -> None:
             return None
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             raise AssertionError("buffered events should avoid another blocking expect")
 
     matched = runner._expect_any_since(
@@ -3770,3 +3770,98 @@ def test_missing_ledger_label_requires_exact_cloud_name_before_cleanup(monkeypat
                                                  checks=checks, notes=notes)
     assert deleted == (['observed-created-stack'] if owned else [])
     assert checks['teardown: observed ROS stacks deleted'] is owned
+
+
+def test_progress_wait_handles_extra_asks_without_skipping_original_milestone(monkeypatch):
+    runner = _load_runner()
+    expected = runner.PIPELINE_COMPLETED_PATTERNS
+    results = iter([runner.ASK_USER_QUESTION_HEADING_PATTERNS[0],
+                    runner.ASK_USER_QUESTION_HEADING_PATTERNS[0], expected[0]])
+    answers = []
+    def expect(patterns, **kwargs):
+        assert patterns[:len(expected)] == expected
+        assert callable(kwargs['state_check'])
+        return next(results)
+    pty = SimpleNamespace(expect_any=expect)
+    monkeypatch.setattr(runner, '_answer_legacy_repl_question', lambda *_: answers.append(True))
+    assert runner._expect_progress_after_optional_questions(
+        pty, SimpleNamespace(), expected, description='image pipeline completed', timeout=1) == expected[0]
+    assert len(answers) == 2
+
+
+def test_durable_completion_never_skips_a_required_interrupt_milestone(tmp_path):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n', encoding='utf-8')
+    pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    assert runner._durable_progress_boundary(pty, runner.CREATE_STACK_STARTED_PATTERNS) is None
+
+
+def test_pending_question_arriving_during_poll_is_routed_before_watchdog(tmp_path, monkeypatch):
+    runner = _load_runner()
+    args = runner.parse_args(['--allow-real-cloud', '--wait-diagnosis-after', '0'])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path,
+                                 env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    class Child:
+        before = after = ''
+        def expect(self, _patterns, timeout):
+            meta.write_text(runner.yaml.safe_dump({'status': 'running', 'execution': {
+                'pending_input_kind': 'ask_user_question', 'pending_ask_user_question_input': {
+                    'question': '用途?', 'toolUseId': 'current'}}}), encoding='utf-8')
+            raise runner.pexpect.TIMEOUT('waiting')
+    pty.child = Child()
+    monkeypatch.setattr(runner, 'diagnose_wait', lambda *_a, **_k: pytest.fail('route input before diagnosis'))
+    assert pty.expect_any(runner.CANDIDATE_SELECTION_PATTERNS + runner.ASK_USER_QUESTION_HEADING_PATTERNS,
+                         description='candidate selection visible', timeout=1,
+                         state_check=lambda: runner._durable_candidate_boundary(pty)) == (
+                             runner.ASK_USER_QUESTION_HEADING_PATTERNS[0])
+
+
+def test_watchdog_does_not_abort_for_consumed_question_in_terminal_history(tmp_path, monkeypatch):
+    runner = _load_runner()
+    args = runner.parse_args(['--allow-real-cloud'])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path,
+                                 env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text('status: running\nexecution: {}\n', encoding='utf-8')
+    pty.raw_chunks.append('● Ask user question: old answered question\nNow evaluating candidates\n')
+    monkeypatch.setattr(runner, 'diagnose_wait', lambda *_a, **_k: {
+        'state': 'waiting_for_input', 'confidence': 0.99, 'input_kind': 'clarification'})
+    pty._diagnose_wait('candidate selection visible', 0, 120)
+    assert pty._wait_diagnoses[-1]['action'] == 'observe'
+
+
+def test_explicit_goal_boundary_tracks_custom_rollback_without_language_heuristics():
+    runner = _load_runner()
+    sent = []
+    pty = SimpleNamespace(e2e_goal='创建 VSwitch', sendline=sent.append)
+    runner._send_case_goal(pty, 'Change target to a security group; keep the test StackName.')
+    assert pty.e2e_goal == sent[0]
+
+
+def test_semantic_hint_cannot_satisfy_an_unmatched_acceptance_pattern(tmp_path, monkeypatch):
+    runner = _load_runner()
+    args = runner.parse_args(['--allow-real-cloud', '--wait-diagnosis-after', '0'])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path,
+                                 env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    class Child:
+        before = after = ''
+        calls = 0
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                pty.raw_chunks.append('A subnet was created.\n')
+                raise runner.pexpect.TIMEOUT('waiting')
+            raise runner.pexpect.EOF('no matched target pattern')
+    pty.child = Child()
+    monkeypatch.setattr(runner, 'diagnose_wait', lambda *_a, **_k: {
+        'state': 'normal_operation', 'confidence': 0.99, 'semantic_hint': 'expected_target_mentioned'})
+    with pytest.raises(runner.pexpect.EOF):
+        pty.expect_any(runner.VSWITCH_MENTION_PATTERNS,
+                       description='normal follow-up answered created VSwitch', timeout=1)
+    assert pty._wait_diagnoses[-1]['semanticHint'] == 'expected_target_mentioned'
+    assert not any(e.get('type') == 'expect' and e.get('passed') is True for e in pty.events)

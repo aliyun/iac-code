@@ -33,7 +33,9 @@ if str(REPO_ROOT) not in sys.path:
 
 from scripts.e2e_question_driver import (  # noqa: E402
     answer_question,
+    case_facts,
     pending_native_question,
+    question_conversation,
     question_identity,
     wait_native_question_ack,
 )
@@ -643,6 +645,12 @@ class ReplPty:
                 try:
                     index = child.expect(all_patterns, timeout=min(remaining, WAIT_POLL_SECONDS))
                 except pexpect.TIMEOUT:
+                    # Input can become durable during the pexpect poll. Route it
+                    # before the advisory watchdog diagnoses it as unhandled.
+                    if state_check is not None:
+                        durable_match = state_check()
+                        if durable_match is not None:
+                            return durable_match
                     elapsed = time.monotonic() - started
                     if description == "first stack create started" and elapsed >= WAIT_PROGRESS_SECONDS:
                         config_path = self.env.get("IAC_CODE_CONFIG_DIR")
@@ -701,7 +709,7 @@ class ReplPty:
         if not config_path:
             return True
         recent_raw = self.transcript[transcript_offset:]
-        recent_text = _normalize_transcript(recent_raw)
+        recent_text = _normalize_transcript(recent_raw)[-1600:]
         diagnosis = diagnose_wait(
             Path(config_path), expected=description,
             transcript=recent_text or _normalize_transcript(self.transcript[-1200:]),
@@ -724,6 +732,12 @@ class ReplPty:
         early_abort = state == "waiting_for_input" and confidence >= 0.85 and cue in {
             "ask_question", "candidate_controls",
         }
+        # A replayed question in terminal history is not a current input. Once
+        # checkpoints exist, the watchdog must corroborate it with actual state.
+        checkpoints = list(Path(config_path).glob('projects/*/*/pipeline/meta.yaml'))
+        pending_kind = _pending_repl_input_kind(Path(config_path))
+        if checkpoints:
+            early_abort = early_abort and pending_kind in {'ask_user_question', 'candidate_selection'}
         record = {
             "state": state,
             "confidence": confidence,
@@ -732,6 +746,21 @@ class ReplPty:
             "elapsedSeconds": round(elapsed, 1),
             "action": "early_abort" if early_abort else "observe",
         }
+        kind = diagnosis.get('input_kind')
+        handlers = {'clarification': 'question_driver', 'candidate_selection': 'scenario_selection',
+                    'deployment_confirmation': 'scenario_confirmation', 'permission': 'scenario_permission'}
+        native_kinds = {'ask_user_question': 'clarification', 'candidate_selection': 'candidate_selection',
+                        'deployment_confirmation': 'deployment_confirmation'}
+        if pending_kind in native_kinds:
+            kind = native_kinds[pending_kind]
+        if isinstance(kind, str) and kind in {*handlers, 'normal_chat', 'none', 'unknown'}:
+            record['inputKind'] = kind
+            record['suggestedHandler'] = handlers.get(kind, 'none')
+        hint = diagnosis.get('semantic_hint')
+        if isinstance(hint, str) and hint in {
+            'expected_target_mentioned', 'different_target_mentioned', 'insufficient_evidence', 'none',
+        }:
+            record['semanticHint'] = hint
         diagnoses.append(record)
         self._wait_diagnoses = diagnoses
         self.events.append({"type": "wait_diagnosis", **record, "at": _utc_now()})
@@ -2671,6 +2700,12 @@ def _expect_initial_prompt(pty: ReplPty, args: argparse.Namespace) -> None:
     pty.expect_any(REPL_INPUT_READY_PATTERNS, description="prompt input ready", timeout=args.timeout)
 
 
+def _send_case_goal(pty: ReplPty, text: str) -> None:
+    """Update the fixture goal at explicit scenario boundaries, including custom rollback text."""
+    pty.e2e_goal = text
+    pty.sendline(text)
+
+
 def _expect_candidate_selection(
     pty: ReplPty,
     args: argparse.Namespace,
@@ -2704,7 +2739,13 @@ def _answer_legacy_repl_question(pty: ReplPty, args: argparse.Namespace) -> None
     if not isinstance(diagnostics, dict):
         diagnostics = pty.question_diagnostics = {}
     goal = getattr(pty, "e2e_goal", "") or args.initial_prompt
-    answer, _ = answer_question(config_dir, question, {"goal": goal}, counts, diagnostics)
+    if getattr(pty, 'scenario', '') in STACK_CREATING_SCENARIOS:
+        if _scenario_stack_name(pty.run_dir, pty.scenario) not in goal:
+            goal += '。' + _stack_name_constraint(pty.run_dir, pty.scenario)
+    facts = case_facts(goal, {'stack_name': _scenario_stack_name(pty.run_dir, pty.scenario)}
+                       if getattr(pty, 'scenario', '') in STACK_CREATING_SCENARIOS else None)
+    context = question_conversation(pty)
+    answer, _ = answer_question(config_dir, question, facts, counts, diagnostics, conversation=context)
     if question.get("allowFreeText", question.get("allow_free_text", True)) is False:
         answer = str(1 + next(i for i, option in enumerate(question["options"]) if option.get("id") == answer))
     pty.drain_output()
@@ -2714,6 +2755,7 @@ def _answer_legacy_repl_question(pty: ReplPty, args: argparse.Namespace) -> None
         _expect_ask_input_ready(pty, args, description="clarification input ready")
     pty.sendline_reliable(answer)
     wait_native_question_ack(path, question_identity(question), pty.drain_output)
+    context.acknowledge(question)
 
 
 def _expect_completed_after_optional_questions(pty: ReplPty, args: argparse.Namespace) -> None:
@@ -2735,6 +2777,38 @@ def _expect_completed_after_optional_questions(pty: ReplPty, args: argparse.Name
         else:
             _answer_legacy_repl_question(pty, args)
     raise RuntimeError("pipeline did not complete after bounded supplemental questions")
+
+
+def _expect_progress_after_optional_questions(
+    pty: ReplPty, args: argparse.Namespace, patterns: tuple[str, ...], *, description: str, timeout: float,
+) -> str:
+    """Preserve the caller's milestone while handling extra native clarifications."""
+    deadline = time.monotonic() + timeout
+    for _ in range(12):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f'timed out waiting for {description}')
+        matched = pty.expect_any(
+            patterns + ASK_USER_QUESTION_HEADING_PATTERNS,
+            description=description, timeout=remaining,
+            state_check=lambda: _durable_progress_boundary(pty, patterns),
+        )
+        if matched in patterns:
+            return matched
+        _answer_legacy_repl_question(pty, args)
+    raise RuntimeError('progress did not follow bounded supplemental questions')
+
+
+def _durable_progress_boundary(pty: ReplPty, patterns: tuple[str, ...]) -> str | None:
+    boundary = _durable_completion_boundary(pty)
+    if boundary in ASK_USER_QUESTION_HEADING_PATTERNS:
+        return boundary
+    # A successful handoff can satisfy completion, never an earlier kill/input milestone.
+    if boundary in PIPELINE_FULLY_COMPLETED_PATTERNS:
+        for pattern in PIPELINE_FULLY_COMPLETED_PATTERNS + PIPELINE_COMPLETED_PATTERNS:
+            if pattern in patterns:
+                return pattern
+    return None
 
 
 def _durable_completion_boundary(pty: ReplPty) -> str | None:
@@ -2761,6 +2835,22 @@ def _durable_completion_boundary(pty: ReplPty) -> str | None:
             and isinstance(pending, dict) and not isinstance(pending.get("answer"), dict)):
             return ASK_USER_QUESTION_HEADING_PATTERNS[0]
     return None
+
+
+def _pending_repl_input_kind(config_dir: Path) -> str:
+    for path in config_dir.glob('projects/*/*/pipeline/meta.yaml'):
+        try:
+            state = yaml.safe_load(path.read_text(encoding='utf-8'))
+        except (OSError, yaml.YAMLError):
+            continue
+        execution = state.get('execution') if isinstance(state, dict) else None
+        if isinstance(execution, dict):
+            kind = execution.get('pending_input_kind')
+            if isinstance(kind, str) and kind in {
+                'ask_user_question', 'candidate_selection', 'deployment_confirmation',
+            }:
+                return str(kind)
+    return 'none'
 
 
 def _durable_candidate_boundary(pty: ReplPty) -> str | None:
@@ -2950,7 +3040,10 @@ def _finish_vswitch_pipeline_after_possible_selection(
             _expect_raw_input_ready(pty, args, description="candidate selection input ready after ask")
         _select_default_candidate(pty, args)
         checks[selection_check] = True
-        pty.expect_any(PIPELINE_COMPLETED_PATTERNS, description=completion_description, timeout=args.stream_timeout)
+        _expect_progress_after_optional_questions(
+            pty, args, PIPELINE_COMPLETED_PATTERNS,
+            description=completion_description, timeout=args.stream_timeout,
+        )
     checks[completion_check] = True
 
 
@@ -2970,14 +3063,14 @@ def _expect_post_rollback_security_group_target(
 def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(PIPELINE_STARTED_PATTERNS, description="pipeline started", timeout=args.stream_timeout)
         checks["pipeline started"] = True
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_FULLY_COMPLETED_PATTERNS,
             description="pipeline fully completed",
             timeout=args.stream_timeout,
@@ -3000,14 +3093,14 @@ def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
 def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible", timeout=args.stream_timeout)
         checks["ask question became visible"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready")
         checks["ask answer input ready"] = True
-        pty.sendline(_stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
         checks["ask answer sent"] = True
-        matched = pty.expect_any(
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask",
             timeout=args.stream_timeout,
@@ -3038,7 +3131,7 @@ def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after image initial",
             timeout=args.stream_timeout,
@@ -3052,7 +3145,7 @@ def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
 def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
         checks["ask question became visible before kill"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready before kill")
@@ -3074,7 +3167,7 @@ def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int
             _expect_ask_input_ready(pty, args, description="second ask image answer input ready")
             _submit_image_fixture(pty, "ask-second-answer", caption=_stack_name_constraint(pty.run_dir, scenario))
             checks["ask second answer image fixture pasted"] = True
-        matched = pty.expect_any(
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask image resume",
             timeout=args.stream_timeout,
@@ -3113,7 +3206,7 @@ def run_image_selection_waiting_resume(args: argparse.Namespace, scenario: str) 
         checks["candidate selection replayed after resume"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after image selection resume",
             timeout=args.stream_timeout,
@@ -3127,7 +3220,7 @@ def run_image_selection_waiting_resume(args: argparse.Namespace, scenario: str) 
 def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(PIPELINE_STARTED_PATTERNS, description="pipeline started", timeout=args.stream_timeout)
         checks["pipeline started"] = True
         _expect_candidate_selection(pty, args, description="candidate selection visible")
@@ -3154,7 +3247,7 @@ def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
 def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         pty.expect_any(
             CANDIDATE_EVALUATION_PATTERNS,
             description="candidate evaluation visible",
@@ -3186,7 +3279,7 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
 def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible before kill"] = True
         pty.terminate(force=True)
@@ -3201,7 +3294,7 @@ def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int
         checks["candidate selection replayed"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS, description="pipeline completed after resume", timeout=args.stream_timeout
         )
         checks["pipeline completed after resume"] = True
@@ -3213,7 +3306,7 @@ def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int
 def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
         checks["ask question became visible before kill"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready before kill")
@@ -3225,9 +3318,9 @@ def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
         checks["ask question replayed"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready after resume")
         checks["ask answer input ready after resume"] = True
-        pty.sendline(_stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
         checks["ask answer sent after resume"] = True
-        matched = pty.expect_any(
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask resume",
             timeout=args.stream_timeout,
@@ -3250,7 +3343,7 @@ def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
 def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(
             CANDIDATE_EVALUATION_PATTERNS, description="candidate evaluation visible", timeout=args.stream_timeout
         )
@@ -3274,7 +3367,7 @@ def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
         checks["candidate selection became visible after resume continue"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after evaluate resume",
             timeout=args.stream_timeout,
@@ -3288,14 +3381,17 @@ def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
 def run_selection_invalid_then_valid(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible"] = True
         pty.send(args.invalid_selection_prompt, label="select-invalid-candidate")
         checks["invalid selection input sent"] = True
         _select_default_candidate(pty, args)
         checks["valid selection input sent after invalid input"] = True
-        pty.expect_any(PIPELINE_COMPLETED_PATTERNS, description="pipeline completed", timeout=args.stream_timeout)
+        _expect_progress_after_optional_questions(
+            pty, args, PIPELINE_COMPLETED_PATTERNS,
+            description="pipeline completed", timeout=args.stream_timeout,
+        )
         checks["pipeline completed"] = True
         pty.sendline("/exit")
 
@@ -3305,7 +3401,7 @@ def run_selection_invalid_then_valid(args: argparse.Namespace, scenario: str) ->
 def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         pty.expect_any(
             ARCHITECTURE_PLANNING_PATTERNS,
             description="architecture planning visible",
@@ -3318,7 +3414,7 @@ def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
         checks["interrupt input visible"] = True
         _expect_raw_input_ready(pty, args, description="interrupt prompt input ready")
         checks["interrupt prompt input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        _send_case_goal(pty, args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
@@ -3335,7 +3431,7 @@ def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
 def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         pty.expect_any(
             CANDIDATE_EVALUATION_PATTERNS,
             description="candidate evaluation visible",
@@ -3350,7 +3446,7 @@ def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
             REPL_INPUT_READY_PATTERNS, description="parallel interrupt text input ready", timeout=args.timeout
         )
         checks["parallel interrupt text input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        _send_case_goal(pty, args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
@@ -3367,7 +3463,7 @@ def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
 def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection reached"] = True
         checks["candidate selection input ready"] = True
@@ -3381,6 +3477,7 @@ def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int
         )
         checks["candidate selection interrupt text input ready"] = True
         reliable_sendline = getattr(pty, "sendline_reliable", pty.sendline)
+        pty.e2e_goal = args.rollback_prompt
         reliable_sendline(args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
@@ -3413,7 +3510,7 @@ def _run_rollback_step5_cleanup(
         _expect_initial_prompt(pty, args)
         _ensure_cleanup_network_target(args, pty.run_dir)
         checks["cleanup network target prepared"] = True
-        pty.sendline(_cleanup_pipeline_prompt(args, pty.run_dir))
+        _send_case_goal(pty, _cleanup_pipeline_prompt(args, pty.run_dir))
         _expect_candidate_selection_after_optional_asks(
             pty,
             args,
@@ -3439,7 +3536,7 @@ def _run_rollback_step5_cleanup(
         )
         checks["deploying interrupt input ready"] = True
 
-        pty.sendline(_cleanup_rollback_prompt(args, pty.run_dir))
+        _send_case_goal(pty, _cleanup_rollback_prompt(args, pty.run_dir))
         checks["rollback prompt sent"] = True
         _expect_candidate_selection_after_optional_asks(
             pty,
@@ -3455,7 +3552,7 @@ def _run_rollback_step5_cleanup(
         _select_default_candidate(pty, args)
         checks["post-rollback candidate selected"] = True
         second_deployment_offset = len(pty.transcript)
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_FULLY_COMPLETED_PATTERNS,
             description="pipeline completed after second deployment",
             timeout=args.stream_timeout,

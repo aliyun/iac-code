@@ -4073,3 +4073,20 @@ def test_required_parameters_must_be_preserved_in_real_confirmation(runner, monk
     runner._verify_required_parameter_confirmation(runtime, {
         'effective_deployment_parameters': {'VpcId': 'vpc-fixture', 'ZoneId': 'cn-hangzhou-i'}})
     assert runtime.checks['both required parameter values preserved in confirmation'] is True
+
+
+def test_goal_override_rebuilds_scope_without_reusing_old_target_clauses(runner, tmp_path, monkeypatch):
+    runtime = SimpleNamespace(spec=SimpleNamespace(profile='rollback'), paths=SimpleNamespace(config_dir=tmp_path),
+                              diagnostics={})
+    monkeypatch.setattr(runner, '_question_facts', lambda _: {
+        'goal': '创建 VSwitch', 'resource_scope': '创建 VSwitch', 'constraints': '部署旧 VSwitch',
+        'vpc_id': 'vpc-fixture'})
+    facts_seen = []
+    def answer(_config, _pending, facts, *_args, **_kwargs):
+        facts_seen.append(facts)
+        return facts['goal'], 'goal'
+    monkeypatch.setattr(runner, 'answer_question', answer)
+    runner._answer_runtime_question(runtime, {'question': '新目标?'}, goal_override='只创建安全组，不创建 VSwitch')
+    assert facts_seen[0]['resource_scope'] == '只创建安全组，不创建 VSwitch'
+    assert '部署旧 VSwitch' not in facts_seen[0]['constraints']
+    assert facts_seen[0]['vpc_id'] == 'vpc-fixture'

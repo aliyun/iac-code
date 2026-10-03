@@ -42,7 +42,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-from scripts.e2e_question_driver import answer_question, network_facts  # noqa: E402
+from scripts.e2e_question_driver import answer_question, case_facts, network_facts, question_conversation  # noqa: E402
 
 PIPELINE_NAME = "selling_solution_first"
 NEW_STEPS = (
@@ -1390,7 +1390,7 @@ def _question_facts(runtime: ScenarioRuntime) -> dict[str, str]:
         )
     facts["goal"] = getattr(runtime, "current_goal", "") or goal
     facts.setdefault("cidr", runtime.cidr)
-    return facts
+    return case_facts(facts['goal'], facts)
 
 
 def _answer_runtime_question(
@@ -1398,14 +1398,18 @@ def _answer_runtime_question(
 ) -> str:
     facts = _question_facts(runtime).copy()
     if goal_override:
-        facts["goal"] = goal_override
+        # Rebuild semantic clauses for the current goal; old scope/constraints
+        # must not override a changed target. Keep only authoritative fixture values.
+        facts = case_facts(goal_override, {k: v for k, v in facts.items()
+                                          if k in {'vpc_id', 'zone_id', 'cidr', 'stack_name'}})
     driver_pending = pending
     if runtime.spec.profile == "step2_parameter":
         driver_pending = {**pending, "one_parameter_at_a_time": True}
     counts = getattr(runtime, "question_counts", None)
     if not isinstance(counts, dict):
         counts = runtime.question_counts = {}
-    answer, category = answer_question(runtime.paths.config_dir, driver_pending, facts, counts, runtime.diagnostics)
+    answer, category = answer_question(runtime.paths.config_dir, driver_pending, facts, counts, runtime.diagnostics,
+                                      conversation=question_conversation(runtime))
     fields = getattr(runtime, "answered_parameter_fields", None)
     if not isinstance(fields, set):
         fields = runtime.answered_parameter_fields = set()
@@ -3430,6 +3434,7 @@ def _repl_submit_question_answer(
                     "type": "question-answer-acknowledged", "step_id": event.get("step_id"),
                     "tool_use_id": tool_id, "fact_category": event["payload"].get("answer_fact_category"),
                 })
+                question_conversation(runtime).acknowledge(event['payload'])
                 return
         time.sleep(0.1)
     runtime.checks[label + " acknowledged"] = False

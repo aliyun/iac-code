@@ -109,3 +109,20 @@ def test_shared_diagnosis_slot_releases_on_failure(tmp_path, monkeypatch) -> Non
     with pytest.raises(RuntimeError, match="fixture"):
         wait_diagnosis.diagnose_wait(tmp_path, expected="prompt", transcript="waiting")
     assert not slot.exists()
+
+
+def test_diagnosis_returns_only_allowed_input_type_and_handler(tmp_path, monkeypatch):
+    (tmp_path / '.credentials.yml').write_text('dashscope: sk-fixture-secret\n', encoding='utf-8')
+    class Response:
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {'choices': [{'message': {'content': json.dumps({
+                'state': 'waiting_for_input', 'confidence': 0.9, 'input_kind': 'clarification',
+                'suggested_handler': 'delete_all_resources', 'answer': 'private',
+                'semantic_hint': 'different_target_mentioned'})}}]}
+    monkeypatch.setattr(wait_diagnosis.httpx, 'post', lambda *_a, **_k: Response())
+    result = wait_diagnosis.diagnose_wait(tmp_path, expected='candidate selection', transcript='question')
+    assert result == {'state': 'waiting_for_input', 'confidence': 0.9,
+                      'input_kind': 'clarification', 'suggested_handler': 'question_driver',
+                      'semantic_hint': 'different_target_mentioned'}

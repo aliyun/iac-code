@@ -523,6 +523,23 @@ def test_live_public_summary_keeps_only_safe_watchdog_fields() -> None:
     }
 
 
+def test_question_diagnostics_export_fixed_categories_without_history_or_model_text():
+    public = run_e2e._public_live_summary({'diagnostics': {
+        'question_driver_supplement_count': 2, 'question_driver_goal_reset_count': 1,
+        'question_driver_missing_fields': ['vpc_id', 'sk-private-secret', {'raw': 'private'}],
+        'question_conversation': [{'answer': 'private cloud fact'}],
+    }, 'watchdog': {'state': 'waiting_for_input', 'action': 'observe', 'waitingFor': 'pipeline completed',
+                   'elapsedSeconds': 120, 'inputKind': 'clarification', 'suggestedHandler': 'question_driver'}})
+    assert public['diagnostics'] == {'question_driver_supplement_count': 2, 'question_driver_goal_reset_count': 1,
+                                     'question_driver_missing_fields': ['vpc_id']}
+    assert public['watchdog']['inputKind'] == 'clarification'
+    assert public['watchdog']['suggestedHandler'] == 'question_driver'
+    assert 'private' not in json.dumps(public)
+    result = {'status': 'failed', 'error': '', 'cleanupStatus': 'completed', 'summary': public,
+              'failedChecks': [], 'live': True, 'notes': []}
+    assert '缺少用例事实：vpc_id' in run_e2e._reason(result)
+
+
 def test_live_audit_note_allowlist_excludes_provider_data() -> None:
     assert run_e2e.SAFE_LIVE_AUDIT_NOTE.fullmatch(
         "credential audit: source=cloud; location=logs; suffix=log"
