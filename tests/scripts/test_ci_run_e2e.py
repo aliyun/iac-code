@@ -14,6 +14,25 @@ import pytest
 from scripts.ci import run_e2e
 
 
+def test_public_live_summary_pending_state_uses_closed_vocabulary() -> None:
+    public = run_e2e._public_live_summary({"diagnostics": {
+        "repl_pending_input_kind": "ask_user_question",
+        "repl_pending_step_id": "solution_planning_and_selection",
+        "repl_pending_question_answered": False,
+    }})
+    assert public["diagnostics"] == {
+        "repl_pending_input_kind": "ask_user_question",
+        "repl_pending_step_id": "solution_planning_and_selection",
+        "repl_pending_question_answered": False,
+    }
+    private = run_e2e._public_live_summary({"diagnostics": {
+        "repl_pending_input_kind": {"private": "sk-fixture"},
+        "repl_pending_step_id": "sk-fixture",
+        "repl_pending_question_answered": "sk-fixture",
+    }})
+    assert private.get("diagnostics", {}) == {}
+
+
 def test_default_selection_is_allowlisted_and_credential_free() -> None:
     selected = run_e2e.select_cases(run_e2e.parse_args([]))
     assert selected == list(run_e2e.FAST_CASES)

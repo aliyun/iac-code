@@ -486,6 +486,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "repl_step1_stall_restarts", "repl_step2_stall_restarts", "repl_selection_image_retries",
             "repl_normal_resume_reselections",
             "repl_native_parameter_asks",
+            "repl_step1_clarification_asks",
             "repl_step1_attempt_count", "repl_step1_tool_use_count",
             "repl_step2_attempt_count", "repl_step2_tool_use_count",
             "text_exit_code", "text_output_length",
@@ -499,6 +500,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         for key in (
             "repl_solution_summary_changed", "repl_effective_parameters_changed",
             "repl_first_rollback_input_intact",
+            "repl_pending_question_answered",
             "persisted_aliyun_tool_publicly_seen", "persisted_aliyun_publicly_attributed",
             "text_has_vpc_marker",
             "cleanup_prompt_active", "cleanup_first_ros_not_found",
@@ -510,6 +512,9 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         allowed_pending = {
             "none", "ask_user_question", "candidate_select", "candidate_selection", "deployment_confirmation",
         }
+        pending_kind = raw_diagnostics.get("repl_pending_input_kind")
+        if isinstance(pending_kind, str) and pending_kind in allowed_pending:
+            diagnostics["repl_pending_input_kind"] = pending_kind
         if isinstance(pending_kinds, list):
             diagnostics["a2a_pending_kinds"] = [
                 kind for kind in pending_kinds if isinstance(kind, str) and kind in allowed_pending
@@ -558,6 +563,9 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         allowed_repl_steps = {
             "solution_planning_and_selection", "materialize_selected_candidate", "deploying",
         }
+        pending_step = raw_diagnostics.get("repl_pending_step_id")
+        if isinstance(pending_step, str) and pending_step in allowed_repl_steps:
+            diagnostics["repl_pending_step_id"] = pending_step
         if isinstance(repl_step_ids, list):
             diagnostics["repl_step_started_ids"] = [
                 step for step in repl_step_ids if isinstance(step, str) and step in allowed_repl_steps

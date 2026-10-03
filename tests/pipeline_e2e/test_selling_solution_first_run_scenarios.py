@@ -1939,6 +1939,9 @@ def test_repl_post_rollback_selection_resumes_stalled_planning_once(
 
     runner._repl_wait_selection_after_rollback(runtime, Pty())
 
+    answer = calls[0][1].pop("clarification_answer")
+    assert "只在杭州创建一个最小测试安全组" in answer
+    assert calls[3][1].pop("clarification_answer") == answer
     assert calls == [
         ("wait", {}),
         ("terminate", True),
@@ -1959,7 +1962,7 @@ def test_repl_post_rollback_selection_does_not_restart_active_planning(
     )
 
     def wait_selection(*_args, **kwargs):
-        assert kwargs == {}
+        assert set(kwargs) == {"clarification_answer"}
         raise TimeoutError("overall deadline")
 
     monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
@@ -2860,6 +2863,51 @@ def test_repl_parameter_question_accepts_prompt_already_drained(
     runner._repl_wait_ask(pty, runtime, description="parameter question", allow_captured_prompt=True)
 
     assert calls == ["drain", "drain"]
+
+
+def test_repl_rollback_selection_answers_durable_native_question_before_selection(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    meta = tmp_path / "projects" / "project" / "session" / "pipeline" / "meta.yaml"
+    meta.parent.mkdir(parents=True)
+    state = {"current_step": runner.NEW_STEPS[0], "execution": {
+        "pending_input_kind": "ask_user_question", "pending_ask_user_question_input": {
+            "toolUseId": "planning-call", "question": "Which existing VPC?", "allowFreeText": True,
+        },
+    }}
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    runtime = argparse.Namespace(
+        paths=argparse.Namespace(config_dir=tmp_path),
+        args=argparse.Namespace(stream_timeout=1), repl_candidate_wait_count=1, diagnostics={},
+    )
+    calls: list[str] = []
+    pty = argparse.Namespace(events=[], transcript="", drain_output=lambda: None)
+
+    def wait_display(_runtime, **kwargs):
+        assert kwargs["occurrence"] == 2
+        assert runtime.repl_candidate_wait_count == 1
+        pending = kwargs["alternate_input"]()
+        if pending is not None:
+            calls.append("pending question")
+            return pending
+        calls.append("selection")
+        return {"type": "candidate_selection_ready", "payload": {"options": ["candidate"]}}, Path("display")
+
+    def submit(_pty, answer, *, label):
+        calls.append(answer)
+        state["execution"]["pending_ask_user_question_input"]["answer"] = {"free_text": answer}
+        meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+
+    monkeypatch.setattr(runner, "_wait_repl_display_event", wait_display)
+    monkeypatch.setattr(runner, "_repl_wait_ask", lambda *_args, **_kwargs: calls.append("prompt ready"))
+    monkeypatch.setattr(runner, "_repl_submit_line_input", submit)
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    runner._repl_wait_selection(pty, runtime, clarification_answer="reuse first existing VPC; only create SG")
+
+    assert calls == ["pending question", "prompt ready", "reuse first existing VPC; only create SG", "selection"]
+    assert runtime.repl_candidate_wait_count == 2
+    assert runtime.diagnostics["repl_step1_clarification_asks"] == 1
 
 
 def test_repl_post_rollback_confirmation_restarts_stalled_step_once(

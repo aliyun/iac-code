@@ -2856,6 +2856,22 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
                 phase = "other"
             _record_diagnostic(runtime, "repl_failed_wait_phase", phase)
     if getattr(getattr(runtime, "spec", None), "profile", None) == "interrupt_rollback":
+        meta_paths = list((runtime.paths.config_dir / "projects").glob("*/*/pipeline/meta.yaml"))
+        if meta_paths:
+            with contextlib.suppress(OSError, yaml.YAMLError):
+                meta = yaml.safe_load(max(meta_paths, key=lambda path: path.stat().st_mtime_ns).read_text("utf-8"))
+                if isinstance(meta, dict):
+                    execution = meta.get("execution")
+                    if isinstance(execution, dict):
+                        _record_diagnostic(runtime, "repl_pending_step_id", meta.get("current_step"))
+                        _record_diagnostic(
+                            runtime, "repl_pending_input_kind", execution.get("pending_input_kind") or "none"
+                        )
+                        pending = execution.get("pending_ask_user_question_input")
+                        if isinstance(pending, dict):
+                            _record_diagnostic(
+                                runtime, "repl_pending_question_answered", isinstance(pending.get("answer"), dict)
+                            )
         for step_index in (1, 2):
             step_paths = _repl_step_transcript_paths(runtime, NEW_STEPS[step_index - 1])
             step_tool_names = [
@@ -2903,22 +2919,40 @@ def _repl_wait_selection(
     await_controls: bool = False,
     terminal_offset: int | None = None,
     timeout: float | None = None,
+    clarification_answer: str | None = None,
 ) -> None:
     occurrence = runtime.repl_candidate_wait_count + 1
     offset = (
         (0 if await_controls else len(getattr(pty, "transcript", "")))
         if terminal_offset is None else terminal_offset
     )
-    event, path = _wait_repl_display_event(
-        runtime,
-        event_type="candidate_selection_ready",
-        occurrence=occurrence,
-        timeout=runtime.args.stream_timeout if timeout is None else timeout,
-        # Always drain the PTY while the model renders the candidate screen;
-        # otherwise a full terminal buffer can block the durable event itself.
-        drain_output=getattr(pty, "drain_output", None),
-        pty=pty,
-    )
+    answered_tool_ids: set[str] = set()
+    for question_index in range(5):
+        kwargs: dict[str, Any] = {}
+        if clarification_answer is not None:
+            kwargs["alternate_input"] = lambda: _pending_repl_parameter_question(
+                runtime, answered_tool_ids, step_id=NEW_STEPS[0]
+            )
+        event, path = _wait_repl_display_event(
+            runtime,
+            event_type="candidate_selection_ready",
+            occurrence=occurrence,
+            timeout=runtime.args.stream_timeout if timeout is None else timeout,
+            # Drain while planning: a full PTY buffer can block persistence.
+            drain_output=getattr(pty, "drain_output", None),
+            pty=pty,
+            **kwargs,
+        )
+        if event.get("type") == "candidate_selection_ready":
+            break
+        payload = event.get("payload", {})
+        if question_index >= 4 or clarification_answer is None or payload.get("kind") != "ask_user_question":
+            raise RuntimeError("candidate planning did not reach selection after four clarification asks")
+        _repl_wait_ask(pty, runtime, description="Step 1 rollback clarification", allow_captured_prompt=True)
+        answer = clarification_answer if payload.get("allow_free_text", True) else "1"
+        _repl_submit_line_input(pty, answer, label=f"step1-clarification-answer-{question_index + 1}")
+        answered_tool_ids.add(payload["tool_use_id"])
+        _record_diagnostic(runtime, "repl_step1_clarification_asks", question_index + 1)
     options = event.get("payload", {}).get("options") if isinstance(event.get("payload"), dict) else None
     if isinstance(options, list):
         _record_diagnostic(runtime, "candidate_option_count", len(options))
@@ -3477,7 +3511,7 @@ def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input
 
 
 def _pending_repl_parameter_question(
-    runtime: ScenarioRuntime, answered_tool_ids: set[str]
+    runtime: ScenarioRuntime, answered_tool_ids: set[str], *, step_id: str = NEW_STEPS[1]
 ) -> tuple[dict[str, Any], Path] | None:
     """Native ask_user_question is persisted in meta, not the display journal."""
 
@@ -3486,7 +3520,7 @@ def _pending_repl_parameter_question(
             metadata = yaml.safe_load(path.read_text(encoding="utf-8"))
         except (OSError, yaml.YAMLError):
             continue
-        if not isinstance(metadata, dict) or metadata.get("current_step") != NEW_STEPS[1]:
+        if not isinstance(metadata, dict) or metadata.get("current_step") != step_id:
             continue
         execution = metadata.get("execution")
         if not isinstance(execution, dict) or execution.get("pending_input_kind") != "ask_user_question":
@@ -3498,7 +3532,7 @@ def _pending_repl_parameter_question(
         if not isinstance(tool_id, str) or not tool_id or tool_id in answered_tool_ids:
             continue
         return {
-            "type": "user_input_required", "step_id": NEW_STEPS[1],
+            "type": "user_input_required", "step_id": step_id,
             "payload": {
                 "kind": "ask_user_question", "tool_use_id": tool_id,
                 "allow_free_text": pending.get("allowFreeText", pending.get("allow_free_text", True)),
@@ -3776,8 +3810,12 @@ def _run_repl_waiting_resume_all(runtime: ScenarioRuntime, pty: Any) -> None:
 
 
 def _repl_wait_selection_after_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
+    clarification_answer = (
+        "本次只在杭州创建一个最小测试安全组；不创建 VPC、VSwitch、ECS 或公网资源。"
+        "如果需要 VPC，请复用上面列出的第一个已有杭州 VPC。其他参数使用测试默认值。"
+    )
     try:
-        _repl_wait_selection(pty, runtime)
+        _repl_wait_selection(pty, runtime, clarification_answer=clarification_answer)
     except TimeoutError:
         watchdog = getattr(runtime, "watchdog", None)
         if (
@@ -3791,7 +3829,10 @@ def _repl_wait_selection_after_rollback(runtime: ScenarioRuntime, pty: Any) -> N
         terminal_offset = len(pty.transcript)
         pty.terminate(force=True)
         pty.spawn(extra_args=["--continue"])
-        _repl_wait_selection(pty, runtime, after_restart=True, terminal_offset=terminal_offset)
+        _repl_wait_selection(
+            pty, runtime, after_restart=True, terminal_offset=terminal_offset,
+            clarification_answer=clarification_answer,
+        )
         missed_check = f"REPL display candidate_selection_ready occurrence {runtime.repl_candidate_wait_count} observed"
         runtime.checks.pop(missed_check, None)
         runtime.checks.pop("REPL display matched at least once before timeout", None)
@@ -3819,7 +3860,10 @@ def _run_repl_interrupt_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
         runtime,
         "架构再次变化：改为只创建一个空 VPC，不创建安全组；请重新规划。",
     )
-    _repl_wait_selection(pty, runtime)
+    _repl_wait_selection(
+        pty, runtime,
+        clarification_answer=f"在杭州只创建一个空 VPC，网段 {runtime.cidr}，不创建安全组或其他资源。",
+    )
     _repl_select_current(pty)
     _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
     _repl_choose_direct_input(runtime, pty, "取消，不再部署。")
