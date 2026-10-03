@@ -76,6 +76,7 @@ from scripts.a2a.e2e.execution_control.run_execution_control_scenarios import SC
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import SCENARIOS as SELECTOR_SCENARIOS  # noqa: E402
 from scripts.a2a.e2e.run_recovery_scenarios import _SCENARIOS as A2A_RECOVERY_SCENARIOS  # noqa: E402
 from scripts.a2a.e2e.run_recovery_scenarios import MULTIMODAL_SCENARIOS as A2A_MULTIMODAL_SCENARIOS  # noqa: E402
+from scripts.ci.live_diagnostics import collect_live_diagnostics  # noqa: E402
 from scripts.ci.model_pool import MULTIMODAL_MODELS, TEXT_MODELS, ModelAssignment, scheduled_cases  # noqa: E402
 from scripts.pipeline.e2e.selling_solution_first.run_scenarios import SCENARIOS as SELLING_SCENARIOS  # noqa: E402
 from scripts.repl.e2e.run_pipeline_scenarios import _SCENARIOS as REPL_PIPELINE_SCENARIOS  # noqa: E402
@@ -1064,7 +1065,13 @@ def run_case(
         else []
     )
     if case.suite == "live":
+        try:
+            failure_evidence = collect_live_diagnostics(script_dir, summary) if isinstance(summary, dict) else {}
+        except (OSError, ValueError, TypeError):
+            failure_evidence = {"unavailable": True}
         summary = _public_live_summary(summary, cleanup_status)
+        if isinstance(summary, dict):
+            summary["failure_evidence"] = failure_evidence
         if case.live_runner == "selling" and isinstance(summary, dict):
             summary.update(_live_a2a_terminal_evidence(script_dir))
         error = "" if not error else "runner failed to start; inspect CI job log"

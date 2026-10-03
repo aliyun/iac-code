@@ -5048,6 +5048,9 @@ def discover_owned_cloud_resources(runtime: ScenarioRuntime) -> list[dict[str, s
         check=False,
     )
     if completed.returncode:
+        (runtime.paths.artifacts_dir / "cleanup-discovery.log").write_text(
+            completed.stdout + completed.stderr, encoding="utf-8"
+        )
         raise RuntimeError(f"owned Stack discovery subprocess exited {completed.returncode}")
     values = json.loads(completed.stdout)
     if not isinstance(values, list):
