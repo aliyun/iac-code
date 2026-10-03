@@ -12,7 +12,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
@@ -300,6 +300,71 @@ def test_cleanup_reports_failed_when_owned_stack_inventory_fails(
     ]
 
 
+@pytest.mark.parametrize("code", ["EntityNotExist.Stack", "NotFound.Stack", "StackNotFound"])
+@pytest.mark.parametrize("phase", ["get", "delete"])
+def test_cleanup_accepts_stack_disappearance_during_get_or_delete(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    code: str, phase: str,
+) -> None:
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.cloud.aliyun import ros_client
+
+    manifest = tmp_path / "stack.json"
+    manifest.write_text(json.dumps({"stackId": "test-stack", "stackName": "iac-e2e-test", "regionId": "cn-hangzhou"}),
+                        encoding="utf-8")
+
+    class StackMissingError(Exception):
+        pass
+
+    missing = StackMissingError(code)
+    missing.code = code
+
+    class Client:
+        def get_stack(self, _request):
+            if phase == "get":
+                raise missing
+            return SimpleNamespace(body=SimpleNamespace(to_map=lambda: {
+                "StackName": "iac-e2e-test", "Status": "CREATE_COMPLETE",
+            }))
+
+        def delete_stack(self, _request):
+            raise missing
+
+    monkeypatch.setattr(cloud_credentials, "CloudCredentials", lambda: SimpleNamespace(
+        get_provider=lambda _: SimpleNamespace(region_id="cn-hangzhou"),
+    ))
+    monkeypatch.setattr(ros_client.RosClientFactory, "create", lambda *_args: Client())
+    monkeypatch.setattr(sys, "argv", ["cleanup", str(manifest)])
+    with pytest.raises(SystemExit) as exited:
+        exec(runner._CLOUD_CLEANUP_CODE, {})
+    assert exited.value.code == 0
+    assert json.loads(capsys.readouterr().out) == {"deleted": True, "notFound": True}
+
+
+def test_cleanup_never_confuses_missing_credentials_or_unowned_stack_with_deletion(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.cloud.aliyun import ros_client
+
+    manifest = tmp_path / "stack.json"
+    manifest.write_text(json.dumps({"stackId": "test-stack", "stackName": "iac-e2e-test"}), encoding="utf-8")
+    monkeypatch.setattr(cloud_credentials, "CloudCredentials", lambda: SimpleNamespace(
+        get_provider=lambda _: SimpleNamespace(region_id="cn-hangzhou"),
+    ))
+    monkeypatch.setattr(sys, "argv", ["cleanup", str(manifest)])
+    denied = RuntimeError("InvalidAccessKeyId.NotFound: access key not found")
+    client = SimpleNamespace(get_stack=lambda _: (_ for _ in ()).throw(denied))
+    monkeypatch.setattr(ros_client.RosClientFactory, "create", lambda *_args: client)
+    with pytest.raises(RuntimeError, match="InvalidAccessKeyId"):
+        exec(runner._CLOUD_CLEANUP_CODE, {})
+    client.get_stack = lambda _: SimpleNamespace(body=SimpleNamespace(to_map=lambda: {
+        "StackName": "not-owned", "Status": "CREATE_COMPLETE",
+    }))
+    with pytest.raises(RuntimeError, match="ownership mismatch"):
+        exec(runner._CLOUD_CLEANUP_CODE, {})
+
+
 def test_runtime_defaults_follow_real_settings_shape(runner: ModuleType, tmp_path: Path) -> None:
     (tmp_path / "settings.yml").write_text(
         "activeProvider: openai_compatible\n"
@@ -349,6 +414,64 @@ def test_a2a_multimodal_plan_uses_distinct_images_then_plain_text(runner: Module
     assert second_confirmation[1] == ""
     assert "调整参数" in first_confirmation[0]
     assert json.loads(second_confirmation[0])["action"] == "cancel"
+
+
+def test_a2a_image_questions_keep_step2_answer_and_image_when_step1_reasks(runner: ModuleType) -> None:
+    runtime = SimpleNamespace(
+        spec=runner.SCENARIO_BY_NAME["a2a-image-asks-confirmation"], cidr="10.250.0.0/24",
+        stack_name="iac-e2e-image-asks-test", args=SimpleNamespace(cleanup_vpc_id="", cleanup_zone_id=""),
+    )
+    plan = runner._a2a_plan(runtime)
+    first = runner._a2a_response_for_pending(runtime, "ask_user_question", plan, runner.NEW_STEPS[0])
+    repeated = runner._a2a_response_for_pending(runtime, "ask_user_question", plan, runner.NEW_STEPS[0])
+    parameter = runner._a2a_response_for_pending(runtime, "ask_user_question", plan, runner.NEW_STEPS[1])
+    assert first[1] == "ask-first-answer"
+    assert repeated == (first[0], "")
+    assert parameter[1] == "ask-second-answer"
+    assert "CidrBlock 使用 10.250.0.0/25" in parameter[0]
+    assert "阿里云杭州" in runner._initial_prompt(runtime)
+    assert "user_required" in runner._initial_prompt(runtime)
+
+
+def test_a2a_image_acceptance_rejects_early_exit_and_requires_complete_adjustment(
+    runner: ModuleType, tmp_path: Path,
+) -> None:
+    runtime = SimpleNamespace(paths=SimpleNamespace(run_dir=tmp_path), events_path=tmp_path / "events.jsonl")
+
+    def event(event_type, step, **data):
+        return {"eventType": event_type, "step": {"id": step}, "data": data}
+
+    step1, step2 = runner.NEW_STEPS[:2]
+    asks = [event("input_received", step, kind="ask_user_question") for step in (step1, step2)]
+    for name, answer in zip(("turn-step1", "turn-step2"), asks):
+        (tmp_path / f"{name}.events.jsonl").write_text(json.dumps(answer), encoding="utf-8")
+    runtime.events_path.write_text("\n".join(json.dumps({
+        "type": "a2a-turn-started", "name": name, "image": True,
+    }) for name in ("turn-step1", "turn-step2")), encoding="utf-8")
+    early_exit = [asks[0], event("pipeline_completed", step1)]
+    assert not all(runner._a2a_image_asks_checks(runtime, early_exit).values())
+    complete = [
+        *asks,
+        event("input_received", step2, kind="deployment_confirmation", has_images=True, structured=False),
+        event("tool_started", step2, toolName="ros_preview_template"),
+        event("tool_started", step2, toolName="ros_estimate_template_cost"),
+        event("input_required", step2, kind="deployment_confirmation"),
+        event("input_received", step2, kind="deployment_confirmation", action="cancel"),
+        event("pipeline_completed", step2),
+    ]
+    assert all(runner._a2a_image_asks_checks(runtime, complete).values())
+    no_quote = [item for item in complete if item["data"].get("toolName") != "ros_estimate_template_cost"]
+    assert runner._a2a_image_asks_checks(runtime, no_quote)["image adjustment reran Preview and quote"] is False
+    attempted_deploy = [*complete, event("tool_started", runner.NEW_STEPS[2], toolName="ros_deploy")]
+    assert runner._a2a_image_asks_checks(runtime, attempted_deploy)[
+        "image adjustment was canceled without deployment"
+    ] is False
+    runtime.events_path.write_text(json.dumps({
+        "type": "a2a-turn-started", "name": "turn-step1", "image": True,
+    }), encoding="utf-8")
+    assert runner._a2a_image_asks_checks(runtime, complete)[
+        "Step 2 parameter question accepted an image answer"
+    ] is False
 
 
 def test_a2a_image_interrupt_only_uses_rollback_image_once(runner: ModuleType) -> None:
@@ -1097,6 +1220,36 @@ def test_old_step_check_uses_structured_ids_not_llm_text(runner: ModuleType, tmp
     values.append({"eventType": "step_started", "step": {"id": "architecture_planning"}})
     runner._common_pipeline_checks(runtime, values)
     assert runtime.checks["old step ids absent"] is False
+
+
+def test_candidate_check_ignores_mentions_but_rejects_real_nested_transport_event(
+    runner: ModuleType, tmp_path: Path
+) -> None:
+    runtime = _pipeline_check_runtime(runner, tmp_path, "rollback_step3")
+    values = [{"eventType": "tool_result", "data": {"toolName": "bash", "result": {
+        "documentation": "candidate_step_started", "example": {"eventType": "candidate_step_started"},
+    }}}]
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["candidate sub-pipeline absent"] is True
+    values.append({"metadata": {"iac_code": {"pipeline": {"eventType": "candidate_step_started"}}}})
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["candidate sub-pipeline absent"] is False
+
+
+def test_tool_sequence_ignores_named_examples_but_preserves_actual_deploy_order(
+    runner: ModuleType, tmp_path: Path
+) -> None:
+    runtime = _pipeline_check_runtime(runner, tmp_path, "image_asks")
+    values = [{"eventType": "tool_result", "data": {"toolName": "bash", "result": {
+        "tools": [{"name": "ros_deploy"}, {"toolName": "ros_deploy"}],
+    }}}]
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["no deploy before confirmation"] is True
+    values.append({"metadata": {"iac_code": {"pipeline": {
+        "eventType": "tool_started", "data": {"toolName": "ros_deploy"},
+    }}}})
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["no deploy before confirmation"] is False
 
 
 def test_safe_cancel_requires_that_no_deployment_was_attempted(runner: ModuleType, tmp_path: Path) -> None:

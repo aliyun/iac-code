@@ -1000,7 +1000,13 @@ def _initial_prompt(runtime: ScenarioRuntime) -> str:
             "必要模板参数但绝不展示凭证；只到部署确认，不创建资源。"
         ),
         "image_initial": base + "本轮不部署。",
-        "image_asks": "我有个产品要上线；需要通过问题澄清，并在实现阶段询问必要参数。本轮不部署。",
+        "image_asks": (
+            "请为阿里云杭州的小团队产品规划低成本网络，只新建 VPC 和 VSwitch。"
+            "先用 ask_user_question 澄清产品用途，然后生成可选方案，等待我选择。"
+            "实现阶段的 CidrBlock 是 user_required 参数，我暂未提供；必须用 ask_user_question 向我询问，"
+            "不得用默认值或推断代替。收到回答后才进行 Preview 和询价，再等待部署确认。"
+            f"ROS StackName 必须使用 {stack}。本轮仅调参、Preview 和询价，不部署、不创建资源。"
+        ),
         "image_interrupt": base,
         "legacy_smoke": "在已有 VPC 中创建一个 VSwitch，给出多个候选，本轮不部署。",
     }
@@ -1152,16 +1158,29 @@ def _record_diagnostic(runtime: ScenarioRuntime, key: str, value: Any) -> None:
         diagnostics[key] = value
 
 
+def _pipeline_event_records(values: Sequence[Any]) -> Iterator[tuple[int, dict[str, Any]]]:
+    """Read transport envelopes and REPL display rows, never events quoted in tool output."""
+    extract = _legacy_a2a_module()._extract_pipeline_envelopes
+    for event_index, value in enumerate(values):
+        envelopes = extract(value)
+        if not envelopes and isinstance(value, dict) and isinstance(value.get("type"), str):
+            envelopes = [value]
+        for envelope in envelopes:
+            yield event_index, envelope
+
+
 def _tool_sequence(values: Sequence[Any]) -> list[dict[str, Any]]:
     sequence: list[dict[str, Any]] = []
-    tool_keys = {"toolName", "tool_name", "name"}
-    for event_index, value in enumerate(values):
-        for key, item in _walk(value):
-            if key not in tool_keys or not isinstance(item, str):
-                continue
-            lowered = item.lower()
-            if any(marker in lowered for marker in ("aliyun_api", "ros_deploy", "write", "edit", "bash")):
-                sequence.append({"index": len(sequence), "eventIndex": event_index, "tool": item})
+    for event_index, event in _pipeline_event_records(values):
+        kind = event.get("eventType") or event.get("event_type") or event.get("type")
+        if kind not in {"tool_started", "tool_result", "tool_used"}:
+            continue
+        payload = event.get("data") or event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        name = payload.get("toolName") or payload.get("tool_name") or payload.get("name")
+        if isinstance(name, str):
+            sequence.append({"index": len(sequence), "eventIndex": event_index, "tool": name})
     return sequence
 
 
@@ -1240,7 +1259,10 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
     ]
     observed_positions = [position for position in first_positions if position >= 0]
     runtime.checks["new step order preserved"] = observed_positions == sorted(observed_positions)
-    runtime.checks["candidate sub-pipeline absent"] = "candidate_step_started" not in text
+    runtime.checks["candidate sub-pipeline absent"] = not any(
+        (event.get("eventType") or event.get("event_type") or event.get("type")) == "candidate_step_started"
+        for _, event in _pipeline_event_records(values)
+    )
     event_texts = [_json_text(value) for value in values]
     step2_index = next(
         (event_index for event_index, step in started_steps if step == NEW_STEPS[1]),
@@ -1448,9 +1470,14 @@ def _a2a_plan(runtime: ScenarioRuntime) -> A2AConversationPlan:
         zone = runtime.args.cleanup_zone_id or "请用 aliyun_api 选择杭州可用区"
         plan.ask_answers = [vpc, zone, runtime.cidr]
     elif profile == "image_asks":
+        initial_cidr = str(next(ipaddress.ip_network(runtime.cidr).subnets(prefixlen_diff=1)))
+        plan.ask_answers = [
+            "这是一个小团队的 Node.js 电商后端 API，需要阿里云杭州低成本 VPC 和 VSwitch 网络；继续提供可选方案。",
+            f"CidrBlock 使用 {initial_cidr}，其它参数按最小成本推荐；只 Preview 和询价，不部署。",
+        ]
         plan.image_kinds = {"ask_user_question", "deployment_confirmation"}
         plan.confirmation_answers = [
-            f"调整参数：将网段改为 {runtime.cidr}，重新 Preview 和询价。",
+            f"调整参数：将网段改为 {runtime.cidr}，重新 Preview 和询价，然后再次等待我确认。不要部署或创建资源。",
             _confirmation_payload("cancel"),
         ]
     elif profile == "image_interrupt":
@@ -1560,7 +1587,7 @@ def _continue_a2a_from_summary(
                 break
             response = "继续"
         else:
-            response, image_key = _a2a_response_for_pending(runtime, kind, plan)
+            response, image_key = _a2a_response_for_pending(runtime, kind, plan, step_id)
         if kind:
             seen_waiting.append(f"{step_id}:{kind}")
         omit_task_id = bool(before_response(step_id, kind, summary)) if before_response is not None and kind else False
@@ -1601,9 +1628,16 @@ def _a2a_response_for_pending(
     runtime: ScenarioRuntime,
     kind: str,
     plan: A2AConversationPlan,
+    step_id: str = "",
 ) -> tuple[str, str]:
+    image_question_stage = (
+        runtime.spec.profile == "image_asks" and kind == "ask_user_question" and step_id in NEW_STEPS[:2]
+    )
     if kind == "ask_user_question":
-        response = plan.ask_answers.pop(0) if plan.ask_answers else "使用低成本默认值继续。"
+        if image_question_stage:
+            response = plan.ask_answers[NEW_STEPS.index(step_id)]
+        else:
+            response = plan.ask_answers.pop(0) if plan.ask_answers else "使用低成本默认值继续。"
     elif kind in {"candidate_select", "candidate_selection"}:
         response = plan.candidate_answers.pop(0) if plan.candidate_answers else _candidate_payload(0)
     elif kind == "deployment_confirmation":
@@ -1617,17 +1651,24 @@ def _a2a_response_for_pending(
     normalized_kind = "candidate_selection" if kind == "candidate_select" else kind
     image_key = ""
     if normalized_kind in plan.image_kinds:
-        image_index = plan.image_counts.get(normalized_kind, 0)
-        image_limit = 2 if runtime.spec.profile == "image_asks" and normalized_kind == "ask_user_question" else 1
+        slot = f"{normalized_kind}:{step_id}" if image_question_stage else normalized_kind
+        image_index = plan.image_counts.get(slot, 0)
+        image_limit = (
+            2 if runtime.spec.profile == "image_asks" and normalized_kind == "ask_user_question"
+            and not image_question_stage else 1
+        )
         if image_index < image_limit:
             image_key = {
-                "ask_user_question": "ask-first-answer" if image_index == 0 else "ask-second-answer",
+                "ask_user_question": (
+                    "ask-second-answer" if (image_question_stage and step_id == NEW_STEPS[1]) or image_index == 1
+                    else "ask-first-answer"
+                ),
                 "candidate_selection": "selection",
                 "deployment_confirmation": (
                     "rollback-interrupt" if runtime.spec.profile == "image_interrupt" else "confirmation-adjust"
                 ),
             }.get(normalized_kind, "")
-            plan.image_counts[normalized_kind] = image_index + 1
+            plan.image_counts[slot] = image_index + 1
     return response, image_key
 
 
@@ -4969,12 +5010,17 @@ client = RosClientFactory.create(credential, region)
 stack_id = item["stackId"]
 expected = item["stackName"]
 request = ros_models.GetStackRequest(stack_id=stack_id, region_id=region)
+
+def stack_not_found(exc):
+    codes = ("entitynotexist.stack", "notfound.stack", "stacknotfound")
+    return str(getattr(exc, "code", "")).lower() in codes or any(code in str(exc).lower() for code in codes)
+
 deadline = time.monotonic() + 900
 while time.monotonic() < deadline:
     try:
         actual = client.get_stack(request).body.to_map()
     except Exception as exc:
-        if "not found" in str(exc).lower() or "stacknotfound" in str(exc).lower():
+        if stack_not_found(exc):
             print(json.dumps({"deleted": True, "notFound": True}))
             raise SystemExit(0)
         raise
@@ -4990,6 +5036,9 @@ while time.monotonic() < deadline:
     try:
         client.delete_stack(ros_models.DeleteStackRequest(stack_id=stack_id, region_id=region))
     except Exception as exc:
+        if stack_not_found(exc):
+            print(json.dumps({"deleted": True, "notFound": True}))
+            raise SystemExit(0)
         message = str(exc).lower()
         if "actioninprogress" not in message and "action in progress" not in message:
             raise
@@ -5489,6 +5538,62 @@ def _repl_natural_adjustment_checks(
     }
 
 
+def _a2a_image_asks_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> dict[str, bool]:
+    """Require accepted images in both question phases and a full adjustment/cancel cycle."""
+    extract = _legacy_a2a_module()._extract_pipeline_envelopes
+    image_ask_steps: set[str] = set()
+    for turn in _read_json_lines(runtime.events_path):
+        if not isinstance(turn, dict) or turn.get("type") != "a2a-turn-started" or turn.get("image") is not True:
+            continue
+        name = turn.get("name")
+        if not isinstance(name, str) or Path(name).name != name:
+            continue
+        for value in _read_json_lines(runtime.paths.run_dir / f"{name}.events.jsonl"):
+            for event in extract(value):
+                data, step = event.get("data"), event.get("step")
+                if (
+                    event.get("eventType") == "input_received" and isinstance(data, dict)
+                    and data.get("kind") == "ask_user_question" and isinstance(step, dict)
+                ):
+                    image_ask_steps.add(str(step.get("id") or ""))
+
+    records = list(_pipeline_event_records(values))
+    image_indexes = [
+        index for index, event in records
+        if event.get("eventType") == "input_received" and isinstance(event.get("data"), dict)
+        and event["data"].get("kind") == "deployment_confirmation" and event["data"].get("has_images") is True
+    ]
+    image_index = min(image_indexes, default=-1)
+    refreshed_indexes = [
+        index for index, event in records
+        if image_index >= 0 and index > image_index and event.get("eventType") == "input_required"
+        and isinstance(event.get("data"), dict) and event["data"].get("kind") == "deployment_confirmation"
+    ]
+    refreshed_index = min(refreshed_indexes, default=-1)
+    refresh_tools = {
+        item["tool"] for item in _tool_sequence(values)
+        if image_index >= 0 and image_index < item["eventIndex"] < refreshed_index
+    }
+    canceled = any(
+        refreshed_index >= 0 and index > refreshed_index and event.get("eventType") == "input_received"
+        and isinstance(event.get("data"), dict) and event["data"].get("kind") == "deployment_confirmation"
+        and event["data"].get("action") == "cancel"
+        for index, event in records
+    )
+    return {
+        "Step 1 clarification accepted an image answer": NEW_STEPS[0] in image_ask_steps,
+        "Step 2 parameter question accepted an image answer": NEW_STEPS[1] in image_ask_steps,
+        "image adjustment produced a second confirmation": image_index >= 0 and refreshed_index > image_index,
+        "image adjustment reran Preview and quote": (
+            {"ros_preview_template", "ros_estimate_template_cost"}.issubset(refresh_tools)
+        ),
+        "image adjustment was canceled without deployment": (
+            canceled and not any(item["tool"].lower() == "ros_deploy" for item in _tool_sequence(values))
+            and not any(step == NEW_STEPS[2] for _, step in _started_steps(values))
+        ),
+    }
+
+
 def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
     spec = runtime.spec
     values = _all_event_values(runtime.paths.run_dir)
@@ -5592,6 +5697,8 @@ def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
             runtime.checks["deployment parameter was requested only in Step 2"] = any(
                 item == f"{NEW_STEPS[1]}:ask_user_question" for item in waiting
             ) and not any(item == f"{NEW_STEPS[0]}:ask_user_question" for item in waiting)
+    elif profile == "image_asks":
+        runtime.checks.update(_a2a_image_asks_checks(runtime, values))
     elif profile == "structured_override":
         runtime.checks["structured override caused a second confirmation"] = (
             sum(item.endswith(":deployment_confirmation") for item in waiting) >= 2
