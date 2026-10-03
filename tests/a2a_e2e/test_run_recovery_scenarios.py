@@ -2999,6 +2999,53 @@ def test_finish_pipeline_answers_clarification_inside_selection_step_before_foll
     assert calls == [{'prompt': '只创建安全组，不创建VSwitch', 'name': 'answer-after-resume-1'}]
 
 
+def test_complete_pipeline_answers_selection_clarification_before_acceptance(tmp_path, monkeypatch):
+    runner = _load_runner()
+    initial = runner.StreamSummary(name='initial', prompt='goal', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    pending = runner.StreamSummary(name='selection', prompt='select', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    done = runner.StreamSummary(name='done', prompt='answer', status_states=['TASK_STATE_COMPLETED'],
+        pipeline_event_types=['pipeline_completed'], normal_handoff_ready=True)
+    (tmp_path / 'selection.events.jsonl').write_text(json.dumps(_input_required_event('ask_user_question')) + '\n',
+                                                   encoding='utf-8')
+    responses = iter([initial, pending, done])
+    calls = []
+
+    def stream(**kwargs):
+        calls.append(kwargs['prompt'])
+        return next(responses)
+
+    h = SimpleNamespace(run_dir=tmp_path, current_goal='只创建测试 VSwitch', checks={}, snapshots={},
+                        stream=stream, fetch_state=lambda _name: {'status': 'completed'})
+    monkeypatch.setattr(runner, '_answer_intervening_ask_inputs', lambda _h, summary, **_kwargs: summary)
+    monkeypatch.setattr(runner, '_answer_pending_legacy_question', lambda _h, _s, goal: goal)
+    runner._complete_pipeline(h, SimpleNamespace(initial_prompt='goal', selection_prompt='select'))
+    assert calls == ['goal', 'select', '只创建测试 VSwitch']
+    assert h.checks == {'initial reached step4 selection': True, 'selection completed pipeline': True,
+                        'selection produced normal handoff': True}
+
+
+def test_intervening_question_inside_selection_step_is_answered(tmp_path, monkeypatch):
+    runner = _load_runner()
+    pending = runner.StreamSummary(name='pending', prompt='goal', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    selection = runner.StreamSummary(name='ready', prompt='answer', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    (tmp_path / 'pending.events.jsonl').write_text(json.dumps(_input_required_event('ask_user_question')) + '\n',
+                                                 encoding='utf-8')
+    calls = []
+
+    def stream(**kwargs):
+        calls.append(kwargs['prompt'])
+        return selection
+
+    h = SimpleNamespace(run_dir=tmp_path, current_goal='fixture goal', notes=[], stream=stream)
+    monkeypatch.setattr(runner, '_answer_pending_legacy_question', lambda _h, _s, goal: goal)
+    assert runner._answer_intervening_ask_inputs(h, pending, name_prefix='initial') is selection
+    assert calls == ['fixture goal']
+
+
 def test_ci_preflight_pins_stable_fixture_without_changing_initial_case_goal(monkeypatch, tmp_path):
     runner = _load_runner()
     config = tmp_path / 'config'

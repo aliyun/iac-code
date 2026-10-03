@@ -2277,6 +2277,10 @@ def _complete_pipeline(h: ScenarioHarness, args: argparse.Namespace) -> None:
     initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
     h.checks["initial reached step4 selection"] = initial.last_input_required_step_id == "confirm_and_select"
     selection = h.stream(prompt=args.selection_prompt, name="02-select-candidate")
+    # Selection may expose a legitimate parameter clarification or return a
+    # refreshed selector. Drive those inputs before checking completion; an
+    # input-required turn alone is not the final outcome of this scenario.
+    selection = _finish_pipeline_after_possible_input(h, selection, args)
     h.checks["selection completed pipeline"] = _pipeline_completed(selection)
     h.checks["selection produced normal handoff"] = selection.normal_handoff_ready
     h.snapshots["after_pipeline"] = h.fetch_state("after-pipeline")
@@ -2569,7 +2573,7 @@ def _answer_intervening_ask_inputs(
 ) -> StreamSummary:
     current = summary
     for idx in range(1, 5):
-        if _pipeline_completed(current) or current.last_input_required_step_id == "confirm_and_select":
+        if _pipeline_completed(current):
             return current
         if not _reached_input_required(current):
             return current
