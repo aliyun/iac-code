@@ -693,6 +693,10 @@ msgid "Permission denied."
 msgstr "権限が拒否されました。"
 
 #: src/iac_code/agent/agent_loop.py
+msgid "Responses input exceeds the safe context budget after local compaction."
+msgstr "ローカル圧縮後も、Responses の入力が安全なコンテキスト上限を超えています。"
+
+#: src/iac_code/agent/agent_loop.py
 msgid ""
 "select_cloud_resource must be called alone. Retry it as a standalone tool"
 " call; no tool in this batch was executed."

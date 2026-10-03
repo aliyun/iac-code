@@ -1670,7 +1670,7 @@ requires-dist = [
     { name = "keyring", specifier = ">=25.0" },
     { name = "loguru", specifier = ">=0.7.0" },
     { name = "mcp", specifier = ">=1.28.0" },
-    { name = "openai", specifier = ">=1.50" },
+    { name = "openai", specifier = ">=2.31.0" },
     { name = "opentelemetry-distro", specifier = ">=0.48b0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.27.0" },
     { name = "packaging", specifier = ">=24.0" },

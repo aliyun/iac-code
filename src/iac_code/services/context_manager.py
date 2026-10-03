@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from loguru import logger
@@ -56,6 +56,8 @@ _MODEL_EXACT_CONFIGS: dict[str, ContextWindowConfig] = {
     "claude-sonnet-5": _context_config(1_000_000, 128_000),
     "claude-sonnet-4-6-1m": _context_config(1_000_000, 64_000),
     "gpt-6-astra": _context_config(1_050_000, 128_000),
+    "gpt-6-sol": _context_config(1_050_000, 128_000),
+    "gpt-6-luna": _context_config(1_050_000, 128_000),
     "gpt-5.5": _context_config(1_050_000, 128_000),
     "gpt-5.4": _context_config(1_050_000, 128_000),
     "gpt-5.4-mini": _context_config(400_000, 128_000),
@@ -218,6 +220,11 @@ class ContextManager:
         self._system_prompt = system_prompt
         self._system_prompt_tokens = self._token_counter.count_text(system_prompt)
 
+    def set_input_window_ratio(self, ratio: float = 1.0) -> None:
+        """Apply a request-specific input limit without changing model defaults."""
+        config = get_context_window_config(self._model)
+        self._config = replace(config, context_window=int(config.context_window * ratio))
+
     def set_tool_definitions(self, tool_definitions: list[Any]) -> None:
         """Cache provider tool definitions and their current token footprint."""
         self._tool_definitions = list(tool_definitions)
@@ -337,10 +344,10 @@ class ContextManager:
             "message_count": len(self.get_context_messages()),
         }
 
-    def needs_compaction(self) -> bool:
+    def needs_compaction(self, reserved_output_tokens: int = 0) -> bool:
         total = self.get_total_tokens()
         threshold = self._config.context_window * self._config.compact_threshold
-        if total <= threshold:
+        if total <= threshold and total + reserved_output_tokens <= self._config.context_window:
             return False
         # 超阈值但没有可压缩的旧消息（token 权重全落在保留尾部，例如单条超大工具结果）时，
         # 压缩是空操作：build_compaction_prompt 为空 → 不留会话记录，且因为上下文没变，下一回合

@@ -57,6 +57,8 @@ KNOWN_MODELS: frozenset[str] = frozenset(
         "claude-haiku-4-5-20251001",
         # OpenAI
         "gpt-6-astra",
+        "gpt-6-sol",
+        "gpt-6-luna",
         "gpt-5.6",
         "gpt-5.6-sol",
         "gpt-5.6-terra",

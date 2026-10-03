@@ -352,6 +352,10 @@ class OpenAIProvider(Provider):
         max_tokens: int,
         context: ChatRequestContext,
     ) -> dict[str, Any]:
+        if tools and self._PROVIDER_KEY == "openai" and self._model in {"gpt-6-astra", "gpt-6-sol", "gpt-6-luna"}:
+            effort = self._build_thinking_kwargs().get("reasoning_effort", "medium")
+            if self._model == "gpt-6-astra" or effort != "none":
+                raise ValueError("This GPT-6 tool request requires apiMode=responses.")
         kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": self._build_api_messages(messages, system, cache_policy=context.cache_policy),

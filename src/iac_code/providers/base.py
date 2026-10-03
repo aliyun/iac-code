@@ -42,6 +42,7 @@ class Message:
 
     role: str  # "user", "assistant"
     content: str | list[ContentBlock] = ""
+    metadata: dict[str, Any] = field(default_factory=dict, kw_only=True, repr=False)
 
     @classmethod
     def user(cls, text: str) -> Message:
@@ -91,6 +92,7 @@ class NonStreamingResponse:
     usage: Usage
     thinking: str = ""
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
+    provider_metadata: dict[str, Any] = field(default_factory=dict, kw_only=True, repr=False)
     usage_attribution: UsageAttribution | None = field(default=None, kw_only=True, compare=False)
 
 

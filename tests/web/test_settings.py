@@ -973,6 +973,30 @@ def test_save_provider_config_knobs_are_per_model(_isolate_config):
     assert kimi["savedMaxCompletionTokens"] == 12000
 
 
+def test_save_provider_config_preserves_manual_model_api_mode(_isolate_config):
+    _save_yaml(
+        get_settings_path(),
+        {
+            "providers": {
+                "dashscope": {
+                    "models": {
+                        "qwen3.8-max": {"apiMode": "responses", "maxCompletionTokens": 8192},
+                        "qwen3.7-plus": {"apiMode": "chat_completions", "maxCompletionTokens": 4096},
+                    }
+                }
+            }
+        },
+    )
+    web_settings.save_provider_config({"provider": "dashscope", "model": "qwen3.8-max", "maxCompletionTokens": 10000})
+    web_settings.save_provider_config({"provider": "dashscope", "model": "qwen3.7-plus", "effort": "low"})
+    provider = _load_yaml(get_settings_path())["providers"]["dashscope"]
+    assert "apiMode" not in provider
+    assert provider["models"] == {
+        "qwen3.8-max": {"apiMode": "responses", "maxCompletionTokens": 10000},
+        "qwen3.7-plus": {"apiMode": "chat_completions", "maxCompletionTokens": 4096},
+    }
+
+
 def test_save_provider_config_null_clears_knob_but_preserves_others(_isolate_config):
     # 先写入两个值,再以 null 清除 thinkingBudget:该键从模型条目删除,其余键保留(回落模型默认)。
     web_settings.save_provider_config(

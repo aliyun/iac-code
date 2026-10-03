@@ -151,6 +151,7 @@ class MessageEndEvent:
     stop_reason: str
     usage: Usage
     type: Literal["message_end"] = "message_end"
+    provider_metadata: dict[str, Any] = field(default_factory=dict, kw_only=True, repr=False)
     usage_attribution: UsageAttribution | None = field(default=None, kw_only=True, compare=False)
 
 
@@ -182,6 +183,7 @@ class ErrorEvent:
     is_retryable: bool
     error_id: str | None = None
     type: Literal["error"] = "error"
+    context_limit_exceeded: bool = field(default=False, kw_only=True, repr=False)
     i18n_message_id: str | None = field(default=None, kw_only=True, compare=False)
     i18n_message_args: dict[str, Any] | None = field(default=None, kw_only=True, compare=False)
 
