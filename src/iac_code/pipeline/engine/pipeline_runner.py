@@ -4640,10 +4640,7 @@ class PipelineRunner:
                     first_step
                     and first_step_user_input_is_restored
                     and step_resume_messages
-                    and (
-                        isinstance(step_user_message, str)
-                        or user_message_already_in_resume(step_user_message, step_resume_messages)
-                    )
+                    and user_message_already_in_resume(step_user_message, step_resume_messages)
                 ):
                     step_user_message = None
                 execute_kwargs: dict[str, Any] = {
