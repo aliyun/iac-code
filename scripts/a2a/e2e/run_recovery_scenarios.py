@@ -16,6 +16,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import signal
 import sys
@@ -36,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 E2E_SCRIPTS_DIR = Path(__file__).resolve().parent
 A2A_SCRIPTS_DIR = E2E_SCRIPTS_DIR.parent
-for scripts_dir in (E2E_SCRIPTS_DIR, A2A_SCRIPTS_DIR):
+for scripts_dir in (E2E_SCRIPTS_DIR, A2A_SCRIPTS_DIR, E2E_SCRIPTS_DIR.parents[2]):
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
 
@@ -82,6 +83,7 @@ from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session  #
 from iac_code.services.session_storage import SessionStorage  # noqa: E402
 from iac_code.utils.project_paths import get_projects_dir  # noqa: E402
 from iac_code.utils.public_paths import redact_known_public_paths  # noqa: E402
+from scripts.e2e_question_driver import answer_question, case_facts, network_facts, question_conversation  # noqa: E402
 
 ASK_TRIGGER_PROMPT = "我有个产品要上线"
 ASK_FIRST_ANSWER = "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。"
@@ -126,6 +128,10 @@ MULTIMODAL_SCENARIOS = frozenset(
     }
 )
 IMAGE_TEXT_PROMPT = "请读取图片中的文字，并将图片中的文字作为本轮用户输入执行。"
+IMAGE_INTERRUPT_PROMPT = (
+    "请先读取图片里的新要求。本轮图片是目标变更，不是确认部署；"
+    "先按图片中的目标重新规划，不得沿用旧目标直接部署。"
+)
 STATIC_TEXT_IMAGE_FIXTURE_ROOT = E2E_SCRIPTS_DIR / "fixtures" / "text-images"
 STATIC_TEXT_IMAGE_FIXTURES = {
     "initial": DEFAULT_INITIAL_PROMPT,
@@ -529,6 +535,17 @@ class ScenarioHarness:
         self.server_cwd = str(Path(args.server_cwd).expanduser().resolve())
         self.run_dir = _scenario_run_dir(args, scenario)
         self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.run_id = uuid.uuid4().hex[:12]
+        self.owned_stack_names = (
+            [_cleanup_stack_name(self, label) for label in ("first", "second")]
+            if scenario in {"rollback-step5-cleanup", "rollback-step5-cleanup-recovery"}
+            else [_cleanup_stack_name(self, "main")]
+        )
+        if getattr(args, "ci_teardown", False):
+            _write_json(
+                self.run_dir / "owned-stacks.json",
+                {"runId": self.run_id, "stackNames": self.owned_stack_names},
+            )
         self.notes: list[str] = []
         self.backup_root: Path | None = None
         self.image_fixtures = TextImageFixtureStore(self.run_dir / "image-fixtures")
@@ -590,10 +607,30 @@ class ScenarioHarness:
         self.context_id = ""
         self.pipeline_task_id = ""
         self.checks: dict[str, bool] = {}
+        self.cleanup_status = "not-needed"
+        self.cleanup_diagnostic: dict[str, Any] = {}
+        self.diagnostics: dict[str, Any] = {}
+        self.question_counts: dict[str, int] = {}
+        self.current_goal = getattr(args, "initial_prompt", DEFAULT_INITIAL_PROMPT)
         self.summaries: dict[str, Any] = {}
         self.snapshots: dict[str, Any] = {}
+        self.failure_stage = ""
 
     def preflight(self) -> None:
+        if getattr(self.args, "ci_teardown", False) and getattr(self.args, "allow_real_cloud", False):
+            fixture = network_facts(self.args.python, self.server_env, Path(self.server_cwd), "10.250.1.0/24")
+            self.network_fixture_facts = fixture
+            config_dir = Path(self.server_env["IAC_CODE_CONFIG_DIR"])
+            instruction_name = "IAC-CODE-E2E.md"
+            (config_dir / instruction_name).write_text(
+                "# E2E fixture isolation\n"
+                "如需复用已有 VPC，只能使用独立测试夹具 VpcId=`" + fixture["vpc_id"]
+                + "`、ZoneId=`" + fixture["zone_id"] + "`。不得复用其它 E2E Stack 创建的临时 VPC。\n"
+                + "创建 Stack 时名称必须精确使用本次归属列表，不能追加日期或其它后缀："
+                + ", ".join(self.owned_stack_names) + "。具体使用哪个名称以当前用户请求为准。\n",
+                encoding="utf-8",
+            )
+            self.server_env["IAC_CODE_INSTRUCTION_MEMORY_FILE"] = instruction_name
         if self.args.skip_preflight:
             self.notes.append("LLM preflight skipped")
             return
@@ -643,6 +680,12 @@ class ScenarioHarness:
         task_id: str | None = None,
         images: list[dict[str, Any]] | None = None,
     ) -> StreamSummary:
+        if prompt in {ASK_FIRST_ANSWER, ASK_SECOND_ANSWER}:
+            self.current_goal = self._ci_owned_prompt(
+                ASK_FIRST_ANSWER + ('\n' + ASK_SECOND_ANSWER if prompt == ASK_SECOND_ANSWER else ''))
+        prompt = self._ci_owned_prompt(prompt)
+        if context_id == "" or "我改需求" in prompt or "停止旧目标" in prompt:
+            self.current_goal = prompt
         summary = stream_message(
             server_url=self.server_url,
             cwd=self.cwd,
@@ -687,6 +730,12 @@ class ScenarioHarness:
         images: list[dict[str, Any]] | None = None,
         wait_for_identity: bool = True,
     ) -> BackgroundStream:
+        if prompt in {ASK_FIRST_ANSWER, ASK_SECOND_ANSWER}:
+            self.current_goal = self._ci_owned_prompt(
+                ASK_FIRST_ANSWER + ('\n' + ASK_SECOND_ANSWER if prompt == ASK_SECOND_ANSWER else ''))
+        prompt = self._ci_owned_prompt(prompt)
+        if context_id == "" or "我改需求" in prompt or "停止旧目标" in prompt:
+            self.current_goal = prompt
         stream = BackgroundStream(
             server_url=self.server_url,
             cwd=self.cwd,
@@ -711,6 +760,22 @@ class ScenarioHarness:
         self.summaries[name] = stream.summary
         return stream
 
+    def _ci_owned_prompt(self, prompt: str) -> str:
+        if not getattr(self.args, "ci_teardown", False) or self.scenario in {
+            "rollback-step5-cleanup", "rollback-step5-cleanup-recovery",
+        }:
+            return prompt
+        if prompt not in {
+            self.args.initial_prompt, self.args.selection_prompt, ASK_TRIGGER_PROMPT,
+            ASK_FIRST_ANSWER, ASK_SECOND_ANSWER, ROLLBACK_PROMPT, IMAGE_TEXT_PROMPT, IMAGE_INTERRUPT_PROMPT,
+        }:
+            return prompt
+        stack_name = self.owned_stack_names[0]
+        return (
+            prompt + "\n\nE2E 资源归属约束：如果本轮创建 ROS Stack，StackName 必须精确等于 `"
+            + stack_name + "`；不得复用已有 Stack。"
+        )
+
     def start_stream_image_text(
         self,
         *,
@@ -721,6 +786,8 @@ class ScenarioHarness:
         task_id: str | None = None,
         prompt: str = IMAGE_TEXT_PROMPT,
     ) -> BackgroundStream:
+        if image_key == "rollback-interrupt":
+            self.current_goal = self._ci_owned_prompt(text)
         return self.start_stream(
             prompt=prompt,
             name=name,
@@ -821,7 +888,9 @@ class ScenarioHarness:
         if summary.task_id and not self.pipeline_task_id:
             self.pipeline_task_id = summary.task_id
 
-    def finish(self, *, passed: bool | None = None, abort_reason: str = "") -> int:
+    def finish(
+        self, *, passed: bool | None = None, abort_reason: str = "", error_type: str = "", error_site: str = ""
+    ) -> int:
         if passed is None:
             passed = bool(self.checks) and all(self.checks.values())
         result = ScenarioRunResult(
@@ -837,9 +906,17 @@ class ScenarioHarness:
         )
         payload = {
             **asdict(result),
+            "cleanup_status": self.cleanup_status,
+            "cleanup_diagnostic": self.cleanup_diagnostic,
+            "diagnostics": self.diagnostics,
+            "a2a_states": [state for summary in self.summaries.values() for state in summary.status_states][-12:],
+            "terminal_markers": _terminal_markers(self.summaries.values()),
+            "control_state": _control_state_diagnostic(self.run_dir, self.context_id, self.pipeline_task_id),
             "streams": {name: asdict(summary) for name, summary in self.summaries.items()},
             "snapshots": self.snapshots,
         }
+        if not result.passed:
+            payload.update(error_type=error_type, error_site=error_site, failure_stage=self.failure_stage)
         _write_json(self.run_dir / "summary.json", payload)
         _print_result(result)
         return 0 if result.passed else 1
@@ -888,6 +965,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Named deterministic fault point, for example after_a2a_pipeline_snapshot_saved.",
     )
     parser.add_argument("--allow-real-cloud", action="store_true")
+    parser.add_argument(
+        "--ci-teardown", action="store_true", help="Use run-scoped Stack names and verified final teardown."
+    )
     parser.add_argument("--skip-preflight", action="store_true")
     parser.add_argument("--preflight-timeout", type=float, default=60.0)
     parser.add_argument("--server-timeout", type=float, default=45.0)
@@ -930,16 +1010,105 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run_with_harness(args: argparse.Namespace, scenario: str, callback: Callable[[ScenarioHarness], None]) -> int:
     harness = ScenarioHarness(args, scenario=scenario)
+    passed: bool | None = None
+    abort_reason = ""
+    error_type = ""
+    error_site = ""
     try:
         harness.preflight()
         harness.start_server()
         callback(harness)
-        return harness.finish()
     except Exception as exc:
         harness.notes.append(f"exception: {type(exc).__name__}: {exc}")
-        return harness.finish(passed=False, abort_reason=str(exc))
+        passed = False
+        abort_reason = str(exc)
+        error_type = type(exc).__name__
+        traceback = exc.__traceback__
+        while traceback is not None:
+            filename = Path(traceback.tb_frame.f_code.co_filename)
+            try:
+                relative = filename.resolve().relative_to(E2E_SCRIPTS_DIR.parents[2])
+            except ValueError:
+                pass
+            else:
+                if relative.parts[0] in {"scripts", "src"} and relative.suffix == ".py":
+                    error_site = f"{relative.as_posix()}:{traceback.tb_lineno}"
+            traceback = traceback.tb_next
     finally:
-        harness.terminate()
+        try:
+            harness.terminate()
+        except Exception as exc:
+            harness.notes.append("server teardown: " + type(exc).__name__)
+            harness.checks["server stopped"] = False
+        if getattr(args, "ci_teardown", False):
+            try:
+                from cleanup_owned_stacks import CleanupOperationError, cleanup_owned_stacks
+
+                cleanup = cleanup_owned_stacks(harness.run_dir)
+                harness.cleanup_status = cleanup["status"]
+                harness.cleanup_diagnostic = {
+                    "failure_count": len(cleanup["failures"]),
+                    "remaining_count": len(cleanup["remainingStackIds"]),
+                }
+                harness.checks["test-owned ROS Stacks cleaned"] = cleanup["status"] == "completed"
+            except Exception as exc:
+                harness.cleanup_status = "failed"
+                harness.cleanup_diagnostic = {
+                    "error_type": exc.cause_type if isinstance(exc, CleanupOperationError) else type(exc).__name__,
+                    "stage": exc.stage if isinstance(exc, CleanupOperationError) else "other",
+                    "sdk_code": exc.sdk_code if isinstance(exc, CleanupOperationError) else "",
+                }
+                harness.checks["test-owned ROS Stacks cleaned"] = False
+                harness.notes.append("teardown: " + type(exc).__name__)
+    return harness.finish(passed=passed, abort_reason=abort_reason, error_type=error_type, error_site=error_site)
+
+
+def _terminal_markers(summaries: Iterable[StreamSummary]) -> list[str]:
+    """Expose only fixed failure clues; terminal text can contain user data."""
+
+    text = " ".join(summary.terminal_status_text for summary in summaries).casefold()
+    markers = (
+        "active session", "execution", "permission", "credential", "timeout", "model",
+        "context", "task", "selector", "not found", "terminal state", "rate limit",
+        "unsupported", "duplicate",
+    )
+    return [marker for marker in markers if marker in text]
+
+
+def _control_state_diagnostic(run_dir: Path, context_id: str, task_id: str) -> dict[str, Any]:
+    """Read only fixed, non-secret execution-control fields for CI triage."""
+
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", context_id):
+        return {"present": False}
+    path = run_dir / "a2a-persistence" / "execution-control" / f"{context_id}.json"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return {"present": False}
+    if not isinstance(record, dict):
+        return {"present": False}
+    blockers = record.get("blockers")
+    external_operations = record.get("externalOperations")
+    backup = record.get("backup")
+    return {
+        "present": True,
+        "task_matches": record.get("taskId") == task_id,
+        "phase": record.get("phase"),
+        "execution_status": record.get("executionStatus"),
+        "release_ready": record.get("releaseReady"),
+        "input_handoff_ready": record.get("inputHandoffReady"),
+        "stream_available": record.get("streamAvailable"),
+        "blocker_count": len(blockers) if isinstance(blockers, list) else None,
+        "subprocess_tracking": record.get("subprocessToolTrackingVersion") == 1,
+        "active_subprocess_tools": record.get("activeSubprocessTools"),
+        "external_operation_count": len(external_operations) if isinstance(external_operations, list) else None,
+        "revision_settled": (
+            isinstance(record.get("revision"), int)
+            and not isinstance(record["revision"], bool)
+            and record.get("revision") == record.get("persistedRevision")
+        ),
+        "backup_status": backup.get("status") if isinstance(backup, dict) else None,
+    }
 
 
 def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
@@ -1013,8 +1182,11 @@ def _run_scenario1(
                 and backup_restore["backupStillPresentAfterSelection"]
             )
             _write_json(h.run_dir / "step4.backup-only-restore.json", backup_restore)
+        selection = _finish_pipeline_after_possible_input(h, selection, args)
         h.checks["selection completed pipeline"] = _pipeline_completed(selection)
         h.checks["selection produced normal handoff"] = selection.normal_handoff_ready
+        if not h.checks["selection completed pipeline"] or not h.checks["selection produced normal handoff"]:
+            raise RuntimeError("pipeline did not complete with normal handoff before follow-up")
         h.snapshots["after_pipeline"] = h.fetch_state("after-pipeline")
         _add_completed_snapshot_checks(
             h.checks,
@@ -1178,10 +1350,14 @@ def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
     def callback(h: ScenarioHarness) -> None:
         control = _backup_delay_control_path(h)
         initial_stream = h.start_stream(prompt=args.initial_prompt, name="01-initial", context_id="", task_id="")
-        started = _wait_for_backup_delay_marker(control, "started", timeout=args.event_timeout)
+        started, initial_streams = _wait_for_backup_start_with_intervening_asks(
+            h, control, initial_stream,
+            # Real Step 1 planning may exceed the shared 240s event timeout.
+            timeout=max(args.event_timeout, min(args.stream_timeout, 600.0)),
+        )
         h.snapshots["backup_delay_started"] = started
         h.checks["input_required backup delay started"] = started.get("delaySeconds") == BACKUP_DELAY_SECONDS
-        h.checks["initial stream was open when backup delay started"] = not initial_stream.done
+        h.checks["active stream was open when backup delay started"] = not initial_streams[-1].done
 
         h.checks["backup was unfinished when selection request was dispatched"] = not _backup_delay_marker_path(
             control, "finished"
@@ -1192,14 +1368,15 @@ def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
             wait_for_identity=False,
         )
 
-        initial_streams = _wait_for_with_intervening_ask_inputs(
+        continued_streams = _wait_for_with_intervening_ask_inputs(
             h,
-            [initial_stream],
+            [initial_streams[-1]],
             _input_required_step("confirm_and_select"),
             description="step4 candidate selection input_required",
             timeout=args.event_timeout,
             name_prefix="01-initial",
         )
+        initial_streams = [*initial_streams[:-1], *continued_streams]
         h.checks["initial reached step4 input_required"] = any(
             stream.summary.last_input_required_step_id == "confirm_and_select" for stream in initial_streams
         )
@@ -1615,6 +1792,7 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
             text=ROLLBACK_PROMPT,
             image_key="rollback-interrupt",
             name="02-rollback-image-interrupt",
+            prompt=IMAGE_INTERRUPT_PROMPT,
         )
         _wait_any(
             [*observed_streams, rollback],
@@ -1636,9 +1814,17 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
         snapshot = h.fetch_state("after-restart")
         h.checks["state endpoint returned snapshot after image interrupt restart"] = _snapshot(snapshot) is not None
         resumed = h.stream(prompt=CONTINUE_PROMPT, name="03-continue-after-restart")
+        h.current_goal = h._ci_owned_prompt(ROLLBACK_PROMPT)
         _finish_pipeline_after_possible_input(h, resumed, args, input_prompt=ROLLBACK_PROMPT)
         h.checks["pipeline completed after image interrupt recovery"] = _completed_snapshot_or_stream(h, resumed)
         final_state = h.fetch_state("after-image-interrupt-completion")
+        _record_final_target_diagnostics(h, final_state)
+        h.diagnostics["final_target_security_group"] = _has_any_marker(
+            _final_deployment_evidence(final_state), SECURITY_GROUP_MARKERS
+        )
+        h.diagnostics["final_target_vswitch"] = _has_any_marker(
+            _final_deployment_evidence(final_state), VSWITCH_MARKERS
+        )
         final_deploying = _final_deployment_evidence(final_state)
         h.checks["final deploying target is security group"] = _has_any_marker(
             final_deploying,
@@ -1653,6 +1839,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
     target_step = _ROLLBACK_SCENARIOS[scenario]
 
     def callback(h: ScenarioHarness) -> None:
+        h.failure_stage = "pre_rollback_candidate"
         initial = h.start_stream(prompt=args.initial_prompt, name="01-initial-running", context_id="", task_id="")
         observed_streams = _wait_for_with_intervening_ask_inputs(
             h,
@@ -1662,6 +1849,10 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
             timeout=args.event_timeout,
             name_prefix="initial-running",
         )
+        h.failure_stage = "rollback_completion"
+        # This fixture phrase does not contain the harness's generic intent-change
+        # markers. Supplemental questions must still use the new target after restart.
+        h.current_goal = h._ci_owned_prompt(ROLLBACK_PROMPT)
         rollback = h.start_stream(prompt=ROLLBACK_PROMPT, name="02-rollback-interrupt")
         _wait_any(
             [*observed_streams, rollback],
@@ -1671,6 +1862,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
         )
         streams_to_join = [*observed_streams, rollback]
         if target_step == "deploying":
+            h.failure_stage = "post_rollback_confirmation"
             observed_streams = _wait_for_with_intervening_ask_inputs(
                 h,
                 streams_to_join,
@@ -1684,6 +1876,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
             streams_to_join = observed_streams
             selection = h.start_stream(prompt=args.selection_prompt, name="03-select-after-rollback")
             streams_to_join.append(selection)
+            h.failure_stage = "post_rollback_step"
             _wait_any(
                 [selection],
                 _step_started(target_step),
@@ -1691,6 +1884,7 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
                 timeout=args.event_timeout,
             )
         else:
+            h.failure_stage = "post_rollback_step"
             streams_to_join = _wait_for_with_intervening_ask_inputs(
                 h,
                 streams_to_join,
@@ -1701,19 +1895,23 @@ def run_rollback(args: argparse.Namespace, scenario: str) -> int:
                 answer_prompt=ROLLBACK_PROMPT,
                 answer_input_steps={"intent_parsing"},
             )
+        h.failure_stage = "restart"
         h.fetch_state("before-kill")
         h.kill9_and_restart()
         for stream in streams_to_join:
             _join_after_kill(stream, h)
         snapshot = h.fetch_state("after-restart")
         h.checks["state endpoint returned snapshot after rollback restart"] = _snapshot(snapshot) is not None
+        h.failure_stage = "resume"
         resumed = h.stream(
             prompt=CONTINUE_PROMPT,
             name="04-continue-after-restart" if target_step == "deploying" else "03-continue-after-restart",
         )
         _finish_pipeline_after_possible_input(h, resumed, args, input_prompt=ROLLBACK_PROMPT)
+        h.failure_stage = "verify"
         h.checks["pipeline completed after rollback recovery"] = _completed_snapshot_or_stream(h, resumed)
         final_state = h.fetch_state("after-rollback-completion")
+        _record_final_target_diagnostics(h, final_state)
         final_deploying = _final_deployment_evidence(final_state)
         h.checks["final deploying target is security group"] = _has_any_marker(
             final_deploying,
@@ -1918,6 +2116,7 @@ def _run_rollback_step5_cleanup(
     kill_during_cleanup: bool,
 ) -> int:
     def callback(h: ScenarioHarness) -> None:
+        h.failure_stage = "initial_selection"
         first_stack_name = _cleanup_stack_name(h, "first")
         second_stack_name = _cleanup_stack_name(h, "second")
 
@@ -1930,6 +2129,7 @@ def _run_rollback_step5_cleanup(
         initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
         h.checks["initial reached step4 selection"] = initial.last_input_required_step_id == "confirm_and_select"
 
+        h.failure_stage = "first_stack_create"
         first_deploy = h.start_stream(
             prompt=_cleanup_deployment_prompt(args.selection_prompt, h, "first"),
             name="02-create-first-stack",
@@ -1942,6 +2142,7 @@ def _run_rollback_step5_cleanup(
         )
         h.checks["first rollback stack observed before rollback"] = bool(first_stack_id)
 
+        h.failure_stage = "rollback_cleanup"
         rollback = h.start_stream(
             prompt=_cleanup_intent_prompt(ROLLBACK_PROMPT, second_stack_name),
             name="03-rollback-after-first-stack",
@@ -1964,6 +2165,7 @@ def _run_rollback_step5_cleanup(
         )
         h.checks["rollback cleanup target stacks observed"] = bool(cleanup_stack_ids)
 
+        h.failure_stage = "second_stack_create"
         second_deploy = h.start_stream(
             prompt=_cleanup_deployment_prompt(args.selection_prompt, h, "second"),
             name="04-select-second-stack",
@@ -1999,6 +2201,7 @@ def _run_rollback_step5_cleanup(
         h.checks["rollback cleanup target stacks observed"] = bool(cleanup_stack_ids)
 
         if kill_during_cleanup:
+            h.failure_stage = "cleanup_recovery"
             cleanup_stream = h.start_stream(
                 prompt=args.normal_followup_prompt,
                 name="05-cleanup-running",
@@ -2015,6 +2218,7 @@ def _run_rollback_step5_cleanup(
                 event_types={"cleanup_started", "cleanup_progress", "cleanup_completed"},
             )
         else:
+            h.failure_stage = "cleanup_normal_turn"
             cleanup_summary = h.stream(
                 prompt=args.normal_followup_prompt,
                 name="05-cleanup-normal-turn",
@@ -2023,7 +2227,26 @@ def _run_rollback_step5_cleanup(
         h.checks["cleanup normal turn stayed in same context"] = cleanup_summary.context_id == h.context_id
         h.checks["cleanup normal turn used normal task"] = cleanup_summary.task_id != h.pipeline_task_id
 
-        after_cleanup = h.fetch_state("after-cleanup")
+        h.failure_stage = "cleanup_verify"
+        # The normal turn can finish while ROS is still deleting the rollback
+        # stack. Verify the same completion criteria after bounded polling.
+        verify_deadline = time.monotonic() + min(args.event_timeout, 180.0)
+        verify_attempt = 0
+        ros_stack_ids = _unique_strings([*cleanup_stack_ids, second_stack_id])
+        while True:
+            verify_attempt += 1
+            after_cleanup = h.fetch_state("after-cleanup")
+            ros_states = _capture_ros_stack_states(h, ros_stack_ids, "after-cleanup")
+            if bool(cleanup_stack_ids) and all(
+                _cleanup_resource_completed(_cleanup_resource_for_stack(after_cleanup, stack_id))
+                and _ros_stack_deleted(ros_states.get(stack_id, {}))
+                for stack_id in cleanup_stack_ids
+            ):
+                break
+            if time.monotonic() >= verify_deadline:
+                break
+            time.sleep(min(10.0, max(0.0, verify_deadline - time.monotonic())))
+        h.snapshots["cleanup_verify_attempts"] = verify_attempt
         cleanup_resource = _cleanup_resource_for_stack(after_cleanup, first_stack_id)
         h.checks["first rollback stack cleanup completed in snapshot"] = _cleanup_resource_completed(cleanup_resource)
         h.checks["rollback cleanup stacks completed in snapshot"] = bool(cleanup_stack_ids) and all(
@@ -2034,12 +2257,6 @@ def _run_rollback_step5_cleanup(
             bool(second_stack_id) and _cleanup_resource_for_stack(after_cleanup, second_stack_id) is None
         )
 
-        ros_stack_ids = _unique_strings([*cleanup_stack_ids, second_stack_id])
-        ros_states = _capture_ros_stack_states(
-            h,
-            ros_stack_ids,
-            "after-cleanup",
-        )
         h.checks["ROS first rollback stack deleted"] = _ros_stack_deleted(ros_states.get(first_stack_id, {}))
         h.checks["ROS rollback cleanup stacks deleted"] = bool(cleanup_stack_ids) and all(
             _ros_stack_deleted(ros_states.get(stack_id, {})) for stack_id in cleanup_stack_ids
@@ -2047,6 +2264,12 @@ def _run_rollback_step5_cleanup(
         h.checks["ROS second stack retained"] = bool(second_stack_id) and _ros_stack_retained(
             ros_states.get(second_stack_id, {})
         )
+        if isinstance(getattr(h, "diagnostics", None), dict):
+            h.diagnostics.update(
+                _rollback_cleanup_diagnostics(
+                    h, cleanup_summary, first_stack_id, cleanup_stack_ids, after_cleanup, ros_states
+                )
+            )
 
     return _run_with_harness(args, scenario, callback)
 
@@ -2056,6 +2279,10 @@ def _complete_pipeline(h: ScenarioHarness, args: argparse.Namespace) -> None:
     initial = _answer_intervening_ask_inputs(h, initial, name_prefix="01-initial")
     h.checks["initial reached step4 selection"] = initial.last_input_required_step_id == "confirm_and_select"
     selection = h.stream(prompt=args.selection_prompt, name="02-select-candidate")
+    # Selection may expose a legitimate parameter clarification or return a
+    # refreshed selector. Drive those inputs before checking completion; an
+    # input-required turn alone is not the final outcome of this scenario.
+    selection = _finish_pipeline_after_possible_input(h, selection, args)
     h.checks["selection completed pipeline"] = _pipeline_completed(selection)
     h.checks["selection produced normal handoff"] = selection.normal_handoff_ready
     h.snapshots["after_pipeline"] = h.fetch_state("after-pipeline")
@@ -2067,11 +2294,19 @@ def _finish_pipeline_after_possible_input(
     args: argparse.Namespace,
     *,
     input_prompt: str = CONTINUE_PROMPT,
-) -> None:
+) -> StreamSummary:
     current = summary
-    for idx in range(1, 5):
+    for idx in range(1, 13):
         if _pipeline_completed(current):
-            return
+            return current
+        if current.last_status_state in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
+            return current
+        kind = _latest_pending_kind(h.run_dir / f"{current.name}.events.jsonl")
+        if _reached_input_required(current) and kind == "ask_user_question":
+            goal = getattr(h, "current_goal", "") or input_prompt
+            response = _answer_pending_legacy_question(h, current, goal)
+            current = h.stream(prompt=response, name=f"answer-after-resume-{idx}")
+            continue
         if current.last_input_required_step_id == "confirm_and_select":
             current = h.stream(prompt=args.selection_prompt, name=f"select-after-resume-{idx}")
             continue
@@ -2079,10 +2314,10 @@ def _finish_pipeline_after_possible_input(
             current = h.stream(prompt=input_prompt, name=f"continue-after-input-{idx}")
             continue
         if current.last_status_state in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
-            return
+            return current
         snapshot = h.fetch_state(f"post-resume-{idx}")
         if _snapshot_value(snapshot, "status") == "completed":
-            return
+            return current
         if (
             _snapshot_value(snapshot, "status") == "waiting_input"
             and _pending_step_id(snapshot) == "confirm_and_select"
@@ -2090,6 +2325,7 @@ def _finish_pipeline_after_possible_input(
             current = h.stream(prompt=args.selection_prompt, name=f"select-from-snapshot-{idx}")
             continue
         current = h.stream(prompt=input_prompt, name=f"continue-loop-{idx}")
+    raise RuntimeError("pipeline remained pending after bounded supplemental inputs")
 
 
 def _apply_event(summary: StreamSummary, payload: Any) -> None:
@@ -2115,7 +2351,10 @@ def _apply_event(summary: StreamSummary, payload: Any) -> None:
         if _is_normal_handoff(envelope):
             summary.normal_handoff_ready = True
 
-    for text in _status_message_texts(payload):
+    status_texts = _status_message_texts(payload)
+    if identity is not None and identity.get("state") in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
+        summary.terminal_status_text = "".join(status_texts)
+    for text in status_texts:
         summary.text += text
 
 
@@ -2249,8 +2488,16 @@ def _wait_for_with_intervening_ask_inputs(
                 h.notes.append(
                     f"answered intervening input_required({input_name}) while waiting for {description}: {stream.name}"
                 )
+                goal = (
+                    answer_prompt if answer_prompt != INTERVENING_ASK_ANSWER
+                    else getattr(h, "current_goal", "") or answer_prompt
+                )
+                response = (
+                    _answer_pending_legacy_question(h, stream.summary, goal)
+                    if kind == "ask_user_question" else answer_prompt
+                )
                 answer = h.start_stream(
-                    prompt=answer_prompt,
+                    prompt=response,
                     name=f"{name_prefix}-answer-{input_name}-{answered_count}",
                 )
                 active_streams.append(answer)
@@ -2285,6 +2532,40 @@ def _wait_or_note(
         h.notes.append(f"did not observe {description}: {exc}")
 
 
+def _latest_pending_input(path: Path) -> dict[str, Any]:
+    pending: dict[str, Any] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return pending
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for envelope in _extract_pipeline_envelopes(row):
+            if envelope.get("eventType") == "input_required":
+                pending = {**(envelope.get("data") or {}), **(envelope.get("input") or {})}
+    return pending
+
+
+def _answer_pending_legacy_question(h: ScenarioHarness, summary: StreamSummary, goal: str) -> str:
+    pending = _latest_pending_input(h.run_dir / f"{summary.name}.events.jsonl")
+    if not pending.get("question"):
+        raise RuntimeError("pending clarification has no question text")
+    counts = getattr(h, "question_counts", None)
+    if not isinstance(counts, dict):
+        counts = h.question_counts = {}
+    diagnostics = getattr(h, "diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = h.diagnostics = {}
+    config_dir = Path(h.server_env["IAC_CODE_CONFIG_DIR"])
+    response, _ = answer_question(config_dir, pending, case_facts(goal, getattr(h, "network_fixture_facts", {})),
+                                  counts, diagnostics,
+                                  conversation=question_conversation(h))
+    return response
+
+
 def _answer_intervening_ask_inputs(
     h: ScenarioHarness,
     summary: StreamSummary,
@@ -2294,7 +2575,7 @@ def _answer_intervening_ask_inputs(
 ) -> StreamSummary:
     current = summary
     for idx in range(1, 5):
-        if _pipeline_completed(current) or current.last_input_required_step_id == "confirm_and_select":
+        if _pipeline_completed(current):
             return current
         if not _reached_input_required(current):
             return current
@@ -2302,7 +2583,13 @@ def _answer_intervening_ask_inputs(
         if kind != "ask_user_question":
             return current
         h.notes.append(f"answered intervening ask_user_question before step4 selection: {current.name}")
-        current = h.stream(prompt=answer_prompt, name=f"{name_prefix}-answer-ask-{idx}")
+        goal = (
+            answer_prompt if answer_prompt != INTERVENING_ASK_ANSWER
+            else getattr(h, "current_goal", "")
+            or getattr(getattr(h, "args", None), "initial_prompt", answer_prompt)
+        )
+        response = _answer_pending_legacy_question(h, current, goal)
+        current = h.stream(prompt=response, name=f"{name_prefix}-answer-ask-{idx}")
     return current
 
 
@@ -2365,6 +2652,41 @@ def _wait_for_backup_delay_marker(control: Path, marker: str, *, timeout: float)
         last_error = "marker was not a JSON object"
         time.sleep(0.05)
     raise TimeoutError(f"Timed out waiting for backup delay marker {path}: {last_error}")
+
+
+def _wait_for_backup_start_with_intervening_asks(
+    h: ScenarioHarness, control: Path, initial_stream: BackgroundStream, *, timeout: float
+) -> tuple[dict[str, Any], list[BackgroundStream]]:
+    """Keep Step 1 clarification turns moving while waiting for the Step 4 backup hook."""
+
+    streams = [initial_stream]
+    handled: set[int] = set()
+    path = _backup_delay_marker_path(control, "started")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.is_file():
+            return _wait_for_backup_delay_marker(control, "started", timeout=1.0), streams
+        for stream in list(streams):
+            if not stream.done or id(stream) in handled:
+                continue
+            handled.add(id(stream))
+            kind = _latest_input_required_kind_from_events(stream.events)
+            if kind != "ask_user_question":
+                if all(item.done for item in streams):
+                    raise RuntimeError("initial A2A stream ended before backup delay without a clarification question")
+                continue
+            if len(streams) > 4:
+                raise RuntimeError("too many intervening questions before backup delay")
+            h.notes.append(f"answered intervening ask_user_question before backup delay: {stream.name}")
+            response = _answer_pending_legacy_question(h, stream.summary, h.current_goal)
+            streams.append(
+                h.start_stream(
+                    prompt=response,
+                    name=f"01-initial-answer-ask-{len(streams)}",
+                )
+            )
+        time.sleep(0.05)
+    raise TimeoutError("Timed out waiting for backup delay to start after Step 1 clarification")
 
 
 def _float_value(value: Any) -> float | None:
@@ -2857,6 +3179,21 @@ def _step_evidence(response: Any, step_id: str) -> str:
     return json.dumps(matches[-1], ensure_ascii=False, default=str)
 
 
+def _record_final_target_diagnostics(h: Any, response: Any) -> None:
+    diagnostics = getattr(h, 'diagnostics', None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = h.diagnostics = {}
+    step = _step_evidence(response, 'deploying')
+    context = _handoff_context(response) or {}
+    handoff = json.dumps({
+        'selected_plan': _final_selected_plan_evidence_value(context.get('selected_plan')),
+        'deployment': _final_target_evidence_value(context.get('deployment')),
+    }, ensure_ascii=False)
+    for source, text in (('step', step), ('handoff', handoff)):
+        for target, markers in (('security_group', SECURITY_GROUP_MARKERS), ('vswitch', VSWITCH_MARKERS)):
+            diagnostics['final_target_' + source + '_' + target] = _has_any_marker(text, markers)
+
+
 def _final_deployment_evidence(response: Any) -> str:
     evidence: dict[str, Any] = {"deploying_step": _step_evidence(response, "deploying")}
     handoff_context = _handoff_context(response)
@@ -3206,7 +3543,7 @@ def _cleanup_intent_prompt(base_prompt: str, stack_name: str) -> str:
 
 
 def _cleanup_stack_name(h: ScenarioHarness, label: str) -> str:
-    suffix = Path(getattr(h, "run_dir", "")).name.rsplit("-", maxsplit=1)[-1] or "stack"
+    suffix = getattr(h, "run_id", "") or Path(getattr(h, "run_dir", "")).name.rsplit("-", maxsplit=1)[-1]
     safe_label = "".join(ch if ch.isalnum() else "-" for ch in label.lower()).strip("-") or "stack"
     return f"iac-e2e-{suffix[:12]}-{safe_label}"[:128]
 
@@ -3538,6 +3875,142 @@ def _cleanup_resource_completed(resource: dict[str, Any] | None) -> bool:
     cleanup_status = resource.get("cleanupStatus") or resource.get("cleanup_status") or resource.get("status")
     stack_status = resource.get("stackStatus") or resource.get("progressStatus") or resource.get("progress_status")
     return cleanup_status == "completed" and stack_status == "DELETE_COMPLETE"
+
+
+def _rollback_cleanup_diagnostics(
+    h: ScenarioHarness,
+    cleanup_summary: StreamSummary,
+    first_stack_id: str | None,
+    cleanup_stack_ids: list[str],
+    after_cleanup: Any,
+    ros_states: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    resources = _cleanup_ledger_items(h, "cleanup_resources")
+    tool_uses = _cleanup_ledger_items(h, "tool_uses")
+    history = _cleanup_ledger_items(h, "history")
+    first_ledger = next(
+        (
+            item for item in resources if _string_from_mapping(item, "resource_id", "resourceId") == first_stack_id
+        ),
+        None,
+    )
+    first_snapshot = _cleanup_resource_for_stack(after_cleanup, first_stack_id)
+    first_ros = ros_states.get(first_stack_id, {}) if first_stack_id else {}
+    first_region = first_ledger.get("region_id") if first_ledger else None
+    failures = [
+        item for item in history
+        if item.get("type") == "cleanup_failed"
+        and isinstance(item.get("resource"), dict)
+        and item["resource"].get("resource_id") == first_stack_id
+    ]
+    failure_by_action = {
+        action: next((item for item in reversed(failures) if item.get("cleanup_action") == action), None)
+        for action in ("DeleteStack", "GetStack")
+    }
+    allowed_cleanup_statuses = {"pending", "started", "in_progress", "completed", "failed", "unknown"}
+    allowed_ros_statuses = {
+        "CREATE_COMPLETE", "DELETE_STARTED", "DELETE_IN_PROGRESS", "DELETE_COMPLETE", "DELETE_FAILED",
+    }
+
+    def status(value: Any, allowed: set[str]) -> str:
+        return value if isinstance(value, str) and value in allowed else "unknown"
+
+    try:
+        from iac_code.pipeline.engine.cleanup import is_active_cleanup_prompt_message
+
+        cwd, session_id = _pipeline_session_identity(h)
+        active_prompt = any(
+            is_active_cleanup_prompt_message(message) for message in SessionStorage().load(cwd, session_id)
+        )
+    except Exception:
+        active_prompt = False
+    diagnostics = {
+        "cleanup_turn_event_count": cleanup_summary.event_count,
+        "cleanup_turn_cleanup_event_count": sum(
+            event_type in {"cleanup_started", "cleanup_progress", "cleanup_completed", "cleanup_failed"}
+            for event_type in cleanup_summary.pipeline_event_types
+        ),
+        "cleanup_target_count": len(cleanup_stack_ids),
+        "cleanup_ledger_pending_count": sum(
+            item.get("cleanup_status") != "completed" for item in resources if item.get("cleanup_required") is not False
+        ),
+        "cleanup_delete_tool_use_count": sum(item.get("action") == "DeleteStack" for item in tool_uses),
+        "cleanup_get_tool_use_count": sum(item.get("action") == "GetStack" for item in tool_uses),
+        "cleanup_delete_tool_kind": _cleanup_tool_kind(tool_uses, "DeleteStack"),
+        "cleanup_get_tool_kind": _cleanup_tool_kind(tool_uses, "GetStack"),
+        "cleanup_delete_target_matches": all(
+            item.get("resource_id") == first_stack_id and item.get("region_id") == first_region
+            for item in tool_uses if item.get("action") == "DeleteStack"
+        ),
+        "cleanup_get_target_matches": all(
+            item.get("resource_id") == first_stack_id and item.get("region_id") == first_region
+            for item in tool_uses if item.get("action") == "GetStack"
+        ),
+        "cleanup_failure_event_count": len(failures),
+        "cleanup_prompt_active": active_prompt,
+        "cleanup_turn_terminal_state": status(
+            cleanup_summary.last_status_state,
+            {"TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"},
+        ),
+        "cleanup_first_ledger_status": status(
+            first_ledger.get("cleanup_status") if first_ledger else None, allowed_cleanup_statuses
+        ),
+        "cleanup_first_snapshot_status": status(
+            first_snapshot.get("cleanupStatus") if first_snapshot else None, allowed_cleanup_statuses
+        ),
+        "cleanup_first_ros_status": status(first_ros.get("status"), allowed_ros_statuses),
+        "cleanup_first_ros_not_found": first_ros.get("not_found") is True,
+    }
+    for action, prefix in (("DeleteStack", "delete"), ("GetStack", "get")):
+        failure = failure_by_action[action]
+        if failure is None:
+            continue
+        code, http_status = _cleanup_failure_code_and_http_status(failure.get("last_error"))
+        if code:
+            diagnostics[f"cleanup_{prefix}_error_code"] = code
+        if http_status:
+            diagnostics[f"cleanup_{prefix}_http_status"] = http_status
+        diagnostics[f"cleanup_{prefix}_error_kind"] = _cleanup_failure_kind(failure.get("last_error"))
+    return diagnostics
+
+
+def _cleanup_tool_kind(tool_uses: list[dict[str, Any]], action: str) -> str:
+    names = {str(item.get("tool_name") or "") for item in tool_uses if item.get("action") == action}
+    return next(iter(names)) if len(names) == 1 and names <= {"aliyun_api", "ros_stack"} else "unknown"
+
+
+def _cleanup_failure_code_and_http_status(value: Any) -> tuple[str, int | None]:
+    if not isinstance(value, str):
+        return "", None
+    code_match = re.search(
+        r"(?:error code|[\"']?[Cc]ode[\"']?\s*[:=])\s*[\"']?([A-Za-z][A-Za-z0-9_.-]{0,79})",
+        value,
+        re.IGNORECASE,
+    )
+    status_match = re.search(r"\bHTTP\s+([45][0-9]{2})\b", value)
+    return (
+        code_match.group(1).rstrip(".") if code_match else "",
+        int(status_match.group(1)) if status_match else None,
+    )
+
+
+def _cleanup_failure_kind(value: Any) -> str:
+    if not isinstance(value, str):
+        return "unknown"
+    lowered = value.casefold()
+    for kind, markers in (
+        ("permission", ("forbidden", "permission", "accessdenied", "denied")),
+        ("credential", ("credential", "authenticate", "signature")),
+        ("not_found", ("notfound", "not found", "nonexistent")),
+        ("resource_busy", ("inoperation", "operationinprogress", "busy", "in use")),
+        ("rate_limited", ("throttl", "ratelimit")),
+        ("invalid_input", ("invalidparameter", "invalid parameter", "invalidinput")),
+        ("timeout", ("timeout", "timed out")),
+        ("network", ("connection", "network", "endpoint")),
+    ):
+        if any(marker in lowered for marker in markers):
+            return kind
+    return "unknown"
 
 
 def _snapshot_cleanup(response: Any) -> dict[str, Any]:

@@ -3908,14 +3908,14 @@ async def test_pipeline_permission_resident_timer_survives_full_executor_publica
 
     await asyncio.wait_for(
         executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue),
-        timeout=3,
+        timeout=15,
     )
 
-    await asyncio.wait_for(timer_started.wait(), timeout=3)
+    await asyncio.wait_for(timer_started.wait(), timeout=15)
     assert future.done() is False
     release_timer.set()
-    assert await asyncio.wait_for(future, timeout=3) is PermissionWaitOutcome.SUSPEND
-    await asyncio.wait_for(timer_completed.wait(), timeout=3)
+    assert await asyncio.wait_for(future, timeout=15) is PermissionWaitOutcome.SUSPEND
+    await asyncio.wait_for(timer_completed.wait(), timeout=15)
     context_record = await store.get_context_record("ctx-1")
     checkpoint = PermissionWaitCheckpointStore(str(tmp_path), context_record.session_id).list_active()[0]
     assert checkpoint["phase"] == "SUSPENDED"

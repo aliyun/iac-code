@@ -10,6 +10,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _load_runner():
     path = Path(__file__).resolve().parents[2] / "scripts" / "a2a" / "e2e" / "run_recovery_scenarios.py"
@@ -19,6 +21,79 @@ def _load_runner():
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_recovery_ci_diagnostics_keep_only_fixed_evidence(tmp_path: Path) -> None:
+    runner = _load_runner()
+    control_dir = tmp_path / "a2a-persistence" / "execution-control"
+    control_dir.mkdir(parents=True)
+    (control_dir / "ctx-1.json").write_text(
+        json.dumps({
+            "taskId": "task-1", "phase": "running", "executionStatus": "working",
+            "releaseReady": False, "inputHandoffReady": False, "streamAvailable": True,
+            "blockers": [{"kind": "execution", "secret": "private-data"}],
+        }),
+        encoding="utf-8",
+    )
+    state = runner._control_state_diagnostic(tmp_path, "ctx-1", "task-1")
+    summary = runner.StreamSummary(
+        name="continue", prompt="private prompt", terminal_status_text="Active execution: private-data"
+    )
+
+    assert state == {
+        "present": True, "task_matches": True, "phase": "running", "execution_status": "working",
+        "release_ready": False, "input_handoff_ready": False, "stream_available": True, "blocker_count": 1,
+        "subprocess_tracking": False, "active_subprocess_tools": None,
+        "external_operation_count": None, "revision_settled": False, "backup_status": None,
+    }
+    assert runner._terminal_markers([summary]) == ["execution"]
+    assert "private-data" not in json.dumps(state)
+    assert runner._control_state_diagnostic(tmp_path, "../ctx-1", "task-1") == {"present": False}
+
+
+def test_cleanup_failure_code_extraction_keeps_only_code_and_http_status() -> None:
+    runner = _load_runner()
+    assert runner._cleanup_failure_code_and_http_status(
+        "Alibaba Cloud API ROS/DeleteStack returned HTTP 409 with error code StackInOperation. sk-fixture"
+    ) == ("StackInOperation", 409)
+    assert runner._cleanup_failure_code_and_http_status("private provider error sk-fixture") == ("", None)
+    assert runner._cleanup_failure_kind("StackInOperation") == "resource_busy"
+    assert runner._cleanup_failure_kind("private provider error sk-fixture") == "unknown"
+
+
+def test_recovery_harness_records_failure_location_without_relying_on_error_text(monkeypatch) -> None:
+    runner = _load_runner()
+    result = {}
+
+    class FakeHarness:
+        def __init__(self, _args, *, scenario):
+            self.scenario = scenario
+            self.failure_stage = "post_rollback_confirmation"
+            self.notes = []
+            self.checks = {}
+
+        def preflight(self):
+            pass
+
+        def start_server(self):
+            pass
+
+        def terminate(self):
+            pass
+
+        def finish(self, **kwargs):
+            result.update(kwargs)
+            return 1
+
+    monkeypatch.setattr(runner, "ScenarioHarness", FakeHarness)
+
+    def fail(_harness):
+        raise TimeoutError("private token sk-fixture")
+
+    assert runner._run_with_harness(SimpleNamespace(ci_teardown=False), "rollback-step5", fail) == 1
+    assert result["passed"] is False
+    assert result["error_type"] == "TimeoutError"
+    assert result["error_site"].startswith("scripts/a2a/e2e/run_recovery_scenarios.py:")
 
 
 def _input_required_event(kind: str = "", *, step_id: str = "") -> dict:
@@ -58,6 +133,25 @@ def _pipeline_batch(*envelopes: dict) -> dict:
             }
         }
     }
+
+
+def test_top_level_task_status_message_is_preserved() -> None:
+    runner = _load_runner()
+    summary = runner.StreamSummary(name="recovered", prompt="continue")
+    runner._apply_event(summary, {
+        "task": {
+            "id": "task-fixture",
+            "contextId": "context-fixture",
+            "status": {
+                "state": "TASK_STATE_FAILED",
+                "message": {"parts": [{"text": "recovery failure fixture"}]},
+            },
+        },
+    })
+
+    assert summary.last_status_state == "TASK_STATE_FAILED"
+    assert summary.text == "recovery failure fixture"
+    assert summary.terminal_status_text == "recovery failure fixture"
 
 
 def test_latest_input_required_kind_from_events_uses_latest_kind() -> None:
@@ -154,6 +248,31 @@ def test_default_recovery_prompt_targets_previous_real_user_question() -> None:
     assert "请完成当前步骤" in runner.DEFAULT_RECOVERY_PROMPT
     assert "[Pipeline Handoff Context]" in runner.DEFAULT_RECOVERY_PROMPT
     assert "更早的方案选择消息" in runner.DEFAULT_RECOVERY_PROMPT
+
+
+def test_ci_recovery_records_run_owned_stacks_and_constrains_create_prompt(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--scenario", "scenario1", "--run-dir", str(tmp_path), "--ci-teardown"])
+    harness = runner.ScenarioHarness(args, scenario="scenario1")
+    manifest = json.loads((tmp_path / "owned-stacks.json").read_text(encoding="utf-8"))
+
+    assert manifest["stackNames"] == harness.owned_stack_names
+    assert manifest["stackNames"] == ["iac-e2e-" + manifest["runId"] + "-main"]
+    assert manifest["stackNames"][0] in harness._ci_owned_prompt(args.initial_prompt)
+    assert manifest["stackNames"][0] in harness._ci_owned_prompt(runner.IMAGE_INTERRUPT_PROMPT)
+    assert harness._ci_owned_prompt(args.recovery_prompt) == args.recovery_prompt
+
+
+def test_ci_rollback_cleanup_tracks_both_stack_names(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args([
+        "--scenario", "rollback-step5-cleanup", "--run-dir", str(tmp_path), "--ci-teardown",
+    ])
+    harness = runner.ScenarioHarness(args, scenario="rollback-step5-cleanup")
+
+    assert len(harness.owned_stack_names) == 2
+    assert harness.owned_stack_names[0].endswith("-first")
+    assert harness.owned_stack_names[1].endswith("-second")
 
 
 def test_iac_code_web_2c4g_evidence_requires_structured_cpu_and_memory() -> None:
@@ -667,7 +786,7 @@ def test_redaction_step4_stops_before_selection_and_writes_only_audit(monkeypatc
     assert any("no selection input was sent" in note for note in harness.notes)
 
 
-def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path) -> None:
+def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path, monkeypatch) -> None:
     runner = _load_runner()
     initial = runner.StreamSummary(
         name="01-initial",
@@ -696,6 +815,7 @@ def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path) -> None
 
     harness = SimpleNamespace(run_dir=tmp_path, notes=[], stream=stream)
 
+    monkeypatch.setattr(runner, "_answer_pending_legacy_question", lambda *_args: runner.INTERVENING_ASK_ANSWER)
     result = runner._answer_intervening_ask_inputs(harness, initial, name_prefix="01-initial")
 
     assert result is selection
@@ -746,7 +866,7 @@ def test_all_evidence_includes_workspace_text_files(tmp_path: Path) -> None:
     assert "ignored.bin" not in evidence
 
 
-def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_input() -> None:
+def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_input(tmp_path) -> None:
     runner = _load_runner()
     prompts: list[str] = []
     initial = runner.StreamSummary(
@@ -767,7 +887,7 @@ def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_inp
             pipeline_event_types=["pipeline_completed"],
         )
 
-    harness = SimpleNamespace(stream=stream)
+    harness = SimpleNamespace(run_dir=tmp_path, stream=stream)
     args = SimpleNamespace(selection_prompt="选择第一个方案")
 
     runner._finish_pipeline_after_possible_input(
@@ -780,7 +900,7 @@ def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_inp
     assert prompts == [runner.ROLLBACK_PROMPT]
 
 
-def test_wait_for_with_intervening_ask_inputs_uses_custom_answer_prompt() -> None:
+def test_wait_for_with_intervening_ask_inputs_uses_custom_answer_prompt(monkeypatch) -> None:
     runner = _load_runner()
     prompts: list[str] = []
     initial_summary = runner.StreamSummary(
@@ -827,6 +947,8 @@ def test_wait_for_with_intervening_ask_inputs_uses_custom_answer_prompt() -> Non
 
     harness = SimpleNamespace(notes=[], start_stream=start_stream)
 
+    InitialStream.summary = initial_summary
+    monkeypatch.setattr(runner, "_answer_pending_legacy_question", lambda _h, _s, goal: goal)
     streams = runner._wait_for_with_intervening_ask_inputs(
         harness,
         [InitialStream()],
@@ -1081,6 +1203,34 @@ def test_selection_during_backup_configures_e2e_only_delay(tmp_path: Path) -> No
     assert arm["delaySeconds"] == 10.0
 
 
+def test_selection_during_backup_allows_real_step1_planning_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = _load_runner()
+    observed: dict[str, object] = {}
+
+    class StopAfterTimeoutProbeError(Exception):
+        pass
+
+    class Harness:
+        def start_stream(self, **_kwargs):
+            return object()
+
+    def wait_for_backup(_h, _control, _stream, *, timeout):
+        observed["timeout"] = timeout
+        raise StopAfterTimeoutProbeError
+
+    monkeypatch.setattr(runner, "_run_with_harness", lambda _args, _scenario, callback: callback(Harness()))
+    monkeypatch.setattr(runner, "_backup_delay_control_path", lambda _h: tmp_path)
+    monkeypatch.setattr(runner, "_wait_for_backup_start_with_intervening_asks", wait_for_backup)
+    args = SimpleNamespace(initial_prompt="test", event_timeout=240.0, stream_timeout=1800.0)
+
+    with pytest.raises(StopAfterTimeoutProbeError):
+        runner.run_selection_during_backup(args, runner.SELECTION_DURING_BACKUP_SCENARIO)
+
+    assert observed["timeout"] == 600.0
+
+
 def test_backup_delay_sitecustomize_delays_armed_input_required_backup(tmp_path: Path) -> None:
     runner = _load_runner()
     control = tmp_path / "backup-delay"
@@ -1112,6 +1262,38 @@ def test_backup_delay_sitecustomize_delays_armed_input_required_backup(tmp_path:
     finished = runner._wait_for_backup_delay_marker(control, "finished", timeout=1)
     assert finished["elapsedSeconds"] >= 0.05
     assert finished["succeeded"] is True
+
+
+def test_backup_delay_wait_answers_step1_question_before_marker(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    control = tmp_path / "backup-delay"
+    initial = SimpleNamespace(
+        name="initial", done=True,
+        events=[{"eventType": "input_required", "data": {"kind": "ask_user_question"}}],
+        summary=SimpleNamespace(name="initial"),
+    )
+    answer = SimpleNamespace(name="answer", done=False, events=[])
+
+    class Harness:
+        notes: list[str] = []
+        current_goal = '已有 VPC 创建 VSwitch'
+
+        def start_stream(self, *, prompt: str, name: str):
+            assert prompt == 'grounded question answer'
+            assert name == "01-initial-answer-ask-1"
+            runner._write_json(runner._backup_delay_marker_path(control, "started"), {"delaySeconds": 10.0})
+            return answer
+
+    calls = []
+    monkeypatch.setattr(runner, '_answer_pending_legacy_question',
+                        lambda h, s, goal: calls.append((s.name, goal)) or 'grounded question answer')
+    marker, streams = runner._wait_for_backup_start_with_intervening_asks(
+        Harness(), control, initial, timeout=1.0
+    )
+
+    assert marker["delaySeconds"] == 10.0
+    assert streams == [initial, answer]
+    assert calls == [('initial', Harness.current_goal)]
 
 
 def test_scenario1_performance_backup_omits_selection_task_id_and_checks_backup(
@@ -1957,6 +2139,7 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
             self.snapshots = {}
             self.stream_calls: list[dict] = []
             self.started_streams: list[str] = []
+            self.cleanup_reads = 0
 
         def stream(self, *, prompt: str, name: str, task_id: str | None = None, **_kwargs):
             self.stream_calls.append({"prompt": prompt, "name": name, "task_id": task_id})
@@ -2004,6 +2187,9 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
             return FakeStream(summary, events=events)
 
         def fetch_state(self, name: str):
+            if name == "after-cleanup":
+                self.cleanup_reads += 1
+            cleanup_done = self.cleanup_reads > 1
             snapshot = {
                 "snapshot": {
                     "status": "completed",
@@ -2015,8 +2201,8 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
                                 "resourceType": "stack",
                                 "resourceId": "stack-1",
                                 "regionId": "cn-hangzhou",
-                                "cleanupStatus": "completed",
-                                "stackStatus": "DELETE_COMPLETE",
+                                "cleanupStatus": "completed" if cleanup_done else "running",
+                                "stackStatus": "DELETE_COMPLETE" if cleanup_done else "DELETE_IN_PROGRESS",
                             }
                         ],
                     },
@@ -2061,11 +2247,12 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
     monkeypatch.setattr(
         runner,
         "_capture_ros_stack_states",
-        lambda _h, stack_ids, name: {
-            "stack-1": {"status": "DELETE_COMPLETE"},
+        lambda h, stack_ids, name: {
+            "stack-1": {"status": "DELETE_COMPLETE" if h.cleanup_reads > 1 else "DELETE_IN_PROGRESS"},
             "stack-2": {"status": "CREATE_COMPLETE"},
         },
     )
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
 
     args = SimpleNamespace(
         event_timeout=1,
@@ -2086,6 +2273,7 @@ def test_rollback_step5_cleanup_flow_cleans_first_stack_and_keeps_second(monkeyp
     assert harness.checks["ROS first rollback stack deleted"] is True
     assert harness.checks["ROS rollback cleanup stacks deleted"] is True
     assert harness.checks["ROS second stack retained"] is True
+    assert harness.snapshots["cleanup_verify_attempts"] == 2
 
 
 def test_rollback_step5_cleanup_recovery_uses_tool_safe_recovery_prompt(monkeypatch, tmp_path: Path) -> None:
@@ -2605,6 +2793,9 @@ def test_rollback_accepts_security_group_deployment_from_handoff(monkeypatch) ->
             self.checks: dict[str, bool] = {}
             self.run_dir = Path("/tmp/fake")
 
+        def _ci_owned_prompt(self, text):
+            return text
+
         def start_stream(self, **_kwargs):
             return SimpleNamespace()
 
@@ -2627,6 +2818,7 @@ def test_rollback_accepts_security_group_deployment_from_handoff(monkeypatch) ->
     finish_kwargs: list[dict] = []
 
     def fake_finish_pipeline_after_possible_input(*_args, **kwargs):
+        assert _args[0].current_goal == runner.ROLLBACK_PROMPT
         finish_kwargs.append(kwargs)
 
     monkeypatch.setattr(runner, "_run_with_harness", fake_run_with_harness)
@@ -2784,3 +2976,100 @@ def test_final_deployment_evidence_prefers_realized_target_over_stale_candidate(
 
     assert "SecurityGroup" in evidence
     assert "VSwitch" not in evidence
+
+
+def test_finish_pipeline_answers_clarification_inside_selection_step_before_followup(tmp_path, monkeypatch):
+    runner = _load_runner()
+    pending = runner.StreamSummary(name='selection', prompt='select', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    done = runner.StreamSummary(name='done', prompt='answer', status_states=['TASK_STATE_COMPLETED'],
+                               pipeline_event_types=['pipeline_completed'], normal_handoff_ready=True)
+    (tmp_path / 'selection.events.jsonl').write_text(
+        json.dumps({'pipeline': {'eventType': 'input_required',
+                                'data': {'kind': 'ask_user_question', 'question': '用途?'}}}) + '\n', encoding="utf-8")
+    calls = []
+    def stream(**kwargs):
+        calls.append(kwargs)
+        return done
+    h = SimpleNamespace(run_dir=tmp_path, current_goal='只创建安全组，不创建VSwitch', stream=stream)
+    monkeypatch.setattr(runner, '_answer_pending_legacy_question', lambda _h, _s, goal: goal)
+    final = runner._finish_pipeline_after_possible_input(h, pending, SimpleNamespace(selection_prompt='选择方案'))
+    assert final is done
+    assert final.normal_handoff_ready
+    assert calls == [{'prompt': '只创建安全组，不创建VSwitch', 'name': 'answer-after-resume-1'}]
+
+
+def test_target_diagnostics_distinguish_deploying_step_from_handoff_without_raw_values():
+    runner = _load_runner()
+    context = {'deployment': {'resources_created': ['ALIYUN::ECS::SecurityGroup'], 'stack_id': 'private-stack'}}
+    state = {'snapshot': {
+        'steps': [{'id': 'deploying', 'status': 'completed', 'conclusion': {'resource_type': 'VSwitch'}}],
+        'normalHandoff': {'summary': 'Included context:\n' + json.dumps(context) + '\n\nUse this context'},
+    }}
+    h = SimpleNamespace(diagnostics={})
+    runner._record_final_target_diagnostics(h, state)
+    assert h.diagnostics == {'final_target_step_security_group': False, 'final_target_step_vswitch': True,
+                             'final_target_handoff_security_group': True, 'final_target_handoff_vswitch': False}
+    assert 'private' not in json.dumps(h.diagnostics)
+
+
+def test_complete_pipeline_answers_selection_clarification_before_acceptance(tmp_path, monkeypatch):
+    runner = _load_runner()
+    initial = runner.StreamSummary(name='initial', prompt='goal', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    pending = runner.StreamSummary(name='selection', prompt='select', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    done = runner.StreamSummary(name='done', prompt='answer', status_states=['TASK_STATE_COMPLETED'],
+        pipeline_event_types=['pipeline_completed'], normal_handoff_ready=True)
+    (tmp_path / 'selection.events.jsonl').write_text(json.dumps(_input_required_event('ask_user_question')) + '\n',
+                                                   encoding='utf-8')
+    responses = iter([initial, pending, done])
+    calls = []
+
+    def stream(**kwargs):
+        calls.append(kwargs['prompt'])
+        return next(responses)
+
+    h = SimpleNamespace(run_dir=tmp_path, current_goal='只创建测试 VSwitch', checks={}, snapshots={},
+                        stream=stream, fetch_state=lambda _name: {'status': 'completed'})
+    monkeypatch.setattr(runner, '_answer_intervening_ask_inputs', lambda _h, summary, **_kwargs: summary)
+    monkeypatch.setattr(runner, '_answer_pending_legacy_question', lambda _h, _s, goal: goal)
+    runner._complete_pipeline(h, SimpleNamespace(initial_prompt='goal', selection_prompt='select'))
+    assert calls == ['goal', 'select', '只创建测试 VSwitch']
+    assert h.checks == {'initial reached step4 selection': True, 'selection completed pipeline': True,
+                        'selection produced normal handoff': True}
+
+
+def test_intervening_question_inside_selection_step_is_answered(tmp_path, monkeypatch):
+    runner = _load_runner()
+    pending = runner.StreamSummary(name='pending', prompt='goal', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    selection = runner.StreamSummary(name='ready', prompt='answer', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    (tmp_path / 'pending.events.jsonl').write_text(json.dumps(_input_required_event('ask_user_question')) + '\n',
+                                                 encoding='utf-8')
+    calls = []
+
+    def stream(**kwargs):
+        calls.append(kwargs['prompt'])
+        return selection
+
+    h = SimpleNamespace(run_dir=tmp_path, current_goal='fixture goal', notes=[], stream=stream)
+    monkeypatch.setattr(runner, '_answer_pending_legacy_question', lambda _h, _s, goal: goal)
+    assert runner._answer_intervening_ask_inputs(h, pending, name_prefix='initial') is selection
+    assert calls == ['fixture goal']
+
+
+def test_ci_preflight_pins_stable_fixture_without_changing_initial_case_goal(monkeypatch, tmp_path):
+    runner = _load_runner()
+    config = tmp_path / 'config'
+    config.mkdir()
+    harness = SimpleNamespace(args=SimpleNamespace(ci_teardown=True, allow_real_cloud=True,
+        skip_preflight=True, python='python'), server_env={'IAC_CODE_CONFIG_DIR': str(config)},
+        server_cwd=str(tmp_path), notes=[], owned_stack_names=['iac-e2e-owned-main'])
+    monkeypatch.setattr(runner, 'network_facts', lambda *_: {
+        'vpc_id': 'vpc-stable-fixture', 'zone_id': 'cn-hangzhou-i', 'cidr': '10.250.1.0/24'})
+    runner.ScenarioHarness.preflight(harness)
+    assert harness.network_fixture_facts['vpc_id'] == 'vpc-stable-fixture'
+    assert '不得复用其它 E2E Stack 创建的临时 VPC' in (config / 'IAC-CODE-E2E.md').read_text(encoding='utf-8')
+    assert harness.server_env['IAC_CODE_INSTRUCTION_MEMORY_FILE'] == 'IAC-CODE-E2E.md'

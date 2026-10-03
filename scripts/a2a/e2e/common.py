@@ -54,6 +54,23 @@ RUN_LOG_ROOT_NAME = "iac-code-a2a-e2e-runs"
 NORMAL_TURN_TERMINAL_STATES = {"TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"}
 
 
+class JsonRpcResponseError(RuntimeError):
+    """A JSON-RPC error with only bounded, non-secret diagnostics for E2E reports."""
+
+    def __init__(self, name: str, error: Any) -> None:
+        super().__init__(f"{name} returned a JSON-RPC error")
+        self.name = name
+        self.code = error.get("code") if isinstance(error, dict) and isinstance(error.get("code"), int) else None
+        message = str(error.get("message") or "").casefold() if isinstance(error, dict) else ""
+        self.markers = [
+            marker for marker in (
+                "resource_selection_resume_invalid", "task is already working", "active session",
+                "execution", "context", "not found", "terminal state", "permission", "rate limit",
+                "unsupported", "duplicate",
+            ) if marker in message
+        ]
+
+
 @dataclass
 class StreamSummary:
     name: str
@@ -66,7 +83,10 @@ class StreamSummary:
     last_input_required_step_id: str = ""
     normal_handoff_ready: bool = False
     text: str = ""
+    terminal_status_text: str = ""
     event_count: int = 0
+    response_content_type: str = ""
+    raw_line_count: int = 0
 
     @property
     def last_status_state(self) -> str:
@@ -198,12 +218,23 @@ def stream_message(
     summary = StreamSummary(name=name, prompt=prompt, request_task_id=task_id)
     try:
         with urlopen(request, timeout=timeout) as response:
-            for line in response:
-                parsed = _parse_sse_data_line(line)
-                if parsed is None:
-                    continue
+            summary.response_content_type = response.headers.get_content_type()
+            if summary.response_content_type == "application/json":
+                raw = response.read()
+                summary.raw_line_count = len(raw.splitlines())
+                parsed = json.loads(raw)
                 _append_jsonl(run_dir / f"{name}.events.jsonl", parsed, redaction_env)
+                if isinstance(parsed, dict) and parsed.get("error"):
+                    raise JsonRpcResponseError(name, parsed["error"])
                 _apply_event(summary, parsed)
+            else:
+                for line in response:
+                    summary.raw_line_count += 1
+                    parsed = _parse_sse_data_line(line)
+                    if parsed is None:
+                        continue
+                    _append_jsonl(run_dir / f"{name}.events.jsonl", parsed, redaction_env)
+                    _apply_event(summary, parsed)
     except HTTPError as exc:
         body = exc.read().decode("utf-8", errors="replace")
         redacted_body = _redact_sensitive_text(body, redaction_env)
@@ -334,7 +365,10 @@ def _apply_event(summary: StreamSummary, payload: Any) -> None:
         if _is_normal_handoff(envelope):
             summary.normal_handoff_ready = True
 
-    for text in _status_message_texts(payload):
+    status_texts = _status_message_texts(payload)
+    if identity is not None and identity.get("state") in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
+        summary.terminal_status_text = "".join(status_texts)
+    for text in status_texts:
         summary.text += text
 
 
@@ -398,9 +432,10 @@ def _status_message_texts(payload: Any) -> list[str]:
     result = payload.get("result")
     if isinstance(result, dict):
         _extend_unique(texts, _status_message_texts(result))
-        task = result.get("task")
-        if isinstance(task, dict):
-            _extend_unique(texts, _status_message_texts(task))
+
+    task = payload.get("task")
+    if isinstance(task, dict):
+        _extend_unique(texts, _status_message_texts(task))
 
     status = payload.get("status")
     if isinstance(status, dict):

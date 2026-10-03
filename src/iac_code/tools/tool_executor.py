@@ -129,7 +129,14 @@ class ToolExecutor:
 
         try:
             with start_span(span_name, span_attrs) as span:
-                async with execution_activity("tool", check_gate=False, handoff_to_parent=True):
+                # Both tools can start OS processes; a killed A2A owner must
+                # leave a durable marker before either tool may run.
+                async with execution_activity(
+                    "tool",
+                    check_gate=False,
+                    handoff_to_parent=True,
+                    may_spawn_subprocess=call.name in {"bash", "grep"},
+                ):
                     result = await run_with_execution_budget(
                         tool.execute(tool_input=call.input, context=context),
                         timeout=timeout,

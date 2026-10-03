@@ -15,7 +15,9 @@ import json
 import os
 import re
 import shlex
+import shutil
 import signal
+import sys
 import tempfile
 import time
 import uuid
@@ -24,6 +26,22 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.e2e_question_driver import (  # noqa: E402
+    answer_question,
+    case_facts,
+    network_facts,
+    pending_native_question,
+    question_conversation,
+    question_identity,
+    temporary_e2e_vpc_ids,
+    wait_native_question_ack,
+)
+from scripts.repl.e2e.wait_diagnosis import diagnose_wait  # noqa: E402
 
 try:
     import pexpect
@@ -39,6 +57,11 @@ except ImportError:  # pragma: no cover - PyYAML is part of the project runtime
 RUN_LOG_ROOT_NAME = "iac-code-repl-e2e-runs"
 PTY_SEND_CHUNK_SIZE = 512
 PTY_SEND_CHUNK_DELAY_SECONDS = 0.01
+WAIT_POLL_SECONDS = 10.0
+WAIT_PROGRESS_SECONDS = 60.0
+WAIT_IDLE_SECONDS = 600.0
+WAIT_CLOUD_IDLE_SECONDS = 1500.0
+MAX_WAIT_DIAGNOSES = 2
 TEXT_IMAGE_FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "a2a" / "e2e" / "fixtures" / "text-images"
 TEXT_IMAGE_FIXTURE_FILENAMES = {
     "initial": "initial.png",
@@ -206,6 +229,9 @@ class ScenarioRunResult:
     elapsed_seconds: float
     abort_reason: str = ""
     notes: list[str] = field(default_factory=list)
+    watchdog: dict[str, Any] | None = None
+    progress: dict[str, int] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -257,6 +283,19 @@ class ScenarioRuntimePaths:
         return isolated
 
 
+def _copy_runtime_config(source: Path, destination: Path) -> None:
+    source = source.expanduser().resolve()
+    required = (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
+    if any(not (source / name).is_file() or (source / name).is_symlink() for name in required):
+        raise ValueError("source config must contain three regular test configuration files")
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination.chmod(0o700)
+    for name in required:
+        target = destination / name
+        shutil.copyfile(source / name, target)
+        target.chmod(0o600)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run interactive REPL pipeline E2E scenarios.")
     parser.add_argument(
@@ -269,6 +308,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cwd", default="", help="Child process cwd. Defaults to <run-dir>/workspace.")
     parser.add_argument("--run-root", default=str(Path(tempfile.gettempdir()) / RUN_LOG_ROOT_NAME))
     parser.add_argument("--run-dir", default="", help="Explicit run dir. Only valid with one scenario.")
+    parser.add_argument("--source-config-dir", default="", help="Copy test configuration into each isolated REPL run.")
     parser.add_argument("--python", default="uv run python")
     parser.add_argument("--provider", default="")
     parser.add_argument(
@@ -282,6 +322,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-base", default="")
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--stream-timeout", type=float, default=1800.0)
+    parser.add_argument("--wait-diagnosis-after", type=float, default=120.0)
     parser.add_argument("--terminal-width", type=int, default=140)
     parser.add_argument("--terminal-height", type=int, default=40)
     parser.add_argument("--candidate-selection-ready-timeout", type=float, default=30.0)
@@ -467,6 +508,8 @@ class ReplPty:
         self.raw_chunks: list[str] = []
         self.child: Any | None = None
         self._live_transcript = False
+        self._wait_diagnoses: list[dict[str, Any]] = []
+        self._last_output_at = time.monotonic()
 
     @property
     def transcript(self) -> str:
@@ -496,8 +539,27 @@ class ReplPty:
         self._live_transcript = True
 
     def sendline(self, text: str) -> None:
+        if not getattr(self, "e2e_goal", "") or "我改需求" in text:
+            self.e2e_goal = text
         transcript_offset = len(self.transcript)
         _sendline_to_child(self._require_child(), text, capture=self._capture_child_output_force)
+        self.events.append(
+            {
+                "type": "sendline",
+                "text": _redact_sensitive_text(text, self.env),
+                "transcript_offset": transcript_offset,
+                "at": _utc_now(),
+            }
+        )
+
+    def sendline_reliable(self, text: str) -> None:
+        """Drain a bracketed paste before Enter reaches prompt_toolkit."""
+
+        transcript_offset = len(self.transcript)
+        self._require_child().send(f"\x1b[200~{text}\x1b[201~")
+        time.sleep(0.1)
+        self.drain_output()
+        self._require_child().send("\r")
         self.events.append(
             {
                 "type": "sendline",
@@ -520,6 +582,10 @@ class ReplPty:
         )
 
     def paste_image_fixture(self, image_key: str) -> Path:
+        if image_key == "rollback-interrupt":
+            self.e2e_goal = DEFAULT_ROLLBACK_PROMPT
+            if getattr(self, "scenario", ""):
+                self.e2e_goal += "。" + _stack_name_constraint(self.run_dir, self.scenario)
         path = _text_image_fixture_path(image_key)
         transcript_offset = len(self.transcript)
         child = self._require_child()
@@ -536,16 +602,65 @@ class ReplPty:
         )
         return path
 
-    def expect_any(self, patterns: tuple[str, ...], *, description: str, timeout: float) -> str:
+    def expect_any(
+        self, patterns: tuple[str, ...], *, description: str, timeout: float,
+        state_check: Callable[[], str | None] | None = None,
+    ) -> str:
         child = self._require_child()
-        deadline = time.monotonic() + timeout
+        started = time.monotonic()
+        deadline = started + timeout
+        transcript_offset = len(self.transcript)
+        diagnosed = False
+        last_progress = started
         all_patterns = list(patterns) + list(PERMISSION_PROMPT_PATTERNS)
         try:
             while True:
-                remaining = deadline - time.monotonic()
+                if state_check is not None:
+                    durable_match = state_check()
+                    if durable_match is not None:
+                        return durable_match
+                now = time.monotonic()
+                remaining = deadline - now
                 if remaining <= 0:
                     raise TimeoutError(f"timed out waiting for {description}")
-                index = child.expect(all_patterns, timeout=remaining)
+                recent_output = _normalize_transcript(self.transcript[-2000:])
+                cloud_wait = bool(re.search(
+                    r"(?i)Deploying\s*\(|CreateStack|ROS Deploy|CREATE_IN_PROGRESS|DELETE_IN_PROGRESS|回滚清理",
+                    recent_output,
+                ))
+                idle_limit = WAIT_CLOUD_IDLE_SECONDS if cloud_wait else WAIT_IDLE_SECONDS
+                if now - max(getattr(self, "_last_output_at", started), started) >= idle_limit:
+                    record = {
+                        "state": "no_output", "confidence": 1.0, "waitingFor": description,
+                        "elapsedSeconds": round(now - started, 1), "action": "early_abort", "cue": "none",
+                    }
+                    diagnoses = getattr(self, "_wait_diagnoses", [])
+                    diagnoses.append(record)
+                    self._wait_diagnoses = diagnoses
+                    self.events.append({"type": "wait_diagnosis", **record, "at": _utc_now()})
+                    raise TimeoutError(
+                        f"no terminal output for {round(idle_limit)}s while waiting for {description}"
+                    )
+                if now - last_progress >= WAIT_PROGRESS_SECONDS:
+                    print(f"REPL E2E waiting for {description}: {round(now - started)}s", flush=True)
+                    last_progress = now
+                try:
+                    index = child.expect(all_patterns, timeout=min(remaining, WAIT_POLL_SECONDS))
+                except pexpect.TIMEOUT:
+                    # Input can become durable during the pexpect poll. Route it
+                    # before the advisory watchdog diagnoses it as unhandled.
+                    if state_check is not None:
+                        durable_match = state_check()
+                        if durable_match is not None:
+                            return durable_match
+                    elapsed = time.monotonic() - started
+                    if description == "first stack create started" and elapsed >= WAIT_PROGRESS_SECONDS:
+                        config_path = self.env.get("IAC_CODE_CONFIG_DIR")
+                        if config_path and _display_progress(Path(config_path)).get("pipeline_completed", 0):
+                            raise RuntimeError("pipeline completed before first stack create started")
+                    if not diagnosed and elapsed >= self.args.wait_diagnosis_after:
+                        diagnosed = self._diagnose_wait(description, transcript_offset, elapsed)
+                    continue
                 self._capture_child_output(f"{child.before}{child.after}")
                 if index < len(patterns):
                     matched = patterns[index]
@@ -587,6 +702,74 @@ class ReplPty:
                 }
             )
             raise
+
+    def _diagnose_wait(self, description: str, transcript_offset: int, elapsed: float) -> bool:
+        diagnoses = getattr(self, "_wait_diagnoses", [])
+        if len(diagnoses) >= MAX_WAIT_DIAGNOSES:
+            return True
+        config_path = self.env.get("IAC_CODE_CONFIG_DIR")
+        if not config_path:
+            return True
+        recent_raw = self.transcript[transcript_offset:]
+        recent_text = _normalize_transcript(recent_raw)[-1600:]
+        diagnosis = diagnose_wait(
+            Path(config_path), expected=description,
+            transcript=recent_text or _normalize_transcript(self.transcript[-1200:]),
+        )
+        if diagnosis is None:
+            return False
+        state = str(diagnosis["state"])
+        confidence = float(diagnosis["confidence"])
+        if re.search(r"●\s*Ask user question", recent_text):
+            cue = "ask_question"
+        elif re.search(r"Press number keys to select a candidate|Enter to confirm|按数字键.*候选", recent_text):
+            cue = "candidate_controls"
+        elif "❯" in recent_text and "\x1b[>4;2m" in recent_raw:
+            cue = "repl_prompt"
+        else:
+            cue = "none"
+        # The normal REPL prompt can be redrawn while a pipeline is still
+        # running. Only explicit question/selection controls prove that the
+        # scenario is waiting for an unhandled user action.
+        early_abort = state == "waiting_for_input" and confidence >= 0.85 and cue in {
+            "ask_question", "candidate_controls",
+        }
+        # A replayed question in terminal history is not a current input. Once
+        # checkpoints exist, the watchdog must corroborate it with actual state.
+        checkpoints = list(Path(config_path).glob('projects/*/*/pipeline/meta.yaml'))
+        pending_kind = _pending_repl_input_kind(Path(config_path))
+        if checkpoints:
+            early_abort = early_abort and pending_kind in {'ask_user_question', 'candidate_selection'}
+        record = {
+            "state": state,
+            "confidence": confidence,
+            "cue": cue,
+            "waitingFor": description,
+            "elapsedSeconds": round(elapsed, 1),
+            "action": "early_abort" if early_abort else "observe",
+        }
+        kind = diagnosis.get('input_kind')
+        handlers = {'clarification': 'question_driver', 'candidate_selection': 'scenario_selection',
+                    'deployment_confirmation': 'scenario_confirmation', 'permission': 'scenario_permission'}
+        native_kinds = {'ask_user_question': 'clarification', 'candidate_selection': 'candidate_selection',
+                        'deployment_confirmation': 'deployment_confirmation'}
+        if pending_kind in native_kinds:
+            kind = native_kinds[pending_kind]
+        if isinstance(kind, str) and kind in {*handlers, 'normal_chat', 'none', 'unknown'}:
+            record['inputKind'] = kind
+            record['suggestedHandler'] = handlers.get(kind, 'none')
+        hint = diagnosis.get('semantic_hint')
+        if isinstance(hint, str) and hint in {
+            'expected_target_mentioned', 'different_target_mentioned', 'insufficient_evidence', 'none',
+        }:
+            record['semanticHint'] = hint
+        diagnoses.append(record)
+        self._wait_diagnoses = diagnoses
+        self.events.append({"type": "wait_diagnosis", **record, "at": _utc_now()})
+        print(f"REPL E2E wait diagnosis: {state}; action={record['action']}", flush=True)
+        if early_abort:
+            raise RuntimeError(f"unexpected input while waiting for {description}; watchdog={state}")
+        return True
 
     def expect_optional(self, patterns: tuple[str, ...], *, description: str, timeout: float) -> bool:
         child = self._require_child()
@@ -665,10 +848,12 @@ class ReplPty:
     def _capture_child_output(self, text: str) -> None:
         if text and not self._live_transcript:
             self.raw_chunks.append(text)
+            self._last_output_at = time.monotonic()
 
     def _capture_child_output_force(self, text: str) -> None:
         if text:
             self.raw_chunks.append(text)
+            self._last_output_at = time.monotonic()
 
     def _require_child(self) -> Any:
         if self.child is None:
@@ -683,6 +868,7 @@ class _TranscriptCapture:
     def write(self, text: str) -> None:
         if text:
             self._pty.raw_chunks.append(text)
+            self._pty._last_output_at = time.monotonic()
 
     def flush(self) -> None:
         return None
@@ -751,23 +937,54 @@ def _run_with_pty(
     workspace_dir = Path(args.cwd).expanduser().resolve() if args.cwd else run_dir / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     shared_env = _build_child_env(args, scenario)
-    env = ScenarioRuntimePaths.for_run(
+    runtime_paths = ScenarioRuntimePaths.for_run(
         run_dir,
         environment=shared_env,
-    ).apply(shared_env)
+    )
+    env = runtime_paths.apply(shared_env)
     pty = ReplPty(args=args, run_dir=run_dir, cwd=workspace_dir, env=env)
+    pty.scenario = scenario
     checks: dict[str, bool] = {}
     notes: list[str] = []
     abort_reason = ""
     passed = False
     acceptance_applied = False
     teardown_applied = False
+    child_stopped = False
 
     try:
+        if args.source_config_dir:
+            _copy_runtime_config(Path(args.source_config_dir), runtime_paths.config_dir)
+        if scenario in STACK_CREATING_SCENARIOS:
+            # Always-on instructions survive phase transitions that summarize the
+            # initial prompt. Only this run's isolated configuration is written.
+            instruction_name = "IAC-CODE-E2E.md"
+            stack_name = _scenario_stack_name(run_dir, scenario)
+            fixture = network_facts(args.python, env, REPO_ROOT, "10.250.1.0/24")
+            pty.network_fixture_facts = fixture
+            runtime_paths.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            (runtime_paths.config_dir / instruction_name).write_text(
+                "# E2E resource identity\n"
+                f"本次 ROS StackName 必须等于 `{stack_name}` 或以 `{stack_name}-` 开头。"
+                "这是跨阶段必须保留的测试身份。\n"
+                "不得生成其它名称、复用已有 Stack，或删除本次测试之外的资源。\n",
+                # Fixture identity is setup data, not an acceptance exception.
+                encoding="utf-8",
+            )
+            with (runtime_paths.config_dir / instruction_name).open("a", encoding="utf-8") as instruction:
+                instruction.write(
+                    "复用已有 VPC 时，只能使用独立测试夹具 VpcId=`" + fixture["vpc_id"]
+                    + "`、ZoneId=`" + fixture["zone_id"] + "`。不得使用其它 E2E Stack 创建的临时 VPC。\n"
+                )
+            env["IAC_CODE_INSTRUCTION_MEMORY_FILE"] = instruction_name
+            _write_json(run_dir / "owned-stack-names.json", [stack_name])
         pty.spawn()
         callback(pty, checks)
         _apply_acceptance_checks(scenario, args, pty, checks)
         acceptance_applied = True
+        if not args.leave_running:
+            pty.terminate()
+            child_stopped = True
         _teardown_real_cloud_scenario_resources(args=args, scenario=scenario, pty=pty, checks=checks, notes=notes)
         teardown_applied = True
         passed = all(checks.values()) if checks else True
@@ -784,6 +1001,9 @@ def _run_with_pty(
                 notes.append(f"acceptance check failed: {type(exc).__name__}: {exc}")
         if acceptance_applied and not teardown_applied:
             try:
+                if not args.leave_running and not child_stopped:
+                    pty.terminate()
+                    child_stopped = True
                 _teardown_real_cloud_scenario_resources(
                     args=args,
                     scenario=scenario,
@@ -798,13 +1018,32 @@ def _run_with_pty(
                 notes.append(f"final teardown failed: {type(exc).__name__}: {exc}")
                 if passed:
                     passed = False
-        if not args.leave_running:
+        if not args.leave_running and not child_stopped:
             try:
                 pty.terminate()
             except BaseException as exc:
                 notes.append(f"terminal child termination failed: {type(exc).__name__}: {exc}")
                 if passed:
                     passed = False
+        checks.update(getattr(pty, "question_checks", {}))
+        progress = _display_progress(runtime_paths.config_dir)
+        progress.update(_transcript_tool_progress(runtime_paths.config_dir))
+        ledger_path = _cleanup_ledger_path(pty)
+        progress["cleanup_ledger_found"] = int(ledger_path is not None and ledger_path.is_file())
+        progress["observed_stack_count"] = min(len(_observed_create_stack_ids(pty)), 10000)
+        progress["cloud_stack_without_ledger"] = int(bool(getattr(pty, "cloud_stack_without_ledger", False)))
+        progress["cloud_stack_not_created"] = int(bool(getattr(pty, "cloud_stack_not_created", False)))
+        progress["cloud_probe_failures"] = min(int(getattr(pty, "cloud_probe_failures", 0)), 10000)
+        if checks.get("acceptance: no ROS create failure in cleanup transcript") is False:
+            after_rollback = _suffix_after_sendline_text(pty.transcript, pty.events, args.rollback_prompt)
+            for name, pattern in zip(
+                ("create_failed", "route_conflict", "stack_exists", "invalid_cidr_block"),
+                CLEANUP_DEPLOYMENT_FAILURE_PATTERNS,
+            ):
+                progress[f"cleanup_failure_{name}"] = min(len(re.findall(pattern, pty.transcript)), 10000)
+                progress[f"cleanup_failure_{name}_after_rollback"] = min(
+                    len(re.findall(pattern, after_rollback)), 10000
+                )
         result = ScenarioRunResult(
             scenario=scenario,
             run_dir=str(run_dir),
@@ -813,11 +1052,115 @@ def _run_with_pty(
             elapsed_seconds=round(time.monotonic() - started, 3),
             abort_reason=abort_reason,
             notes=notes,
+            watchdog=(getattr(pty, "_wait_diagnoses", []) or [None])[-1],
+            progress=progress,
+            diagnostics=getattr(pty, "question_diagnostics", {}),
         )
         _write_run_artifacts(run_dir=run_dir, env=env, raw_transcript=pty.transcript, events=pty.events, result=result)
         _print_result(result)
 
     return 0 if passed else 1
+
+
+def _display_progress(config_dir: Path) -> dict[str, int]:
+    """Count fixed display events and deployment milestones without exposing payloads."""
+
+    allowed = {
+        "candidate_selection_ready", "candidate_selection_submitted", "user_input_required", "user_input_received",
+        "step_started", "step_completed", "pipeline_completed", "pipeline_failed", "stack_progress",
+    }
+    counts: dict[str, int] = {}
+    for path in config_dir.glob("projects/*/*/pipeline/display.jsonl"):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = event.get("type") if isinstance(event, dict) else None
+            if isinstance(event_type, str) and event_type in allowed:
+                counts[event_type] = min(counts.get(event_type, 0) + 1, 10000)
+            if not isinstance(event, dict):
+                continue
+            if (
+                isinstance(event_type, str)
+                and event_type in {"step_started", "step_completed"}
+                and event.get("step_id") == "deploying"
+            ):
+                key = f"{event_type}_deploying"
+                counts[key] = min(counts.get(key, 0) + 1, 10000)
+            if event_type == "tool_used":
+                payload = event.get("payload")
+                if isinstance(payload, dict):
+                    tool_name = payload.get("name")
+                    tool_counts = {
+                        "ros_deploy": "ros_deploy_used",
+                        "aliyun_api": "aliyun_api_used",
+                        "ros_stack": "ros_stack_used",
+                        "bash": "bash_used",
+                    }
+                    key = tool_counts.get(tool_name) if isinstance(tool_name, str) else None
+                    if key:
+                        counts[key] = min(counts.get(key, 0) + 1, 10000)
+            if event_type == "pipeline_completed":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and payload.get("early_exit") is True:
+                    counts["pipeline_completed_early_exit"] = min(
+                        counts.get("pipeline_completed_early_exit", 0) + 1, 10000
+                    )
+            if event_type == "stack_progress":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and payload.get("status") == "CREATE_COMPLETE":
+                    counts["stack_progress_create_complete"] = min(
+                        counts.get("stack_progress_create_complete", 0) + 1, 10000
+                    )
+    counts["cleanup_ledger_files"] = min(
+        sum(1 for _ in config_dir.glob("projects/*/*/pipeline/cleanup.yaml")), 10000
+    )
+    return counts
+
+
+def _transcript_tool_progress(config_dir: Path) -> dict[str, int]:
+    """Count completed ros_deploy calls without exposing transcript content or tool IDs."""
+
+    used: set[str] = set()
+    completed: set[str] = set()
+    failed: set[str] = set()
+    for path in config_dir.glob("projects/*/*/pipeline/transcripts/*/session.jsonl"):
+        try:
+            if path.stat().st_size > 20_000_000:
+                continue
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            blocks = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(blocks, list):
+                continue
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and block.get("name") == "ros_deploy":
+                    tool_id = block.get("id")
+                    if isinstance(tool_id, str):
+                        used.add(tool_id)
+                elif block.get("type") == "tool_result":
+                    tool_id = block.get("tool_use_id")
+                    if isinstance(tool_id, str):
+                        completed.add(tool_id)
+                        if block.get("is_error") is True:
+                            failed.add(tool_id)
+    return {
+        "ros_deploy_result": min(len(used & completed), 10000),
+        "ros_deploy_result_error": min(len(used & failed), 10000),
+    }
 
 
 def _print_result(result: ScenarioRunResult) -> None:
@@ -1183,9 +1526,12 @@ def _find_available_vswitch_cidr(vpc_cidr: str, used_cidrs: Iterable[str]) -> st
 
 
 def _discover_cleanup_network_target(*, excluded_cidrs: Iterable[str] = ()) -> CleanupNetworkTarget:
+    excluded_vpcs = temporary_e2e_vpc_ids()
     vpcs_data = _call_aliyun_api("vpc", "DescribeVpcs", {"PageSize": 50})
     for vpc in _nested_api_items(vpcs_data, "Vpcs", "Vpc"):
         vpc_id = str(vpc.get("VpcId") or "")
+        if vpc_id in excluded_vpcs:
+            continue
         vpc_cidr = str(vpc.get("CidrBlock") or "")
         if not vpc_id or not vpc_cidr or str(vpc.get("Status") or "") != "Available":
             continue
@@ -1376,11 +1722,43 @@ def _observed_create_stack_names(pty: Any) -> list[str]:
 
 
 def _wait_for_latest_observed_stack_id(pty: Any, *, exclude: set[str], timeout: float) -> str:
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
+    next_cloud_check = started + 120.0
     while time.monotonic() < deadline:
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
         stack_id = _latest_observed_stack_id(pty, exclude=exclude)
+        config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+        progress = _display_progress(Path(config_path)) if config_path else {}
+        if progress.get("step_completed_deploying") or progress.get("pipeline_completed"):
+            raise RuntimeError("deploying finished before rollback observed a ROS stack")
         if stack_id:
             return stack_id
+        now = time.monotonic()
+        run_dir = getattr(pty, "run_dir", None)
+        if run_dir and now >= next_cloud_check:
+            next_cloud_check = now + 60.0
+            try:
+                owned_names = _owned_cleanup_stack_names(Path(run_dir))
+                candidate_ids = _discover_owned_cleanup_stack_ids(Path(run_dir))
+                for candidate_id in candidate_ids:
+                    state = _fresh_ros_stack_state(pty, candidate_id)
+                    if state.get("stack_name") in owned_names and state.get("status") == "CREATE_COMPLETE":
+                        pty.cloud_stack_without_ledger = True
+                        raise RuntimeError("ROS Stack completed but no resource reached the cleanup ledger")
+                if not candidate_ids and now - started >= 600.0:
+                    pty.cloud_stack_not_created = True
+                    raise RuntimeError("ROS deployment did not create a test Stack within 10 minutes")
+            except RuntimeError:
+                if bool(getattr(pty, "cloud_stack_without_ledger", False)) or bool(
+                    getattr(pty, "cloud_stack_not_created", False)
+                ):
+                    raise
+                pty.cloud_probe_failures = int(getattr(pty, "cloud_probe_failures", 0)) + 1
+            except Exception:
+                pty.cloud_probe_failures = int(getattr(pty, "cloud_probe_failures", 0)) + 1
         time.sleep(0.5)
     raise TimeoutError("Timed out waiting for rollback cleanup ledger to observe a ROS stack")
 
@@ -1401,6 +1779,9 @@ def _cleanup_target_stack_ids(pty: Any, *, exclude: set[str]) -> list[str]:
 def _wait_for_cleanup_target_stack_ids(pty: Any, *, exclude: set[str], timeout: float) -> list[str]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
         stack_ids = _cleanup_target_stack_ids(pty, exclude=exclude)
         if stack_ids:
             return stack_ids
@@ -1728,6 +2109,21 @@ def _owned_cleanup_stack_names(run_dir: Path) -> set[str]:
     return {_cleanup_stack_name(run_dir, "first"), _cleanup_stack_name(run_dir, "second")}
 
 
+def _discover_owned_cleanup_stack_ids(run_dir: Path) -> list[str]:
+    """Find exact run-owned names when an interrupted tool never wrote the local ledger."""
+
+    stack_ids: list[str] = []
+    for name in sorted(_owned_cleanup_stack_names(run_dir)):
+        response = _call_aliyun_api("ROS", "ListStacks", {"StackName": [name], "PageSize": 50})
+        for stack in _nested_api_items(response, "Stacks", "Stack"):
+            if stack.get("StackName") != name or stack.get("Status") == "DELETE_COMPLETE":
+                continue
+            stack_id = stack.get("StackId")
+            if isinstance(stack_id, str) and stack_id:
+                stack_ids.append(stack_id)
+    return _unique_strings(stack_ids)
+
+
 def _observed_cleanup_stack_ids(pty: Any) -> list[str]:
     stack_ids = [
         str(getattr(pty, "cleanup_first_stack_id", "") or ""),
@@ -1758,13 +2154,25 @@ def _apply_stack_creating_acceptance_checks(scenario: str, pty: Any, checks: dic
     stack_ids = _observed_create_stack_ids(pty)
     run_dir = Path(getattr(pty, "run_dir", ""))
     stack_names = _observed_create_stack_names(pty)
+    ros_states = _ros_stack_states_for_acceptance(pty, stack_ids, "acceptance-before-teardown") if stack_ids else {}
+    missing_names = [stack_id for stack_id in stack_ids if not _observed_cleanup_stack_name(pty, stack_id)]
+    # A missing ledger label can be resolved only from GetStack for the actually
+    # observed ID. A nonempty conflicting label is never replaced.
+    stack_names.extend(str(ros_states.get(stack_id, {}).get("stack_name") or "") for stack_id in missing_names)
+    diagnostics = getattr(pty, "question_diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = pty.question_diagnostics = {}
+    diagnostics["cleanup_missing_name_count"] = len(missing_names)
+    diagnostics["cleanup_unexpected_name_count"] = sum(
+        not _is_scenario_stack_name(run_dir, scenario, str(ros_states.get(stack_id, {}).get("stack_name") or ""))
+        and not _ros_stack_deleted(ros_states.get(stack_id, {})) for stack_id in stack_ids
+    )
     _add_acceptance_check(checks, "ROS stack observed in cleanup ledger", bool(stack_ids))
     _add_acceptance_check(
         checks,
         "ROS stack name is test-owned",
         bool(stack_ids) and any(_is_scenario_stack_name(run_dir, scenario, stack_name) for stack_name in stack_names),
     )
-    ros_states = _ros_stack_states_for_acceptance(pty, stack_ids, "acceptance-before-teardown") if stack_ids else {}
     _add_acceptance_check(
         checks,
         "ROS created stack retained before teardown",
@@ -1789,8 +2197,16 @@ def _teardown_cleanup_scenario_resources(
     run_dir = Path(getattr(pty, "run_dir", ""))
     owned_stack_names = _owned_cleanup_stack_names(run_dir)
     stack_ids = _observed_cleanup_stack_ids(pty)
+    try:
+        stack_ids = _unique_strings([*stack_ids, *_discover_owned_cleanup_stack_ids(run_dir)])
+        checks["teardown: owned ROS Stack discovery succeeded"] = True
+    except Exception as exc:
+        checks["teardown: owned ROS Stack discovery succeeded"] = False
+        notes.append(f"final teardown Stack discovery failed: {type(exc).__name__}")
     if not stack_ids:
-        checks["teardown: no cleanup scenario stacks leaked"] = True
+        checks["teardown: no cleanup scenario stacks leaked"] = bool(
+            checks["teardown: owned ROS Stack discovery succeeded"]
+        )
         return
 
     deletion_failures: list[str] = []
@@ -1830,6 +2246,25 @@ def _teardown_cleanup_scenario_resources(
         notes.append(f"final teardown deleted ROS stacks: {', '.join(deleted_stack_ids)}")
 
 
+def _discover_scenario_stack_resources(run_dir: Path, scenario: str) -> list[dict[str, str]]:
+    """Find exact run-owned Stack names even if a tool never wrote its ledger."""
+    base = _scenario_stack_name(run_dir, scenario)
+    resources = []
+    for page in range(1, 21):
+        response = _call_aliyun_api("ROS", "ListStacks", {
+            "StackName": [base + "*"], "PageSize": 50, "PageNumber": page,
+        })
+        batch = _nested_api_items(response, "Stacks", "Stack")
+        for stack in batch:
+            name, stack_id = stack.get("StackName"), stack.get("StackId")
+            if (isinstance(name, str) and _is_scenario_stack_name(run_dir, scenario, name)
+                and isinstance(stack_id, str) and stack_id and stack.get("Status") != "DELETE_COMPLETE"):
+                resources.append({"resource_id": stack_id, "resource_name": name})
+        if len(batch) < 50:
+            return resources
+    raise RuntimeError("run-owned Stack discovery exceeded bounded pagination")
+
+
 def _teardown_real_cloud_scenario_resources(
     *,
     args: argparse.Namespace,
@@ -1846,29 +2281,35 @@ def _teardown_real_cloud_scenario_resources(
         return
 
     resources = _observed_create_stack_resources(pty)
+    run_dir = Path(getattr(pty, "run_dir", ""))
+    if scenario in STACK_CREATING_SCENARIOS:
+        observed_ids = {_string_from_mapping(item, "resource_id", "resourceId", "stack_id", "stackId")
+                        for item in resources}
+        resources.extend(item for item in _discover_scenario_stack_resources(run_dir, scenario)
+                         if item["resource_id"] not in observed_ids)
     if not resources:
         checks["teardown: no observed ROS stacks leaked"] = True
         return
 
     deletion_failures: list[str] = []
     deleted_stack_ids: list[str] = []
-    run_dir = Path(getattr(pty, "run_dir", ""))
     expected_scenario_stack_name = _scenario_stack_name(run_dir, scenario)
     for resource in resources:
         stack_id = _string_from_mapping(resource, "resource_id", "resourceId", "stack_id", "stackId")
         if not stack_id:
             continue
         expected_stack_name = _string_from_mapping(resource, "resource_name", "resourceName", "stack_name", "stackName")
+        state = _fresh_ros_stack_state(pty, stack_id)
+        if _ros_stack_deleted(state):
+            continue
+        if not expected_stack_name:
+            expected_stack_name = str(state.get("stack_name") or "")
         if not _is_scenario_stack_name(run_dir, scenario, expected_stack_name):
             deletion_failures.append(
                 f"{stack_id} has unexpected test-owned stack name {expected_stack_name or '<unknown>'}; "
                 f"expected {expected_scenario_stack_name} or a generated suffix"
             )
             continue
-        state = _fresh_ros_stack_state(pty, stack_id)
-        if _ros_stack_deleted(state):
-            continue
-
         actual_stack_name = str(state.get("stack_name") or "")
         if not expected_stack_name:
             deletion_failures.append(f"{stack_id} has no observed stack name in cleanup ledger")
@@ -2228,15 +2669,85 @@ def _apply_acceptance_checks(
 
 
 def _select_default_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
-    if args.selection_prompt:
-        pty.send(f"{args.selection_prompt}\r", label="select-default-candidate")
-    else:
-        pty.send("\r", label="select-default-candidate")
+    config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+    drain_output = getattr(pty, "drain_output", None)
+    baseline = (
+        _display_progress(Path(config_path))
+        if config_path and callable(drain_output) and (Path(config_path) / "projects").is_dir()
+        else None
+    )
+    for attempt in range(1, 4):
+        label = "select-default-candidate" if attempt == 1 else f"select-default-candidate-retry-{attempt}"
+        pty.send(f"{args.selection_prompt or ''}\r", label=label)
+        if baseline is None:
+            return
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            drain_output()
+            progress = _display_progress(Path(config_path))
+            if any(
+                progress.get(event, 0) > baseline.get(event, 0)
+                for event in ("candidate_selection_submitted", "user_input_received", "step_started")
+            ):
+                return
+            time.sleep(0.1)
+    raise TimeoutError("candidate selection input was not accepted after three attempts")
+
+
+def _expect_first_stack_create_started(pty: ReplPty, args: argparse.Namespace) -> None:
+    config_path = pty.env.get("IAC_CODE_CONFIG_DIR")
+    if not config_path:
+        pty.expect_any(
+            CREATE_STACK_STARTED_PATTERNS,
+            description="first stack create started",
+            timeout=args.stream_timeout,
+        )
+        return
+    started = time.monotonic()
+    transcript_offset = len(pty.transcript)
+    diagnosed = False
+    while True:
+        elapsed = time.monotonic() - started
+        remaining = args.stream_timeout - elapsed
+        if remaining <= 0:
+            raise TimeoutError("timed out waiting for first stack create started")
+        progress = _display_progress(Path(config_path))
+        if progress.get("ros_deploy_used"):
+            if progress.get("step_completed_deploying") or progress.get("pipeline_completed"):
+                raise RuntimeError("ROS deployment finished before rollback interrupt")
+            pty.events.append({
+                "type": "expect", "description": "first stack create started",
+                "pattern": "display:ros_deploy", "passed": True, "at": _utc_now(),
+            })
+            return
+        if progress.get("pipeline_completed"):
+            raise RuntimeError("pipeline completed before first stack create started")
+        try:
+            pty.expect_any(
+                CREATE_STACK_STARTED_PATTERNS,
+                description="first stack create started",
+                timeout=min(1.0, remaining),
+            )
+            return
+        except TimeoutError as exc:
+            if str(exc) != "timed out waiting for first stack create started":
+                raise
+        elapsed = time.monotonic() - started
+        if elapsed >= WAIT_IDLE_SECONDS and time.monotonic() - pty._last_output_at >= WAIT_IDLE_SECONDS:
+            raise TimeoutError("no terminal output while waiting for first stack create started")
+        if not diagnosed and elapsed >= args.wait_diagnosis_after:
+            diagnosed = pty._diagnose_wait("first stack create started", transcript_offset, elapsed)
 
 
 def _expect_initial_prompt(pty: ReplPty, args: argparse.Namespace) -> None:
     pty.expect_any(REPL_PROMPT_PATTERNS, description="initial prompt", timeout=args.timeout)
     pty.expect_any(REPL_INPUT_READY_PATTERNS, description="prompt input ready", timeout=args.timeout)
+
+
+def _send_case_goal(pty: ReplPty, text: str) -> None:
+    """Update the fixture goal at explicit scenario boundaries, including custom rollback text."""
+    pty.e2e_goal = text
+    pty.sendline(text)
 
 
 def _expect_candidate_selection(
@@ -2246,8 +2757,159 @@ def _expect_candidate_selection(
     description: str,
     require_live_refresh: bool = False,
 ) -> None:
-    pty.expect_any(CANDIDATE_SELECTION_PATTERNS, description=description, timeout=args.stream_timeout)
-    _expect_candidate_selection_ready(pty, args, require_live_refresh=require_live_refresh)
+    for _ in range(12):
+        matched = pty.expect_any(
+            CANDIDATE_SELECTION_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS,
+            description=description, timeout=args.stream_timeout,
+            state_check=lambda: _durable_candidate_boundary(pty),
+        )
+        if matched in CANDIDATE_SELECTION_PATTERNS:
+            _expect_candidate_selection_ready(pty, args, require_live_refresh=require_live_refresh)
+            return
+        _answer_legacy_repl_question(pty, args)
+    raise RuntimeError("candidate selection did not follow bounded clarification answers")
+
+
+def _answer_legacy_repl_question(pty: ReplPty, args: argparse.Namespace) -> None:
+    config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+    pending = pending_native_question(config_dir)
+    if pending is None:
+        raise RuntimeError("visible question has no durable pending-input checkpoint")
+    question, path = pending
+    counts = getattr(pty, "question_counts", None)
+    if not isinstance(counts, dict):
+        counts = pty.question_counts = {}
+    diagnostics = getattr(pty, "question_diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = pty.question_diagnostics = {}
+    goal = getattr(pty, "e2e_goal", "") or args.initial_prompt
+    if getattr(pty, 'scenario', '') in STACK_CREATING_SCENARIOS:
+        if _scenario_stack_name(pty.run_dir, pty.scenario) not in goal:
+            goal += '。' + _stack_name_constraint(pty.run_dir, pty.scenario)
+    supplied = dict(getattr(pty, 'network_fixture_facts', {}))
+    if getattr(pty, 'scenario', '') in STACK_CREATING_SCENARIOS:
+        supplied['stack_name'] = _scenario_stack_name(pty.run_dir, pty.scenario)
+    facts = case_facts(goal, supplied)
+    context = question_conversation(pty)
+    answer, _ = answer_question(config_dir, question, facts, counts, diagnostics, conversation=context)
+    if question.get("allowFreeText", question.get("allow_free_text", True)) is False:
+        answer = str(1 + next(i for i, option in enumerate(question["options"]) if option.get("id") == answer))
+    pty.drain_output()
+    # Journal polling may already have drained the transient prompt; its tail plus
+    # this unacknowledged question checkpoint is sufficient input readiness evidence.
+    if not re.search(r"[ \t]+>[ \t]*$", _normalize_transcript(pty.transcript)):
+        _expect_ask_input_ready(pty, args, description="clarification input ready")
+    pty.sendline_reliable(answer)
+    wait_native_question_ack(path, question_identity(question), pty.drain_output)
+    context.acknowledge(question)
+
+
+def _expect_completed_after_optional_questions(pty: ReplPty, args: argparse.Namespace) -> None:
+    selections = 0
+    for _ in range(12):
+        matched = pty.expect_any(
+            PIPELINE_FULLY_COMPLETED_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS + CANDIDATE_SELECTION_PATTERNS,
+            description="pipeline fully completed", timeout=args.stream_timeout,
+            state_check=lambda: _durable_completion_boundary(pty),
+        )
+        if matched in PIPELINE_FULLY_COMPLETED_PATTERNS:
+            return
+        if matched in CANDIDATE_SELECTION_PATTERNS:
+            selections += 1
+            if selections > 2:
+                raise RuntimeError("supplemental candidate selection budget exhausted")
+            _expect_candidate_selection_ready(pty, args)
+            _select_default_candidate(pty, args)
+        else:
+            _answer_legacy_repl_question(pty, args)
+    raise RuntimeError("pipeline did not complete after bounded supplemental questions")
+
+
+def _expect_progress_after_optional_questions(
+    pty: ReplPty, args: argparse.Namespace, patterns: tuple[str, ...], *, description: str, timeout: float,
+) -> str:
+    """Preserve the caller's milestone while handling extra native clarifications."""
+    deadline = time.monotonic() + timeout
+    for _ in range(12):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f'timed out waiting for {description}')
+        matched = pty.expect_any(
+            patterns + ASK_USER_QUESTION_HEADING_PATTERNS,
+            description=description, timeout=remaining,
+            state_check=lambda: _durable_progress_boundary(pty, patterns),
+        )
+        if matched in patterns:
+            return matched
+        _answer_legacy_repl_question(pty, args)
+    raise RuntimeError('progress did not follow bounded supplemental questions')
+
+
+def _durable_progress_boundary(pty: ReplPty, patterns: tuple[str, ...]) -> str | None:
+    boundary = _durable_completion_boundary(pty)
+    if boundary in ASK_USER_QUESTION_HEADING_PATTERNS:
+        return boundary
+    # A successful handoff can satisfy completion, never an earlier kill/input milestone.
+    if boundary in PIPELINE_FULLY_COMPLETED_PATTERNS:
+        for pattern in PIPELINE_FULLY_COMPLETED_PATTERNS + PIPELINE_COMPLETED_PATTERNS:
+            if pattern in patterns:
+                return pattern
+    return None
+
+
+def _durable_completion_boundary(pty: ReplPty) -> str | None:
+    """A terminal checkpoint must end a wait; native questions may outlive terminal redraws."""
+    config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+    for path in config_dir.glob("projects/*/*/pipeline/meta.yaml"):
+        try:
+            state = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        status = state.get("status")
+        handoff = state.get("normal_handoff")
+        if status in {"failed", "canceled", "discarded"}:
+            raise RuntimeError("pipeline reached a terminal checkpoint before successful handoff")
+        if isinstance(handoff, dict) and handoff.get("status") == "failed":
+            raise RuntimeError("normal handoff failed in durable checkpoint")
+        if status == "completed" and isinstance(handoff, dict) and handoff.get("status") == "succeeded":
+            return PIPELINE_FULLY_COMPLETED_PATTERNS[0]
+        execution = state.get("execution")
+        pending = execution.get("pending_ask_user_question_input") if isinstance(execution, dict) else None
+        if (isinstance(execution, dict) and execution.get("pending_input_kind") == "ask_user_question"
+            and isinstance(pending, dict) and not isinstance(pending.get("answer"), dict)):
+            return ASK_USER_QUESTION_HEADING_PATTERNS[0]
+    return None
+
+
+def _pending_repl_input_kind(config_dir: Path) -> str:
+    for path in config_dir.glob('projects/*/*/pipeline/meta.yaml'):
+        try:
+            state = yaml.safe_load(path.read_text(encoding='utf-8'))
+        except (OSError, yaml.YAMLError):
+            continue
+        execution = state.get('execution') if isinstance(state, dict) else None
+        if isinstance(execution, dict):
+            kind = execution.get('pending_input_kind')
+            if isinstance(kind, str) and kind in {
+                'ask_user_question', 'candidate_selection', 'deployment_confirmation',
+            }:
+                return str(kind)
+    return 'none'
+
+
+def _durable_candidate_boundary(pty: ReplPty) -> str | None:
+    boundary = _durable_completion_boundary(pty)
+    if boundary in PIPELINE_FULLY_COMPLETED_PATTERNS:
+        raise RuntimeError("pipeline completed before candidate selection")
+    if boundary is None:
+        config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+        progress = _display_progress(config_dir)
+        if (_pending_repl_input_kind(config_dir) == "candidate_selection"
+            or progress.get("candidate_selection_ready", 0) > progress.get("candidate_selection_submitted", 0)):
+            return CANDIDATE_SELECTION_PATTERNS[0]
+    return boundary
 
 
 def _expect_candidate_selection_ready(
@@ -2256,6 +2918,16 @@ def _expect_candidate_selection_ready(
     *,
     require_live_refresh: bool = False,
 ) -> None:
+    # expect_any may find the durable checkpoint only after drain_output has
+    # consumed the renderer hint. Re-reading pexpect would wait for a prompt
+    # that is already on screen. Require the current candidate boundary and
+    # its captured controls together; a stale heading alone is insufficient.
+    config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+    if config_path and not require_live_refresh and _durable_candidate_boundary(pty) in CANDIDATE_SELECTION_PATTERNS:
+        if any(re.search(pattern, _normalize_transcript(pty.transcript[-4000:]))
+               for pattern in CANDIDATE_SELECTION_READY_PATTERNS):
+            time.sleep(0.25)
+            return
     controls_ready = pty.expect_optional(
         CANDIDATE_SELECTION_READY_PATTERNS,
         description="candidate selection controls ready",
@@ -2287,12 +2959,12 @@ def _expect_candidate_selection_after_optional_asks(
             CANDIDATE_SELECTION_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS,
             description=description,
             timeout=args.stream_timeout,
+            state_check=lambda: _durable_candidate_boundary(pty),
         )
         if matched in CANDIDATE_SELECTION_PATTERNS:
             _expect_candidate_selection_ready(pty, args)
             return ask_count
-        _expect_ask_input_ready(pty, args, description="cleanup clarification input ready")
-        pty.sendline("1")
+        _answer_legacy_repl_question(pty, args)
     raise RuntimeError("too many cleanup clarification questions before candidate selection")
 
 
@@ -2430,7 +3102,10 @@ def _finish_vswitch_pipeline_after_possible_selection(
             _expect_raw_input_ready(pty, args, description="candidate selection input ready after ask")
         _select_default_candidate(pty, args)
         checks[selection_check] = True
-        pty.expect_any(PIPELINE_COMPLETED_PATTERNS, description=completion_description, timeout=args.stream_timeout)
+        _expect_progress_after_optional_questions(
+            pty, args, PIPELINE_COMPLETED_PATTERNS,
+            description=completion_description, timeout=args.stream_timeout,
+        )
     checks[completion_check] = True
 
 
@@ -2450,14 +3125,14 @@ def _expect_post_rollback_security_group_target(
 def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(PIPELINE_STARTED_PATTERNS, description="pipeline started", timeout=args.stream_timeout)
         checks["pipeline started"] = True
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_FULLY_COMPLETED_PATTERNS,
             description="pipeline fully completed",
             timeout=args.stream_timeout,
@@ -2480,14 +3155,14 @@ def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
 def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible", timeout=args.stream_timeout)
         checks["ask question became visible"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready")
         checks["ask answer input ready"] = True
-        pty.sendline(_stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
         checks["ask answer sent"] = True
-        matched = pty.expect_any(
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask",
             timeout=args.stream_timeout,
@@ -2518,7 +3193,7 @@ def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after image initial",
             timeout=args.stream_timeout,
@@ -2532,7 +3207,7 @@ def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
 def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
         checks["ask question became visible before kill"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready before kill")
@@ -2554,7 +3229,7 @@ def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int
             _expect_ask_input_ready(pty, args, description="second ask image answer input ready")
             _submit_image_fixture(pty, "ask-second-answer", caption=_stack_name_constraint(pty.run_dir, scenario))
             checks["ask second answer image fixture pasted"] = True
-        matched = pty.expect_any(
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask image resume",
             timeout=args.stream_timeout,
@@ -2593,7 +3268,7 @@ def run_image_selection_waiting_resume(args: argparse.Namespace, scenario: str) 
         checks["candidate selection replayed after resume"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after image selection resume",
             timeout=args.stream_timeout,
@@ -2607,18 +3282,14 @@ def run_image_selection_waiting_resume(args: argparse.Namespace, scenario: str) 
 def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(PIPELINE_STARTED_PATTERNS, description="pipeline started", timeout=args.stream_timeout)
         checks["pipeline started"] = True
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
-            PIPELINE_FULLY_COMPLETED_PATTERNS,
-            description="pipeline fully completed",
-            timeout=args.stream_timeout,
-        )
+        _expect_completed_after_optional_questions(pty, args)
         checks["pipeline completed"] = True
         _expect_raw_input_ready(pty, args, description="normal prompt input ready")
         checks["normal prompt input ready"] = True
@@ -2638,7 +3309,7 @@ def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
 def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         pty.expect_any(
             CANDIDATE_EVALUATION_PATTERNS,
             description="candidate evaluation visible",
@@ -2670,7 +3341,7 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
 def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible before kill"] = True
         pty.terminate(force=True)
@@ -2685,7 +3356,7 @@ def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int
         checks["candidate selection replayed"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS, description="pipeline completed after resume", timeout=args.stream_timeout
         )
         checks["pipeline completed after resume"] = True
@@ -2697,7 +3368,7 @@ def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int
 def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
         checks["ask question became visible before kill"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready before kill")
@@ -2709,9 +3380,9 @@ def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
         checks["ask question replayed"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready after resume")
         checks["ask answer input ready after resume"] = True
-        pty.sendline(_stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
         checks["ask answer sent after resume"] = True
-        matched = pty.expect_any(
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask resume",
             timeout=args.stream_timeout,
@@ -2734,7 +3405,7 @@ def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
 def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(
             CANDIDATE_EVALUATION_PATTERNS, description="candidate evaluation visible", timeout=args.stream_timeout
         )
@@ -2758,7 +3429,7 @@ def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
         checks["candidate selection became visible after resume continue"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after evaluate resume",
             timeout=args.stream_timeout,
@@ -2772,14 +3443,17 @@ def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
 def run_selection_invalid_then_valid(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible"] = True
         pty.send(args.invalid_selection_prompt, label="select-invalid-candidate")
         checks["invalid selection input sent"] = True
         _select_default_candidate(pty, args)
         checks["valid selection input sent after invalid input"] = True
-        pty.expect_any(PIPELINE_COMPLETED_PATTERNS, description="pipeline completed", timeout=args.stream_timeout)
+        _expect_progress_after_optional_questions(
+            pty, args, PIPELINE_COMPLETED_PATTERNS,
+            description="pipeline completed", timeout=args.stream_timeout,
+        )
         checks["pipeline completed"] = True
         pty.sendline("/exit")
 
@@ -2789,7 +3463,7 @@ def run_selection_invalid_then_valid(args: argparse.Namespace, scenario: str) ->
 def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         pty.expect_any(
             ARCHITECTURE_PLANNING_PATTERNS,
             description="architecture planning visible",
@@ -2802,7 +3476,7 @@ def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
         checks["interrupt input visible"] = True
         _expect_raw_input_ready(pty, args, description="interrupt prompt input ready")
         checks["interrupt prompt input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        _send_case_goal(pty, args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
@@ -2819,7 +3493,7 @@ def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
 def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         pty.expect_any(
             CANDIDATE_EVALUATION_PATTERNS,
             description="candidate evaluation visible",
@@ -2834,7 +3508,7 @@ def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
             REPL_INPUT_READY_PATTERNS, description="parallel interrupt text input ready", timeout=args.timeout
         )
         checks["parallel interrupt text input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        _send_case_goal(pty, args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
@@ -2851,7 +3525,7 @@ def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
 def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection reached"] = True
         checks["candidate selection input ready"] = True
@@ -2864,7 +3538,9 @@ def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int
             ready_description="candidate selection interrupt text input ready",
         )
         checks["candidate selection interrupt text input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        reliable_sendline = getattr(pty, "sendline_reliable", pty.sendline)
+        pty.e2e_goal = args.rollback_prompt
+        reliable_sendline(args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
@@ -2896,7 +3572,7 @@ def _run_rollback_step5_cleanup(
         _expect_initial_prompt(pty, args)
         _ensure_cleanup_network_target(args, pty.run_dir)
         checks["cleanup network target prepared"] = True
-        pty.sendline(_cleanup_pipeline_prompt(args, pty.run_dir))
+        _send_case_goal(pty, _cleanup_pipeline_prompt(args, pty.run_dir))
         _expect_candidate_selection_after_optional_asks(
             pty,
             args,
@@ -2906,11 +3582,12 @@ def _run_rollback_step5_cleanup(
 
         _select_default_candidate(pty, args)
         checks["initial candidate selected"] = True
-        pty.expect_any(
-            CREATE_STACK_STARTED_PATTERNS,
-            description="first stack create started",
-            timeout=args.stream_timeout,
-        )
+        _expect_first_stack_create_started(pty, args)
+
+        first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
+        pty.cleanup_first_stack_id = first_stack_id
+        checks["first rollback stack observed before rollback"] = bool(first_stack_id)
+
         pty.send("\x1b", label="send-esc")
         checks["esc sent during deploying"] = True
         _expect_interrupt_input_ready(
@@ -2921,11 +3598,7 @@ def _run_rollback_step5_cleanup(
         )
         checks["deploying interrupt input ready"] = True
 
-        first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
-        pty.cleanup_first_stack_id = first_stack_id
-        checks["first rollback stack observed before rollback"] = bool(first_stack_id)
-
-        pty.sendline(_cleanup_rollback_prompt(args, pty.run_dir))
+        _send_case_goal(pty, _cleanup_rollback_prompt(args, pty.run_dir))
         checks["rollback prompt sent"] = True
         _expect_candidate_selection_after_optional_asks(
             pty,
@@ -2941,7 +3614,7 @@ def _run_rollback_step5_cleanup(
         _select_default_candidate(pty, args)
         checks["post-rollback candidate selected"] = True
         second_deployment_offset = len(pty.transcript)
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_FULLY_COMPLETED_PATTERNS,
             description="pipeline completed after second deployment",
             timeout=args.stream_timeout,

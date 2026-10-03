@@ -2717,9 +2717,12 @@ class AgentLoop:
                                 )
 
                 pending_cancellation: asyncio.CancelledError | None = None
+                detached_resource_selection = False
                 try:
                     async with execution_non_advancing_wait():
                         async for sub_event in poll_event_queues():
+                            if isinstance(sub_event, CloudResourceSelectionEvent):
+                                detached_resource_selection = True
                             yield sub_event
 
                         results = await exec_task
@@ -2739,6 +2742,15 @@ class AgentLoop:
                     except BaseException:
                         raise cancellation
                     pending_cancellation = cancellation
+                except GeneratorExit:
+                    # A detached resource selector has a durable checkpoint
+                    # and resumes in a fresh AgentLoop. Its original tool must
+                    # stop waiting before execution control releases the turn.
+                    if detached_resource_selection:
+                        if not exec_task.done():
+                            exec_task.cancel()
+                        await asyncio.gather(exec_task, return_exceptions=True)
+                    raise
 
                 # Process results and yield ToolResultEvents.
                 terminal_step_result = False

@@ -6,12 +6,13 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 import yaml
@@ -78,7 +79,9 @@ def test_selection_deduplicates_and_keeps_registry_order(runner: ModuleType) -> 
 def test_parser_defaults_to_concurrency_three_and_smoke(runner: ModuleType) -> None:
     args = runner.parse_args([])
     assert args.concurrency == 3
+    assert args.cidr_pool == ""
     assert [item.case_id for item in runner.select_scenarios(args.scenario, args.suite)] == ["A01", "R01", "W01"]
+    assert runner.parse_args(["--cidr-pool", "10.250.4.0/22"]).cidr_pool == "10.250.4.0/22"
     with pytest.raises(SystemExit):
         runner.parse_args(["--concurrency", "0"])
 
@@ -227,6 +230,141 @@ def test_repl_cloud_discovery_reads_persisted_tool_transcript(runner: ModuleType
     assert json.loads((tmp_path / "cloud-resources.json").read_text(encoding="utf-8")) == runtime.cloud_resources
 
 
+def test_cleanup_finds_owned_stack_even_without_tool_transcript(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    owned_name = "iac-e2e-ssf-repl-single-plan-happy-abc12345"
+    stack_id = "test-stack-id-123456"
+    artifacts_dir = tmp_path / "artifacts"
+    logs_dir = tmp_path / "logs"
+    artifacts_dir.mkdir()
+    logs_dir.mkdir()
+    runtime = argparse.Namespace(
+        spec=argparse.Namespace(cloud_write=True),
+        args=argparse.Namespace(python=sys.executable, stream_timeout=30, skip_final_teardown=False),
+        paths=argparse.Namespace(run_dir=tmp_path, artifacts_dir=artifacts_dir, logs_dir=logs_dir),
+        env={"IAC_CODE_CONFIG_DIR": str(tmp_path / "config")},
+        owned_stack_names={owned_name},
+        cloud_resources=[],
+        checks={},
+    )
+    monkeypatch.setattr(runner, "discover_cloud_resources", lambda _: [])
+    calls: list[str] = []
+
+    def fake_run(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(command[2])
+        if command[2] == runner._CLOUD_DISCOVERY_CODE:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                json.dumps(
+                    [{"provider": "ros", "resourceType": "stack", "stackId": stack_id,
+                      "stackName": owned_name, "regionId": "cn-hangzhou", "createdByCase": "true"}]
+                ),
+                "",
+            )
+        assert command[2] == runner._CLOUD_CLEANUP_CODE
+        return subprocess.CompletedProcess(command, 0, '{"deleted": true}', "")
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+
+    assert runner.cleanup_cloud_resources(runtime) == "completed"
+    assert calls == [runner._CLOUD_DISCOVERY_CODE, runner._CLOUD_CLEANUP_CODE]
+    assert json.loads((tmp_path / "cleanup-result.json").read_text(encoding="utf-8"))["deletedStackIds"] == [stack_id]
+
+
+def test_cleanup_reports_failed_when_owned_stack_inventory_fails(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "artifacts").mkdir()
+    runtime = argparse.Namespace(
+        spec=argparse.Namespace(cloud_write=True),
+        args=argparse.Namespace(python=sys.executable, stream_timeout=30, skip_final_teardown=False),
+        paths=argparse.Namespace(run_dir=tmp_path, artifacts_dir=tmp_path / "artifacts"),
+        env={},
+        owned_stack_names={"iac-e2e-ssf-repl-single-plan-happy-abc12345"},
+        cloud_resources=[],
+        checks={},
+    )
+    monkeypatch.setattr(runner, "discover_cloud_resources", lambda _: [])
+    monkeypatch.setattr(
+        runner.subprocess,
+        "run",
+        lambda command, **kwargs: subprocess.CompletedProcess(command, 1, "", "cloud API unavailable"),
+    )
+
+    assert runner.cleanup_cloud_resources(runtime) == "failed"
+    assert runtime.checks["test-owned stacks cleaned"] is False
+    assert json.loads((tmp_path / "cleanup-result.json").read_text(encoding="utf-8"))["failures"] == [
+        "owned Stack discovery failed: RuntimeError"
+    ]
+
+
+@pytest.mark.parametrize("code", ["EntityNotExist.Stack", "NotFound.Stack", "StackNotFound"])
+@pytest.mark.parametrize("phase", ["get", "delete"])
+def test_cleanup_accepts_stack_disappearance_during_get_or_delete(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
+    code: str, phase: str,
+) -> None:
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.cloud.aliyun import ros_client
+
+    manifest = tmp_path / "stack.json"
+    manifest.write_text(json.dumps({"stackId": "test-stack", "stackName": "iac-e2e-test", "regionId": "cn-hangzhou"}),
+                        encoding="utf-8")
+
+    class StackMissingError(Exception):
+        pass
+
+    missing = StackMissingError(code)
+    missing.code = code
+
+    class Client:
+        def get_stack(self, _request):
+            if phase == "get":
+                raise missing
+            return SimpleNamespace(body=SimpleNamespace(to_map=lambda: {
+                "StackName": "iac-e2e-test", "Status": "CREATE_COMPLETE",
+            }))
+
+        def delete_stack(self, _request):
+            raise missing
+
+    monkeypatch.setattr(cloud_credentials, "CloudCredentials", lambda: SimpleNamespace(
+        get_provider=lambda _: SimpleNamespace(region_id="cn-hangzhou"),
+    ))
+    monkeypatch.setattr(ros_client.RosClientFactory, "create", lambda *_args: Client())
+    monkeypatch.setattr(sys, "argv", ["cleanup", str(manifest)])
+    with pytest.raises(SystemExit) as exited:
+        exec(runner._CLOUD_CLEANUP_CODE, {})
+    assert exited.value.code == 0
+    assert json.loads(capsys.readouterr().out) == {"deleted": True, "notFound": True}
+
+
+def test_cleanup_never_confuses_missing_credentials_or_unowned_stack_with_deletion(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.cloud.aliyun import ros_client
+
+    manifest = tmp_path / "stack.json"
+    manifest.write_text(json.dumps({"stackId": "test-stack", "stackName": "iac-e2e-test"}), encoding="utf-8")
+    monkeypatch.setattr(cloud_credentials, "CloudCredentials", lambda: SimpleNamespace(
+        get_provider=lambda _: SimpleNamespace(region_id="cn-hangzhou"),
+    ))
+    monkeypatch.setattr(sys, "argv", ["cleanup", str(manifest)])
+    denied = RuntimeError("InvalidAccessKeyId.NotFound: access key not found")
+    client = SimpleNamespace(get_stack=lambda _: (_ for _ in ()).throw(denied))
+    monkeypatch.setattr(ros_client.RosClientFactory, "create", lambda *_args: client)
+    with pytest.raises(RuntimeError, match="InvalidAccessKeyId"):
+        exec(runner._CLOUD_CLEANUP_CODE, {})
+    client.get_stack = lambda _: SimpleNamespace(body=SimpleNamespace(to_map=lambda: {
+        "StackName": "not-owned", "Status": "CREATE_COMPLETE",
+    }))
+    with pytest.raises(RuntimeError, match="ownership mismatch"):
+        exec(runner._CLOUD_CLEANUP_CODE, {})
+
+
 def test_runtime_defaults_follow_real_settings_shape(runner: ModuleType, tmp_path: Path) -> None:
     (tmp_path / "settings.yml").write_text(
         "activeProvider: openai_compatible\n"
@@ -278,10 +416,69 @@ def test_a2a_multimodal_plan_uses_distinct_images_then_plain_text(runner: Module
     assert json.loads(second_confirmation[0])["action"] == "cancel"
 
 
+def test_a2a_image_questions_keep_step2_answer_and_image_when_step1_reasks(runner: ModuleType) -> None:
+    runtime = SimpleNamespace(
+        spec=runner.SCENARIO_BY_NAME["a2a-image-asks-confirmation"], cidr="10.250.0.0/24",
+        stack_name="iac-e2e-image-asks-test", args=SimpleNamespace(cleanup_vpc_id="", cleanup_zone_id=""),
+    )
+    plan = runner._a2a_plan(runtime)
+    first = runner._a2a_response_for_pending(runtime, "ask_user_question", plan, runner.NEW_STEPS[0])
+    repeated = runner._a2a_response_for_pending(runtime, "ask_user_question", plan, runner.NEW_STEPS[0])
+    parameter = runner._a2a_response_for_pending(runtime, "ask_user_question", plan, runner.NEW_STEPS[1])
+    assert first[1] == "ask-first-answer"
+    assert repeated == (first[0], "")
+    assert parameter[1] == "ask-second-answer"
+    assert "CidrBlock 使用 10.250.0.0/25" in parameter[0]
+    assert "阿里云杭州" in runner._initial_prompt(runtime)
+    assert "user_required" in runner._initial_prompt(runtime)
+
+
+def test_a2a_image_acceptance_rejects_early_exit_and_requires_complete_adjustment(
+    runner: ModuleType, tmp_path: Path,
+) -> None:
+    runtime = SimpleNamespace(paths=SimpleNamespace(run_dir=tmp_path), events_path=tmp_path / "events.jsonl")
+
+    def event(event_type, step, **data):
+        return {"eventType": event_type, "step": {"id": step}, "data": data}
+
+    step1, step2 = runner.NEW_STEPS[:2]
+    asks = [event("input_received", step, kind="ask_user_question") for step in (step1, step2)]
+    for name, answer in zip(("turn-step1", "turn-step2"), asks):
+        (tmp_path / f"{name}.events.jsonl").write_text(json.dumps(answer), encoding="utf-8")
+    runtime.events_path.write_text("\n".join(json.dumps({
+        "type": "a2a-turn-started", "name": name, "image": True,
+    }) for name in ("turn-step1", "turn-step2")), encoding="utf-8")
+    early_exit = [asks[0], event("pipeline_completed", step1)]
+    assert not all(runner._a2a_image_asks_checks(runtime, early_exit).values())
+    complete = [
+        *asks,
+        event("input_received", step2, kind="deployment_confirmation", has_images=True, structured=False),
+        event("tool_started", step2, toolName="ros_preview_template"),
+        event("tool_started", step2, toolName="ros_estimate_template_cost"),
+        event("input_required", step2, kind="deployment_confirmation"),
+        event("input_received", step2, kind="deployment_confirmation", action="cancel"),
+        event("pipeline_completed", step2),
+    ]
+    assert all(runner._a2a_image_asks_checks(runtime, complete).values())
+    no_quote = [item for item in complete if item["data"].get("toolName") != "ros_estimate_template_cost"]
+    assert runner._a2a_image_asks_checks(runtime, no_quote)["image adjustment reran Preview and quote"] is False
+    attempted_deploy = [*complete, event("tool_started", runner.NEW_STEPS[2], toolName="ros_deploy")]
+    assert runner._a2a_image_asks_checks(runtime, attempted_deploy)[
+        "image adjustment was canceled without deployment"
+    ] is False
+    runtime.events_path.write_text(json.dumps({
+        "type": "a2a-turn-started", "name": "turn-step1", "image": True,
+    }), encoding="utf-8")
+    assert runner._a2a_image_asks_checks(runtime, complete)[
+        "Step 2 parameter question accepted an image answer"
+    ] is False
+
+
 def test_a2a_image_interrupt_only_uses_rollback_image_once(runner: ModuleType) -> None:
     runtime = argparse.Namespace(
         spec=runner.SCENARIO_BY_NAME["a2a-image-interrupt-handoff"],
         cidr="10.250.0.0/24",
+        stack_name="iac-e2e-image-interrupt-test",
         args=argparse.Namespace(cleanup_vpc_id="", cleanup_zone_id=""),
     )
     plan = runner._a2a_plan(runtime)
@@ -290,8 +487,33 @@ def test_a2a_image_interrupt_only_uses_rollback_image_once(runner: ModuleType) -
     second_confirmation = runner._a2a_response_for_pending(runtime, "deployment_confirmation", plan)
 
     assert first_confirmation[1] == "rollback-interrupt"
+    assert "最终 ROS StackName 仍必须使用 iac-e2e-image-interrupt-test" in first_confirmation[0]
     assert second_confirmation[1] == ""
     assert json.loads(second_confirmation[0])["action"] == "confirm"
+
+
+def test_a2a_image_interrupt_instruction_keeps_target_inside_image(runner: ModuleType) -> None:
+    runtime = argparse.Namespace(
+        spec=argparse.Namespace(profile="image_interrupt"),
+        event=lambda *args, **kwargs: None,
+        stack_name="iac-e2e-ssf-a2a-image-interrupt-handoff-abc12345",
+    )
+    calls: list[dict[str, str]] = []
+
+    class Harness:
+        def stream_image_text(self, **kwargs):
+            calls.append(kwargs)
+            return argparse.Namespace(context_id="ctx", task_id="task", last_input_required_step_id="")
+
+    runner._a2a_turn(
+        runtime, Harness(), prompt="create security group", name="interrupt", image_key="rollback-interrupt"
+    )
+
+    assert calls[0]["text"] == "create security group"
+    assert "security group" not in calls[0]["prompt"].lower()
+    assert "不是确认部署" in calls[0]["prompt"]
+    assert f"`{runtime.stack_name}`" in calls[0]["prompt"]
+    assert "后续重新规划、参数确认和部署都必须保留" in calls[0]["prompt"]
 
 
 def test_backup_window_reads_pending_input_from_prepublication_snapshot(runner: ModuleType) -> None:
@@ -449,12 +671,118 @@ def test_backup_delay_uses_artifact_directory_for_multiple_windows(
     assert runner._backup_delay_marker(second, "arm").is_file()
 
 
+def test_backup_window_wait_reads_started_marker(
+    runner: ModuleType, tmp_path: Path
+) -> None:
+    control = tmp_path / "control"
+    runner._backup_delay_marker(control, "started").write_text("{}", encoding="utf-8")
+    started = {"delaySeconds": 10}
+
+    def wait_for_marker(_control: Path, marker: str, *, timeout: float) -> dict:
+        assert marker == "started"
+        assert timeout == 1.0
+        return started
+
+    runtime = argparse.Namespace(args=argparse.Namespace(timeout=240.0, stream_timeout=1800.0))
+    a2a = argparse.Namespace(_wait_for_backup_delay_marker=wait_for_marker)
+    stream = argparse.Namespace(events=[], done=False)
+
+    assert runner._wait_a2a_backup_window_started(runtime, a2a, control, stream, 1) is started
+
+
+def test_backup_window_wait_stops_when_stream_ends(runner: ModuleType, tmp_path: Path) -> None:
+    runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=1800.0))
+    stream = argparse.Namespace(events=[], done=True)
+
+    with pytest.raises(RuntimeError, match="stream ended before delay started"):
+        runner._wait_a2a_backup_window_started(runtime, object(), tmp_path / "control", stream, 3)
+
+
+def test_backup_window_wait_aborts_after_silent_stream(runner: ModuleType, tmp_path: Path, monkeypatch) -> None:
+    now = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: now.__setitem__(0, now[0] + 601.0))
+    runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=1800.0), watchdog=None)
+    stream = argparse.Namespace(events=[], done=False)
+
+    with pytest.raises(TimeoutError, match="no stream progress"):
+        runner._wait_a2a_backup_window_started(runtime, object(), tmp_path / "control", stream, 3)
+
+    assert runtime.watchdog["state"] == "no_output"
+    assert runtime.watchdog["waitingFor"] == "A2A backup delay marker"
+
+
 @pytest.mark.parametrize("state", ["TASK_STATE_FAILED", "TASK_STATE_CANCELED"])
 def test_unexpected_a2a_terminal_state_fails_immediately(runner: ModuleType, state: str) -> None:
-    summary = argparse.Namespace(last_status_state=state, text="pipeline_identity_mismatch")
+    summary = argparse.Namespace(
+        last_status_state=state, text="prior model output", terminal_status_text="pipeline_identity_mismatch"
+    )
 
     with pytest.raises(RuntimeError, match=f"{state}.*pipeline_identity_mismatch"):
         runner._raise_for_unexpected_a2a_terminal(summary)
+
+
+def test_unexpected_a2a_terminal_omits_prior_model_output(runner: ModuleType) -> None:
+    summary = argparse.Namespace(last_status_state="TASK_STATE_FAILED", text="private prior model output")
+
+    with pytest.raises(RuntimeError, match="TASK_STATE_FAILED$") as failure:
+        runner._raise_for_unexpected_a2a_terminal(summary)
+    assert "private prior model output" not in str(failure.value)
+
+
+def test_continue_to_pending_stops_on_terminal_failure(runner: ModuleType, tmp_path: Path) -> None:
+    runtime = argparse.Namespace(paths=argparse.Namespace(run_dir=tmp_path))
+    summary = argparse.Namespace(last_status_state="TASK_STATE_FAILED", terminal_status_text="execution conflict")
+    harness = argparse.Namespace(stream=lambda **_kwargs: pytest.fail("must not start another A2A turn"))
+
+    with pytest.raises(RuntimeError, match="execution conflict"):
+        runner._continue_a2a_to_pending(
+            runtime, harness, None, runner.A2AConversationPlan(), summary,
+            "candidate_selection", name_prefix="recovery",
+        )
+
+
+def test_backup_restore_response_omits_stale_task_id(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    first = argparse.Namespace(
+        name="first", last_status_state="TASK_STATE_INPUT_REQUIRED", last_input_required_step_id="step1",
+        normal_handoff_ready=False,
+    )
+    finished = argparse.Namespace(name="done", last_status_state="TASK_STATE_COMPLETED", normal_handoff_ready=False)
+    runtime = argparse.Namespace(
+        cancel_event=threading.Event(), spec=argparse.Namespace(profile="backup_restore"),
+        paths=argparse.Namespace(run_dir=tmp_path, artifacts_dir=tmp_path), checks={},
+    )
+    harness = argparse.Namespace(context_id="context-1", pipeline_task_id="task-1")
+    a2a = argparse.Namespace(_pipeline_completed=lambda summary: summary is finished)
+    observed: list[str | None] = []
+    monkeypatch.setattr(runner, "_pending_kind", lambda *_args: "candidate_selection")
+    monkeypatch.setattr(runner, "_a2a_response_for_pending", lambda *_args: ("select", ""))
+
+    def turn(_runtime: object, _harness: object, **kwargs: object) -> object:
+        observed.append(kwargs.get("task_id"))
+        return finished
+
+    monkeypatch.setattr(runner, "_a2a_turn", turn)
+    runner._continue_a2a_from_summary(
+        runtime, harness, a2a, runner.A2AConversationPlan(), first,
+        before_response=lambda *_args: True,
+    )
+
+    assert observed == [""]
+
+
+def test_selling_repl_adapter_includes_wait_diagnosis_threshold(runner: ModuleType, tmp_path: Path) -> None:
+    runtime = argparse.Namespace(
+        args=runner.parse_args([]),
+        paths=argparse.Namespace(workspace_dir=tmp_path, run_dir=tmp_path),
+        port=12345, env={}, cidr="10.0.0.0/24",
+    )
+
+    adapted = runner._python_namespace(runtime)
+
+    assert adapted.wait_diagnosis_after == 120.0
 
 
 def test_repl_waits_for_initial_prompt_before_sending_scenario_input(
@@ -506,7 +834,8 @@ def test_rollback_recovery_restates_the_case_owned_stack_name(runner: ModuleType
 def test_walk_exposes_event_dicts_nested_directly_in_arrays(runner: ModuleType) -> None:
     event = {"batch": [{"eventType": "step_started", "step": {"id": runner.NEW_STEPS[1]}}]}
 
-    assert runner._started_steps([event]) == [(0, runner.NEW_STEPS[1])]
+    assert any(isinstance(value, dict) and value.get("eventType") == "step_started" for _, value in runner._walk(event))
+    assert runner._started_steps([event]) == []
 
 
 def test_web_state_wait_reads_hydrated_status_endpoint(runner: ModuleType) -> None:
@@ -888,6 +1217,47 @@ def test_deploy_order_uses_confirm_action_not_later_cancel(runner: ModuleType, t
     assert runtime.checks["no deploy before confirmation"] is True
 
 
+def test_old_step_check_uses_structured_ids_not_llm_text(runner: ModuleType, tmp_path: Path) -> None:
+    runtime = _pipeline_check_runtime(runner, tmp_path, "backup_restore")
+    values = [{"eventType": "status_update", "data": {"text": "以前叫 architecture_planning"}}]
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["old step ids absent"] is True
+
+    values.append({"eventType": "step_started", "step": {"id": "architecture_planning"}})
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["old step ids absent"] is False
+
+
+def test_candidate_check_ignores_mentions_but_rejects_real_nested_transport_event(
+    runner: ModuleType, tmp_path: Path
+) -> None:
+    runtime = _pipeline_check_runtime(runner, tmp_path, "rollback_step3")
+    values = [{"eventType": "tool_result", "data": {"toolName": "bash", "result": {
+        "documentation": "candidate_step_started", "example": {"eventType": "candidate_step_started"},
+    }}}]
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["candidate sub-pipeline absent"] is True
+    values.append({"metadata": {"iac_code": {"pipeline": {"eventType": "candidate_step_started"}}}})
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["candidate sub-pipeline absent"] is False
+
+
+def test_tool_sequence_ignores_named_examples_but_preserves_actual_deploy_order(
+    runner: ModuleType, tmp_path: Path
+) -> None:
+    runtime = _pipeline_check_runtime(runner, tmp_path, "image_asks")
+    values = [{"eventType": "tool_result", "data": {"toolName": "bash", "result": {
+        "tools": [{"name": "ros_deploy"}, {"toolName": "ros_deploy"}],
+    }}}]
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["no deploy before confirmation"] is True
+    values.append({"metadata": {"iac_code": {"pipeline": {
+        "eventType": "tool_started", "data": {"toolName": "ros_deploy"},
+    }}}})
+    runner._common_pipeline_checks(runtime, values)
+    assert runtime.checks["no deploy before confirmation"] is False
+
+
 def test_safe_cancel_requires_that_no_deployment_was_attempted(runner: ModuleType, tmp_path: Path) -> None:
     # A02 cancels instead of confirming, so ros_deploy must never be reached. Safe mode does not
     # restrict step tools, so an attempted deployment there would be a real cloud write.
@@ -1010,7 +1380,7 @@ def test_successful_quote_must_be_projected_as_succeeded(runner: ModuleType, tmp
     values = [
         {
             "eventType": "tool_result",
-            "data": {"toolName": "ros_estimate_template_cost", "isError": False},
+            "data": {"toolName": "ros_estimate_template_cost", "isError": False, "result": {"cost": 1}},
         },
         {
             "eventType": "input_required",
@@ -1086,16 +1456,22 @@ def test_repl_artifacts_reject_child_exit_before_runner_teardown(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / ".cloud-credentials.yml").write_text(
+        "access_key_secret: cloud-secret-value\n", encoding="utf-8"
+    )
     runtime = argparse.Namespace(
         env={},
-        paths=argparse.Namespace(run_dir=tmp_path),
+        paths=argparse.Namespace(run_dir=tmp_path, config_dir=config_dir),
         checks={},
     )
     pty = argparse.Namespace(
-        transcript="handled tool output",
+        transcript="handled tool output cloud-secret-value",
         events=[
             {
                 "type": "terminate",
+                "detail": "cloud-secret-value",
                 "force": False,
                 "aliveBeforeTerminate": False,
                 "exitStatus": 1,
@@ -1116,6 +1492,8 @@ def test_repl_artifacts_reject_child_exit_before_runner_teardown(
     assert runtime.checks["REPL has no terminal exception"] is False
     recorded = json.loads((tmp_path / "repl-events.jsonl").read_text(encoding="utf-8"))
     assert recorded["exitStatus"] == 1
+    assert "cloud-secret-value" not in (tmp_path / "transcript.raw.log").read_text(encoding="utf-8")
+    assert "cloud-secret-value" not in (tmp_path / "repl-events.jsonl").read_text(encoding="utf-8")
 
 
 def test_first_pending_resource_option_id_ignores_control_actions(runner: ModuleType) -> None:
@@ -1180,7 +1558,7 @@ def test_successful_tool_result_matches_solution_first_quote_tool(runner: Module
             "envelopes": [
                 {
                     "eventType": "tool_result",
-                    "data": {"toolName": "ros_estimate_template_cost", "isError": False},
+                    "data": {"toolName": "ros_estimate_template_cost", "isError": False, "result": {"cost": 1}},
                 }
             ]
         },
@@ -1553,8 +1931,16 @@ def test_case_artifact_credential_audit_ignores_config_but_detects_log_leak(runn
     preflight_config.mkdir(parents=True)
     (preflight_config / ".credentials.yml").write_text("api_key: unit-secret-value\n", encoding="utf-8")
     assert runner.credential_values_absent_from_artifacts(runtime)
+    credential_source = runtime.paths.run_dir / "credential-source"
+    credential_source.mkdir()
+    (credential_source / ".cloud-credentials.yml").write_text(
+        "access_key_secret: cloud-secret-value\n", encoding="utf-8"
+    )
+    assert runner.credential_values_absent_from_artifacts(runtime)
     (runtime.paths.logs_dir / "leak.log").write_text("unit-secret-value", encoding="utf-8")
     assert not runner.credential_values_absent_from_artifacts(runtime)
+    assert runtime.notes[-1] == "credential audit: source=llm; location=logs; suffix=log"
+    assert "unit-secret-value" not in runtime.notes[-1]
 
 
 def test_reused_web_browser_helper_accepts_optional_dom_artifacts(
@@ -1625,6 +2011,121 @@ def test_repl_selection_waits_for_durable_display_event_occurrence(runner: Modul
     ]
 
 
+def test_repl_selection_after_restart_waits_for_live_controls(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[object] = []
+    runtime = argparse.Namespace(
+        paths=argparse.Namespace(config_dir=tmp_path),
+        args=argparse.Namespace(stream_timeout=1.0),
+        repl_candidate_wait_count=0,
+    )
+    pty = argparse.Namespace(events=[], transcript="Enter to confirm", drain_output=lambda: calls.append("drain"))
+
+    def wait_for_display(*_args: object, **kwargs: object) -> tuple[dict[str, str], Path]:
+        calls.append(("journal", callable(kwargs["drain_output"])))
+        return {"type": "candidate_selection_ready"}, tmp_path
+
+    monkeypatch.setattr(
+        runner,
+        "_wait_repl_display_event",
+        wait_for_display,
+    )
+    monkeypatch.setattr(
+        runner,
+        "_legacy_repl_module",
+        lambda: argparse.Namespace(
+            _normalize_transcript=lambda value: value,
+            CANDIDATE_SELECTION_READY_PATTERNS=("Enter to confirm",),
+        ),
+    )
+    monkeypatch.setattr(runner, "_python_namespace", lambda _runtime: argparse.Namespace())
+
+    runner._repl_wait_selection(pty, runtime, after_restart=True, terminal_offset=0)
+
+    assert calls == [("journal", True), "drain"]
+    assert runtime.repl_candidate_wait_count == 1
+
+
+def test_repl_selection_timeout_keeps_occurrence_for_retry(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=9.0), repl_candidate_wait_count=1)
+    pty = argparse.Namespace(events=[], transcript="")
+
+    def wait_for_display(*_args, **kwargs):
+        assert kwargs["occurrence"] == 2
+        assert kwargs["timeout"] == 4.0
+        raise TimeoutError("stalled")
+
+    monkeypatch.setattr(runner, "_wait_repl_display_event", wait_for_display)
+
+    with pytest.raises(TimeoutError, match="stalled"):
+        runner._repl_wait_selection(pty, runtime, timeout=4.0)
+
+    assert runtime.repl_candidate_wait_count == 1
+
+
+def test_repl_post_rollback_selection_preserves_stall_failure_without_restart(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[object] = []
+
+    class Pty:
+        transcript = "prior terminal output"
+
+        def terminate(self, *, force):
+            calls.append(("terminate", force))
+
+        def spawn(self, *, extra_args):
+            calls.append(("spawn", extra_args))
+
+    def wait_selection(_pty, runtime, **kwargs):
+        calls.append(("wait", kwargs))
+        if len([item for item in calls if item[0] == "wait"]) == 1:
+            raise TimeoutError("stalled")
+        runtime.repl_candidate_wait_count += 1
+
+    runtime = argparse.Namespace(
+        args=argparse.Namespace(stream_timeout=900.0),
+        repl_candidate_wait_count=1,
+        checks={"REPL display candidate_selection_ready occurrence 2 observed": False},
+        diagnostics={},
+        watchdog={"state": "no_output"},
+    )
+    monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
+    monkeypatch.setattr(runner, "_repl_active_deploy_step", lambda _runtime: False)
+
+    with pytest.raises(TimeoutError, match="stalled"):
+        runner._repl_wait_selection_after_rollback(runtime, Pty())
+
+    assert len(calls) == 1
+    assert calls[0][0] == "wait"
+    assert "只在杭州创建一个最小测试安全组" in calls[0][1]["clarification_answer"]
+    assert runtime.diagnostics == {}
+    assert runtime.checks == {"REPL display candidate_selection_ready occurrence 2 observed": False}
+
+
+def test_repl_post_rollback_selection_does_not_restart_active_planning(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runtime = argparse.Namespace(
+        args=argparse.Namespace(stream_timeout=900.0),
+        repl_candidate_wait_count=1,
+        watchdog={"state": "running"},
+    )
+
+    def wait_selection(*_args, **kwargs):
+        assert set(kwargs) == {"clarification_answer"}
+        raise TimeoutError("overall deadline")
+
+    monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
+    monkeypatch.setattr(runner, "_repl_active_deploy_step", lambda _runtime: False)
+
+    with pytest.raises(TimeoutError, match="overall deadline"):
+        runner._repl_wait_selection_after_rollback(runtime, object())
+
+
 def test_repl_candidate_waiting_restart_uses_durable_events_and_handoff_delay(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1681,6 +2182,11 @@ def test_repl_confirmation_restart_waits_for_ready_hint_only_once(
         "_prepare_restored_repl_confirmation",
         lambda _pty, _runtime: calls.append("prepare-confirmation"),
     )
+    monkeypatch.setattr(
+        runner,
+        "_repl_wait_confirmation_after_optional_parameter_asks",
+        lambda _pty, _runtime: calls.append("wait-confirmation"),
+    )
     runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=9.0))
 
     runner._restart_repl_at_waiting(
@@ -1691,16 +2197,22 @@ def test_repl_confirmation_restart_waits_for_ready_hint_only_once(
     )
 
     assert calls == [
-        (
-            "expect",
-            runner.REPL_CONFIRMATION_PATTERNS,
-            "deployment confirmation before restart",
-            9.0,
-        ),
+        "wait-confirmation",
         ("terminate", True),
         ("spawn", ["--continue"]),
         "prepare-confirmation",
     ]
+
+
+def test_repl_confirmation_cost_details_only_expected_for_priced_resources(runner: ModuleType) -> None:
+    event = {
+        "type": "user_input_required",
+        "step_id": runner.NEW_STEPS[1],
+        "payload": {"kind": "deployment_confirmation", "cost": {"resources": []}},
+    }
+    assert runner._repl_confirmation_has_cost_lines([event]) is False
+    event["payload"]["cost"]["resources"] = [{"type": "VSwitch", "cost": "¥1/月"}]
+    assert runner._repl_confirmation_has_cost_lines([event]) is True
 
 
 def test_repl_step_started_wait_filters_by_target_step(runner: ModuleType, tmp_path: Path) -> None:
@@ -1860,6 +2372,7 @@ def test_repl_running_step1_resume_waits_on_candidate_boundary_without_second_st
     class Pty:
         def __init__(self, **_kwargs: object) -> None:
             self.events: list[dict[str, object]] = []
+            self.transcript = ""
 
         def spawn(self, *, extra_args: list[str] | None = None) -> None:
             calls.append(("spawn", extra_args))
@@ -1877,9 +2390,10 @@ def test_repl_running_step1_resume_waits_on_candidate_boundary_without_second_st
     runtime = argparse.Namespace(
         args=argparse.Namespace(stream_timeout=1.0),
         env={},
-        paths=argparse.Namespace(run_dir=tmp_path, workspace_dir=tmp_path),
+        paths=argparse.Namespace(run_dir=tmp_path, workspace_dir=tmp_path, config_dir=tmp_path),
         spec=argparse.Namespace(profile="running_step1", cloud_write=False),
         checks={},
+        repl_candidate_wait_count=0,
         event=lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr(runner, "_legacy_repl_module", lambda: fake_repl)
@@ -1890,7 +2404,7 @@ def test_repl_running_step1_resume_waits_on_candidate_boundary_without_second_st
         "_repl_wait_step_started",
         lambda *_args, **kwargs: calls.append(("step-started", kwargs["occurrence"])),
     )
-    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
+    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
     monkeypatch.setattr(runner, "_repl_select_current", lambda *_args: calls.append("select"))
     monkeypatch.setattr(runner, "_repl_wait_confirmation", lambda *_args: calls.append("confirmation"))
     monkeypatch.setattr(runner, "_repl_choose_direct_input", lambda *_args: calls.append("cancel"))
@@ -1921,16 +2435,170 @@ def test_repl_display_wait_fails_fast_on_terminal_pipeline_event(runner: ModuleT
         )
 
 
-def test_repl_candidate_switch_uses_right_arrow_before_enter(runner: ModuleType) -> None:
-    sent: list[tuple[str, str]] = []
+@pytest.mark.parametrize(
+    ("transcript", "elapsed", "aborts"),
+    [("", 601.0, True), ("CreateStack", 601.0, False), ("CreateStack", 1501.0, True)],
+)
+def test_repl_file_wait_uses_output_idle_guard(
+    runner: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    transcript: str,
+    elapsed: float,
+    aborts: bool,
+) -> None:
+    pty = argparse.Namespace(_last_output_at=0.0, transcript=transcript, events=[], _wait_diagnoses=[])
+    runtime = argparse.Namespace(watchdog=None)
+    monkeypatch.setattr(
+        runner,
+        "_legacy_repl_module",
+        lambda: argparse.Namespace(WAIT_IDLE_SECONDS=600.0, WAIT_CLOUD_IDLE_SECONDS=1500.0),
+    )
+    monkeypatch.setattr(runner.time, "monotonic", lambda: elapsed)
+
+    if aborts:
+        with pytest.raises(TimeoutError, match="no terminal output"):
+            runner._observe_repl_wait(
+                pty, runtime, description="REPL display pipeline_completed occurrence 1",
+                started=0.0, transcript_offset=0, diagnosis_attempted=False,
+            )
+        assert runtime.watchdog["action"] == "early_abort"
+        assert pty._wait_diagnoses[-1] == runtime.watchdog
+    else:
+        assert runner._observe_repl_wait(
+            pty, runtime, description="REPL display pipeline_completed occurrence 1",
+            started=0.0, transcript_offset=0, diagnosis_attempted=False,
+        ) is True
+        assert runtime.watchdog is None
+
+
+def test_repl_file_wait_ignores_old_cloud_text_but_keeps_active_deploy(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pty = argparse.Namespace(_last_output_at=0.0, transcript="CreateStack", events=[], _wait_diagnoses=[])
+    runtime = argparse.Namespace(watchdog=None)
+    monkeypatch.setattr(
+        runner, "_legacy_repl_module",
+        lambda: argparse.Namespace(WAIT_IDLE_SECONDS=600.0, WAIT_CLOUD_IDLE_SECONDS=1500.0),
+    )
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 601.0)
+    with pytest.raises(TimeoutError, match="no terminal output"):
+        runner._observe_repl_wait(
+            pty, runtime, description="confirmation", started=0.0,
+            transcript_offset=len(pty.transcript), diagnosis_attempted=False,
+        )
+
+    display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text('{"type":"step_started","step_id":"deploying"}\n', encoding="utf-8")
+    runtime.paths = argparse.Namespace(config_dir=tmp_path)
+    assert runner._observe_repl_wait(
+        pty, runtime, description="pipeline completed", started=0.0,
+        transcript_offset=len(pty.transcript), diagnosis_attempted=True,
+    ) is True
+
+
+def test_repl_file_wait_counts_persisted_step_progress_as_activity(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    transcript = (
+        tmp_path / "projects" / "project" / "session" / "pipeline" / "transcripts" / "attempt" / "session.jsonl"
+    )
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text('{"type":"tool_use"}\n', encoding="utf-8")
+    pty = argparse.Namespace(_last_output_at=0.0, transcript="", events=[], _wait_diagnoses=[])
+    runtime = argparse.Namespace(paths=argparse.Namespace(config_dir=tmp_path), watchdog=None)
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        runner, "_legacy_repl_module",
+        lambda: argparse.Namespace(WAIT_IDLE_SECONDS=600.0, WAIT_CLOUD_IDLE_SECONDS=1500.0),
+    )
+
+    runner._observe_repl_wait(
+        pty, runtime, description="Step 2 confirmation", started=0.0,
+        transcript_offset=0, diagnosis_attempted=True,
+    )
+    transcript.write_text('{"type":"tool_use"}\n{"type":"tool_result"}\n', encoding="utf-8")
+    clock[0] = 601.0
+
+    assert runner._observe_repl_wait(
+        pty, runtime, description="Step 2 confirmation", started=0.0,
+        transcript_offset=0, diagnosis_attempted=True,
+    ) is True
+    assert runtime.watchdog is None
+
+
+def test_repl_file_wait_records_advisory_diagnosis(
+    runner: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = {
+        "state": "normal_operation", "action": "observe", "waitingFor": "REPL display pipeline_completed occurrence 1",
+        "elapsedSeconds": 121.0, "cue": "none",
+    }
+    pty = argparse.Namespace(_last_output_at=120.0, transcript="working", events=[], _wait_diagnoses=[])
+    calls: list[tuple[str, int, float]] = []
+
+    def diagnose(description: str, offset: int, elapsed: float) -> bool:
+        calls.append((description, offset, elapsed))
+        pty._wait_diagnoses.append(record)
+        return True
+
+    pty._diagnose_wait = diagnose
+    runtime = argparse.Namespace(watchdog=None)
+    monkeypatch.setattr(
+        runner,
+        "_legacy_repl_module",
+        lambda: argparse.Namespace(WAIT_IDLE_SECONDS=600.0, WAIT_CLOUD_IDLE_SECONDS=1500.0),
+    )
+    monkeypatch.setattr(runner.time, "monotonic", lambda: 121.0)
+
+    assert runner._observe_repl_wait(
+        pty, runtime, description=record["waitingFor"], started=0.0,
+        transcript_offset=3, diagnosis_attempted=False,
+    ) is True
+    assert calls == [(record["waitingFor"], 3, 121.0)]
+    assert runtime.watchdog == record
+
+
+def test_repl_candidate_switch_waits_for_arrow_before_enter(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[tuple[str, str] | str] = []
 
     class Pty:
         def send(self, text: str, *, label: str) -> None:
             sent.append((text, label))
 
+        def drain_output(self) -> None:
+            sent.append("drain")
+
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: sent.append("settle"))
     runner._repl_select_current(Pty(), next_candidate=True)
 
-    assert sent == [("\x1b[C", "candidate-right"), ("\r", "candidate-enter")]
+    assert sent == [("\x1b[C", "candidate-right"), "settle", "drain", ("\r", "candidate-enter")]
+
+
+def test_repl_candidate_enter_retries_until_submission_is_recorded(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[str] = []
+    ticks = iter(range(100))
+
+    class Pty:
+        def send(self, _text: str, *, label: str) -> None:
+            sent.append(label)
+
+        def drain_output(self) -> None:
+            pass
+
+    monkeypatch.setattr(runner, "_repl_selection_submission_count", lambda _pty: int(len(sent) >= 2))
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    runner._repl_select_current(Pty())
+
+    assert sent == ["candidate-enter", "candidate-enter-retry-2"]
 
 
 def test_repl_restored_line_input_uses_paste_then_separate_enter(
@@ -2109,6 +2777,27 @@ def test_repl_generated_image_uses_separate_enter_after_refresh(
     ]
 
 
+def test_repl_multimodal_selection_retries_until_durable_submission(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    labels: list[str] = []
+    counts = iter((1, 2))
+    ticks = iter((0.0, 6.0, 10.0, 11.0))
+    runtime = argparse.Namespace(diagnostics={})
+    pty = argparse.Namespace(drain_output=lambda: None)
+    monkeypatch.setattr(
+        runner, "_legacy_repl_module",
+        lambda: argparse.Namespace(_repl_selection_submission_count=lambda _pty: next(counts)),
+    )
+    monkeypatch.setattr(runner, "_repl_submit_image_fixture", lambda _pty, _key, *, label: labels.append(label))
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+
+    runner._repl_submit_multimodal_selection(runtime, pty, label="rollback-selection-image-enter")
+
+    assert labels == ["rollback-selection-image-enter", "rollback-selection-image-enter-retry-2"]
+    assert runtime.diagnostics["repl_selection_image_retries"] == 1
+
+
 def test_repl_confirmation_records_action_count_from_display(
     runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2215,29 +2904,91 @@ def test_repl_recovery_confirmation_uses_durable_event_without_rematching_draine
     assert pty.events[0]["event_type"] == "user_input_required"
 
 
+def test_repl_post_rollback_confirmation_does_not_count_received_answers(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    events = [
+        {"type": "candidate_selection_submitted"},
+        {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+            "kind": "deployment_confirmation", "options": [{"action": "confirm"}, {"action": "cancel"}],
+        }},
+        {"type": "user_input_received", "step_id": runner.NEW_STEPS[1], "payload": {
+            "kind": "deployment_confirmation", "selected_value": "change architecture",
+        }},
+        {"type": "candidate_selection_submitted"},
+        {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+            "kind": "deployment_confirmation",
+            "options": [{"action": "confirm"}, {"action": "reselect"}, {"action": "cancel"}],
+        }},
+    ]
+    runtime = argparse.Namespace(spec=argparse.Namespace(profile="rollback"),
+        paths=argparse.Namespace(config_dir=tmp_path),
+        args=argparse.Namespace(stream_timeout=0.01),
+        checks={}, repl_confirmation_wait_count=1, repl_confirmation_action_count=0,
+    )
+    pty = argparse.Namespace(events=[], drain_output=lambda: None)
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    for occurrence in (2, 3):
+        display.write_text("\n".join(json.dumps(event) for event in events), encoding="utf-8")
+        runner._repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+        assert runtime.repl_confirmation_wait_count == occurrence
+        assert runtime.repl_confirmation_action_count == 3
+        assert pty.events[-1]["occurrence"] == occurrence
+        events.extend([
+            {"type": "user_input_received", "step_id": runner.NEW_STEPS[1], "payload": {
+                "kind": "deployment_confirmation", "action": "confirm",
+            }},
+            {"type": "candidate_selection_submitted"},
+            {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+                "kind": "deployment_confirmation",
+                "options": [{"action": "confirm"}, {"action": "reselect"}, {"action": "cancel"}],
+            }},
+        ])
+    assert runtime.checks == {}
+
+
 def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
-    matches = iter(
+    inputs = iter(
         [
-            runner.REPL_ASK_INPUT_READY_PATTERNS[0],
-            runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS[0],
+            {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {"kind": "ask_user_question"}},
+            {
+                "type": "user_input_required",
+                "step_id": runner.NEW_STEPS[1],
+                "payload": {"kind": "deployment_confirmation"},
+            },
         ]
     )
 
     class Pty:
-        def expect_any(self, patterns, *, description, timeout):
-            calls.append(("expect", description, timeout, patterns))
-            return next(matches)
-
         def drain_output(self) -> None:
             calls.append("drain")
 
     runtime = argparse.Namespace(
         args=argparse.Namespace(stream_timeout=9.0, cleanup_vpc_id="vpc-test"),
+        spec=argparse.Namespace(profile="rollback"),
     )
-    monkeypatch.setattr(runner.time, "sleep", lambda seconds: calls.append(("sleep", seconds)))
+    monkeypatch.setattr(
+        runner, "_read_repl_display_events", lambda _runtime: [
+            {"type": "user_input_required", "step_id": runner.NEW_STEPS[1],
+             "payload": {"kind": "deployment_confirmation"}},
+            {"type": "candidate_selection_submitted"},
+        ],
+    )
+    def wait_input(_runtime, **kwargs):
+        calls.append(("durable", kwargs["occurrence"]))
+        return next(inputs), Path("display")
+
+    monkeypatch.setattr(runner, "_wait_repl_display_event", wait_input)
+    monkeypatch.setattr(
+        runner, "_repl_wait_ask",
+        lambda _pty, _runtime, *, description, allow_captured_prompt: calls.append(("ask", description)),
+    )
     monkeypatch.setattr(
         runner,
         "_repl_submit_line_input",
@@ -2249,26 +3000,259 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
         lambda _pty, _runtime, *, require_input_ready: calls.append(("confirmation", require_input_ready)),
     )
 
+    monkeypatch.setattr(runner, "_answer_runtime_question", lambda *_args, **_kw: "vpc-test")
+    monkeypatch.setattr(
+        runner, "_repl_submit_question_answer",
+        lambda _pty, _runtime, text, _pending, *, label: calls.append(("answer", text, label)),
+    )
     runner._repl_wait_confirmation_after_optional_parameter_asks(Pty(), runtime)
 
     assert calls == [
-        (
-            "expect",
-            "post-rollback Step 2 ask or confirmation #1",
-            9.0,
-            runner.REPL_ASK_INPUT_READY_PATTERNS + runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-        ),
-        ("sleep", 0.25),
-        "drain",
-        ("answer", "vpc-test", "post-rollback-parameter-answer-1"),
-        (
-            "expect",
-            "post-rollback Step 2 ask or confirmation #2",
-            9.0,
-            runner.REPL_ASK_INPUT_READY_PATTERNS + runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-        ),
+        ("durable", 2),
+        ("ask", "Step 2 parameter ask #1"),
+        ("answer", "vpc-test", "step2-parameter-answer-1"),
+        ("durable", 2),
         ("confirmation", False),
     ]
+
+
+def test_repl_step2_wait_observes_native_question_outside_display_journal(
+    runner: ModuleType, tmp_path: Path
+) -> None:
+    meta = tmp_path / "projects" / "project" / "session" / "pipeline" / "meta.yaml"
+    meta.parent.mkdir(parents=True)
+    state = {
+        "current_step": runner.NEW_STEPS[1],
+        "execution": {
+            "pending_input_kind": "ask_user_question",
+            "pending_ask_user_question_input": {
+                "toolUseId": "parameter-call", "question": "Which VPC?", "options": [],
+                "allowFreeText": True,
+            },
+        },
+    }
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    runtime = argparse.Namespace(paths=argparse.Namespace(config_dir=tmp_path), checks={})
+    answered: set[str] = set()
+
+    event, path = runner._wait_repl_display_event(
+        runtime, event_type="user_input_required", occurrence=2, timeout=1,
+        predicate=runner._is_repl_deployment_confirmation,
+        alternate_input=lambda: runner._pending_repl_parameter_question(runtime, answered),
+    )
+
+    assert path == meta
+    assert event["payload"] == {
+        "kind": "ask_user_question", "tool_use_id": "parameter-call", "allow_free_text": True,
+        "question": "Which VPC?", "options": [],
+    }
+    answered.add("parameter-call")
+    assert runner._pending_repl_parameter_question(runtime, answered) is None
+    answered.clear()
+    state["execution"]["pending_ask_user_question_input"]["answer"] = {"free_text": "vpc-test"}
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    assert runner._pending_repl_parameter_question(runtime, answered) is None
+    state["execution"]["pending_ask_user_question_input"].pop("answer")
+    state["current_step"] = runner.NEW_STEPS[0]
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    assert runner._pending_repl_parameter_question(runtime, answered) is None
+
+
+@pytest.mark.parametrize("acknowledged", [True, False])
+def test_restored_question_answer_waits_for_checkpoint_ack_before_next_question(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, acknowledged: bool,
+) -> None:
+    meta = tmp_path / "projects/p/s/pipeline/meta.yaml"
+    meta.parent.mkdir(parents=True)
+    state = {"current_step": runner.NEW_STEPS[1], "execution": {
+        "pending_input_kind": "ask_user_question", "pending_ask_user_question_input": {
+            "toolUseId": "restored-parameter-call", "allowFreeText": True,
+        },
+    }}
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    runtime = SimpleNamespace(paths=SimpleNamespace(config_dir=tmp_path),
+                              args=SimpleNamespace(stream_timeout=0.05), checks={})
+    drains: list[int] = []
+    sent: list[str] = []
+
+    class Pty:
+        events = []
+        def send(self, text, *, label):
+            sent.append(label)
+
+        def drain_output(self):
+            drains.append(1)
+            if acknowledged and len(drains) == 3:
+                state["execution"]["pending_input_kind"] = None
+                state["execution"]["pending_ask_user_question_input"] = None
+                meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    if acknowledged:
+        runner._repl_submit_restored_parameter_answer(Pty(), runtime, "vpc-test")
+        assert len(drains) == 3
+        assert runner._pending_repl_parameter_question(runtime, set()) is None
+    else:
+        with pytest.raises(TimeoutError, match="answer acknowledgement"):
+            runner._repl_submit_restored_parameter_answer(Pty(), runtime, "vpc-test")
+    assert runtime.checks["restored Step 2 answer acknowledged"] is acknowledged
+    assert sent == ["restored-step2-ask-answer-paste", "restored-step2-ask-answer-enter"]
+
+
+def test_repl_parameter_question_accepts_prompt_already_drained(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[object] = []
+    pty = argparse.Namespace(events=[], transcript="● Ask user question: Which VPC?\n  > ",
+                             drain_output=lambda: calls.append("drain"))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=1))
+
+    runner._repl_wait_ask(pty, runtime, description="parameter question", allow_captured_prompt=True)
+
+    assert calls == ["drain", "drain"]
+    assert pty.events[0]["description"] == "parameter question input ready"
+
+
+def test_repl_rollback_selection_answers_durable_native_question_before_selection(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    meta = tmp_path / "projects" / "project" / "session" / "pipeline" / "meta.yaml"
+    meta.parent.mkdir(parents=True)
+    state = {"current_step": runner.NEW_STEPS[0], "execution": {
+        "pending_input_kind": "ask_user_question", "pending_ask_user_question_input": {
+            "toolUseId": "planning-call", "question": "Which existing VPC?", "allowFreeText": True,
+        },
+    }}
+    meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+    runtime = argparse.Namespace(
+        paths=argparse.Namespace(config_dir=tmp_path),
+        args=argparse.Namespace(stream_timeout=1), repl_candidate_wait_count=1, diagnostics={},
+    )
+    calls: list[str] = []
+    pty = argparse.Namespace(events=[], transcript="", drain_output=lambda: None)
+
+    def wait_display(_runtime, **kwargs):
+        assert kwargs["occurrence"] == 2
+        assert runtime.repl_candidate_wait_count == 1
+        pending = kwargs["alternate_input"]()
+        if pending is not None:
+            calls.append("pending question")
+            return pending
+        calls.append("selection")
+        return {"type": "candidate_selection_ready", "payload": {"options": ["candidate"]}}, Path("display")
+
+    def submit(_pty, answer, *, label):
+        calls.append(answer)
+        state["execution"]["pending_ask_user_question_input"]["answer"] = {"free_text": answer}
+        meta.write_text(yaml.safe_dump(state), encoding="utf-8")
+
+    monkeypatch.setattr(runner, "_wait_repl_display_event", wait_display)
+    monkeypatch.setattr(runner, "_repl_wait_ask", lambda *_args, **_kwargs: calls.append("prompt ready"))
+    monkeypatch.setattr(runner, "_repl_submit_line_input", submit)
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    monkeypatch.setattr(
+        runner, "_answer_runtime_question", lambda *_args, **_kw: "reuse first existing VPC; only create SG"
+    )
+    monkeypatch.setattr(
+        runner, "_repl_submit_question_answer",
+        lambda _pty, _runtime, text, _pending, *, label: runner._repl_submit_line_input(_pty, text, label=label),
+    )
+    runner._repl_wait_selection(pty, runtime, clarification_answer="reuse first existing VPC; only create SG")
+
+    assert calls == ["pending question", "prompt ready", "reuse first existing VPC; only create SG", "selection"]
+    assert runtime.repl_candidate_wait_count == 2
+    assert runtime.diagnostics["repl_step1_clarification_asks"] == 1
+
+
+def test_repl_post_rollback_confirmation_preserves_stall_failure_without_restart(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[object] = []
+    event = {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+        "kind": "deployment_confirmation",
+    }}
+
+    class Pty:
+        def terminate(self, *, force):
+            calls.append(("terminate", force))
+
+        def spawn(self, *, extra_args):
+            calls.append(("spawn", extra_args))
+
+        def drain_output(self) -> None:
+            pass
+
+    def wait(_runtime, **kwargs):
+        calls.append(("wait", kwargs["timeout"], kwargs["occurrence"]))
+        if len([item for item in calls if item[0] == "wait"]) == 1:
+            runtime.watchdog = {"state": "no_output", "action": "early_abort"}
+            raise TimeoutError("stalled")
+        return event, Path("display")
+
+    runtime = argparse.Namespace(spec=argparse.Namespace(profile="rollback"),
+        args=argparse.Namespace(stream_timeout=900.0, cleanup_vpc_id="vpc-test"),
+        checks={"REPL display user_input_required occurrence 1 observed": False},
+        diagnostics={},
+        watchdog=None,
+    )
+    monkeypatch.setattr(runner, "_read_repl_display_events", lambda _runtime: [{
+        "type": "candidate_selection_submitted",
+    }])
+    monkeypatch.setattr(runner, "_wait_repl_display_event", wait)
+    monkeypatch.setattr(runner, "_repl_active_deploy_step", lambda _runtime: False)
+    monkeypatch.setattr(
+        runner, "_repl_wait_confirmation",
+        lambda _pty, _runtime, *, require_input_ready: calls.append(("confirmation", require_input_ready)),
+    )
+
+    with pytest.raises(TimeoutError, match="stalled"):
+        runner._repl_wait_confirmation_after_optional_parameter_asks(Pty(), runtime)
+
+    assert calls == [("wait", 900.0, 1)]
+    assert runtime.diagnostics == {}
+    assert runtime.watchdog["action"] == "early_abort"
+    assert runtime.checks == {"REPL display user_input_required occurrence 1 observed": False}
+
+
+def test_normal_resume_selects_new_candidate_after_input_watchdog(
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    runtime = argparse.Namespace(repl_candidate_wait_count=1, diagnostics={}, watchdog=None)
+
+    def wait_confirmation(_pty, target):
+        calls.append("confirmation")
+        if calls.count("confirmation") == 1:
+            target.watchdog = {"state": "waiting_for_input", "cue": "candidate_controls", "action": "early_abort"}
+            raise RuntimeError("candidate controls need input")
+
+    def wait_selection(_pty, target):
+        calls.append("selection")
+        target.repl_candidate_wait_count = 2
+
+    monkeypatch.setattr(runner, "_repl_wait_confirmation", wait_confirmation)
+    monkeypatch.setattr(runner, "_repl_wait_selection", wait_selection)
+    monkeypatch.setattr(runner, "_repl_select_current", lambda _pty: calls.append("submit"))
+    monkeypatch.setattr(runner, "_read_repl_display_events", lambda _runtime: [
+        {"type": "candidate_selection_ready"}, {"type": "candidate_selection_ready"},
+    ])
+
+    runner._repl_wait_normal_resume_confirmation(object(), runtime)
+
+    assert calls == ["confirmation", "selection", "submit", "confirmation"]
+    assert runtime.diagnostics["repl_normal_resume_reselections"] == 1
+    assert runtime.watchdog["action"] == "observe"
+
+
+def test_repl_image_lifecycle_requires_initial_vpc_question(runner: ModuleType) -> None:
+    required = {"initial", "selection", "confirmation-adjust", "rollback-interrupt", "normal-followup"}
+
+    assert runner._multimodal_image_lifecycle_complete(required | {"ask-first-answer"})
+    assert not runner._multimodal_image_lifecycle_complete(required)
+    assert not runner._multimodal_image_lifecycle_complete(required | {"rollback-ask-answer"})
+    assert not runner._multimodal_image_lifecycle_complete((required - {"selection"}) | {"ask-first-answer"})
 
 
 def test_repl_multimodal_confirmation_answers_repeated_asks_before_confirmation(
@@ -2326,9 +3310,10 @@ def test_repl_multimodal_confirmation_answers_repeated_asks_before_confirmation(
     assert ("fixture", "ask-first-answer") in calls
     generated = next(item for item in calls if isinstance(item, tuple) and item[0] == "generated")
     assert generated[1] == "initial-parameter-2"
-    assert "第一个默认 VPC" in generated[2]
+    assert "首个已有 VPC" in generated[2]
     assert ("send", "\r", "initial-image-ask-enter-1") in calls
     assert ("send", "\r", "initial-image-ask-enter-2") in calls
+    assert calls[calls.index(("send", "\r", "initial-image-ask-enter-2")) - 1] == "drain"
     assert calls[-2][0:2] == ("expect", "initial image ask or confirmation #3")
     assert calls[-1] == ("confirmation", False)
 
@@ -2422,7 +3407,7 @@ def test_repl_multimodal_selection_answers_step1_ask_before_candidates(
         "_repl_submit_generated_image",
         lambda _runtime, _pty, key, text, *, label: calls.append(("generated", key, text, label)),
     )
-    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
+    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
 
     runner._repl_wait_multimodal_selection(runtime, Pty(), phase="rollback")
 
@@ -2438,6 +3423,7 @@ def test_repl_multimodal_handoff_waits_for_normal_prompt_before_image_followup(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
+    generated_images: dict[str, str] = {}
 
     class Pty:
         def __init__(self) -> None:
@@ -2473,12 +3459,12 @@ def test_repl_multimodal_handoff_waits_for_normal_prompt_before_image_followup(
         calls.append(("direct-image", key, text))
         pty.events.append({"type": "paste-image-fixture", "image_key": key})
 
+    def submit_generated_image(_runtime, _pty, key: str, text: str, *, label: str) -> None:
+        generated_images[key] = text
+        submit_image(_pty, key, label=label)
+
     monkeypatch.setattr(runner, "_repl_submit_image_fixture", submit_image)
-    monkeypatch.setattr(
-        runner,
-        "_repl_submit_generated_image",
-        lambda _runtime, _pty, key, text, *, label: submit_image(_pty, key, label=label),
-    )
+    monkeypatch.setattr(runner, "_repl_submit_generated_image", submit_generated_image)
     monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
     monkeypatch.setattr(
         runner,
@@ -2504,6 +3490,7 @@ def test_repl_multimodal_handoff_waits_for_normal_prompt_before_image_followup(
     )
     assert "第一个已有 VPC" in initial_confirmation[3]
     assert "不要再次询问" in initial_confirmation[3]
+    assert all(marker in generated_images["selection"] for marker in ("VpcId", "问我选哪一个", "不要自行选择"))
     handoff_index = calls.index(("expect", "multimodal pipeline handoff", 9.0))
     ready_index = calls.index("normal-prompt-ready")
     followup_index = calls.index(("image", "normal-followup", "normal-followup-image-enter"))
@@ -2606,6 +3593,123 @@ def test_repl_natural_adjustment_is_proven_by_outcomes_without_structured_action
     }
 
 
+def test_repl_natural_adjustment_uses_distinct_reserved_subnet(runner: ModuleType) -> None:
+    runtime = argparse.Namespace(cidr="10.250.0.0/24")
+
+    assert runner._repl_natural_adjusted_cidr(runtime) == "10.250.0.128/25"
+
+
+def test_public_journal_tool_names_reads_only_translated_tool_envelopes(runner: ModuleType, tmp_path: Path) -> None:
+    journal = tmp_path / "projects" / "project" / "session" / "pipeline" / "a2a-events.jsonl"
+    journal.parent.mkdir(parents=True)
+    journal.write_text(
+        json.dumps({"events": [
+            {"eventType": "tool_result", "data": {"toolName": "aliyun_api", "result": "private"}},
+            {"eventType": "text_delta", "data": {"toolName": "private"}},
+            {"eventType": "tool_started", "data": {"toolName": "ros_deploy"}},
+        ]}) + "\n",
+        encoding="utf-8",
+    )
+
+    assert runner._public_journal_tool_names(tmp_path) == ["aliyun_api", "ros_deploy"]
+
+
+def test_public_a2a_tool_use_ids_ignores_non_tool_payloads(runner: ModuleType) -> None:
+    attributed = {"metadata": {"iac_code": {"pipeline": {
+        "eventType": "tool_result", "data": {"toolName": "aliyun_api", "toolUseId": "call-1"},
+    }}}}
+    text_only = {"metadata": {"iac_code": {"pipeline": {
+        "eventType": "text_delta", "data": {"toolUseId": "private"},
+    }}}}
+
+    assert runner._public_a2a_tool_use_ids([attributed, text_only]) == {"call-1"}
+
+
+def test_public_a2a_attribution_ignores_artifact_reference_but_checks_tool_event(runner: ModuleType) -> None:
+    def envelope(event_type: str, tool_name: str | None = None):
+        data = {"toolUseId": "call-1"}
+        if tool_name is not None:
+            data["toolName"] = tool_name
+        return {"metadata": {"iac_code": {"pipeline": {"eventType": event_type, "data": data}}}}
+
+    artifact = envelope("artifact_created")
+    public_tool = envelope("tool_result", "aliyun_api")
+    misattributed_tool = envelope("tool_result", "ros_deploy")
+
+    assert runner._public_a2a_tool_use_ids([artifact]) == {"call-1"}
+    assert runner._public_a2a_tool_events_for_id([artifact], "call-1") == []
+    assert runner._public_a2a_tool_events_for_id([artifact, public_tool], "call-1") == [
+        {"toolUseId": "call-1", "toolName": "aliyun_api"},
+    ]
+    assert runner._public_a2a_tool_events_for_id([misattributed_tool], "call-1") == [
+        {"toolUseId": "call-1", "toolName": "ros_deploy"},
+    ]
+    assert not runner._public_aliyun_attribution_consistent(
+        runner._public_a2a_tool_events_for_id([artifact], "call-1")
+    )
+    assert runner._public_aliyun_attribution_consistent(
+        runner._public_a2a_tool_events_for_id([artifact, public_tool], "call-1")
+    )
+    assert not runner._public_aliyun_attribution_consistent(
+        runner._public_a2a_tool_events_for_id([misattributed_tool], "call-1")
+    )
+    delegated_tool = envelope("tool_result", "ros_preview_template")
+    delegated_events = runner._public_a2a_tool_events_for_id([delegated_tool], "call-1")
+    assert runner._public_aliyun_attribution_consistent(delegated_events, "ros_preview_template")
+    assert not runner._public_aliyun_attribution_consistent(delegated_events, "ros_validate_template")
+    assert runner._public_tool_name_category("aliyun_api") == "aliyun_api_alias"
+    assert runner._public_tool_name_category("ros_preview_template") == "other_tool_name"
+    assert runner._public_tool_name_category(None) == "missing"
+
+
+@pytest.mark.parametrize(
+    "public_name,event_types,passed",
+    [
+        ("ros_validate_template", ("tool_started", "tool_result"), True),
+        ("aliyun_api", ("tool_started", "tool_result"), False),
+        (None, ("tool_started", "tool_result"), False),
+        ("ros_validate_template", (), False),
+        ("ros_validate_template", ("artifact_created",), False),
+    ],
+)
+def test_public_contract_audit_preserves_actual_delegated_tool_identity(
+    runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    public_name: str | None, event_types: tuple[str, ...], passed: bool,
+) -> None:
+    config_dir = tmp_path / "config"
+    transcript = config_dir / "projects" / "project" / "session" / "session.jsonl"
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text("\n".join(json.dumps(row) for row in [
+        {"role": "assistant", "content": [{
+            "type": "tool_use", "id": "cloud-call", "name": "ros_validate_template",
+        }]},
+        {"role": "user", "content": [{
+            "type": "tool_result", "tool_use_id": "cloud-call", "content": '{"Parameters": []}',
+            "metadata": {"aliyun_http": {
+                "contract_version": "aliyun_body_v1", "product": "ros", "version": "2019-09-10",
+                "action": "ValidateTemplate", "status": 200, "response_mode": "json", "body_format": "json",
+            }},
+        }]},
+    ]), encoding="utf-8")
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir()
+    runtime = argparse.Namespace(
+        paths=argparse.Namespace(config_dir=config_dir, run_dir=tmp_path, artifacts_dir=artifacts_dir),
+        spec=argparse.Namespace(surface=runner.Surface.A2A, case_id="A02"),
+        checks={}, diagnostics={}, notes=[],
+    )
+    events = [{"metadata": {"iac_code": {"pipeline": {
+        "eventType": event_type, "data": {"toolUseId": "cloud-call", "toolName": public_name},
+    }}}} for event_type in event_types]
+    monkeypatch.setattr(runner, "_all_event_values", lambda _path: events)
+    monkeypatch.setattr(runner, "_copied_credential_values", lambda _runtime: [])
+
+    runner.run_public_contract_audit(runtime)
+
+    assert runtime.checks["Aliyun business body and public payload contract passed"] is True
+    assert runtime.checks["public events preserve Aliyun tool attribution"] is passed
+
+
 def test_repl_question_waits_for_actual_input_prompt(runner: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, object]] = []
 
@@ -2690,47 +3794,22 @@ def test_repl_step2_parameter_waits_only_after_candidate_selection(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
-
-    class Pty:
-        def sendline(self, text: str) -> None:
-            calls.append(("sendline", text))
-
     runtime = argparse.Namespace(
-        spec=argparse.Namespace(profile="step2_parameter", cloud_write=False),
-        args=argparse.Namespace(cleanup_vpc_id="vpc-test", cleanup_zone_id="cn-hangzhou-i"),
+        spec=argparse.Namespace(profile="step2_parameter", cloud_write=False), checks={},
+        answered_parameter_fields={"vpc_id", "zone_id"},
     )
+    monkeypatch.setattr(runner, "_question_facts", lambda _runtime: calls.append("fixtures"))
     monkeypatch.setattr(runner, "_repl_submit_initial_prompt", lambda *_args: calls.append("initial"))
-    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
-    monkeypatch.setattr(
-        runner,
-        "_repl_select_current",
-        lambda *_args, **kwargs: calls.append(("select", kwargs["next_candidate"])),
-    )
-    monkeypatch.setattr(
-        runner,
-        "_repl_wait_ask",
-        lambda *_args, **kwargs: calls.append(("ask", kwargs["description"])),
-    )
-    monkeypatch.setattr(runner, "_repl_wait_confirmation", lambda *_args: calls.append("confirmation"))
-    monkeypatch.setattr(
-        runner,
-        "_repl_choose_direct_input",
-        lambda _runtime, _pty, text: calls.append(("direct", text)),
-    )
-
-    runner._repl_basic_flow(runtime, Pty())
-
-    assert calls == [
-        "initial",
-        "selection",
-        ("select", False),
-        ("ask", "Step 2 VPC parameter question"),
-        ("sendline", "vpc-test"),
-        ("ask", "Step 2 zone parameter question"),
-        ("sendline", "cn-hangzhou-i"),
-        "confirmation",
-        ("direct", "取消本次部署，不创建任何云资源。"),
-    ]
+    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
+    monkeypatch.setattr(runner, "_repl_select_current", lambda *_args, **_kwargs: calls.append("select"))
+    monkeypatch.setattr(runner, "_repl_wait_confirmation_after_optional_parameter_asks",
+                        lambda *_args: calls.append("questions-and-confirmation"))
+    monkeypatch.setattr(runner, "_repl_choose_direct_input",
+                        lambda _runtime, _pty, text: calls.append(("direct", text)))
+    runner._repl_basic_flow(runtime, object())
+    assert calls == ["fixtures", "initial", "selection", "select", "questions-and-confirmation",
+                     ("direct", "取消本次部署，不创建任何云资源。")]
+    assert runtime.checks["both required parameters answered"] is True
 
 
 def test_step2_parameter_prompt_requires_user_answers_instead_of_api_discovery(runner: ModuleType) -> None:
@@ -2767,7 +3846,7 @@ def test_repl_replace_invalid_uses_candidate_interrupt_editor(
     )
     monkeypatch.setattr(runner.time, "sleep", lambda seconds: calls.append(("sleep", seconds)))
     monkeypatch.setattr(runner, "_repl_submit_initial_prompt", lambda *_args: calls.append("initial"))
-    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args: calls.append("selection"))
+    monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
     monkeypatch.setattr(
         runner,
         "_repl_submit_candidate_interrupt",
@@ -2778,7 +3857,9 @@ def test_repl_replace_invalid_uses_candidate_interrupt_editor(
         "_repl_select_current",
         lambda *_args, **kwargs: calls.append(("select", kwargs["next_candidate"])),
     )
-    monkeypatch.setattr(runner, "_repl_wait_confirmation", lambda *_args: calls.append("confirmation"))
+    monkeypatch.setattr(
+        runner, "_repl_wait_confirmation_after_optional_parameter_asks", lambda *_args: calls.append("confirmation")
+    )
     monkeypatch.setattr(
         runner,
         "_repl_choose_direct_input",
@@ -2931,3 +4012,228 @@ def test_repl_initial_input_is_retried_until_history_acknowledges_it(
     assert pty.submissions == 2
     assert events[0]["type"] == "initial-input-accepted"
     assert events[0]["attempt"] == 2
+
+
+def test_fault_checkpoint_requires_validation_result_not_tool_start_or_documentation(runner):
+    predicate = runner._event_contains('validate', 'template')
+    assert not predicate({'pipeline': {'eventType': 'tool_started', 'data': {
+        'toolName': 'ros_validate_template'}}}, None)
+    assert not predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'read_file', 'result': 'validate template; CreateStack StackId input_received'}}}, None)
+    assert predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'ros_validate_template', 'isError': False, 'result': {'valid': True}}}}, None)
+    assert not predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'ros_validate_template', 'isError': True, 'result': {'valid': False}}}}, None)
+    assert not predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'ros_validate_template', 'isError': False, 'result': '{"is_success":false}'}}}, None)
+
+
+def test_create_checkpoint_requires_accepted_resource_event(runner):
+    predicate = runner._event_contains('CreateStack', 'StackId')
+    assert not predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'read_file', 'result': {'Action': 'CreateStack', 'StackId': 'example-stack-id'}}}}, None)
+    assert predicate({'pipeline': {'eventType': 'stack_current_changed', 'data': {
+        'action': 'CreateStack', 'stackId': 'accepted-stack-id', 'isSuccess': True}}}, None)
+
+
+def test_resource_discovery_ignores_documentation_and_correlates_real_cloud_tool_results(runner, tmp_path):
+    runtime = SimpleNamespace(paths=SimpleNamespace(run_dir=tmp_path, config_dir=tmp_path / 'config',
+        artifacts_dir=tmp_path / 'artifacts'), owned_stack_names={'iac-e2e-owned'}, cloud_resources=[])
+    (tmp_path / 'artifacts').mkdir()
+    rows = [
+        {'pipeline': {'eventType': 'tool_result', 'data': {'toolName': 'read_file', 'result': {
+            'example': {'Action': 'CreateStack', 'StackId': 'example-stack-id'}}}}},
+        {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'real-create', 'name': 'ros_deploy',
+            'input': {'stack_name': 'iac-e2e-owned', 'region_id': 'cn-hangzhou'}}]},
+        {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'real-create',
+            'content': json.dumps({'stack_id': 'real-stack-id', 'is_success': True})}]},
+    ]
+    (tmp_path / 'test.events.jsonl').write_text(''.join(json.dumps(x) + '\n' for x in rows), encoding="utf-8")
+    resources = runner.discover_cloud_resources(runtime)
+    assert len(resources) == 1
+    assert resources[0]['stackId'] == 'real-stack-id'
+    assert resources[0]['stackName'] == 'iac-e2e-owned'
+
+
+def test_repl_parameter_completion_cannot_pass_with_only_one_answer(runner, monkeypatch):
+    runtime = SimpleNamespace(spec=SimpleNamespace(profile='step2_parameter', cloud_write=False), checks={},
+                              answered_parameter_fields={'vpc_id'})
+    for name in ('_question_facts', '_repl_submit_initial_prompt', '_repl_wait_selection',
+                 '_repl_select_current', '_repl_wait_confirmation_after_optional_parameter_asks'):
+        monkeypatch.setattr(runner, name, lambda *_args, **_kwargs: None)
+    with pytest.raises(RuntimeError, match='both required parameters'):
+        runner._repl_basic_flow(runtime, object())
+    assert runtime.checks['both required parameters answered'] is False
+
+
+def test_required_parameters_must_be_preserved_in_real_confirmation(runner, monkeypatch):
+    runtime = SimpleNamespace(checks={})
+    monkeypatch.setattr(runner, '_question_facts', lambda _: {'vpc_id': 'vpc-fixture', 'zone_id': 'cn-hangzhou-i'})
+    with pytest.raises(RuntimeError, match='preserve both'):
+        runner._verify_required_parameter_confirmation(runtime, {
+            'effective_deployment_parameters': {'VpcId': 'vpc-other', 'ZoneId': 'cn-hangzhou-i'}})
+    runner._verify_required_parameter_confirmation(runtime, {
+        'effective_deployment_parameters': {'VpcId': 'vpc-fixture', 'ZoneId': 'cn-hangzhou-i'}})
+    assert runtime.checks['both required parameter values preserved in confirmation'] is True
+
+
+def test_goal_override_rebuilds_scope_without_reusing_old_target_clauses(runner, tmp_path, monkeypatch):
+    runtime = SimpleNamespace(spec=SimpleNamespace(profile='rollback'), paths=SimpleNamespace(config_dir=tmp_path),
+                              diagnostics={})
+    monkeypatch.setattr(runner, '_question_facts', lambda _: {
+        'goal': '创建 VSwitch', 'resource_scope': '创建 VSwitch', 'constraints': '部署旧 VSwitch',
+        'vpc_id': 'vpc-fixture'})
+    facts_seen = []
+    def answer(_config, _pending, facts, *_args, **_kwargs):
+        facts_seen.append(facts)
+        return facts['goal'], 'goal'
+    monkeypatch.setattr(runner, 'answer_question', answer)
+    runner._answer_runtime_question(runtime, {'question': '新目标?'}, goal_override='只创建安全组，不创建 VSwitch')
+    assert facts_seen[0]['resource_scope'] == '只创建安全组，不创建 VSwitch'
+    assert '部署旧 VSwitch' not in facts_seen[0]['constraints']
+    assert facts_seen[0]['vpc_id'] == 'vpc-fixture'
+
+
+@pytest.mark.parametrize('profile', ['backup_restore', 'waiting_resume', 'input_during_backup'])
+def test_recovery_answers_use_fixture_target_instead_of_vague_initial_question(runner, profile):
+    runtime = SimpleNamespace(spec=SimpleNamespace(profile=profile), cidr='192.168.12.0/24', stack_name='iac-e2e-fake')
+    facts = runner._question_facts(runtime)
+    assert '创建一个 VSwitch' in facts['goal']
+    assert 'user_required' in facts['goal']
+    assert '不部署' in facts['goal']
+    assert '我有个产品要上线' not in facts['goal']
+    assert 'vpc_id' not in facts  # Still must exercise the Step 2 question.
+
+
+def test_rollback_stream_updates_question_goal_before_recovery(runner, monkeypatch):
+    runtime = SimpleNamespace(stack_name='iac-e2e-owned', current_goal='创建 VSwitch')
+    monkeypatch.setattr(runner, '_advance_a2a_to_pending', lambda *_args, **_kwargs: None)
+    plan = SimpleNamespace(confirmation_answers=[])
+    class Harness:
+        def start_stream(self, **kwargs):
+            assert runtime.current_goal == kwargs['prompt']
+            assert '只创建一个安全组' in runtime.current_goal
+            raise ValueError('boundary verified')
+    with pytest.raises(ValueError, match='boundary verified'):
+        runner._run_a2a_rollback_recovery(runtime, Harness(), object(), plan, runner.NEW_STEPS[0])
+
+
+def test_rollback_question_facts_include_existing_vpc_without_changing_new_target(runner, monkeypatch):
+    runtime = SimpleNamespace(spec=SimpleNamespace(profile='rollback_step1'), stack_name='iac-e2e-owned',
+                              cidr='192.168.12.0/24', current_goal='只创建安全组，不创建 VSwitch', env={},
+                              args=SimpleNamespace(python='python'))
+    monkeypatch.setattr(runner, 'network_facts', lambda *_args: {
+        'vpc_id': 'vpc-fixture', 'zone_id': 'cn-hangzhou-i', 'cidr': '192.168.12.0/24'})
+    facts = runner._question_facts(runtime)
+    assert facts['goal'] == runtime.current_goal
+    assert facts['vpc_id'] == 'vpc-fixture'
+
+
+def test_cleanup_stops_on_delete_failed_instead_of_reissuing_for_fifteen_minutes(
+    runner, tmp_path, monkeypatch, capsys,
+):
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.cloud.aliyun import ros_client
+    manifest = tmp_path / 'stack.json'
+    manifest.write_text(json.dumps({'stackId': 'private-stack', 'stackName': 'iac-e2e-owned'}), encoding='utf-8')
+    class Client:
+        deletes = 0
+        def get_stack(self, _request):
+            return SimpleNamespace(body=SimpleNamespace(to_map=lambda: {
+                'StackName': 'iac-e2e-owned', 'Status': 'DELETE_FAILED' if self.deletes else 'CREATE_COMPLETE'}))
+        def delete_stack(self, _request):
+            self.deletes += 1
+    client = Client()
+    monkeypatch.setattr(cloud_credentials, 'CloudCredentials', lambda: SimpleNamespace(
+        get_provider=lambda _: SimpleNamespace(region_id='cn-hangzhou')))
+    monkeypatch.setattr(ros_client.RosClientFactory, 'create', lambda *_args: client)
+    monkeypatch.setattr(sys, 'argv', ['cleanup', str(manifest)])
+    monkeypatch.setattr(time, 'sleep', lambda _: None)
+    with pytest.raises(RuntimeError, match='deletion failed after accepted delete'):
+        exec(runner._CLOUD_CLEANUP_CODE, {})
+    assert client.deletes == 1
+    diagnostic = json.loads(capsys.readouterr().out)['cleanupDiagnostic']
+    assert diagnostic['status'] == 'DELETE_FAILED'
+    assert diagnostic['stage'] == 'get_stack'
+    assert 'private-stack' not in json.dumps(diagnostic)
+
+
+def test_network_question_facts_are_lazy_requested_only_and_cached(runner, monkeypatch):
+    runtime = SimpleNamespace(args=SimpleNamespace(python='python'), env={}, cidr='10.250.1.0/24')
+    calls = []
+    def fetch(*_args):
+        calls.append('read-only')
+        return {'vpc_id': 'vpc-fixture', 'zone_id': 'cn-hangzhou-i', 'cidr': '10.251.1.0/24'}
+    monkeypatch.setattr(runner, 'network_facts', fetch)
+    assert runner._resolve_runtime_question_facts(runtime, ('purpose',)) == {}
+    assert calls == []
+    assert runner._resolve_runtime_question_facts(runtime, ('vpc_id',)) == {'vpc_id': 'vpc-fixture'}
+    assert runner._resolve_runtime_question_facts(runtime, ('zone_id',)) == {'zone_id': 'cn-hangzhou-i'}
+    assert calls == ['read-only']
+    assert runtime.cidr == '10.250.1.0/24'
+
+
+def test_step1_question_wait_records_the_description_required_by_acceptance(runner, tmp_path, monkeypatch):
+    runtime = SimpleNamespace(repl_candidate_wait_count=0, args=SimpleNamespace(stream_timeout=1), diagnostics={})
+    pty = SimpleNamespace(events=[], transcript='', drain_output=lambda: None)
+    question = {'type': 'user_input_required', 'step_id': runner.NEW_STEPS[0],
+                'payload': {'kind': 'ask_user_question', 'tool_use_id': 'question-1'}}
+    candidate = {'type': 'candidate_selection_ready', 'step_id': runner.NEW_STEPS[0]}
+    answers = iter([(question, tmp_path / 'meta.yaml'), (candidate, tmp_path / 'display.jsonl')])
+    monkeypatch.setattr(runner, '_wait_repl_display_event', lambda *_args, **_kwargs: next(answers))
+    def ready(_pty, _runtime, *, description, **_kwargs):
+        pty.events.append({'type': 'expect', 'description': description + ' input ready'})
+    monkeypatch.setattr(runner, '_repl_wait_ask', ready)
+    monkeypatch.setattr(runner, '_answer_runtime_question', lambda *_args, **_kwargs: '仅规划')
+    monkeypatch.setattr(runner, '_repl_submit_question_answer', lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner.time, 'sleep', lambda _: None)
+    runner._repl_wait_selection(pty, runtime)
+    assert runner._repl_step1_clarification_checks(pty.events, [])[0] is True
+    # The same prompt after selection must still fail the unchanged ordering check.
+    assert runner._repl_step1_clarification_checks(list(reversed(pty.events)), [])[0] is False
+
+
+def test_backup_directory_does_not_prove_current_checkpoint(runner, tmp_path):
+    from iac_code.services.session_backup_state import SessionBackupState
+    primary, backup = tmp_path / 'primary', tmp_path / 'backup'
+    state = SessionBackupState.bootstrap('session-1', writer_id='writer').committed_next(
+        commit_id='commit-1', reason='pipeline_waiting_input', writer_id='writer', proofs={})
+    for path in (primary, backup):
+        (path / 'pipeline').mkdir(parents=True)
+        (path / '.backup-state.json').write_text(json.dumps(state.to_dict()), encoding='utf-8')
+        (path / 'pipeline/meta.yaml').write_text('current_step: step1\n', encoding='utf-8')
+        (path / 'pipeline/context.yaml').write_text('value: same\n', encoding='utf-8')
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is True
+    newer = state.committed_next(commit_id='commit-2', reason='pipeline_waiting_input', writer_id='writer', proofs={})
+    (primary / '.backup-state.json').write_text(json.dumps(newer.to_dict()), encoding='utf-8')
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is False
+    (backup / '.backup-state.json').write_text(json.dumps(newer.to_dict()), encoding='utf-8')
+    (backup / 'pipeline/meta.yaml').write_text('current_step: stale\n', encoding='utf-8')
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is False
+    (backup / 'pipeline/meta.yaml').write_text('current_step: step1\n', encoding='utf-8')
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is True
+    assert runner._backup_checkpoint_is_current(primary, backup, 'other-session') is False
+    (backup / 'pipeline/context.yaml').unlink()
+    assert runner._backup_checkpoint_is_current(primary, backup, 'session-1') is False
+def test_rollback_cleanup_question_driver_uses_new_goal_at_direct_stream_boundary(runner, monkeypatch, tmp_path):
+    runtime = SimpleNamespace(
+        spec=SimpleNamespace(profile='rollback_cleanup_recovery'), stack_name='iac-e2e-fixture',
+        owned_stack_names={'iac-e2e-fixture'}, current_goal='原目标创建 VSwitch',
+        question_facts={'vpc_id': 'vpc-fixture', 'zone_id': 'cn-hangzhou-i'}, cidr='10.0.1.0/24',
+        args=SimpleNamespace(stream_timeout=1),
+    )
+    class StopAtRollbackError(RuntimeError):
+        pass
+    class Harness:
+        def start_stream(self, *, prompt, name):
+            if name == 'cleanup-rollback-new-intent':
+                facts = runner._question_facts(runtime)
+                assert facts['goal'] == prompt
+                assert '不创建 VPC 或 VSwitch' in facts['goal']
+                assert 'iac-e2e-fixture-b' in facts['goal']
+                raise StopAtRollbackError
+            return SimpleNamespace(wait_for=lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, '_advance_a2a_to_pending', lambda *_a, **_k: None)
+    plan = SimpleNamespace(confirmation_answers=['confirm'])
+    with pytest.raises(StopAtRollbackError):
+        runner._run_a2a_rollback_cleanup(runtime, Harness(), SimpleNamespace(), plan, recover_cleanup=True)

@@ -6,6 +6,7 @@ import json
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import Mock
 
 import pytest
@@ -4393,6 +4394,107 @@ async def test_dead_owner_claim_cannot_be_replaced_without_input_admission(
         assert recovering.snapshot_for_context("ctx-1") is None
     finally:
         await recovering.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("active_subprocess_tools", [0, 1], ids=["quiescent", "subprocess-in-flight"])
+async def test_dead_owner_replacement_requires_durable_subprocess_quiescence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    active_subprocess_tools: int,
+) -> None:
+    document = _persist_dead_owner_claim_remnant(tmp_path)
+    document["subprocessToolTrackingVersion"] = 1
+    document["activeSubprocessTools"] = active_subprocess_tools
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
+    execution_control_module.atomic_write_json(control_path, document)
+    monkeypatch.setattr(execution_control_module, "_pid_alive", lambda pid: False)
+    recovering = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        if active_subprocess_tools:
+            with pytest.raises(ExecutionControlConflictError, match="active in another process"):
+                await recovering.begin_execution(
+                    context_id="ctx-1", task_id="task-2", owner="owner-1", cwd=str(tmp_path)
+                )
+            assert json.loads(control_path.read_text(encoding="utf-8")) == document
+        else:
+            control = await recovering.begin_execution(
+                context_id="ctx-1", task_id="task-2", owner="owner-1", cwd=str(tmp_path)
+            )
+            assert control.task_id == "task-2"
+            assert json.loads(control_path.read_text(encoding="utf-8"))["executionId"] == control.execution_id
+            current = asyncio.current_task()
+            assert current is not None
+            await control.detach_task(current, execution_status="input-required")
+    finally:
+        await recovering.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("task_id", "operation_override", "admitted"),
+    [
+        pytest.param("task-1", {}, True, id="same-task-accepted-stack"),
+        pytest.param("task-2", {}, False, id="new-task"),
+        pytest.param("task-1", {"outcome": "unknown"}, False, id="unknown-outcome"),
+        pytest.param("task-1", {"resourceId": None}, False, id="missing-resource-id"),
+        pytest.param("task-1", {"action": "CreateStackInstances"}, False, id="unsupported-operation"),
+    ],
+)
+async def test_dead_owner_replacement_with_recorded_ros_write_requires_same_task_and_known_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    task_id: str,
+    operation_override: dict[str, Any],
+    admitted: bool,
+) -> None:
+    document = _persist_dead_owner_claim_remnant(tmp_path)
+    document["subprocessToolTrackingVersion"] = 1
+    document["activeSubprocessTools"] = 0
+    document["externalOperations"] = [{
+        "product": "ros", "action": "CreateStack", "outcome": "accepted",
+        "resourceType": "stack", "resourceId": "stack-1", "regionId": "cn-hangzhou",
+    } | operation_override]
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
+    execution_control_module.atomic_write_json(control_path, document)
+    monkeypatch.setattr(execution_control_module, "_pid_alive", lambda pid: False)
+    recovering = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        if not admitted:
+            with pytest.raises(ExecutionControlConflictError, match="active in another process"):
+                await recovering.begin_execution(
+                    context_id="ctx-1", task_id=task_id, owner="owner-1", cwd=str(tmp_path)
+                )
+            assert json.loads(control_path.read_text(encoding="utf-8")) == document
+        else:
+            control = await recovering.begin_execution(
+                context_id="ctx-1", task_id=task_id, owner="owner-1", cwd=str(tmp_path)
+            )
+            assert control.task_id == task_id
+            current = asyncio.current_task()
+            assert current is not None
+            await control.detach_task(current, execution_status="input-required")
+    finally:
+        await recovering.close()
+
+
+@pytest.mark.asyncio
+async def test_subprocess_tool_activity_is_persisted_before_execution_and_cleared_afterward(tmp_path: Path) -> None:
+    service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+    try:
+        control = await service.begin_execution(
+            context_id="ctx-1", task_id="task-1", owner="owner-1", cwd=str(tmp_path)
+        )
+        control_path = tmp_path / "execution-control" / "ctx-1.json"
+        activity = await control.begin_activity("tool", check_gate=False, may_spawn_subprocess=True)
+        assert json.loads(control_path.read_text(encoding="utf-8"))["activeSubprocessTools"] == 1
+        await control.end_activity(activity.activity_id)
+        assert json.loads(control_path.read_text(encoding="utf-8"))["activeSubprocessTools"] == 0
+        current = asyncio.current_task()
+        assert current is not None
+        await control.detach_task(current, execution_status="input-required")
+    finally:
+        await service.close()
 
 
 @pytest.mark.asyncio

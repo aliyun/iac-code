@@ -17,6 +17,7 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
 from iac_code.types.permissions import PermissionAuditMetadata, PermissionResult
 from iac_code.types.stream_events import (
+    CloudResourceSelectionEvent,
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
@@ -34,6 +35,77 @@ USER_DENIED_TOOL_RESULT = (
     "The user explicitly denied this tool operation. This is not a cloud API or IAM permission error. "
     "Do not retry this operation or perform the same action with another tool unless the user asks again."
 )
+
+
+@pytest.mark.asyncio
+async def test_closing_resource_selection_stream_cancels_pending_tool() -> None:
+    stopped = asyncio.Event()
+
+    class SelectionTool(Tool):
+        @property
+        def name(self) -> str:
+            return "select_cloud_resource"
+
+        @property
+        def description(self) -> str:
+            return "Wait for resource selection."
+
+        @property
+        def input_schema(self) -> dict:
+            return {"type": "object", "properties": {}}
+
+        def needs_event_queue(self) -> bool:
+            return True
+
+        async def check_permissions(self, input: dict, context: dict | None = None) -> PermissionResult:
+            return PermissionResult(behavior="allow")
+
+        async def execute(self, *, tool_input: dict, context: ToolContext) -> ToolResult:
+            assert context.event_queue is not None
+            future = asyncio.get_running_loop().create_future()
+            event = CloudResourceSelectionEvent(
+                tool_use_id=context.tool_use_id or "select-1",
+                input_id="resource-" + "a" * 32,
+                question="Select a VPC",
+                selector_id="vpc.vpc",
+                association_property="ALIYUN::ECS::VPC::VPCId",
+                output_kind="resource_id",
+                association_property_metadata={"RegionId": "cn-hangzhou"},
+                source=None,
+                profile_hash=PROFILE_HASH,
+                response_future=future,
+            )
+            await context.event_queue.put(event)
+            try:
+                await asyncio.shield(future)
+            finally:
+                stopped.set()
+            return ToolResult.success("selected")
+
+    class SelectionProvider:
+        def get_model_name(self) -> str:
+            return "fake"
+
+        async def stream(self, messages, system, tools=None):
+            yield MessageStartEvent(message_id="select-message")
+            yield ToolUseStartEvent(tool_use_id="select-1", name="select_cloud_resource")
+            yield ToolUseEndEvent(tool_use_id="select-1", name="select_cloud_resource", input={})
+            yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+
+    registry = ToolRegistry()
+    registry.register(SelectionTool())
+    loop = AgentLoop(provider_manager=SelectionProvider(), system_prompt="system", tool_registry=registry, max_turns=1)
+    stream = loop.run_streaming("select")
+    try:
+        while True:
+            event = await asyncio.wait_for(anext(stream), timeout=2)
+            if isinstance(event, CloudResourceSelectionEvent):
+                break
+        await asyncio.wait_for(stream.aclose(), timeout=2)
+        assert stopped.is_set()
+    finally:
+        if not stopped.is_set():
+            await stream.aclose()
 
 
 @pytest.mark.asyncio

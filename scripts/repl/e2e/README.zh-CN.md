@@ -372,12 +372,15 @@ PY
 - `--cwd` 指定 REPL 子进程工作目录；默认使用 run dir 下的 `workspace/`。
 - `--timeout` 控制普通终端等待。
 - `--stream-timeout` 控制 LLM/pipeline 长等待。
+- `--wait-diagnosis-after` 控制等待多久后尝试用百炼分析终端状态，默认 120 秒。
 - `--selection-prompt` 指定候选方案选择输入；默认发送 `1` 选择第一个候选；传空字符串时直接回车确认。
 - `--evaluate-resume-continue-prompt` 指定 `evaluate-resume` 在 `--continue` 重放后用于继续 running sidecar 的输入；默认 `continue`。
 - `--cleanup-continue-prompt` 指定 `rollback-step5-cleanup-recovery` 在 `--continue` 恢复后用于继续 cleanup 的输入；默认只允许删除待清理列表中的 stack，避免误删其他资源。
 - `--permission-prompt-response` 指定工具权限确认菜单的输入；默认 `pageup-enter`（发送 PageUp+Enter，选择第一项 `Yes, allow once`）。
 - `--skip-final-teardown` 调试时跳过测试创建 stack 的最终删除；日常回归不要开启。
 - `--leave-running` 调试时保留子进程，不自动 terminate。
+
+长等待每 10 秒检查一次、每 60 秒输出一次当前等待阶段。普通阶段连续 10 分钟无终端输出、明确进入云部署或删除阶段连续 25 分钟无终端输出时提前失败。达到 120 秒诊断阈值后，runner 从隔离的 `.credentials.yml` 读取 DashScope Key，用 `glm-5.3-prime`（最低推理强度）对截短且遮盖已知凭证的终端内容做一次分类；每个场景最多诊断两个等待阶段，每次调用最多 45 秒。只有模型高置信度识别出额外输入要求，且终端内容同时有明确澄清提问或候选选择控件时才提前结束等待并进入原有资源清理；普通 REPL 输入提示只记录诊断，因为流程可能仍在运行。模型服务异常不会使用例失败。
 
 ## 与 pytest 的关系
 

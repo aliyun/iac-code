@@ -1,9 +1,11 @@
 import asyncio
 import contextlib
+import json
 from unittest.mock import MagicMock
 
 import pytest
 
+from iac_code.a2a.execution_control import ExecutionControlService, bind_execution_control, reset_execution_control
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.tool_executor import ToolCallRequest, ToolExecutor
 from iac_code.types.permissions import InvocationBinding
@@ -62,6 +64,39 @@ class FakeRuntimeClassTool(FakeReadTool):
 
 @pytest.mark.asyncio
 class TestToolExecutor:
+    @pytest.mark.parametrize("tool_name", ["bash", "grep"])
+    async def test_subprocess_tools_persist_activity_before_invocation(self, tmp_path, tool_name):
+        service = ExecutionControlService(persistence_root=tmp_path, backup_service=None)
+        control = await service.begin_execution(
+            context_id="ctx-1", task_id="task-1", owner="owner-1", cwd=str(tmp_path)
+        )
+        control_path = tmp_path / "execution-control" / "ctx-1.json"
+
+        class SubprocessTool(FakeWriteTool):
+            @property
+            def name(self):
+                return tool_name
+
+            async def execute(self, *, tool_input, context):
+                assert json.loads(control_path.read_text(encoding="utf-8"))["activeSubprocessTools"] == 1
+                return ToolResult.success("done")
+
+        registry = MagicMock()
+        registry.get.return_value = SubprocessTool()
+        token = bind_execution_control(control)
+        try:
+            result = await ToolExecutor(registry=registry).execute_batch(
+                [ToolCallRequest(id="tool-1", name=tool_name, input={})], ToolContext()
+            )
+            assert result[0].content == "done"
+            assert json.loads(control_path.read_text(encoding="utf-8"))["activeSubprocessTools"] == 0
+        finally:
+            reset_execution_control(token)
+            current = asyncio.current_task()
+            assert current is not None
+            await control.detach_task(current, execution_status="input-required")
+            await service.close()
+
     async def test_partition(self):
         read_tool, write_tool = FakeReadTool(), FakeWriteTool()
         registry = MagicMock()

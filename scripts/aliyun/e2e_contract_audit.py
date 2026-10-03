@@ -35,6 +35,30 @@ def find_latest_aliyun_tool_result(config_dir: Path) -> tuple[Path, dict[str, An
     return path, block
 
 
+def find_persisted_tool_name(path: Path, tool_use_id: str) -> str:
+    """Resolve the invoking tool, including tools delegating to Aliyun APIs."""
+
+    names: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        content = row.get("content") if isinstance(row, dict) else None
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if (
+                isinstance(block, dict) and block.get("type") == "tool_use"
+                and block.get("id") == tool_use_id and isinstance(block.get("name"), str)
+                and block["name"]
+            ):
+                names.add(block["name"])
+    if len(names) != 1:
+        raise AssertionError("persisted Aliyun result has no unambiguous invoking tool")
+    return names.pop()
+
+
 def audit_aliyun_result_contract(
     *,
     expected_body: Any,

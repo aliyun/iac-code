@@ -5,16 +5,30 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
 from iac_code.pipeline.engine.loader import load_pipeline_dir
+from scripts.a2a.e2e.common import StreamSummary
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import (
     SCENARIOS,
+    _answer_selection,
     _iac_code_values,
     _resource_selection_inputs,
     _selection_response,
+    _SelectorAssociationMismatchError,
+    _wait_for_released_execution,
 )
+
+
+@pytest.mark.parametrize('value,present,shape', [(None, False, False), ('private-label', True, False),
+                                                ('vpc-private', True, True)])
+def test_selector_mismatch_diagnostics_never_export_the_value(value, present, shape):
+    error = _SelectorAssociationMismatchError({'VpcId': value})
+    assert error.diagnostics == {'selector_vpc_present': present, 'selector_vpc_matches_selected': False,
+                                 'selector_vpc_has_resource_id_shape': shape}
+    assert 'private' not in json.dumps(error.diagnostics)
 
 
 def _live_enabled() -> bool:
@@ -112,6 +126,36 @@ def test_iac_code_value_extraction_reads_nested_transport_metadata(tmp_path: Pat
     )
 
     assert _iac_code_values(event_path, "inputReceived") == [{"duplicate": True}]
+
+
+def test_selection_answer_uses_original_task_correlation() -> None:
+    harness = Mock()
+    pending = {"contextId": "ctx-1", "requestTaskId": "task-1"}
+    response = {"kind": "cloud_resource_selection", "status": "selected"}
+
+    _answer_selection(harness, name="answer", pending=pending, response=response)
+
+    assert harness.stream.call_args.kwargs["task_id"] == "task-1"
+    assert harness.stream.call_args.kwargs["context_id"] == "ctx-1"
+
+
+def test_restart_waits_for_durable_execution_release(tmp_path: Path) -> None:
+    control_path = tmp_path / "execution-control" / "ctx-1.json"
+    control_path.parent.mkdir(parents=True)
+    summary = StreamSummary(name="initial", prompt="", task_id="task-1", context_id="ctx-1")
+    control = {
+        "taskId": "task-1", "phase": "terminated", "releaseReady": False,
+        "inputHandoffReady": False,
+    }
+    control_path.write_text(json.dumps(control), encoding="utf-8")
+    with pytest.raises(AssertionError, match="durable release") as error:
+        _wait_for_released_execution(tmp_path, summary, timeout=0.01)
+    assert error.value.state["phase"] == "terminated"
+    assert error.value.state["release_ready"] is False
+
+    control["releaseReady"] = True
+    control_path.write_text(json.dumps(control), encoding="utf-8")
+    _wait_for_released_execution(tmp_path, summary, timeout=0.1)
 
 
 def test_live_pipeline_fixtures_load_with_production_pipeline_loader() -> None:

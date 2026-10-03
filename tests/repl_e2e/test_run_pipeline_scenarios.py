@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import os
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 
 def _load_runner():
@@ -70,6 +75,10 @@ def _install_flow_fake_pty(
     *,
     scenario: str = "scenario1",
 ) -> None:
+    monkeypatch.setattr(runner, "_discover_scenario_stack_resources", lambda *_: [])
+    monkeypatch.setattr(runner, "network_facts", lambda *_: {
+        "vpc_id": "vpc-fixture", "zone_id": "cn-hangzhou-i", "cidr": "10.250.1.0/24"})
+
     class FakePty:
         def __init__(self, *, args, run_dir, cwd, env):
             self.args = args
@@ -158,7 +167,7 @@ def _install_flow_fake_pty(
                 offset = self.transcript.find("● Confirm and select (4/5)")
             self.events.append({"type": "sendline", "text": text, "transcript_offset": max(offset, 0)})
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             actions.append(("expect", description))
             return patterns[0]
 
@@ -214,6 +223,7 @@ def _install_flow_fake_pty(
 
 
 def _install_cleanup_teardown_fakes(monkeypatch, runner, run_dir: Path) -> list[str]:
+    monkeypatch.setattr(runner, "_discover_scenario_stack_resources", lambda *_: [])
     deleted_stack_ids: list[str] = []
 
     def fake_fresh_ros_stack_state(_pty, stack_id: str) -> dict[str, object]:
@@ -237,6 +247,7 @@ def _install_cleanup_teardown_fakes(monkeypatch, runner, run_dir: Path) -> list[
 
     monkeypatch.setattr(runner, "_fresh_ros_stack_state", fake_fresh_ros_stack_state)
     monkeypatch.setattr(runner, "_delete_ros_stack", fake_delete_ros_stack)
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: [])
     monkeypatch.setattr(
         runner,
         "_wait_for_ros_stack_deleted",
@@ -251,6 +262,7 @@ def _install_observed_stack_teardown_fakes(
     *,
     stack_name: str = "vswitch-in-existing-vpc",
 ) -> list[str]:
+    monkeypatch.setattr(runner, "_discover_scenario_stack_resources", lambda *_: [])
     deleted_stack_ids: list[str] = []
 
     def fake_fresh_ros_stack_state(_pty, stack_id: str) -> dict[str, object]:
@@ -469,7 +481,7 @@ def test_initial_prompt_wait_does_not_match_generic_angle_bracket() -> None:
     observed_patterns: list[tuple[str, ...]] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             observed_patterns.append(patterns)
             return patterns[0]
 
@@ -487,7 +499,7 @@ def test_initial_prompt_waits_for_prompt_toolkit_ready_sequence() -> None:
     descriptions: list[str] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             descriptions.append(description)
             return patterns[0]
 
@@ -596,7 +608,7 @@ def test_candidate_selection_uses_semantic_controls_without_waiting_for_stale_ra
     descriptions: list[str] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             descriptions.append(description)
             return patterns[0]
 
@@ -619,7 +631,7 @@ def test_candidate_selection_falls_back_to_raw_marker_when_semantic_controls_are
     descriptions: list[str] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             descriptions.append(description)
             return patterns[0]
 
@@ -670,6 +682,186 @@ def test_expect_any_auto_approves_permission_prompt(tmp_path: Path) -> None:
     assert child.sent == ["\x1b[5~\r"]
     assert any(event["type"] == "permission_prompt" for event in pty.events)
     assert any(event["type"] == "permission-prompt-response" for event in pty.events)
+
+
+def test_expect_any_diagnoses_and_aborts_unexpected_input(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--wait-diagnosis-after", "0"])
+    pty = _repl_pty_unit_instance(
+        runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={"IAC_CODE_CONFIG_DIR": str(tmp_path)}
+    )
+
+    class Child:
+        before = ""
+        after = ""
+
+        def expect(self, _patterns, timeout):
+            pty.raw_chunks.append("● Ask user question: choose a VPC\n")
+            raise runner.pexpect.TIMEOUT("waiting")
+
+    pty.child = Child()
+    monkeypatch.setattr(
+        runner, "diagnose_wait", lambda *_args, **_kwargs: {"state": "waiting_for_input", "confidence": 0.93}
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected input"):
+        pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=300)
+
+    assert pty._wait_diagnoses[-1]["action"] == "early_abort"
+    assert pty._wait_diagnoses[-1]["cue"] == "ask_question"
+    assert pty.events[-1]["type"] == "expect"
+    assert pty.events[-1]["passed"] is False
+
+
+def test_expect_any_keeps_waiting_when_model_cannot_confirm_input(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--wait-diagnosis-after", "0"])
+    pty = _repl_pty_unit_instance(
+        runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={"IAC_CODE_CONFIG_DIR": str(tmp_path)}
+    )
+
+    class Child:
+        before = ""
+        after = ""
+        calls = 0
+
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                pty.raw_chunks.append("Cloud resource creation is running\n")
+                raise runner.pexpect.TIMEOUT("waiting")
+            self.after = "Pipeline completed"
+            return 0
+
+    pty.child = Child()
+    monkeypatch.setattr(
+        runner, "diagnose_wait", lambda *_args, **_kwargs: {"state": "normal_operation", "confidence": 0.95}
+    )
+
+    matched = pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=300)
+
+    assert matched == "Pipeline completed"
+    assert pty._wait_diagnoses[-1]["action"] == "observe"
+    assert pty._wait_diagnoses[-1]["cue"] == "none"
+
+
+def test_expect_any_does_not_abort_on_repl_prompt_while_pipeline_may_continue(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--wait-diagnosis-after", "0"])
+    pty = _repl_pty_unit_instance(
+        runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={"IAC_CODE_CONFIG_DIR": str(tmp_path)}
+    )
+
+    class Child:
+        before = ""
+        after = ""
+        calls = 0
+
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                pty.raw_chunks.append("❯\x1b[>4;2m")
+                raise runner.pexpect.TIMEOUT("waiting")
+            self.after = "Confirm and select (3/5)"
+            return 0
+
+    pty.child = Child()
+    monkeypatch.setattr(
+        runner, "diagnose_wait", lambda *_args, **_kwargs: {"state": "waiting_for_input", "confidence": 0.95}
+    )
+
+    assert pty.expect_any(("Confirm and select",), description="candidate selection visible", timeout=300) == (
+        "Confirm and select"
+    )
+    assert pty._wait_diagnoses[-1]["cue"] == "repl_prompt"
+    assert pty._wait_diagnoses[-1]["action"] == "observe"
+
+
+def test_expect_any_aborts_silent_non_cloud_wait_before_stream_timeout(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+
+    class Child:
+        def expect(self, _patterns, timeout):
+            clock[0] += runner.WAIT_IDLE_SECONDS + 1
+            raise runner.pexpect.TIMEOUT("waiting")
+
+    pty.child = Child()
+    with pytest.raises(TimeoutError, match="no terminal output"):
+        pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=1800)
+    assert pty._wait_diagnoses[-1]["state"] == "no_output"
+
+
+def test_expect_any_aborts_when_pipeline_finishes_before_first_stack_create(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    config_dir = tmp_path / "config"
+    display = config_dir / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text('{"type":"pipeline_completed"}\n', encoding="utf-8")
+    pty = _repl_pty_unit_instance(
+        runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={"IAC_CODE_CONFIG_DIR": str(config_dir)}
+    )
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+
+    class Child:
+        def expect(self, _patterns, timeout):
+            clock[0] += runner.WAIT_PROGRESS_SECONDS + 1
+            raise runner.pexpect.TIMEOUT("waiting")
+
+    pty.child = Child()
+    with pytest.raises(RuntimeError, match="pipeline completed before first stack create started"):
+        pty.expect_any(("ROS Deploy",), description="first stack create started", timeout=1800)
+
+
+def test_expect_any_allows_long_cloud_silence(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    pty.raw_chunks.append("● Deploying (5/5): CreateStack\n")
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+
+    class Child:
+        before = ""
+        after = "Pipeline completed"
+        calls = 0
+
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                clock[0] += runner.WAIT_IDLE_SECONDS + 1
+                raise runner.pexpect.TIMEOUT("waiting")
+            return 0
+
+    pty.child = Child()
+    assert pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=1800) == (
+        "Pipeline completed"
+    )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="pexpect PTY requires POSIX")
+def test_expect_any_preserves_partial_pty_output_across_poll_timeouts(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    monkeypatch.setattr(runner, "WAIT_POLL_SECONDS", 0.02)
+    child = runner.pexpect.spawn(
+        sys.executable,
+        ["-u", "-c", "import time; print('first', flush=True); time.sleep(0.15); print('second', flush=True)"],
+        encoding="utf-8",
+    )
+    pty.child = child
+    try:
+        assert pty.expect_any((r"first\s+second",), description="two chunks", timeout=1) == r"first\s+second"
+        assert "first" in pty.transcript
+        assert "second" in pty.transcript
+    finally:
+        child.close(force=True)
 
 
 def test_permission_prompt_response_sequence_supports_named_keys() -> None:
@@ -830,6 +1022,7 @@ def test_discover_cleanup_network_target_excludes_prior_scenario_cidrs(monkeypat
         }
 
     monkeypatch.setattr(runner, "_call_aliyun_api", call_api)
+    monkeypatch.setattr(runner, "temporary_e2e_vpc_ids", lambda: set())
 
     target = runner._discover_cleanup_network_target(excluded_cidrs={"192.168.255.0/24", "192.168.254.0/24"})
 
@@ -1393,6 +1586,59 @@ def test_cleanup_final_teardown_deletes_owned_second_stack(monkeypatch, tmp_path
     assert checks["teardown: cleanup scenario owned ROS stacks deleted"] is True
 
 
+def test_cleanup_final_teardown_discovers_stack_missing_from_ledger(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
+    first_name = runner._cleanup_stack_name(tmp_path, "first")
+    deleted: list[str] = []
+
+    class FakePty:
+        run_dir = tmp_path
+        env: dict[str, str] = {"ALIBABA_CLOUD_REGION_ID": "cn-hangzhou"}
+        cleanup_ledger = {"observed_resources": []}
+
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: ["first-stack-id"])
+    monkeypatch.setattr(
+        runner, "_fresh_ros_stack_state",
+        lambda _pty, _id: {
+            "status": "CREATE_COMPLETE", "not_found": False,
+            "stack_name": first_name, "region_id": "cn-hangzhou",
+        },
+    )
+    monkeypatch.setattr(runner, "_delete_ros_stack", lambda **kwargs: deleted.append(kwargs["stack_id"]))
+    monkeypatch.setattr(
+        runner, "_wait_for_ros_stack_deleted",
+        lambda **_kwargs: {"status": "DELETE_COMPLETE", "not_found": False},
+    )
+    checks: dict[str, bool] = {}
+    runner._teardown_cleanup_scenario_resources(
+        args=args, scenario="rollback-step5-cleanup", pty=FakePty(), checks=checks, notes=[]
+    )
+
+    assert deleted == ["first-stack-id"]
+    assert checks["teardown: owned ROS Stack discovery succeeded"] is True
+    assert checks["teardown: cleanup scenario owned ROS stacks deleted"] is True
+
+
+def test_cleanup_stack_discovery_matches_exact_run_owned_names(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    first_name = runner._cleanup_stack_name(tmp_path, "first")
+    second_name = runner._cleanup_stack_name(tmp_path, "second")
+    requested: list[str] = []
+
+    def fake_call(_product: str, _action: str, params: dict) -> dict:
+        requested.extend(params["StackName"])
+        return {"Stacks": [
+            {"StackName": first_name, "StackId": "first-stack-id", "Status": "CREATE_COMPLETE"},
+            {"StackName": second_name, "StackId": "deleted-stack-id", "Status": "DELETE_COMPLETE"},
+            {"StackName": "other-stack", "StackId": "other-stack-id", "Status": "CREATE_COMPLETE"},
+        ]}
+
+    monkeypatch.setattr(runner, "_call_aliyun_api", fake_call)
+    assert runner._discover_owned_cleanup_stack_ids(tmp_path) == ["first-stack-id"]
+    assert requested == sorted({first_name, second_name})
+
+
 def test_cleanup_final_teardown_refuses_unowned_stack_name(monkeypatch, tmp_path: Path) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
@@ -1416,6 +1662,7 @@ def test_cleanup_final_teardown_refuses_unowned_stack_name(monkeypatch, tmp_path
 
     monkeypatch.setattr(runner, "_fresh_ros_stack_state", fake_fresh_ros_stack_state)
     monkeypatch.setattr(runner, "_delete_ros_stack", lambda **_kwargs: (_ for _ in ()).throw(AssertionError))
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: [])
 
     checks: dict[str, bool] = {}
     notes: list[str] = []
@@ -1957,7 +2204,7 @@ def test_post_rollback_security_group_target_waits_for_slow_candidate_evaluation
     observed_timeouts: list[float] = []
 
     class FakePty:
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             observed_timeouts.append(timeout)
             return patterns[0]
 
@@ -2154,6 +2401,9 @@ def test_run_with_pty_writes_acceptance_checks_after_callback_failure(monkeypatc
         raise RuntimeError("boom")
 
     monkeypatch.setattr(runner, "ReplPty", FakePty)
+    monkeypatch.setattr(runner, "_discover_scenario_stack_resources", lambda *_: [])
+    monkeypatch.setattr(runner, "network_facts", lambda *_: {
+        "vpc_id": "vpc-fixture", "zone_id": "cn-hangzhou-i", "cidr": "10.250.1.0/24"})
     args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
 
     assert runner._run_with_pty(args, "scenario1", callback) == 1
@@ -2203,7 +2453,7 @@ def test_scenario1_runs_expected_terminal_flow(monkeypatch, tmp_path: Path) -> N
             actions.append(("sendline", text))
             self.events.append({"type": "sendline", "text": text, "transcript_offset": self.transcript.find(text)})
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             actions.append(("expect", description))
             return patterns[0]
 
@@ -2218,6 +2468,8 @@ def test_scenario1_runs_expected_terminal_flow(monkeypatch, tmp_path: Path) -> N
             actions.append(("terminate", str(force)))
 
     monkeypatch.setattr(runner, "ReplPty", FakePty)
+    monkeypatch.setattr(runner, "network_facts", lambda *_: {
+        "vpc_id": "vpc-fixture", "zone_id": "cn-hangzhou-i", "cidr": "10.250.1.0/24"})
     args = runner.parse_args(["--allow-real-cloud", "--run-dir", str(tmp_path)])
     stack_owned_initial = runner._stack_creating_prompt(args.initial_prompt, tmp_path, "scenario1")
     _install_observed_stack_teardown_fakes(
@@ -2472,7 +2724,7 @@ def test_rollback_step3_sends_rollback_prompt_without_waiting_for_visible_interr
             offset = self.transcript.find("● Intent parsing (1/5)") if text == args.rollback_prompt else 0
             self.events.append({"type": "sendline", "text": text, "transcript_offset": offset})
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             if description in {"candidate evaluation activity visible", "interrupt input visible"}:
                 raise AssertionError(description)
             actions.append(("expect", description))
@@ -2530,7 +2782,7 @@ def test_rollback_step3_waits_for_interrupt_text_input_ready_after_escape(monkey
             offset = self.transcript.find("● Intent parsing (1/5)") if text == args.rollback_prompt else 0
             self.events.append({"type": "sendline", "text": text, "transcript_offset": offset})
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             actions.append(("expect", description))
             return patterns[0]
 
@@ -2852,7 +3104,11 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
             rollback_vswitch_cidr="172.31.254.0/24",
         ),
     )
-    monkeypatch.setattr(runner, "_wait_for_latest_observed_stack_id", lambda *_, **__: "first-stack-id")
+    def observe_first_stack(*_, **__) -> str:
+        actions.append(("stack-observed", "first-stack-id"))
+        return "first-stack-id"
+
+    monkeypatch.setattr(runner, "_wait_for_latest_observed_stack_id", observe_first_stack)
     monkeypatch.setattr(runner, "_cleanup_target_stack_ids", lambda *_, **__: ["first-stack-id"])
     monkeypatch.setattr(runner, "_wait_for_cleanup_resource_status", lambda *_, **__: None)
     monkeypatch.setattr(
@@ -2868,7 +3124,7 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
     ordered_actions = [
         (kind, value)
         for kind, value in actions
-        if kind in {"expect", "send-esc", "sendline", "select-default-candidate"}
+        if kind in {"expect", "send-esc", "sendline", "select-default-candidate", "stack-observed"}
         or (kind == "expect_optional" and value == "cleanup completed")
     ]
     assert ordered_actions == [
@@ -2878,6 +3134,7 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
         ("expect", "initial candidate selection or clarification visible"),
         ("select-default-candidate", f"{args.selection_prompt}\r"),
         ("expect", "first stack create started"),
+        ("stack-observed", "first-stack-id"),
         ("send-esc", "\x1b"),
         ("expect", "deploying interrupt input visible"),
         ("expect", "deploying interrupt input ready"),
@@ -2892,6 +3149,258 @@ def test_rollback_step5_cleanup_runs_expected_terminal_flow(monkeypatch, tmp_pat
         ("expect", "post-cleanup prompt input ready"),
         ("sendline", "/exit"),
     ]
+
+
+def test_display_progress_counts_only_fixed_event_types(tmp_path: Path) -> None:
+    runner = _load_runner()
+    display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    (display.parent / "cleanup.yaml").write_text("observed_resources: []\n", encoding="utf-8")
+    display.write_text(
+        "\n".join(json.dumps(event) for event in (
+            {"type": "candidate_selection_ready", "payload": {"secret": "sk-fixture"}},
+            {"type": "user_input_received"},
+            {"type": "private-sk-fixture"},
+            {"type": ["candidate_selection_ready"]},
+            {"type": "step_started", "step_id": "deploying"},
+            {"type": "step_completed", "step_id": "deploying"},
+            {"type": "tool_used", "payload": {"name": "ros_deploy", "secret": "sk-fixture"}},
+            {"type": "tool_used", "payload": {"name": "aliyun_api", "secret": "sk-fixture"}},
+            {"type": "tool_used", "payload": {"name": "ros_stack", "secret": "sk-fixture"}},
+            {"type": "tool_used", "payload": {"name": "bash", "secret": "sk-fixture"}},
+            {"type": "pipeline_completed", "payload": {"early_exit": True, "secret": "sk-fixture"}},
+            {"type": "stack_progress", "payload": {"status": "CREATE_COMPLETE", "stack_id": "secret-id"}},
+        )) + "\n",
+        encoding="utf-8",
+    )
+
+    assert runner._display_progress(tmp_path) == {
+        "candidate_selection_ready": 1, "user_input_received": 1,
+        "step_started": 1, "step_started_deploying": 1,
+        "step_completed": 1, "step_completed_deploying": 1,
+        "ros_deploy_used": 1,
+        "aliyun_api_used": 1, "ros_stack_used": 1, "bash_used": 1,
+        "pipeline_completed": 1, "pipeline_completed_early_exit": 1,
+        "stack_progress": 1, "stack_progress_create_complete": 1, "cleanup_ledger_files": 1,
+    }
+
+
+def test_candidate_selection_retries_only_until_durable_submission(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    display = tmp_path / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text("", encoding="utf-8")
+    sent: list[str] = []
+    clock = [0.0]
+
+    class Pty:
+        env = {"IAC_CODE_CONFIG_DIR": str(tmp_path)}
+
+        def send(self, text: str, *, label: str):
+            sent.append(label)
+            if len(sent) == 2:
+                display.write_text('{"type":"candidate_selection_submitted"}\n', encoding="utf-8")
+
+        def drain_output(self):
+            pass
+
+    def tick() -> float:
+        clock[0] += 1.0
+        return clock[0]
+
+    monkeypatch.setattr(runner.time, "monotonic", tick)
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    runner._select_default_candidate(Pty(), type("Args", (), {"selection_prompt": ""})())
+
+    assert sent == ["select-default-candidate", "select-default-candidate-retry-2"]
+
+
+def test_reliable_sendline_drains_paste_before_enter(tmp_path: Path, monkeypatch) -> None:
+    runner = _load_runner()
+    pty = _repl_pty_unit_instance(runner, args=None, run_dir=tmp_path, cwd=tmp_path, env={})
+    actions: list[str] = []
+
+    class Child:
+        def send(self, text: str):
+            actions.append(text)
+
+    pty.child = Child()
+    monkeypatch.setattr(runner.time, "sleep", lambda _: None)
+    monkeypatch.setattr(pty, "drain_output", lambda: actions.append("drain"))
+    pty.sendline_reliable("rollback")
+
+    assert actions == ["\x1b[200~rollback\x1b[201~", "drain", "\r"]
+    assert pty.events[-1]["type"] == "sendline"
+
+
+def test_transcript_tool_progress_counts_results_without_content(tmp_path: Path) -> None:
+    runner = _load_runner()
+    transcript = (
+        tmp_path / "projects" / "project" / "session" / "pipeline" / "transcripts" / "attempt" / "session.jsonl"
+    )
+    transcript.parent.mkdir(parents=True)
+    transcript.write_text(
+        "\n".join(json.dumps(item) for item in [
+            {"role": "assistant", "content": [
+                {"type": "tool_use", "id": "first", "name": "ros_deploy", "input": {"secret": "sk-fixture"}},
+                {"type": "tool_use", "id": "second", "name": "ros_deploy", "input": {}},
+            ]},
+            {"role": "user", "content": [
+                {"type": "tool_result", "tool_use_id": "first", "content": "sk-fixture", "is_error": True},
+                {"type": "tool_result", "tool_use_id": "unrelated", "content": "", "is_error": False},
+            ]},
+        ]) + "\n",
+        encoding="utf-8",
+    )
+
+    assert runner._transcript_tool_progress(tmp_path) == {
+        "ros_deploy_result": 1,
+        "ros_deploy_result_error": 1,
+    }
+
+
+def test_first_stack_create_uses_display_deploy_event_when_terminal_marker_is_absent(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    config_dir = tmp_path / "config"
+    display = config_dir / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+
+    class FakePty:
+        env = {"IAC_CODE_CONFIG_DIR": str(config_dir)}
+        transcript = ""
+        events: list[dict[str, object]] = []
+
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
+            assert patterns == runner.CREATE_STACK_STARTED_PATTERNS
+            assert description == "first stack create started"
+            display.write_text('{"type":"tool_used","payload":{"name":"ros_deploy"}}\n', encoding="utf-8")
+            raise TimeoutError("timed out waiting for first stack create started")
+
+    pty = FakePty()
+    runner._expect_first_stack_create_started(pty, args)
+    assert pty.events[-1]["pattern"] == "display:ros_deploy"
+
+
+def test_first_stack_create_rejects_deploy_event_after_step_completed(tmp_path: Path) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    config_dir = tmp_path / "config"
+    display = config_dir / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text(
+        '{"type":"tool_used","payload":{"name":"ros_deploy"}}\n'
+        '{"type":"step_completed","step_id":"deploying"}\n',
+        encoding="utf-8",
+    )
+
+    class FakePty:
+        env = {"IAC_CODE_CONFIG_DIR": str(config_dir)}
+        transcript = ""
+        events: list[dict[str, object]] = []
+
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
+            raise AssertionError("the completed deployment must be detected before waiting on PTY")
+
+    with pytest.raises(RuntimeError, match="ROS deployment finished before rollback interrupt"):
+        runner._expect_first_stack_create_started(FakePty(), args)
+
+
+def test_first_stack_observation_stops_when_deploying_finishes_without_stack(tmp_path: Path) -> None:
+    runner = _load_runner()
+    config_dir = tmp_path / "config"
+    display = config_dir / "projects" / "project" / "session" / "pipeline" / "display.jsonl"
+    display.parent.mkdir(parents=True)
+    display.write_text('{"type":"step_completed","step_id":"deploying"}\n', encoding="utf-8")
+
+    class FakePty:
+        env = {"IAC_CODE_CONFIG_DIR": str(config_dir)}
+
+    with pytest.raises(RuntimeError, match="deploying finished before rollback observed a ROS stack"):
+        runner._wait_for_latest_observed_stack_id(FakePty(), exclude=set(), timeout=10)
+
+
+def test_first_stack_observation_drains_pty_while_waiting(monkeypatch) -> None:
+    runner = _load_runner()
+
+    class FakePty:
+        env: dict[str, str] = {}
+        drained = False
+
+        def drain_output(self) -> None:
+            self.drained = True
+
+    pty = FakePty()
+    monkeypatch.setattr(
+        runner,
+        "_latest_observed_stack_id",
+        lambda _pty, *, exclude: "stack-id" if pty.drained else None,
+    )
+
+    assert runner._wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=10) == "stack-id"
+    assert pty.drained is True
+
+
+def test_cleanup_target_observation_drains_pty_while_waiting(monkeypatch) -> None:
+    runner = _load_runner()
+
+    class FakePty:
+        drained = False
+
+        def drain_output(self) -> None:
+            self.drained = True
+
+    pty = FakePty()
+    monkeypatch.setattr(
+        runner,
+        "_cleanup_target_stack_ids",
+        lambda _pty, *, exclude: ["stack-id"] if pty.drained else [],
+    )
+
+    assert runner._wait_for_cleanup_target_stack_ids(pty, exclude=set(), timeout=10) == ["stack-id"]
+    assert pty.drained is True
+
+
+def test_first_stack_observation_stops_when_cloud_completed_without_ledger(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    ticks = iter([0.0, 121.0, 121.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner, "_latest_observed_stack_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: ["stack-id"])
+    monkeypatch.setattr(
+        runner,
+        "_fresh_ros_stack_state",
+        lambda _pty, _stack_id: {
+            "stack_name": runner._cleanup_stack_name(tmp_path, "first"),
+            "status": "CREATE_COMPLETE",
+        },
+    )
+
+    class FakePty:
+        run_dir = tmp_path
+        env: dict[str, str] = {}
+
+    pty = FakePty()
+    with pytest.raises(RuntimeError, match="ROS Stack completed but no resource reached the cleanup ledger"):
+        runner._wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=1800)
+    assert pty.cloud_stack_without_ledger is True
+
+
+def test_first_stack_observation_stops_when_cloud_never_created_stack(monkeypatch, tmp_path: Path) -> None:
+    runner = _load_runner()
+    ticks = iter([0.0, 601.0, 601.0])
+    monkeypatch.setattr(runner.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(runner, "_latest_observed_stack_id", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner, "_discover_owned_cleanup_stack_ids", lambda _run_dir: [])
+
+    class FakePty:
+        run_dir = tmp_path
+        env: dict[str, str] = {}
+
+    pty = FakePty()
+    with pytest.raises(RuntimeError, match="did not create a test Stack within 10 minutes"):
+        runner._wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=1800)
+    assert pty.cloud_stack_not_created is True
 
 
 def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch) -> None:
@@ -2909,7 +3418,7 @@ def test_cleanup_ready_accepts_marker_already_drained_after_followup(monkeypatch
         def expect_optional(self, patterns, *, description, timeout):
             return True
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             raise AssertionError("buffered prompt marker should avoid another blocking expect")
 
     pty = FakePty()
@@ -2940,7 +3449,7 @@ def test_raw_input_ready_ignores_buffered_marker_before_requested_offset() -> No
         def drain_output(self) -> None:
             return None
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             self.expected = True
             return patterns[0]
 
@@ -2970,7 +3479,7 @@ def test_expect_any_since_accepts_buffered_cleanup_start_after_offset() -> None:
         def drain_output(self) -> None:
             return None
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             raise AssertionError("buffered cleanup marker should avoid another blocking expect")
 
     pty = FakePty()
@@ -3002,7 +3511,7 @@ def test_expect_any_since_prefers_earliest_buffered_event_over_pattern_order() -
         def drain_output(self) -> None:
             return None
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             raise AssertionError("buffered events should avoid another blocking expect")
 
     matched = runner._expect_any_since(
@@ -3034,6 +3543,25 @@ def test_scenario_runtime_paths_override_shared_sandbox_state(tmp_path: Path) ->
     assert paths.backup_dir == Path("/home/iac_code_config_backup/.e2e-runs/case-run-1")
     assert environment["IAC_CODE_CONFIG_DIR"] == str(paths.config_dir)
     assert environment["IAC_CODE_CONFIG_BACKUP_DIR"] == str(paths.backup_dir)
+
+
+def test_explicit_source_config_is_copied_to_isolated_repl_config(tmp_path: Path) -> None:
+    runner = _load_runner()
+    source = tmp_path / "source"
+    source.mkdir()
+    names = (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
+    for name in names:
+        (source / name).write_text("fixture", encoding="utf-8")
+    destination = tmp_path / "isolated" / "config"
+
+    runner._copy_runtime_config(source, destination)
+
+    for name in names:
+        assert (destination / name).read_text(encoding="utf-8") == "fixture"
+        if os.name != "nt":
+            assert (destination / name).stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert destination.stat().st_mode & 0o777 == 0o700
 
 
 def test_cleanup_ledger_lookup_uses_case_isolated_config_dir(monkeypatch, tmp_path: Path) -> None:
@@ -3161,3 +3689,243 @@ def test_cleanup_recovery_uses_ledger_when_resume_summary_is_not_visible(monkeyp
         (runner.CLEANUP_RESUME_SUMMARY_PATTERNS, "cleanup resume summary", 5.0),
         (pty, "first-stack-id", {"completed"}, args.stream_timeout),
     ]
+
+
+def test_candidate_wait_handles_extra_question_before_selection(monkeypatch):
+    runner = _load_runner()
+    patterns = iter([runner.ASK_USER_QUESTION_HEADING_PATTERNS[0], runner.CANDIDATE_SELECTION_PATTERNS[0]])
+    calls = []
+    pty = SimpleNamespace(expect_any=lambda *_args, **_kw: next(patterns))
+    monkeypatch.setattr(runner, '_answer_legacy_repl_question', lambda *_: calls.append('answered'))
+    monkeypatch.setattr(runner, '_expect_candidate_selection_ready', lambda *_a, **_kw: calls.append('ready'))
+    runner._expect_candidate_selection(
+        pty, SimpleNamespace(stream_timeout=1), description='candidate selection visible'
+    )
+    assert calls == ['answered', 'ready']
+
+
+@pytest.mark.parametrize('cleanup', [False, True])
+def test_candidate_wait_answers_durable_question_when_heading_was_drained(tmp_path, monkeypatch, cleanup):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text(runner.yaml.safe_dump({'status': 'running', 'execution': {
+        'pending_input_kind': 'ask_user_question', 'pending_ask_user_question_input': {
+            'toolUseId': 'question-fixture', 'question': '确认用途?', 'allowFreeText': True}}}), encoding='utf-8')
+    calls = []
+    def expect(_patterns, **kwargs):
+        boundary = kwargs.get('state_check')
+        if not calls:
+            assert callable(boundary), 'terminal heading already consumed: checkpoint must drive the wait'
+            return boundary()
+        return runner.CANDIDATE_SELECTION_PATTERNS[0]
+    pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)}, expect_any=expect)
+    def answer(*_):
+        calls.append('answered')
+        meta.write_text('status: running\nexecution: {}\n', encoding='utf-8')
+    monkeypatch.setattr(runner, '_answer_legacy_repl_question', answer)
+    monkeypatch.setattr(runner, '_expect_candidate_selection_ready', lambda *_a, **_kw: calls.append('ready'))
+    wait = (runner._expect_candidate_selection_after_optional_asks if cleanup
+            else runner._expect_candidate_selection)
+    wait(pty, SimpleNamespace(stream_timeout=1), description='candidate selection visible')
+    assert calls == ['answered', 'ready']
+
+
+def test_candidate_checkpoint_cannot_treat_early_completion_as_selection(tmp_path):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n', encoding='utf-8')
+    with pytest.raises(RuntimeError, match='completed before candidate selection'):
+        runner._durable_candidate_boundary(SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)}))
+
+
+@pytest.mark.parametrize('status,handoff,expected_error', [
+    ('failed', None, 'terminal checkpoint'), ('running', 'failed', 'normal handoff failed'),
+])
+def test_native_completion_wait_rejects_terminal_checkpoint(tmp_path, status, handoff, expected_error):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    state = {'status': status}
+    if handoff:
+        state['normal_handoff'] = {'status': handoff}
+    meta.write_text(runner.yaml.safe_dump(state), encoding="utf-8")
+    pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    with pytest.raises(RuntimeError, match=expected_error):
+        runner._durable_completion_boundary(pty)
+
+
+def test_native_completion_wait_requires_successful_handoff(tmp_path):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    meta.write_text('status: completed\nnormal_handoff: {status: pending}\n', encoding="utf-8")
+    assert runner._durable_completion_boundary(pty) is None
+    meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n', encoding="utf-8")
+    assert runner._durable_completion_boundary(pty) == runner.PIPELINE_FULLY_COMPLETED_PATTERNS[0]
+
+
+@pytest.mark.parametrize('owned', [True, False])
+def test_missing_ledger_label_requires_exact_cloud_name_before_cleanup(monkeypatch, tmp_path, owned):
+    runner = _load_runner()
+    args = runner.parse_args(['--allow-real-cloud', '--run-dir', str(tmp_path)])
+    expected_name = runner._scenario_stack_name(tmp_path, 'scenario1')
+    pty = SimpleNamespace(run_dir=tmp_path, env={}, cleanup_ledger={'observed_resources': [
+        {'provider': 'ros', 'resource_type': 'stack', 'resource_id': 'observed-created-stack',
+         'observed_action': 'CreateStack', 'resource_name': ''}]})
+    deleted = _install_observed_stack_teardown_fakes(monkeypatch, runner,
+        stack_name=expected_name if owned else 'unrelated-stack')
+    checks, notes = {}, []
+    runner._teardown_real_cloud_scenario_resources(args=args, scenario='scenario1', pty=pty,
+                                                 checks=checks, notes=notes)
+    assert deleted == (['observed-created-stack'] if owned else [])
+    assert checks['teardown: observed ROS stacks deleted'] is owned
+
+
+def test_progress_wait_handles_extra_asks_without_skipping_original_milestone(monkeypatch):
+    runner = _load_runner()
+    expected = runner.PIPELINE_COMPLETED_PATTERNS
+    results = iter([runner.ASK_USER_QUESTION_HEADING_PATTERNS[0],
+                    runner.ASK_USER_QUESTION_HEADING_PATTERNS[0], expected[0]])
+    answers = []
+    def expect(patterns, **kwargs):
+        assert patterns[:len(expected)] == expected
+        assert callable(kwargs['state_check'])
+        return next(results)
+    pty = SimpleNamespace(expect_any=expect)
+    monkeypatch.setattr(runner, '_answer_legacy_repl_question', lambda *_: answers.append(True))
+    assert runner._expect_progress_after_optional_questions(
+        pty, SimpleNamespace(), expected, description='image pipeline completed', timeout=1) == expected[0]
+    assert len(answers) == 2
+
+
+def test_durable_completion_never_skips_a_required_interrupt_milestone(tmp_path):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n', encoding='utf-8')
+    pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    assert runner._durable_progress_boundary(pty, runner.CREATE_STACK_STARTED_PATTERNS) is None
+
+
+def test_pending_question_arriving_during_poll_is_routed_before_watchdog(tmp_path, monkeypatch):
+    runner = _load_runner()
+    args = runner.parse_args(['--allow-real-cloud', '--wait-diagnosis-after', '0'])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path,
+                                 env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    class Child:
+        before = after = ''
+        def expect(self, _patterns, timeout):
+            meta.write_text(runner.yaml.safe_dump({'status': 'running', 'execution': {
+                'pending_input_kind': 'ask_user_question', 'pending_ask_user_question_input': {
+                    'question': '用途?', 'toolUseId': 'current'}}}), encoding='utf-8')
+            raise runner.pexpect.TIMEOUT('waiting')
+    pty.child = Child()
+    monkeypatch.setattr(runner, 'diagnose_wait', lambda *_a, **_k: pytest.fail('route input before diagnosis'))
+    assert pty.expect_any(runner.CANDIDATE_SELECTION_PATTERNS + runner.ASK_USER_QUESTION_HEADING_PATTERNS,
+                         description='candidate selection visible', timeout=1,
+                         state_check=lambda: runner._durable_candidate_boundary(pty)) == (
+                             runner.ASK_USER_QUESTION_HEADING_PATTERNS[0])
+
+
+def test_watchdog_does_not_abort_for_consumed_question_in_terminal_history(tmp_path, monkeypatch):
+    runner = _load_runner()
+    args = runner.parse_args(['--allow-real-cloud'])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path,
+                                 env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    meta.write_text('status: running\nexecution: {}\n', encoding='utf-8')
+    pty.raw_chunks.append('● Ask user question: old answered question\nNow evaluating candidates\n')
+    monkeypatch.setattr(runner, 'diagnose_wait', lambda *_a, **_k: {
+        'state': 'waiting_for_input', 'confidence': 0.99, 'input_kind': 'clarification'})
+    pty._diagnose_wait('candidate selection visible', 0, 120)
+    assert pty._wait_diagnoses[-1]['action'] == 'observe'
+
+
+def test_explicit_goal_boundary_tracks_custom_rollback_without_language_heuristics():
+    runner = _load_runner()
+    sent = []
+    pty = SimpleNamespace(e2e_goal='创建 VSwitch', sendline=sent.append)
+    runner._send_case_goal(pty, 'Change target to a security group; keep the test StackName.')
+    assert pty.e2e_goal == sent[0]
+
+
+def test_semantic_hint_cannot_satisfy_an_unmatched_acceptance_pattern(tmp_path, monkeypatch):
+    runner = _load_runner()
+    args = runner.parse_args(['--allow-real-cloud', '--wait-diagnosis-after', '0'])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path,
+                                 env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    class Child:
+        before = after = ''
+        calls = 0
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                pty.raw_chunks.append('A subnet was created.\n')
+                raise runner.pexpect.TIMEOUT('waiting')
+            raise runner.pexpect.EOF('no matched target pattern')
+    pty.child = Child()
+    monkeypatch.setattr(runner, 'diagnose_wait', lambda *_a, **_k: {
+        'state': 'normal_operation', 'confidence': 0.99, 'semantic_hint': 'expected_target_mentioned'})
+    with pytest.raises(runner.pexpect.EOF):
+        pty.expect_any(runner.VSWITCH_MENTION_PATTERNS,
+                       description='normal follow-up answered created VSwitch', timeout=1)
+    assert pty._wait_diagnoses[-1]['semanticHint'] == 'expected_target_mentioned'
+    assert not any(e.get('type') == 'expect' and e.get('passed') is True for e in pty.events)
+
+
+def test_candidate_controls_already_drained_require_real_unsubmitted_display_boundary(tmp_path, monkeypatch):
+    runner = _load_runner()
+    journal = tmp_path / 'projects/p/s/pipeline/display.jsonl'
+    journal.parent.mkdir(parents=True)
+    journal.write_text(json.dumps({'type': 'candidate_selection_ready'}) + '\n', encoding='utf-8')
+    class Pty:
+        env = {'IAC_CODE_CONFIG_DIR': str(tmp_path)}
+        transcript = 'Press number keys to select a candidate. Enter to confirm'
+        def expect_optional(self, *_args, **_kwargs):
+            raise AssertionError('controls already consumed')
+    monkeypatch.setattr(runner.time, 'sleep', lambda _: None)
+    pty = Pty()
+    args = runner.parse_args(['--allow-real-cloud'])
+    assert runner._durable_candidate_boundary(pty) in runner.CANDIDATE_SELECTION_PATTERNS
+    runner._expect_candidate_selection_ready(pty, args)
+    journal.write_text(
+        journal.read_text(encoding='utf-8') + json.dumps({'type': 'candidate_selection_submitted'}) + '\n',
+        encoding='utf-8',
+    )
+    assert runner._durable_candidate_boundary(pty) is None
+    with pytest.raises(AssertionError, match='controls already consumed'):
+        runner._expect_candidate_selection_ready(pty, args)
+
+
+def test_teardown_discovers_owned_stack_when_tool_never_wrote_ledger(monkeypatch, tmp_path):
+    runner = _load_runner()
+    name = runner._scenario_stack_name(tmp_path, 'scenario1')
+    deleted = _install_observed_stack_teardown_fakes(monkeypatch, runner, stack_name=name)
+    monkeypatch.setattr(runner, '_discover_scenario_stack_resources', lambda *_: [
+        {'resource_id': 'unrecorded-stack', 'resource_name': name}])
+    pty = SimpleNamespace(run_dir=tmp_path, env={}, cleanup_ledger={'observed_resources': []})
+    checks = {}
+    runner._teardown_real_cloud_scenario_resources(args=runner.parse_args([]), scenario='scenario1',
+                                                 pty=pty, checks=checks, notes=[])
+    assert deleted == ['unrecorded-stack']
+    assert checks['teardown: observed ROS stacks deleted'] is True
+    assert 'teardown: no observed ROS stacks leaked' not in checks
+
+
+def test_run_owned_discovery_rejects_neighbor_names_and_deleted_stacks(monkeypatch, tmp_path):
+    runner = _load_runner()
+    base = runner._scenario_stack_name(tmp_path, 'scenario1')
+    def api(_product, _action, params):
+        assert params['StackName'] == [base + '*']
+        return {'Stacks': [{'StackName': n, 'StackId': n, 'Status': status} for n, status in [
+            (base, 'CREATE_COMPLETE'), (base + '-suffix', 'CREATE_COMPLETE'),
+            (base + 'different', 'CREATE_COMPLETE'), ('unowned', 'CREATE_COMPLETE'), (base, 'DELETE_COMPLETE')]]}
+    monkeypatch.setattr(runner, '_call_aliyun_api', api)
+    assert [r['resource_name'] for r in runner._discover_scenario_stack_resources(tmp_path, 'scenario1')] == [
+        base, base + '-suffix']

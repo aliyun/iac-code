@@ -135,6 +135,8 @@ def test_pending_prompt_includes_active_resources_after_restart(tmp_path) -> Non
     assert "Do not infer extra cleanup targets from pipeline handoff" in prompt.prompt
     assert "Do not expand cleanup scope for user follow-ups" in prompt.prompt
     assert "When resuming cleanup, still process only resources listed in this prompt" in prompt.prompt
+    assert "Use the ros_stack tool for DeleteStack" in prompt.prompt
+    assert "Do not use aliyun_api for DeleteStack when ros_stack is available" in prompt.prompt
     assert "如果用户只说“继续”" not in prompt.prompt
     assert "After all listed resources are DELETE_COMPLETE, stop this cleanup turn immediately" in prompt.prompt
 

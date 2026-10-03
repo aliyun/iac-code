@@ -2907,6 +2907,36 @@ class PipelineRunner:
         self._step_attempts[step_id] = attempt
         return attempt
 
+    def _resolve_restored_candidate_selection(
+        self, step: StepSpec, user_text: str, resume_messages: list[Message] | None,
+    ) -> StepResult | None:
+        """Revalidate an accepted choice saved before its deterministic result was consumed."""
+        conclusion = self.context.get_conclusion(step.conclusion_field)
+        if (
+            step.ui_mode != "candidate_selection"
+            or step.config.get("deterministic_structured_candidate_selection") is not True
+            or not isinstance(conclusion, dict)
+            or conclusion.get("status") != "awaiting_selection"
+            or conclusion.get("user_input") != user_text
+        ):
+            return None
+        options = conclusion.get("options")
+        selected_index = self._infer_selected_index(user_text, options if isinstance(options, list) else [])
+        if selected_index is None:
+            return None
+        self._retain_resumed_candidate_selection(step, conclusion, user_text)
+        result = self._step_executor.finalize_completion_input_from_transcript(
+            step,
+            self.context,
+            user_message=user_text,
+            tool_input={"conclusion": {"status": "selected", "selected_candidate_index": selected_index}},
+            resume_messages=resume_messages or [],
+            rollback_targets=self.state_machine.completed_non_future_rollback_targets(),
+            rollback_count=self.state_machine.rollback_count,
+            max_rollbacks=self.state_machine.max_rollbacks,
+        )
+        return None if isinstance(result, CompletionValidationError) else result
+
     def _current_step_attempt(self, step_id: str) -> int:
         return self._step_attempts.get(step_id, 1)
 
@@ -4599,11 +4629,18 @@ class PipelineRunner:
                 if (
                     first_step
                     and first_step_user_input_is_restored
-                    and step_resume_messages
-                    and (
-                        isinstance(step_user_message, str)
-                        or user_message_already_in_resume(step_user_message, step_resume_messages)
+                    and resume_running_step
+                    and resolved_step_result is None
+                    and isinstance(first_step_user_input_display_text, str)
+                ):
+                    resolved_step_result = self._resolve_restored_candidate_selection(
+                        step, first_step_user_input_display_text, step_resume_messages,
                     )
+                if (
+                    first_step
+                    and first_step_user_input_is_restored
+                    and step_resume_messages
+                    and user_message_already_in_resume(step_user_message, step_resume_messages)
                 ):
                     step_user_message = None
                 execute_kwargs: dict[str, Any] = {

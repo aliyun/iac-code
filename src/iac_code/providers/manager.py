@@ -1142,6 +1142,8 @@ class ProviderManager:
     def _get_fallback_model(self, model: str | None = None, provider_key: str | None = None) -> str | None:
         current_model = model or self._model
         resolved_provider_key = provider_key or self.get_provider_key()
+        if not self._model_fallback_enabled(current_model, resolved_provider_key):
+            return None
         provider_fallbacks = _PROVIDER_MODEL_FALLBACK_MAP.get(resolved_provider_key, {})
         provider_fallback = provider_fallbacks.get(current_model)
         if provider_fallback is not None:
@@ -1162,6 +1164,8 @@ class ProviderManager:
         return fallback if fallback in model_ids else None
 
     def _get_refusal_fallback_model(self, model: str, provider_key: str) -> str | None:
+        if not self._model_fallback_enabled(model, provider_key):
+            return None
         fallback = _MODEL_REFUSAL_FALLBACK_MAP.get(model)
         if fallback is None:
             return None
@@ -1172,6 +1176,14 @@ class ProviderManager:
             return None
         model_ids = {entry.id for entry in descriptor.models}
         return fallback if model in model_ids and fallback in model_ids else None
+
+    def _model_fallback_enabled(self, model: str, provider_key: str) -> bool:
+        from iac_code.config import get_provider_config
+
+        config = getattr(self, "_provider_config_override", None)
+        if config is None:
+            config = get_provider_config(provider_key)
+        return _get_bool_provider_config_value(config, model, "modelFallbackEnabled") is not False
 
     def stream(
         self,
