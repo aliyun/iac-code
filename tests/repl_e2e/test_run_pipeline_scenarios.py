@@ -163,7 +163,7 @@ def _install_flow_fake_pty(
                 offset = self.transcript.find("● Confirm and select (4/5)")
             self.events.append({"type": "sendline", "text": text, "transcript_offset": max(offset, 0)})
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check=None):
             actions.append(("expect", description))
             return patterns[0]
 
@@ -3690,3 +3690,30 @@ def test_candidate_wait_handles_extra_question_before_selection(monkeypatch):
         pty, SimpleNamespace(stream_timeout=1), description='candidate selection visible'
     )
     assert calls == ['answered', 'ready']
+
+
+@pytest.mark.parametrize('status,handoff,expected_error', [
+    ('failed', None, 'terminal checkpoint'), ('running', 'failed', 'normal handoff failed'),
+])
+def test_native_completion_wait_rejects_terminal_checkpoint(tmp_path, status, handoff, expected_error):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    state = {'status': status}
+    if handoff:
+        state['normal_handoff'] = {'status': handoff}
+    meta.write_text(runner.yaml.safe_dump(state))
+    pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    with pytest.raises(RuntimeError, match=expected_error):
+        runner._durable_completion_boundary(pty)
+
+
+def test_native_completion_wait_requires_successful_handoff(tmp_path):
+    runner = _load_runner()
+    meta = tmp_path / 'projects' / 'project' / 'session' / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir(parents=True)
+    pty = SimpleNamespace(env={'IAC_CODE_CONFIG_DIR': str(tmp_path)})
+    meta.write_text('status: completed\nnormal_handoff: {status: pending}\n')
+    assert runner._durable_completion_boundary(pty) is None
+    meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n')
+    assert runner._durable_completion_boundary(pty) == runner.PIPELINE_FULLY_COMPLETED_PATTERNS[0]

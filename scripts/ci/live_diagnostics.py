@@ -24,6 +24,55 @@ KNOWN_WAITS = {
     "restored Step 2 answer acknowledgement",
 }
 
+COMPLETION_ERROR_PATTERNS = {
+    "input_schema": r"completion_input_schema_validation_failed",
+    "conclusion_schema": r"conclusion_schema_validation_failed|Schema validation failed|schema 验证失败",
+    "retry_exhausted": r"maximum retry count|超过最大重试|exceeding.{0,30}retry",
+    "no_conclusion": r"No conclusion extracted|No result",
+    "missing_required": r"is a required property|required property|缺少必填",
+    "guard_rejected": r"completion guard|complete_step validation failed",
+    "natural_handoff_receipt": r"Natural completion did not produce an exact durable handoff receipt",
+}
+
+
+def _completion_failure_facts(root: Path) -> dict[str, Any]:
+    """Project only fixed failure codes and schema validators, never tool result bodies."""
+    codes: Counter[str] = Counter()
+    validators: set[str] = set()
+    failed_calls = 0
+    allowed_validators = {"required", "type", "oneOf", "anyOf", "enum", "const", "minItems", "additionalProperties"}
+    for path in list(root.rglob("transcripts/*/session.jsonl"))[:30]:
+        if path.stat().st_size > 20_000_000:
+            continue
+        calls: set[str] = set()
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            content = row.get("content") if isinstance(row, dict) else None
+            for block in content if isinstance(content, list) else []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and block.get("name") == "complete_step":
+                    calls.add(str(block.get("id") or ""))
+                if (block.get("type") != "tool_result" or block.get("tool_use_id") not in calls
+                    or not block.get("is_error")):
+                    continue
+                failed_calls += 1
+                text = str(block.get("content") or "")
+                for code, pattern in COMPLETION_ERROR_PATTERNS.items():
+                    if re.search(pattern, text, re.I):
+                        codes[code] += 1
+                validators.update(v for v in re.findall(r'"validator"\s*:\s*"([A-Za-z]+)"', text)
+                                  if v in allowed_validators)
+    facts: dict[str, Any] = {"complete_step_error_count": min(failed_calls, 10000)}
+    if codes:
+        facts["completion_error_codes"] = dict(codes)
+    if validators:
+        facts["completion_schema_validators"] = sorted(validators)
+    return facts
+
 
 def _known_wait(value: Any) -> str | None:
     if not isinstance(value, str):
@@ -142,6 +191,16 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
             continue
         if not isinstance(state, dict):
             continue
+        status = state.get("status")
+        if status in {"running", "waiting_input", "completed", "failed", "canceled", "discarded"}:
+            facts["pipeline_status"] = status
+        handoff = state.get("normal_handoff")
+        if isinstance(handoff, dict) and handoff.get("status") in {"pending", "succeeded", "failed"}:
+            facts["normal_handoff_status"] = handoff["status"]
+        reason = str(state.get("reason") or "")
+        reason_codes = [code for code, pattern in COMPLETION_ERROR_PATTERNS.items() if re.search(pattern, reason, re.I)]
+        if reason_codes:
+            facts["pipeline_reason_codes"] = reason_codes
         step = state.get("current_step")
         if step in {
             "solution_planning_and_selection", "materialize_selected_candidate", "deploying", "confirm_and_select",
@@ -157,4 +216,5 @@ def collect_live_diagnostics(root: Path, summary: dict[str, Any]) -> dict[str, A
             question = execution.get("pending_ask_user_question_input")
             if isinstance(question, dict):
                 facts["pending_question_answered"] = isinstance(question.get("answer"), dict)
+    facts.update(_completion_failure_facts(root))
     return facts

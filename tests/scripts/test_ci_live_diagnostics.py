@@ -84,3 +84,29 @@ def test_diagnostics_normalize_numbered_waits_and_count_missing_or_unexpected_st
     assert "failed_wait" not in collect_live_diagnostics(tmp_path, {"error": (
         "TimeoutError: timed out waiting for Step 2 parameter ask #1 input ready private-key"
     )})
+
+
+def test_completion_diagnostics_export_only_fixed_codes_and_validators(tmp_path):
+    meta = tmp_path / 'pipeline' / 'meta.yaml'
+    meta.parent.mkdir()
+    meta.write_text(yaml.safe_dump({'status': 'failed', 'current_step': 'solution_planning_and_selection',
+        'reason': 'Schema validation failed private-secret', 'normal_handoff': {'status': 'failed'}}))
+    transcript = meta.parent / 'transcripts' / 'step1' / 'session.jsonl'
+    transcript.parent.mkdir(parents=True)
+    rows = [
+        {'content': [{'type': 'tool_use', 'name': 'read_file', 'id': 'doc'},
+                     {'type': 'tool_use', 'name': 'complete_step', 'id': 'complete'}]},
+        {'content': [{'type': 'tool_result', 'tool_use_id': 'doc', 'is_error': True,
+                      'content': 'conclusion_schema_validation_failed example'},
+                     {'type': 'tool_result', 'tool_use_id': 'complete', 'is_error': True,
+                      'content': 'completion_input_schema_validation_failed {"validator":"required",'
+                                 '"received":"private-secret"}'}]},
+    ]
+    transcript.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+    facts = collect_live_diagnostics(tmp_path, {})
+    assert facts['pipeline_status'] == 'failed'
+    assert facts['normal_handoff_status'] == 'failed'
+    assert facts['completion_error_codes'] == {'input_schema': 1}
+    assert facts['complete_step_error_count'] == 1
+    assert facts['completion_schema_validators'] == ['required']
+    assert 'private-secret' not in json.dumps(facts)

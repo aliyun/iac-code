@@ -598,7 +598,10 @@ class ReplPty:
         )
         return path
 
-    def expect_any(self, patterns: tuple[str, ...], *, description: str, timeout: float) -> str:
+    def expect_any(
+        self, patterns: tuple[str, ...], *, description: str, timeout: float,
+        state_check: Callable[[], str | None] | None = None,
+    ) -> str:
         child = self._require_child()
         started = time.monotonic()
         deadline = started + timeout
@@ -608,6 +611,10 @@ class ReplPty:
         all_patterns = list(patterns) + list(PERMISSION_PROMPT_PATTERNS)
         try:
             while True:
+                if state_check is not None:
+                    durable_match = state_check()
+                    if durable_match is not None:
+                        return durable_match
                 now = time.monotonic()
                 remaining = deadline - now
                 if remaining <= 0:
@@ -2671,7 +2678,11 @@ def _answer_legacy_repl_question(pty: ReplPty, args: argparse.Namespace) -> None
     answer, _ = answer_question(config_dir, question, {"goal": goal}, counts, diagnostics)
     if question.get("allowFreeText", question.get("allow_free_text", True)) is False:
         answer = str(1 + next(i for i, option in enumerate(question["options"]) if option.get("id") == answer))
-    _expect_ask_input_ready(pty, args, description="clarification input ready")
+    pty.drain_output()
+    # Journal polling may already have drained the transient prompt; its tail plus
+    # this unacknowledged question checkpoint is sufficient input readiness evidence.
+    if not re.search(r"[ \t]+>[ \t]*$", _normalize_transcript(pty.transcript)):
+        _expect_ask_input_ready(pty, args, description="clarification input ready")
     pty.sendline_reliable(answer)
     wait_native_question_ack(path, question_identity(question), pty.drain_output)
 
@@ -2682,6 +2693,7 @@ def _expect_completed_after_optional_questions(pty: ReplPty, args: argparse.Name
         matched = pty.expect_any(
             PIPELINE_FULLY_COMPLETED_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS + CANDIDATE_SELECTION_PATTERNS,
             description="pipeline fully completed", timeout=args.stream_timeout,
+            state_check=lambda: _durable_completion_boundary(pty),
         )
         if matched in PIPELINE_FULLY_COMPLETED_PATTERNS:
             return
@@ -2694,6 +2706,32 @@ def _expect_completed_after_optional_questions(pty: ReplPty, args: argparse.Name
         else:
             _answer_legacy_repl_question(pty, args)
     raise RuntimeError("pipeline did not complete after bounded supplemental questions")
+
+
+def _durable_completion_boundary(pty: ReplPty) -> str | None:
+    """A terminal checkpoint must end a wait; native questions may outlive terminal redraws."""
+    config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+    for path in config_dir.glob("projects/*/*/pipeline/meta.yaml"):
+        try:
+            state = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        status = state.get("status")
+        handoff = state.get("normal_handoff")
+        if status in {"failed", "canceled", "discarded"}:
+            raise RuntimeError("pipeline reached a terminal checkpoint before successful handoff")
+        if isinstance(handoff, dict) and handoff.get("status") == "failed":
+            raise RuntimeError("normal handoff failed in durable checkpoint")
+        if status == "completed" and isinstance(handoff, dict) and handoff.get("status") == "succeeded":
+            return PIPELINE_FULLY_COMPLETED_PATTERNS[0]
+        execution = state.get("execution")
+        pending = execution.get("pending_ask_user_question_input") if isinstance(execution, dict) else None
+        if (isinstance(execution, dict) and execution.get("pending_input_kind") == "ask_user_question"
+            and isinstance(pending, dict) and not isinstance(pending.get("answer"), dict)):
+            return ASK_USER_QUESTION_HEADING_PATTERNS[0]
+    return None
 
 
 def _expect_candidate_selection_ready(
