@@ -271,6 +271,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--case", action="append", choices=sorted(case.name for case in CASES))
     parser.add_argument("--jobs", type=int, help="Maximum running cases (live: 12; offline: 3)")
+    parser.add_argument("--case-model", action="append", default=[], metavar="CASE=MODEL",
+                        help="Pin a selected live case to a model in its pool; repeatable")
     parser.add_argument("--no-model-pool", action="store_true", help="Keep original model selection")
     parser.add_argument("--text-model", action="append", choices=TEXT_MODELS, help="Restrict text pool; repeatable")
     parser.add_argument("--multimodal-model", action="append", choices=MULTIMODAL_MODELS,
@@ -285,6 +287,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--list", action="store_true", help="Show the allowlist and exclusions without running")
     args = parser.parse_args(argv)
     selected = select_cases(args)
+    pins: dict[str, str] = {}
+    by_name = {case.name: case for case in selected}
+    for item in args.case_model:
+        name, separator, model = item.partition("=")
+        case = by_name.get(name)
+        if not separator or case is None or case.suite != "live" or args.no_model_pool:
+            parser.error("--case-model requires a selected live case and an enabled model pool")
+        models = (args.multimodal_model or MULTIMODAL_MODELS) if case.multimodal else (args.text_model or TEXT_MODELS)
+        if model not in models or name in pins:
+            parser.error("--case-model must use a matching pool model and cannot duplicate a case")
+        pins[name] = model
+    args.case_models = pins
     if args.jobs is None:
         args.jobs = 12 if any(case.suite == "live" for case in selected) else 3
     if args.jobs < 1 or args.jobs > 16:
@@ -491,6 +505,10 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     if isinstance(raw_diagnostics, dict):
         diagnostics: dict[str, Any] = {}
         for key in (
+            "question_driver_answer_count", "question_driver_llm_count", "question_driver_facts_fallback_count",
+            "repl_supplemental_reselections",
+            "canary_aliyun_call_count", "canary_allowed_call_count", "canary_wrong_action_count",
+            "canary_wrong_params_count",
             "confirmation_event_count", "unstructured_confirmation_count", "image_confirmation_count",
             "ros_deploy_event_count", "public_tool_event_count",
             "public_journal_aliyun_count", "persisted_aliyun_public_tool_event_count",
@@ -511,6 +529,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
                 diagnostics[key] = count
         for key in (
+            "question_driver_budget_exhausted", "final_target_security_group", "final_target_vswitch",
             "repl_solution_summary_changed", "repl_effective_parameters_changed",
             "repl_first_rollback_input_intact",
             "repl_pending_question_answered",
@@ -775,6 +794,54 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     return public
 
 
+def _local_failure_facts(root: Path) -> dict[str, Any]:
+    """Extract fixed exception types and repo source locations; keep raw logs on the worker."""
+    types = {
+        "AssertionError", "AttributeError", "ConnectionError", "FileNotFoundError", "KeyError",
+        "PermissionError", "RuntimeError", "TimeoutError", "TypeError", "ValueError", "ValidationError",
+        "JSONDecodeError", "ToolCallProtocolError", "PipelineStatePersistenceError", "RateLimitError",
+        "BadRequestError", "APIConnectionError", "APITimeoutError", "InternalServerError",
+    }
+    observed_types: list[str] = []
+    observed_sites: list[str] = []
+    categories: list[str] = []
+    paths = sorted({
+        *root.glob("server-*.log"), *root.glob("server-*.stderr*"), *root.glob("logs/*.log"),
+        *root.glob("config/logs/*.log"),
+    })
+    for path in paths[:20]:
+        try:
+            with path.open("rb") as stream:
+                stream.seek(max(0, path.stat().st_size - 131072))
+                text = stream.read(131072).decode("utf-8", errors="replace")
+        except OSError:
+            continue
+        # Only lines with an explicit exception class can contribute a clue.
+        error_lines = [line for line in text.splitlines() if any(
+            re.search(r"\b" + name + r":", line) for name in types
+        )]
+        if not error_lines:
+            continue
+        for line in error_lines[-6:]:
+            for name in types:
+                if re.search(r"\b" + name + r":", line) and name not in observed_types:
+                    observed_types.append(name)
+            for category, pattern in TERMINAL_CATEGORIES:
+                if re.search(pattern, line) and category not in categories:
+                    categories.append(category)
+        # File locations must have the known repository src layout, never arbitrary absolute paths.
+        for relative, line_number in re.findall(
+            r'[/\\](src[/\\]iac_code[/\\][A-Za-z0-9_/\\]+\.py)["\']?,?\s*(?:line|:)\s*(\d+)', text
+        )[-6:]:
+            site = relative.replace("\\", "/") + ":" + line_number
+            if site not in observed_sites:
+                observed_sites.append(site)
+    return {k: v for k, v in {
+        "local_error_types": observed_types[-4:], "local_error_sites": observed_sites[-4:],
+        "local_error_categories": categories[-4:],
+    }.items() if v}
+
+
 def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
     """Read local A2A events and return fixed-schema failure clues, never event text."""
     from scripts.a2a.debugger import _extract_pipeline_envelopes
@@ -848,6 +915,8 @@ def _live_a2a_terminal_evidence(script_dir: Path) -> dict[str, Any]:
                         record_failure(envelope)
     if recent_events:
         evidence["pipeline_events"] = recent_events
+    if evidence.get("step_failed_event") == "observed" or evidence.get("pipeline_failed_event") == "observed":
+        evidence.update(_local_failure_facts(script_dir))
     return evidence
 
 
@@ -1281,6 +1350,7 @@ def main(argv: list[str] | None = None) -> int:
         text_models=tuple(dict.fromkeys(args.text_model or TEXT_MODELS)),
         multimodal_models=tuple(dict.fromkeys(args.multimodal_model or MULTIMODAL_MODELS)),
         text_jobs=args.text_model_jobs, multimodal_jobs=args.multimodal_model_jobs,
+        case_models=args.case_models,
     ):
         try:
             result = future.result()

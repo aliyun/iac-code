@@ -786,7 +786,7 @@ def test_redaction_step4_stops_before_selection_and_writes_only_audit(monkeypatc
     assert any("no selection input was sent" in note for note in harness.notes)
 
 
-def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path) -> None:
+def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path, monkeypatch) -> None:
     runner = _load_runner()
     initial = runner.StreamSummary(
         name="01-initial",
@@ -815,6 +815,7 @@ def test_answer_intervening_ask_inputs_reaches_selection(tmp_path: Path) -> None
 
     harness = SimpleNamespace(run_dir=tmp_path, notes=[], stream=stream)
 
+    monkeypatch.setattr(runner, "_answer_pending_legacy_question", lambda *_args: runner.INTERVENING_ASK_ANSWER)
     result = runner._answer_intervening_ask_inputs(harness, initial, name_prefix="01-initial")
 
     assert result is selection
@@ -865,7 +866,7 @@ def test_all_evidence_includes_workspace_text_files(tmp_path: Path) -> None:
     assert "ignored.bin" not in evidence
 
 
-def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_input() -> None:
+def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_input(tmp_path) -> None:
     runner = _load_runner()
     prompts: list[str] = []
     initial = runner.StreamSummary(
@@ -886,7 +887,7 @@ def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_inp
             pipeline_event_types=["pipeline_completed"],
         )
 
-    harness = SimpleNamespace(stream=stream)
+    harness = SimpleNamespace(run_dir=tmp_path, stream=stream)
     args = SimpleNamespace(selection_prompt="选择第一个方案")
 
     runner._finish_pipeline_after_possible_input(
@@ -899,7 +900,7 @@ def test_finish_pipeline_after_possible_input_uses_custom_prompt_for_pending_inp
     assert prompts == [runner.ROLLBACK_PROMPT]
 
 
-def test_wait_for_with_intervening_ask_inputs_uses_custom_answer_prompt() -> None:
+def test_wait_for_with_intervening_ask_inputs_uses_custom_answer_prompt(monkeypatch) -> None:
     runner = _load_runner()
     prompts: list[str] = []
     initial_summary = runner.StreamSummary(
@@ -946,6 +947,8 @@ def test_wait_for_with_intervening_ask_inputs_uses_custom_answer_prompt() -> Non
 
     harness = SimpleNamespace(notes=[], start_stream=start_stream)
 
+    InitialStream.summary = initial_summary
+    monkeypatch.setattr(runner, "_answer_pending_legacy_question", lambda _h, _s, goal: goal)
     streams = runner._wait_for_with_intervening_ask_inputs(
         harness,
         [InitialStream()],
@@ -2963,3 +2966,23 @@ def test_final_deployment_evidence_prefers_realized_target_over_stale_candidate(
 
     assert "SecurityGroup" in evidence
     assert "VSwitch" not in evidence
+
+
+def test_finish_pipeline_answers_clarification_inside_selection_step_before_followup(tmp_path, monkeypatch):
+    runner = _load_runner()
+    pending = runner.StreamSummary(name='selection', prompt='select', status_states=['TASK_STATE_INPUT_REQUIRED'],
+        pipeline_event_types=['input_required'], last_input_required_step_id='confirm_and_select')
+    done = runner.StreamSummary(name='done', prompt='answer', status_states=['TASK_STATE_COMPLETED'],
+                               pipeline_event_types=['pipeline_completed'], normal_handoff_ready=True)
+    (tmp_path / 'selection.events.jsonl').write_text(json.dumps({'pipeline': {
+        'eventType': 'input_required', 'data': {'kind': 'ask_user_question', 'question': '用途?'}}}) + '\n')
+    calls = []
+    def stream(**kwargs):
+        calls.append(kwargs)
+        return done
+    h = SimpleNamespace(run_dir=tmp_path, current_goal='只创建安全组，不创建VSwitch', stream=stream)
+    monkeypatch.setattr(runner, '_answer_pending_legacy_question', lambda _h, _s, goal: goal)
+    final = runner._finish_pipeline_after_possible_input(h, pending, SimpleNamespace(selection_prompt='选择方案'))
+    assert final is done
+    assert final.normal_handoff_ready
+    assert calls == [{'prompt': '只创建安全组，不创建VSwitch', 'name': 'answer-after-resume-1'}]

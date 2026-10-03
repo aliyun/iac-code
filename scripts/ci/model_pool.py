@@ -37,7 +37,7 @@ def scheduled_cases(
     cases: list[Any], jobs: int, execute: Callable[..., Any], *,
     enabled: bool = True, text_models: tuple[str, ...] = TEXT_MODELS,
     multimodal_models: tuple[str, ...] = MULTIMODAL_MODELS,
-    text_jobs: int = 2, multimodal_jobs: int = 1,
+    text_jobs: int = 2, multimodal_jobs: int = 1, case_models: dict[str, str] | None = None,
 ) -> Iterator[tuple[Any, ModelAssignment | None, Future]]:
     """Reserve model/resource capacity before occupying a worker, then refill on completion.
 
@@ -46,6 +46,12 @@ def scheduled_cases(
     """
     if not cases:
         return
+    case_models = case_models or {}
+    for case in cases:
+        pinned = case_models.get(case.name)
+        models = multimodal_models if case.multimodal else text_models
+        if pinned and (not enabled or case.suite != "live" or pinned not in models):
+            raise ValueError("pinned model must belong to the matching live model pool")
     pending = list(cases)
     busy_resources: set[str] = set()
     active: Counter[str] = Counter()
@@ -61,6 +67,8 @@ def scheduled_cases(
                 assignment = None
                 if enabled and case.suite == "live":
                     models = multimodal_models if case.multimodal else text_models
+                    if case.name in case_models:
+                        models = (case_models[case.name],)
                     capacity = multimodal_jobs if case.multimodal else text_jobs
                     available = [
                         model for model in models

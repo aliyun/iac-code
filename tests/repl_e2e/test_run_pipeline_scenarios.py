@@ -6,6 +6,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -3676,3 +3677,16 @@ def test_cleanup_recovery_uses_ledger_when_resume_summary_is_not_visible(monkeyp
         (runner.CLEANUP_RESUME_SUMMARY_PATTERNS, "cleanup resume summary", 5.0),
         (pty, "first-stack-id", {"completed"}, args.stream_timeout),
     ]
+
+
+def test_candidate_wait_handles_extra_question_before_selection(monkeypatch):
+    runner = _load_runner()
+    patterns = iter([runner.ASK_USER_QUESTION_HEADING_PATTERNS[0], runner.CANDIDATE_SELECTION_PATTERNS[0]])
+    calls = []
+    pty = SimpleNamespace(expect_any=lambda *_args, **_kw: next(patterns))
+    monkeypatch.setattr(runner, '_answer_legacy_repl_question', lambda *_: calls.append('answered'))
+    monkeypatch.setattr(runner, '_expect_candidate_selection_ready', lambda *_a, **_kw: calls.append('ready'))
+    runner._expect_candidate_selection(
+        pty, SimpleNamespace(stream_timeout=1), description='candidate selection visible'
+    )
+    assert calls == ['answered', 'ready']

@@ -42,6 +42,8 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from scripts.e2e_question_driver import answer_question, network_facts  # noqa: E402
+
 PIPELINE_NAME = "selling_solution_first"
 NEW_STEPS = (
     "solution_planning_and_selection",
@@ -713,6 +715,10 @@ class ScenarioRuntime:
     control_state: dict[str, Any] | None = None
     cloud_resources: list[dict[str, Any]] = field(default_factory=list)
     owned_stack_names: set[str] = field(default_factory=set)
+    question_facts: dict[str, str] = field(default_factory=dict)
+    question_counts: dict[str, int] = field(default_factory=dict)
+    pending_question: dict[str, Any] = field(default_factory=dict)
+    answered_parameter_fields: set[str] = field(default_factory=set)
     repl_candidate_wait_count: int = 0
     repl_confirmation_wait_count: int = 0
     repl_confirmation_action_count: int = 0
@@ -1186,20 +1192,13 @@ def _tool_sequence(values: Sequence[Any]) -> list[dict[str, Any]]:
 
 def _started_steps(values: Sequence[Any]) -> list[tuple[int, str]]:
     result: list[tuple[int, str]] = []
-    for event_index, value in enumerate(values):
-        candidates = [item for _, item in _walk(value) if isinstance(item, dict)]
-        if isinstance(value, dict):
-            candidates.append(value)
-        for item in candidates:
-            event_type = item.get("eventType") or item.get("event_type") or item.get("type")
-            if event_type != "step_started":
-                continue
-            step = item.get("step")
-            step_id = step.get("id") if isinstance(step, dict) else item.get("step_id")
-            if isinstance(step_id, str):
-                pair = (event_index, step_id)
-                if pair not in result:
-                    result.append(pair)
+    for event_index, item in _pipeline_event_records(values):
+        if (item.get("eventType") or item.get("type")) != "step_started":
+            continue
+        step = item.get("step")
+        step_id = step.get("id") if isinstance(step, dict) else item.get("step_id")
+        if isinstance(step_id, str) and (event_index, step_id) not in result:
+            result.append((event_index, step_id))
     return result
 
 
@@ -1363,6 +1362,77 @@ def _pending_kind(a2a: Any, path: Path) -> str:
     return str(a2a._latest_pending_kind(path) or "")
 
 
+def _question_facts(runtime: ScenarioRuntime) -> dict[str, str]:
+    facts = getattr(runtime, "question_facts", None)
+    if not isinstance(facts, dict):
+        facts = runtime.question_facts = {}
+    profile = runtime.spec.profile
+    if profile == "step2_parameter" and "vpc_id" not in facts:
+        supplied = {
+            "vpc_id": getattr(runtime.args, "cleanup_vpc_id", ""),
+            "zone_id": getattr(runtime.args, "cleanup_zone_id", ""),
+            "cidr": runtime.cidr,
+        }
+        if not supplied["vpc_id"] or not supplied["zone_id"]:
+            supplied = network_facts(runtime.args.python, runtime.env, REPO_ROOT, runtime.cidr)
+            runtime.cidr = supplied["cidr"]
+        facts.update(supplied)
+    goal = _initial_prompt(runtime)
+    if profile == "step1_clarify":
+        goal = (
+            "我要上线一个小团队 Node.js 电商 API，只规划阿里云杭州低成本网络，先展示候选方案，"
+            "本轮不部署、不创建资源。"
+        )
+    elif profile == "step2_parameter":
+        goal = (
+            "只在杭州复用指定已有 VPC 创建 VSwitch；VpcId 和 ZoneId 必须逐项分别询问，"
+            "每次只回答当前参数。两个答案收齐后进行 Preview 和询价，本轮不部署。"
+        )
+    facts["goal"] = getattr(runtime, "current_goal", "") or goal
+    facts.setdefault("cidr", runtime.cidr)
+    return facts
+
+
+def _answer_runtime_question(
+    runtime: ScenarioRuntime, pending: dict[str, Any], *, goal_override: str = ""
+) -> str:
+    facts = _question_facts(runtime).copy()
+    if goal_override:
+        facts["goal"] = goal_override
+    driver_pending = pending
+    if runtime.spec.profile == "step2_parameter":
+        driver_pending = {**pending, "one_parameter_at_a_time": True}
+    counts = getattr(runtime, "question_counts", None)
+    if not isinstance(counts, dict):
+        counts = runtime.question_counts = {}
+    answer, category = answer_question(runtime.paths.config_dir, driver_pending, facts, counts, runtime.diagnostics)
+    fields = getattr(runtime, "answered_parameter_fields", None)
+    if not isinstance(fields, set):
+        fields = runtime.answered_parameter_fields = set()
+    fields.add(category)
+    pending["answer_fact_category"] = category
+    return answer
+
+
+def _verify_required_parameter_confirmation(runtime: ScenarioRuntime, payload: dict[str, Any]) -> None:
+    facts = _question_facts(runtime)
+    parameters = payload.get("effective_deployment_parameters")
+    values = list(parameters.values()) if isinstance(parameters, dict) else []
+    valid = all(facts.get(key) in values for key in ("vpc_id", "zone_id"))
+    runtime.checks["both required parameter values preserved in confirmation"] = valid
+    if not valid:
+        raise RuntimeError("confirmation did not preserve both supplied required parameter values")
+
+
+def _latest_a2a_pending_question(a2a: Any, path: Path) -> dict[str, Any]:
+    pending: dict[str, Any] = {}
+    for row in _read_json_lines(path):
+        for envelope in a2a._extract_pipeline_envelopes(row):
+            if envelope.get("eventType") == "input_required" and isinstance(envelope.get("data"), dict):
+                pending = {**envelope["data"], **(envelope.get("input") or {})}
+    return pending
+
+
 def _a2a_turn(
     runtime: ScenarioRuntime,
     harness: Any,
@@ -1372,6 +1442,8 @@ def _a2a_turn(
     image_key: str = "",
     task_id: str | None = None,
 ) -> Any:
+    if "我改需求" in prompt or "停止旧目标" in prompt:
+        runtime.current_goal = prompt
     runtime.event("a2a-turn-started", name=name, image=bool(image_key))
     identity = {"task_id": task_id} if task_id is not None else {}
     if image_key:
@@ -1391,6 +1463,11 @@ def _a2a_turn(
         )
     else:
         summary = harness.stream(prompt=prompt, name=name, **identity)
+    run_dir = getattr(getattr(runtime, "paths", None), "run_dir", None)
+    if isinstance(run_dir, Path):
+        runtime.pending_question = _latest_a2a_pending_question(
+            _legacy_a2a_module(), run_dir / f"{summary.name}.events.jsonl"
+        )
     runtime.event(
         "a2a-turn-finished",
         name=name,
@@ -1413,6 +1490,8 @@ class A2AConversationPlan:
 
 def _a2a_plan(runtime: ScenarioRuntime) -> A2AConversationPlan:
     profile = runtime.spec.profile
+    if profile == "step2_parameter":
+        _question_facts(runtime)
     plan = A2AConversationPlan(
         ask_answers=[
             "部署在 cn-hangzhou，使用低成本按量资源；继续生成可选架构。",
@@ -1538,6 +1617,9 @@ def _run_a2a_legacy_smoke(runtime: ScenarioRuntime, harness: Any, a2a: Any) -> N
     )
     waiting_sequence: list[str] = []
     for turn_index in range(1, 5):
+        runtime.pending_question = _latest_a2a_pending_question(
+            a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl"
+        )
         kind = _pending_kind(a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl")
         step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         waiting_sequence.append(f"{step_id}:{kind}" if step_id else kind)
@@ -1640,13 +1722,18 @@ def _a2a_response_for_pending(
         runtime.spec.profile == "image_asks" and kind == "ask_user_question" and step_id in NEW_STEPS[:2]
     )
     if kind == "ask_user_question":
-        if image_question_stage:
+        pending = getattr(runtime, "pending_question", {})
+        if pending and pending.get("kind") == "ask_user_question" and runtime.spec.profile != "image_asks":
+            response = _answer_runtime_question(runtime, pending)
+        elif image_question_stage:
             response = plan.ask_answers[NEW_STEPS.index(step_id)]
         else:
             response = plan.ask_answers.pop(0) if plan.ask_answers else "使用低成本默认值继续。"
     elif kind in {"candidate_select", "candidate_selection"}:
         response = plan.candidate_answers.pop(0) if plan.candidate_answers else _candidate_payload(0)
     elif kind == "deployment_confirmation":
+        if runtime.spec.profile == "step2_parameter":
+            _verify_required_parameter_confirmation(runtime, getattr(runtime, "pending_question", {}))
         response = (
             plan.confirmation_answers.pop(0)
             if plan.confirmation_answers
@@ -1691,17 +1778,21 @@ def _advance_a2a_to_pending(
     summary = _a2a_turn(runtime, harness, prompt=_initial_prompt(runtime), name=f"{name_prefix}-initial")
     for index in range(12):
         _raise_for_unexpected_a2a_terminal(summary)
+        runtime.pending_question = _latest_a2a_pending_question(
+            a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl"
+        )
         kind = _pending_kind(a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl")
         step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         if kind and seen_waiting is not None:
             seen_waiting.append(f"{step_id}:{kind}")
+        step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         normalized_kind = "candidate_selection" if kind == "candidate_select" else kind
         normalized_target = "candidate_selection" if target_kind == "candidate_select" else target_kind
         if normalized_kind == normalized_target:
             return summary
         if not kind:
             raise RuntimeError(f"pipeline completed before pending input {target_kind}")
-        response, image_key = _a2a_response_for_pending(runtime, kind, plan)
+        response, image_key = _a2a_response_for_pending(runtime, kind, plan, step_id)
         summary = _a2a_turn(
             runtime,
             harness,
@@ -1724,7 +1815,11 @@ def _continue_a2a_to_pending(
 ) -> Any:
     for index in range(12):
         _raise_for_unexpected_a2a_terminal(summary)
+        runtime.pending_question = _latest_a2a_pending_question(
+            a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl"
+        )
         kind = _pending_kind(a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl")
+        step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         normalized_kind = "candidate_selection" if kind == "candidate_select" else kind
         normalized_target = "candidate_selection" if target_kind == "candidate_select" else target_kind
         if normalized_kind == normalized_target:
@@ -1737,7 +1832,7 @@ def _continue_a2a_to_pending(
                 name=f"{name_prefix}-resume-{index:02d}",
             )
             continue
-        response, image_key = _a2a_response_for_pending(runtime, kind, plan)
+        response, image_key = _a2a_response_for_pending(runtime, kind, plan, step_id)
         summary = _a2a_turn(
             runtime,
             harness,
@@ -2332,13 +2427,23 @@ def _run_a2a_input_during_backup(
 
 
 def _event_contains(*markers: str) -> Callable[[Any, Any], bool]:
-    lowered_markers = tuple(marker.lower() for marker in markers)
-
-    def predicate(event: Any, _summary: Any) -> bool:
-        text = _json_text(event).lower()
-        return all(marker in text for marker in lowered_markers)
-
-    return predicate
+    """Legacy name retained; match a real operation boundary, never arbitrary JSON text."""
+    a2a = _legacy_a2a_module()
+    if markers == ("validate", "template"):
+        return _successful_tool_result(a2a, "ros_validate_template")
+    if markers == ("CreateStack", "StackId"):
+        def created(event: Any, _summary: Any) -> bool:
+            return any(
+                item.get("action") in {"CreateStack", "ContinueCreateStack"}
+                and item.get("isSuccess") is True and bool(item.get("stackId"))
+                for _, envelope in _pipeline_event_records([event])
+                if envelope.get("eventType") == "stack_current_changed"
+                for item in [envelope.get("data") or {}]
+            )
+        return created
+    if len(markers) == 1:
+        return a2a._event_type(markers[0])
+    raise ValueError("checkpoint requires an explicit structural event predicate")
 
 
 def _successful_tool_result(a2a: Any, expected_tool_name: str) -> Callable[[Any, Any], bool]:
@@ -2349,7 +2454,12 @@ def _successful_tool_result(a2a: Any, expected_tool_name: str) -> Callable[[Any,
             data = envelope.get("data")
             if not isinstance(data, dict):
                 continue
-            if data.get("toolName") == expected_tool_name and data.get("isError") is not True:
+            result = _result_mapping(data.get("result"))
+            if (
+                data.get("toolName") == expected_tool_name and data.get("isError") is not True
+                and data.get("result") is not None
+                and not any(result.get(key) is False for key in ("is_success", "isSuccess", "valid", "is_valid"))
+            ):
                 return True
         return False
 
@@ -2363,7 +2473,17 @@ def _kill_restart_at(
     predicate: Callable[[Any, Any], bool],
     checkpoint: str,
 ) -> None:
-    stream.wait_for(predicate, description=checkpoint, timeout=runtime.args.stream_timeout)
+    matched = False
+
+    def observe(event: Any, summary: Any) -> bool:
+        nonlocal matched
+        matched = bool(predicate(event, summary))
+        return matched
+
+    stream.wait_for(observe, description=checkpoint, timeout=runtime.args.stream_timeout)
+    if not matched:
+        raise RuntimeError("fault checkpoint did not verify a real event")
+    runtime.checks[checkpoint + " event verified"] = True
     harness.kill9()
     with contextlib.suppress(Exception):
         stream.join(timeout=5)
@@ -2436,7 +2556,10 @@ def _run_a2a_fault_checkpoints(
     if plan.confirmation_answers:
         plan.confirmation_answers.pop(0)
     stream = harness.start_stream(prompt=_confirmation_payload("confirm"), name="fault-confirmation-saved")
-    _kill_restart_at(runtime, harness, stream, _event_contains("input_received"), "confirmation-saved")
+    _kill_restart_at(
+        runtime, harness, stream,
+        _input_received_kind_and_step(a2a, NEW_STEPS[1], "deployment_confirmation"), "confirmation-saved"
+    )
     checkpoints.append("confirmation-saved")
 
     stream = harness.start_stream(prompt="继续执行已确认部署。", name="fault-create-stack")
@@ -2967,6 +3090,7 @@ def _repl_wait_selection(
     terminal_offset: int | None = None,
     timeout: float | None = None,
     clarification_answer: str | None = None,
+    adaptive_questions: bool = True,
 ) -> None:
     occurrence = runtime.repl_candidate_wait_count + 1
     offset = (
@@ -2976,7 +3100,7 @@ def _repl_wait_selection(
     answered_tool_ids: set[str] = set()
     for question_index in range(5):
         kwargs: dict[str, Any] = {}
-        if clarification_answer is not None:
+        if clarification_answer is not None or adaptive_questions:
             kwargs["alternate_input"] = lambda: _pending_repl_parameter_question(
                 runtime, answered_tool_ids, step_id=NEW_STEPS[0]
             )
@@ -2993,11 +3117,18 @@ def _repl_wait_selection(
         if event.get("type") == "candidate_selection_ready":
             break
         payload = event.get("payload", {})
-        if question_index >= 4 or clarification_answer is None or payload.get("kind") != "ask_user_question":
+        if question_index >= 4 or payload.get("kind") != "ask_user_question":
             raise RuntimeError("candidate planning did not reach selection after four clarification asks")
         _repl_wait_ask(pty, runtime, description="Step 1 rollback clarification", allow_captured_prompt=True)
-        answer = clarification_answer if payload.get("allow_free_text", True) else "1"
-        _repl_submit_line_input(pty, answer, label=f"step1-clarification-answer-{question_index + 1}")
+        answer = _answer_runtime_question(runtime, payload, goal_override=clarification_answer or "")
+        if not payload.get("allow_free_text", True):
+            answer = str(1 + next(
+                i for i, option in enumerate(payload["options"])
+                if option.get("id") == answer
+            ))
+        _repl_submit_question_answer(
+            pty, runtime, answer, (event, path), label=f"step1-clarification-answer-{question_index + 1}"
+        )
         answered_tool_ids.add(payload["tool_use_id"])
         _record_diagnostic(runtime, "repl_step1_clarification_asks", question_index + 1)
     options = event.get("payload", {}).get("options") if isinstance(event.get("payload"), dict) else None
@@ -3196,6 +3327,11 @@ def _repl_wait_ask(
         rendered = _legacy_repl_module()._normalize_transcript(getattr(pty, "transcript", ""))
         if re.search(r"[ \t]+>[ \t]*$", rendered):
             matched = REPL_ASK_INPUT_READY_PATTERNS[0]
+            if isinstance(getattr(pty, "events", None), list):
+                pty.events.append({
+                    "type": "expect", "description": f"{description} input ready",
+                    "source": "captured_prompt", "at": utc_now(),
+                })
     if matched is None:
         matched = pty.expect_any(
             patterns,
@@ -3259,13 +3395,14 @@ def _repl_submit_line_input(pty: Any, text: str, *, label: str) -> None:
     pty.send("\r", label=f"{label}-enter")
 
 
-def _repl_submit_restored_parameter_answer(pty: Any, runtime: ScenarioRuntime, text: str) -> None:
-    pending = _pending_repl_parameter_question(runtime, set())
-    if pending is None:
-        raise RuntimeError("restored Step 2 question checkpoint was not observed")
+def _repl_submit_question_answer(
+    pty: Any, runtime: ScenarioRuntime, text: str, pending: tuple[dict[str, Any], Path], *, label: str
+) -> None:
     event, path = pending
     tool_id = event["payload"]["tool_use_id"]
-    _repl_submit_line_input(pty, text, label="restored-step2-ask-answer")
+    _repl_submit_line_input(
+        pty, text, label="restored-step2-ask-answer" if label == "restored Step 2 answer" else label
+    )
     # Enter is asynchronous. Until its checkpoint acknowledges this answer,
     # the next wait can mistake the same question for a new parameter ask and
     # wait for a prompt that the first answer already consumed.
@@ -3281,18 +3418,29 @@ def _repl_submit_restored_parameter_answer(pty: Any, runtime: ScenarioRuntime, t
         if isinstance(execution, dict):
             question = execution.get("pending_ask_user_question_input")
             same_question = (
-                state.get("current_step") == NEW_STEPS[1]
+                state.get("current_step") == event.get("step_id")
                 and execution.get("pending_input_kind") == "ask_user_question"
                 and isinstance(question, dict)
                 and (question.get("toolUseId") or question.get("tool_use_id")) == tool_id
                 and not isinstance(question.get("answer"), dict)
             )
             if not same_question:
-                runtime.checks["restored Step 2 answer acknowledged"] = True
+                runtime.checks[label + " acknowledged"] = True
+                pty.events.append({
+                    "type": "question-answer-acknowledged", "step_id": event.get("step_id"),
+                    "tool_use_id": tool_id, "fact_category": event["payload"].get("answer_fact_category"),
+                })
                 return
         time.sleep(0.1)
-    runtime.checks["restored Step 2 answer acknowledged"] = False
-    raise TimeoutError("timed out waiting for restored Step 2 answer acknowledgement")
+    runtime.checks[label + " acknowledged"] = False
+    raise TimeoutError("timed out waiting for question answer acknowledgement")
+
+
+def _repl_submit_restored_parameter_answer(pty: Any, runtime: ScenarioRuntime, text: str) -> None:
+    pending = _pending_repl_parameter_question(runtime, set())
+    if pending is None:
+        raise RuntimeError("restored Step 2 question checkpoint was not observed")
+    _repl_submit_question_answer(pty, runtime, text, pending, label="restored Step 2 answer")
 
 
 def _repl_durable_progress_signature(runtime: ScenarioRuntime) -> tuple[tuple[str, int, int], ...]:
@@ -3465,6 +3613,7 @@ def _wait_repl_display_event(
 
 
 def _repl_submit_candidate_interrupt(pty: Any, runtime: ScenarioRuntime, text: str) -> None:
+    runtime.current_goal = text
     repl = _legacy_repl_module()
     pty.send("\x1b", label="candidate-interrupt")
     repl._expect_interrupt_input_ready(
@@ -3620,8 +3769,24 @@ def _pending_repl_parameter_question(
             "payload": {
                 "kind": "ask_user_question", "tool_use_id": tool_id,
                 "allow_free_text": pending.get("allowFreeText", pending.get("allow_free_text", True)),
+                "question": pending.get("question", ""), "options": pending.get("options", []),
             },
         }, path
+    return None
+
+
+def _pending_repl_input_before_confirmation(
+    runtime: ScenarioRuntime, answered_tool_ids: set[str]
+) -> tuple[dict[str, Any], Path] | None:
+    question = _pending_repl_parameter_question(runtime, answered_tool_ids)
+    if question:
+        return question
+    # A second ready event after a persisted selection is a real new boundary, not terminal redraw text.
+    events = _read_repl_display_events(runtime)
+    ready = [x for x in events if x.get("type") == "candidate_selection_ready"]
+    submitted = [x for x in events if x.get("type") == "candidate_selection_submitted"]
+    if len(ready) > max(runtime.repl_candidate_wait_count, len(submitted)):
+        return ready[-1], runtime.paths.run_dir / "repl-events.jsonl"
     return None
 
 
@@ -3637,15 +3802,17 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
     if not selection_indexes:
         raise RuntimeError("candidate selection was not persisted before Step 2 input")
     selection_index = selection_indexes[-1]
-    confirmation_occurrence = 1 + sum(
-        _is_repl_deployment_confirmation(event) for event in display_events[:selection_index]
+    confirmation_occurrence = max(
+        getattr(runtime, "repl_confirmation_wait_count", 0) + 1,
+        1 + sum(_is_repl_deployment_confirmation(event) for event in display_events[:selection_index]),
     )
     answered_tool_ids: set[str] = set()
     restarted = False
-    for input_index in range(1, 5):
+    reselections = 0
+    for input_index in range(1, 9):
         while True:
             try:
-                event, _ = _wait_repl_display_event(
+                event, question_path = _wait_repl_display_event(
                     runtime,
                     event_type="user_input_required",
                     occurrence=confirmation_occurrence,
@@ -3654,7 +3821,7 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
                     predicate=_is_repl_deployment_confirmation,
                     check_before_drain=True,
                     pty=pty,
-                    alternate_input=lambda: _pending_repl_parameter_question(runtime, answered_tool_ids),
+                    alternate_input=lambda: _pending_repl_input_before_confirmation(runtime, answered_tool_ids),
                 )
                 break
             except TimeoutError:
@@ -3676,21 +3843,39 @@ def _repl_wait_confirmation_after_optional_parameter_asks(
                 runtime.checks.pop(missed_check, None)
                 runtime.checks.pop("REPL display matched at least once before timeout", None)
         if _is_repl_deployment_confirmation(event):
+            if runtime.spec.profile == "step2_parameter":
+                _verify_required_parameter_confirmation(runtime, event.get("payload") or {})
+            runtime.repl_confirmation_wait_count = confirmation_occurrence - 1
             _repl_wait_confirmation(pty, runtime, require_input_ready=False)
             return
+        if event.get("type") == "candidate_selection_ready":
+            if reselections >= 2:
+                raise RuntimeError("candidate reselection budget exhausted before Step 2")
+            _repl_wait_selection(pty, runtime)
+            _repl_select_current(pty, next_candidate=runtime.spec.profile == "reselect_progress")
+            reselections += 1
+            _record_diagnostic(runtime, "repl_supplemental_reselections", reselections)
+            continue
         payload = event.get("payload")
         if not isinstance(payload, dict) or payload.get("kind") != "ask_user_question":
             raise RuntimeError("unexpected Step 2 input kind before deployment confirmation")
-        _repl_wait_ask(pty, runtime, description=f"Step 2 parameter ask #{input_index}", allow_captured_prompt=True)
-        answer = (
-            (runtime.args.cleanup_vpc_id or "请使用上面列出的第一个可用杭州 VPC")
-            if payload.get("allow_free_text", True) else "1"
+        answer = _answer_runtime_question(runtime, payload)
+        description = f"Step 2 parameter ask #{input_index}"
+        if runtime.spec.profile == "step2_parameter":
+            description = "Step 2 {} parameter question".format(payload.get("answer_fact_category", "unknown"))
+        _repl_wait_ask(pty, runtime, description=description, allow_captured_prompt=True)
+        if not payload.get("allow_free_text", True):
+            answer = str(1 + next(
+                i for i, option in enumerate(payload["options"])
+                if option.get("id") == answer
+            ))
+        _repl_submit_question_answer(
+            pty, runtime, answer, (event, question_path), label=f"step2-parameter-answer-{input_index}"
         )
-        _repl_submit_line_input(pty, answer, label=f"step2-parameter-answer-{input_index}")
         if isinstance(payload.get("tool_use_id"), str):
             answered_tool_ids.add(payload["tool_use_id"])
         _record_diagnostic(runtime, "repl_native_parameter_asks", input_index)
-    raise RuntimeError("Step 2 did not reach deployment confirmation after four parameter asks")
+    raise RuntimeError("Step 2 input budget exhausted before deployment confirmation")
 
 
 def _repl_wait_pipeline_completed(pty: Any, runtime: ScenarioRuntime) -> None:
@@ -3761,10 +3946,9 @@ def _repl_wait_normal_resume_confirmation(pty: Any, runtime: ScenarioRuntime) ->
 
 def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
     profile = runtime.spec.profile
+    if profile == "step2_parameter":
+        _question_facts(runtime)
     _repl_submit_initial_prompt(pty, runtime)
-    if profile == "step1_clarify":
-        _repl_wait_ask(pty, runtime, description="pipeline question")
-        pty.sendline(_repl_step1_clarification_answer(runtime))
     _repl_wait_selection(pty, runtime, await_controls=profile in {"natural_adjust", "reselect_progress"})
     if profile == "step1_clarify":
         _repl_submit_candidate_interrupt(
@@ -3786,36 +3970,26 @@ def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
         )
         _repl_wait_selection(pty, runtime)
     _repl_select_current(pty, next_candidate=profile in {"natural_adjust", "reselect_progress"})
-    if profile == "step2_parameter":
-        _repl_wait_ask(
-            pty,
-            runtime,
-            description="Step 2 VPC parameter question",
-            reject_confirmation=True,
-        )
-        pty.sendline(runtime.args.cleanup_vpc_id or "请从账号内已有 VPC 中自动选择测试可用项")
-        _repl_wait_ask(
-            pty,
-            runtime,
-            description="Step 2 zone parameter question",
-            reject_confirmation=True,
-        )
-        pty.sendline(runtime.args.cleanup_zone_id or "cn-hangzhou-h")
     if profile == "normal_resume":
         _repl_wait_normal_resume_confirmation(pty, runtime)
     else:
-        _repl_wait_confirmation(pty, runtime)
+        _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+    if profile == "step2_parameter":
+        fields = getattr(runtime, "answered_parameter_fields", set())
+        runtime.checks["both required parameters answered"] = {"vpc_id", "zone_id"}.issubset(fields)
+        if not runtime.checks["both required parameters answered"]:
+            raise RuntimeError("deployment confirmation appeared before both required parameters were answered")
     if profile == "natural_adjust":
         _repl_choose_direct_input(
             runtime, pty, f"把 VSwitch 网段调整为 {_repl_natural_adjusted_cidr(runtime)}，重新 Preview 和询价。"
         )
-        _repl_wait_confirmation(pty, runtime)
+        _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
         _repl_choose_direct_input(runtime, pty, "确认部署，参数覆盖保持刚才的值。")
     elif profile == "reselect_progress":
         _repl_choose_direct_input(runtime, pty, "重新选择方案")
         _repl_wait_selection(pty, runtime)
         _repl_select_current(pty, next_candidate=True)
-        _repl_wait_confirmation(pty, runtime)
+        _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
         _repl_choose_direct_input(runtime, pty, "取消")
     elif runtime.spec.cloud_write:
         # Confirm is the first option, so Enter avoids relying on natural-language parsing.
@@ -4979,6 +5153,86 @@ def _mapping_string(value: Mapping[str, Any], *keys: str) -> str:
     return ""
 
 
+def _result_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            value = json.loads(value)
+    return value if isinstance(value, dict) else {}
+
+
+def _cloud_result_observation(name: str, inputs: dict[str, Any], result: Any) -> dict[str, Any] | None:
+    if name not in {"ros_deploy", "ros_stack", "aliyun_api"}:
+        return None
+    params = inputs.get("params") if isinstance(inputs.get("params"), dict) else inputs
+    action = _mapping_string(inputs, "action", "Action")
+    if name == "aliyun_api" and (str(inputs.get("product", "")).lower() != "ros" or action != "CreateStack"):
+        return None
+    if name == "ros_stack" and action not in {"create", "CreateStack", "ContinueCreateStack"}:
+        return None
+    if name == "ros_deploy" and action in {"delete", "rollback", "cancel"}:
+        return None
+    data = _result_mapping(result)
+    stack_id = _mapping_string(data, "StackId", "stackId", "stack_id")
+    if not stack_id:
+        outputs = _result_mapping(data.get("outputs"))
+        stack_id = _mapping_string(outputs, "StackId", "stackId", "stack_id")
+    if not stack_id:
+        return None
+    return {
+        "StackId": stack_id, "Action": "CreateStack",
+        "StackName": _mapping_string(data, "StackName", "stackName", "stack_name")
+        or _mapping_string(params, "StackName", "stackName", "stack_name"),
+        "RegionId": _mapping_string(data, "RegionId", "regionId", "region_id")
+        or _mapping_string(inputs, "RegionId", "regionId", "region_id"),
+    }
+
+
+def _authoritative_stack_observations(values: list[Any]) -> Iterator[dict[str, Any]]:
+    calls: dict[str, tuple[str, dict[str, Any]]] = {}
+    for value in values:
+        for _, envelope in _pipeline_event_records([value]):
+            kind = envelope.get("eventType") or envelope.get("type")
+            data = envelope.get("data") or envelope.get("payload") or {}
+            if not isinstance(data, dict):
+                continue
+            if kind == "stack_current_changed" and data.get("isSuccess") is True:
+                yield data
+            elif kind == "resource_observed" and data.get("provider") == "ros" and data.get("resource_type") == "stack":
+                yield data
+            elif kind == "tool_result":
+                inputs = _result_mapping(data.get("input"))
+                observed = _cloud_result_observation(
+                    str(data.get("toolName") or ""), inputs, data.get("stackResult") or data.get("result")
+                )
+                if observed:
+                    yield observed
+        if not isinstance(value, dict):
+            continue
+        # Persisted assistant/user content blocks are the only other trusted operation source.
+        content = value.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    calls[str(block.get("id") or "")] = (
+                        str(block.get("name") or ""), _result_mapping(block.get("input"))
+                    )
+                elif block.get("type") == "tool_result":
+                    name, inputs = calls.get(str(block.get("tool_use_id") or ""), ("", {}))
+                    metadata = _result_mapping(block.get("metadata"))
+                    observed = _cloud_result_observation(
+                        name, inputs, metadata.get("stack_result") or block.get("content")
+                    )
+                    if observed:
+                        yield observed
+        # Old runner-owned transcript rows have a single flat tool_result object.
+        # No recursion: documentation examples nested in a result are never operations.
+        legacy = value.get("tool_result")
+        if isinstance(legacy, dict) and _mapping_string(legacy, "stack_id", "StackId", "stackId"):
+            yield legacy
+
+
 def discover_cloud_resources(runtime: ScenarioRuntime) -> list[dict[str, str]]:
     values: list[Any] = _all_event_values(runtime.paths.run_dir)
     # REPL does not write A2A ``*.events.jsonl`` files. Its authoritative tool
@@ -4992,40 +5246,36 @@ def discover_cloud_resources(runtime: ScenarioRuntime) -> list[dict[str, str]]:
             with contextlib.suppress(json.JSONDecodeError, OSError):
                 values.append(json.loads(path.read_text(encoding="utf-8")))
     resources: dict[str, dict[str, str]] = {}
-    for value in values:
-        candidates = [item for _, item in _walk(value) if isinstance(item, dict)]
-        if isinstance(value, dict):
-            candidates.append(value)
-        for item in candidates:
-            explicit_stack_id = _mapping_string(item, "stackId", "stack_id", "StackId")
-            resource_id = _mapping_string(item, "resourceId", "resource_id")
-            action = _mapping_string(item, "action", "Action", "apiName", "api_name")
-            resource_type = _mapping_string(item, "resourceType", "resource_type", "type").lower()
-            provider = _mapping_string(item, "provider", "Provider").lower()
-            is_create = action in {"CreateStack", "ContinueCreateStack"}
-            is_stack_resource = "stack" in resource_type and provider in {"", "ros", "aliyun"}
-            stack_id = explicit_stack_id or (resource_id if is_stack_resource else "")
-            if not stack_id or not re.fullmatch(r"[A-Za-z0-9_-]{6,}", stack_id):
-                continue
-            stack_name = _mapping_string(item, "stackName", "stack_name", "StackName", "resourceName", "resource_name")
-            region_id = _mapping_string(item, "regionId", "region_id", "RegionId")
-            if not is_create and not is_stack_resource and stack_name not in runtime.owned_stack_names:
-                continue
-            previous = resources.setdefault(
-                stack_id,
-                {
-                    "provider": "ros",
-                    "resourceType": "stack",
-                    "stackId": stack_id,
-                    "stackName": "",
-                    "regionId": "",
-                    "createdByCase": "true" if is_create else "false",
-                },
-            )
-            previous["stackName"] = previous["stackName"] or stack_name
-            previous["regionId"] = previous["regionId"] or region_id
-            if is_create:
-                previous["createdByCase"] = "true"
+    for item in _authoritative_stack_observations(values):
+        explicit_stack_id = _mapping_string(item, "stackId", "stack_id", "StackId")
+        resource_id = _mapping_string(item, "resourceId", "resource_id")
+        action = _mapping_string(item, "action", "Action", "apiName", "api_name")
+        resource_type = _mapping_string(item, "resourceType", "resource_type", "type").lower()
+        provider = _mapping_string(item, "provider", "Provider").lower()
+        is_create = action in {"CreateStack", "ContinueCreateStack"}
+        is_stack_resource = "stack" in resource_type and provider in {"", "ros", "aliyun"}
+        stack_id = explicit_stack_id or (resource_id if is_stack_resource else "")
+        if not stack_id or not re.fullmatch(r"[A-Za-z0-9_-]{6,}", stack_id):
+            continue
+        stack_name = _mapping_string(item, "stackName", "stack_name", "StackName", "resourceName", "resource_name")
+        region_id = _mapping_string(item, "regionId", "region_id", "RegionId")
+        if not is_create and not is_stack_resource and stack_name not in runtime.owned_stack_names:
+            continue
+        previous = resources.setdefault(
+            stack_id,
+            {
+                "provider": "ros",
+                "resourceType": "stack",
+                "stackId": stack_id,
+                "stackName": "",
+                "regionId": "",
+                "createdByCase": "true" if is_create else "false",
+            },
+        )
+        previous["stackName"] = previous["stackName"] or stack_name
+        previous["regionId"] = previous["regionId"] or region_id
+        if is_create:
+            previous["createdByCase"] = "true"
     result = [
         item
         for item in resources.values()

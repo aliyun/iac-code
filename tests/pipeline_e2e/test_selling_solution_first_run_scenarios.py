@@ -834,7 +834,8 @@ def test_rollback_recovery_restates_the_case_owned_stack_name(runner: ModuleType
 def test_walk_exposes_event_dicts_nested_directly_in_arrays(runner: ModuleType) -> None:
     event = {"batch": [{"eventType": "step_started", "step": {"id": runner.NEW_STEPS[1]}}]}
 
-    assert runner._started_steps([event]) == [(0, runner.NEW_STEPS[1])]
+    assert any(isinstance(value, dict) and value.get("eventType") == "step_started" for _, value in runner._walk(event))
+    assert runner._started_steps([event]) == []
 
 
 def test_web_state_wait_reads_hydrated_status_endpoint(runner: ModuleType) -> None:
@@ -1379,7 +1380,7 @@ def test_successful_quote_must_be_projected_as_succeeded(runner: ModuleType, tmp
     values = [
         {
             "eventType": "tool_result",
-            "data": {"toolName": "ros_estimate_template_cost", "isError": False},
+            "data": {"toolName": "ros_estimate_template_cost", "isError": False, "result": {"cost": 1}},
         },
         {
             "eventType": "input_required",
@@ -1557,7 +1558,7 @@ def test_successful_tool_result_matches_solution_first_quote_tool(runner: Module
             "envelopes": [
                 {
                     "eventType": "tool_result",
-                    "data": {"toolName": "ros_estimate_template_cost", "isError": False},
+                    "data": {"toolName": "ros_estimate_template_cost", "isError": False, "result": {"cost": 1}},
                 }
             ]
         },
@@ -2927,7 +2928,7 @@ def test_repl_post_rollback_confirmation_does_not_count_received_answers(
             "options": [{"action": "confirm"}, {"action": "reselect"}, {"action": "cancel"}],
         }},
     ]
-    runtime = argparse.Namespace(
+    runtime = argparse.Namespace(spec=argparse.Namespace(profile="rollback"),
         paths=argparse.Namespace(config_dir=tmp_path),
         args=argparse.Namespace(stream_timeout=0.01),
         checks={}, repl_confirmation_wait_count=1, repl_confirmation_action_count=0,
@@ -2975,6 +2976,7 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
 
     runtime = argparse.Namespace(
         args=argparse.Namespace(stream_timeout=9.0, cleanup_vpc_id="vpc-test"),
+        spec=argparse.Namespace(profile="rollback"),
     )
     monkeypatch.setattr(
         runner, "_read_repl_display_events", lambda _runtime: [
@@ -3003,6 +3005,11 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
         lambda _pty, _runtime, *, require_input_ready: calls.append(("confirmation", require_input_ready)),
     )
 
+    monkeypatch.setattr(runner, "_answer_runtime_question", lambda *_args, **_kw: "vpc-test")
+    monkeypatch.setattr(
+        runner, "_repl_submit_question_answer",
+        lambda _pty, _runtime, text, _pending, *, label: calls.append(("answer", text, label)),
+    )
     runner._repl_wait_confirmation_after_optional_parameter_asks(Pty(), runtime)
 
     assert calls == [
@@ -3042,6 +3049,7 @@ def test_repl_step2_wait_observes_native_question_outside_display_journal(
     assert path == meta
     assert event["payload"] == {
         "kind": "ask_user_question", "tool_use_id": "parameter-call", "allow_free_text": True,
+        "question": "Which VPC?", "options": [],
     }
     answered.add("parameter-call")
     assert runner._pending_repl_parameter_question(runtime, answered) is None
@@ -3073,6 +3081,7 @@ def test_restored_question_answer_waits_for_checkpoint_ack_before_next_question(
     sent: list[str] = []
 
     class Pty:
+        events = []
         def send(self, text, *, label):
             sent.append(label)
 
@@ -3099,7 +3108,7 @@ def test_repl_parameter_question_accepts_prompt_already_drained(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
-    pty = argparse.Namespace(transcript="● Ask user question: Which VPC?\n  > ",
+    pty = argparse.Namespace(events=[], transcript="● Ask user question: Which VPC?\n  > ",
                              drain_output=lambda: calls.append("drain"))
     monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
     runtime = argparse.Namespace(args=argparse.Namespace(stream_timeout=1))
@@ -3107,6 +3116,7 @@ def test_repl_parameter_question_accepts_prompt_already_drained(
     runner._repl_wait_ask(pty, runtime, description="parameter question", allow_captured_prompt=True)
 
     assert calls == ["drain", "drain"]
+    assert pty.events[0]["description"] == "parameter question input ready"
 
 
 def test_repl_rollback_selection_answers_durable_native_question_before_selection(
@@ -3147,6 +3157,13 @@ def test_repl_rollback_selection_answers_durable_native_question_before_selectio
     monkeypatch.setattr(runner, "_repl_submit_line_input", submit)
     monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
 
+    monkeypatch.setattr(
+        runner, "_answer_runtime_question", lambda *_args, **_kw: "reuse first existing VPC; only create SG"
+    )
+    monkeypatch.setattr(
+        runner, "_repl_submit_question_answer",
+        lambda _pty, _runtime, text, _pending, *, label: runner._repl_submit_line_input(_pty, text, label=label),
+    )
     runner._repl_wait_selection(pty, runtime, clarification_answer="reuse first existing VPC; only create SG")
 
     assert calls == ["pending question", "prompt ready", "reuse first existing VPC; only create SG", "selection"]
@@ -3179,7 +3196,7 @@ def test_repl_post_rollback_confirmation_restarts_stalled_step_once(
             raise TimeoutError("stalled")
         return event, Path("display")
 
-    runtime = argparse.Namespace(
+    runtime = argparse.Namespace(spec=argparse.Namespace(profile="rollback"),
         args=argparse.Namespace(stream_timeout=900.0, cleanup_vpc_id="vpc-test"),
         checks={"REPL display user_input_required occurrence 1 observed": False},
         diagnostics={},
@@ -3775,47 +3792,22 @@ def test_repl_step2_parameter_waits_only_after_candidate_selection(
     runner: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     calls: list[object] = []
-
-    class Pty:
-        def sendline(self, text: str) -> None:
-            calls.append(("sendline", text))
-
     runtime = argparse.Namespace(
-        spec=argparse.Namespace(profile="step2_parameter", cloud_write=False),
-        args=argparse.Namespace(cleanup_vpc_id="vpc-test", cleanup_zone_id="cn-hangzhou-i"),
+        spec=argparse.Namespace(profile="step2_parameter", cloud_write=False), checks={},
+        answered_parameter_fields={"vpc_id", "zone_id"},
     )
+    monkeypatch.setattr(runner, "_question_facts", lambda _runtime: calls.append("fixtures"))
     monkeypatch.setattr(runner, "_repl_submit_initial_prompt", lambda *_args: calls.append("initial"))
     monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_args, **_kwargs: calls.append("selection"))
-    monkeypatch.setattr(
-        runner,
-        "_repl_select_current",
-        lambda *_args, **kwargs: calls.append(("select", kwargs["next_candidate"])),
-    )
-    monkeypatch.setattr(
-        runner,
-        "_repl_wait_ask",
-        lambda *_args, **kwargs: calls.append(("ask", kwargs["description"])),
-    )
-    monkeypatch.setattr(runner, "_repl_wait_confirmation", lambda *_args: calls.append("confirmation"))
-    monkeypatch.setattr(
-        runner,
-        "_repl_choose_direct_input",
-        lambda _runtime, _pty, text: calls.append(("direct", text)),
-    )
-
-    runner._repl_basic_flow(runtime, Pty())
-
-    assert calls == [
-        "initial",
-        "selection",
-        ("select", False),
-        ("ask", "Step 2 VPC parameter question"),
-        ("sendline", "vpc-test"),
-        ("ask", "Step 2 zone parameter question"),
-        ("sendline", "cn-hangzhou-i"),
-        "confirmation",
-        ("direct", "取消本次部署，不创建任何云资源。"),
-    ]
+    monkeypatch.setattr(runner, "_repl_select_current", lambda *_args, **_kwargs: calls.append("select"))
+    monkeypatch.setattr(runner, "_repl_wait_confirmation_after_optional_parameter_asks",
+                        lambda *_args: calls.append("questions-and-confirmation"))
+    monkeypatch.setattr(runner, "_repl_choose_direct_input",
+                        lambda _runtime, _pty, text: calls.append(("direct", text)))
+    runner._repl_basic_flow(runtime, object())
+    assert calls == ["fixtures", "initial", "selection", "select", "questions-and-confirmation",
+                     ("direct", "取消本次部署，不创建任何云资源。")]
+    assert runtime.checks["both required parameters answered"] is True
 
 
 def test_step2_parameter_prompt_requires_user_answers_instead_of_api_discovery(runner: ModuleType) -> None:
@@ -3863,7 +3855,9 @@ def test_repl_replace_invalid_uses_candidate_interrupt_editor(
         "_repl_select_current",
         lambda *_args, **kwargs: calls.append(("select", kwargs["next_candidate"])),
     )
-    monkeypatch.setattr(runner, "_repl_wait_confirmation", lambda *_args: calls.append("confirmation"))
+    monkeypatch.setattr(
+        runner, "_repl_wait_confirmation_after_optional_parameter_asks", lambda *_args: calls.append("confirmation")
+    )
     monkeypatch.setattr(
         runner,
         "_repl_choose_direct_input",
@@ -4016,3 +4010,66 @@ def test_repl_initial_input_is_retried_until_history_acknowledges_it(
     assert pty.submissions == 2
     assert events[0]["type"] == "initial-input-accepted"
     assert events[0]["attempt"] == 2
+
+
+def test_fault_checkpoint_requires_validation_result_not_tool_start_or_documentation(runner):
+    predicate = runner._event_contains('validate', 'template')
+    assert not predicate({'pipeline': {'eventType': 'tool_started', 'data': {
+        'toolName': 'ros_validate_template'}}}, None)
+    assert not predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'read_file', 'result': 'validate template; CreateStack StackId input_received'}}}, None)
+    assert predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'ros_validate_template', 'isError': False, 'result': {'valid': True}}}}, None)
+    assert not predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'ros_validate_template', 'isError': True, 'result': {'valid': False}}}}, None)
+    assert not predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'ros_validate_template', 'isError': False, 'result': '{"is_success":false}'}}}, None)
+
+
+def test_create_checkpoint_requires_accepted_resource_event(runner):
+    predicate = runner._event_contains('CreateStack', 'StackId')
+    assert not predicate({'pipeline': {'eventType': 'tool_result', 'data': {
+        'toolName': 'read_file', 'result': {'Action': 'CreateStack', 'StackId': 'example-stack-id'}}}}, None)
+    assert predicate({'pipeline': {'eventType': 'stack_current_changed', 'data': {
+        'action': 'CreateStack', 'stackId': 'accepted-stack-id', 'isSuccess': True}}}, None)
+
+
+def test_resource_discovery_ignores_documentation_and_correlates_real_cloud_tool_results(runner, tmp_path):
+    runtime = SimpleNamespace(paths=SimpleNamespace(run_dir=tmp_path, config_dir=tmp_path / 'config',
+        artifacts_dir=tmp_path / 'artifacts'), owned_stack_names={'iac-e2e-owned'}, cloud_resources=[])
+    (tmp_path / 'artifacts').mkdir()
+    rows = [
+        {'pipeline': {'eventType': 'tool_result', 'data': {'toolName': 'read_file', 'result': {
+            'example': {'Action': 'CreateStack', 'StackId': 'example-stack-id'}}}}},
+        {'role': 'assistant', 'content': [{'type': 'tool_use', 'id': 'real-create', 'name': 'ros_deploy',
+            'input': {'stack_name': 'iac-e2e-owned', 'region_id': 'cn-hangzhou'}}]},
+        {'role': 'user', 'content': [{'type': 'tool_result', 'tool_use_id': 'real-create',
+            'content': json.dumps({'stack_id': 'real-stack-id', 'is_success': True})}]},
+    ]
+    (tmp_path / 'test.events.jsonl').write_text(''.join(json.dumps(x) + '\n' for x in rows))
+    resources = runner.discover_cloud_resources(runtime)
+    assert len(resources) == 1
+    assert resources[0]['stackId'] == 'real-stack-id'
+    assert resources[0]['stackName'] == 'iac-e2e-owned'
+
+
+def test_repl_parameter_completion_cannot_pass_with_only_one_answer(runner, monkeypatch):
+    runtime = SimpleNamespace(spec=SimpleNamespace(profile='step2_parameter', cloud_write=False), checks={},
+                              answered_parameter_fields={'vpc_id'})
+    for name in ('_question_facts', '_repl_submit_initial_prompt', '_repl_wait_selection',
+                 '_repl_select_current', '_repl_wait_confirmation_after_optional_parameter_asks'):
+        monkeypatch.setattr(runner, name, lambda *_args, **_kwargs: None)
+    with pytest.raises(RuntimeError, match='both required parameters'):
+        runner._repl_basic_flow(runtime, object())
+    assert runtime.checks['both required parameters answered'] is False
+
+
+def test_required_parameters_must_be_preserved_in_real_confirmation(runner, monkeypatch):
+    runtime = SimpleNamespace(checks={})
+    monkeypatch.setattr(runner, '_question_facts', lambda _: {'vpc_id': 'vpc-fixture', 'zone_id': 'cn-hangzhou-i'})
+    with pytest.raises(RuntimeError, match='preserve both'):
+        runner._verify_required_parameter_confirmation(runtime, {
+            'effective_deployment_parameters': {'VpcId': 'vpc-other', 'ZoneId': 'cn-hangzhou-i'}})
+    runner._verify_required_parameter_confirmation(runtime, {
+        'effective_deployment_parameters': {'VpcId': 'vpc-fixture', 'ZoneId': 'cn-hangzhou-i'}})
+    assert runtime.checks['both required parameter values preserved in confirmation'] is True

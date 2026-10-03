@@ -218,3 +218,25 @@ def test_assignment_is_inherited_by_every_live_adapter(tmp_path: Path, monkeypat
     assert "glm-5.2-fast-preview / low" in (tmp_path / "report/report.md").read_text(encoding="utf-8")
     assert "glm-5.2-fast-preview / low" in (tmp_path / "report/report.html").read_text(encoding="utf-8")
     assert 'name="model" value="glm-5.2-fast-preview"' in (tmp_path / "report/junit.xml").read_text(encoding="utf-8")
+
+
+def test_pinned_cases_keep_original_model_with_rolling_capacity():
+    cases = [case('a'), case('b'), case('image', multimodal=True)]
+    pins = {'a': 'glm-5.3-prime', 'b': 'deepseek-v4.1-flash', 'image': 'qwen3.8-flash'}
+    results = list(scheduled_cases(cases, 3, lambda spec, assignment: assignment.model, case_models=pins))
+    assert {spec.name: future.result() for spec, _, future in results} == pins
+
+
+def test_pinned_model_cannot_route_multimodal_case_to_text():
+    with pytest.raises(ValueError, match='matching live model pool'):
+        list(scheduled_cases([case('image', multimodal=True)], 1, lambda *_: None,
+                             case_models={'image': 'glm-5.3-prime'}))
+
+
+def test_cli_pins_only_selected_matching_cases():
+    args = run_e2e.parse_args(['--suite', 'live', '--list', '--case', 'ssf-a2a-step1-clarify',
+                              '--case-model', 'ssf-a2a-step1-clarify=glm-5.3-prime'])
+    assert args.case_models == {'ssf-a2a-step1-clarify': 'glm-5.3-prime'}
+    with pytest.raises(SystemExit):
+        run_e2e.parse_args(['--suite', 'live', '--list', '--case', 'ssf-a2a-step1-clarify',
+                           '--case-model', 'ssf-a2a-step1-clarify=qwen3.8-flash'])

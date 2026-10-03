@@ -17,6 +17,7 @@ import re
 import shlex
 import shutil
 import signal
+import sys
 import tempfile
 import time
 import uuid
@@ -26,10 +27,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-try:
-    from scripts.repl.e2e.wait_diagnosis import diagnose_wait
-except ModuleNotFoundError:  # direct `python scripts/repl/e2e/run_pipeline_scenarios.py`
-    from wait_diagnosis import diagnose_wait
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.e2e_question_driver import (  # noqa: E402
+    answer_question,
+    pending_native_question,
+    question_identity,
+    wait_native_question_ack,
+)
+from scripts.repl.e2e.wait_diagnosis import diagnose_wait  # noqa: E402
 
 try:
     import pexpect
@@ -219,6 +227,7 @@ class ScenarioRunResult:
     notes: list[str] = field(default_factory=list)
     watchdog: dict[str, Any] | None = None
     progress: dict[str, int] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -526,6 +535,8 @@ class ReplPty:
         self._live_transcript = True
 
     def sendline(self, text: str) -> None:
+        if not getattr(self, "e2e_goal", "") or "我改需求" in text:
+            self.e2e_goal = text
         transcript_offset = len(self.transcript)
         _sendline_to_child(self._require_child(), text, capture=self._capture_child_output_force)
         self.events.append(
@@ -567,6 +578,10 @@ class ReplPty:
         )
 
     def paste_image_fixture(self, image_key: str) -> Path:
+        if image_key == "rollback-interrupt":
+            self.e2e_goal = DEFAULT_ROLLBACK_PROMPT
+            if getattr(self, "scenario", ""):
+                self.e2e_goal += "。" + _stack_name_constraint(self.run_dir, self.scenario)
         path = _text_image_fixture_path(image_key)
         transcript_offset = len(self.transcript)
         child = self._require_child()
@@ -890,6 +905,7 @@ def _run_with_pty(
     )
     env = runtime_paths.apply(shared_env)
     pty = ReplPty(args=args, run_dir=run_dir, cwd=workspace_dir, env=env)
+    pty.scenario = scenario
     checks: dict[str, bool] = {}
     notes: list[str] = []
     abort_reason = ""
@@ -941,6 +957,7 @@ def _run_with_pty(
                 notes.append(f"terminal child termination failed: {type(exc).__name__}: {exc}")
                 if passed:
                     passed = False
+        checks.update(getattr(pty, "question_checks", {}))
         progress = _display_progress(runtime_paths.config_dir)
         progress.update(_transcript_tool_progress(runtime_paths.config_dir))
         ledger_path = _cleanup_ledger_path(pty)
@@ -969,6 +986,7 @@ def _run_with_pty(
             notes=notes,
             watchdog=(getattr(pty, "_wait_diagnoses", []) or [None])[-1],
             progress=progress,
+            diagnostics=getattr(pty, "question_diagnostics", {}),
         )
         _write_run_artifacts(run_dir=run_dir, env=env, raw_transcript=pty.transcript, events=pty.events, result=result)
         _print_result(result)
@@ -2625,8 +2643,57 @@ def _expect_candidate_selection(
     description: str,
     require_live_refresh: bool = False,
 ) -> None:
-    pty.expect_any(CANDIDATE_SELECTION_PATTERNS, description=description, timeout=args.stream_timeout)
-    _expect_candidate_selection_ready(pty, args, require_live_refresh=require_live_refresh)
+    for _ in range(12):
+        matched = pty.expect_any(
+            CANDIDATE_SELECTION_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS,
+            description=description, timeout=args.stream_timeout,
+        )
+        if matched in CANDIDATE_SELECTION_PATTERNS:
+            _expect_candidate_selection_ready(pty, args, require_live_refresh=require_live_refresh)
+            return
+        _answer_legacy_repl_question(pty, args)
+    raise RuntimeError("candidate selection did not follow bounded clarification answers")
+
+
+def _answer_legacy_repl_question(pty: ReplPty, args: argparse.Namespace) -> None:
+    config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+    pending = pending_native_question(config_dir)
+    if pending is None:
+        raise RuntimeError("visible question has no durable pending-input checkpoint")
+    question, path = pending
+    counts = getattr(pty, "question_counts", None)
+    if not isinstance(counts, dict):
+        counts = pty.question_counts = {}
+    diagnostics = getattr(pty, "question_diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = pty.question_diagnostics = {}
+    goal = getattr(pty, "e2e_goal", "") or args.initial_prompt
+    answer, _ = answer_question(config_dir, question, {"goal": goal}, counts, diagnostics)
+    if question.get("allowFreeText", question.get("allow_free_text", True)) is False:
+        answer = str(1 + next(i for i, option in enumerate(question["options"]) if option.get("id") == answer))
+    _expect_ask_input_ready(pty, args, description="clarification input ready")
+    pty.sendline_reliable(answer)
+    wait_native_question_ack(path, question_identity(question), pty.drain_output)
+
+
+def _expect_completed_after_optional_questions(pty: ReplPty, args: argparse.Namespace) -> None:
+    selections = 0
+    for _ in range(12):
+        matched = pty.expect_any(
+            PIPELINE_FULLY_COMPLETED_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS + CANDIDATE_SELECTION_PATTERNS,
+            description="pipeline fully completed", timeout=args.stream_timeout,
+        )
+        if matched in PIPELINE_FULLY_COMPLETED_PATTERNS:
+            return
+        if matched in CANDIDATE_SELECTION_PATTERNS:
+            selections += 1
+            if selections > 2:
+                raise RuntimeError("supplemental candidate selection budget exhausted")
+            _expect_candidate_selection_ready(pty, args)
+            _select_default_candidate(pty, args)
+        else:
+            _answer_legacy_repl_question(pty, args)
+    raise RuntimeError("pipeline did not complete after bounded supplemental questions")
 
 
 def _expect_candidate_selection_ready(
@@ -2670,8 +2737,7 @@ def _expect_candidate_selection_after_optional_asks(
         if matched in CANDIDATE_SELECTION_PATTERNS:
             _expect_candidate_selection_ready(pty, args)
             return ask_count
-        _expect_ask_input_ready(pty, args, description="cleanup clarification input ready")
-        pty.sendline("1")
+        _answer_legacy_repl_question(pty, args)
     raise RuntimeError("too many cleanup clarification questions before candidate selection")
 
 
@@ -2993,11 +3059,7 @@ def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
-            PIPELINE_FULLY_COMPLETED_PATTERNS,
-            description="pipeline fully completed",
-            timeout=args.stream_timeout,
-        )
+        _expect_completed_after_optional_questions(pty, args)
         checks["pipeline completed"] = True
         _expect_raw_input_ready(pty, args, description="normal prompt input ready")
         checks["normal prompt input ready"] = True

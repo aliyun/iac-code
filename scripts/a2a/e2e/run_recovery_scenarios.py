@@ -37,7 +37,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 E2E_SCRIPTS_DIR = Path(__file__).resolve().parent
 A2A_SCRIPTS_DIR = E2E_SCRIPTS_DIR.parent
-for scripts_dir in (E2E_SCRIPTS_DIR, A2A_SCRIPTS_DIR):
+for scripts_dir in (E2E_SCRIPTS_DIR, A2A_SCRIPTS_DIR, E2E_SCRIPTS_DIR.parents[2]):
     if str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
 
@@ -83,6 +83,7 @@ from iac_code.a2a.pipeline_paths import existing_a2a_pipeline_dir_for_session  #
 from iac_code.services.session_storage import SessionStorage  # noqa: E402
 from iac_code.utils.project_paths import get_projects_dir  # noqa: E402
 from iac_code.utils.public_paths import redact_known_public_paths  # noqa: E402
+from scripts.e2e_question_driver import answer_question  # noqa: E402
 
 ASK_TRIGGER_PROMPT = "我有个产品要上线"
 ASK_FIRST_ANSWER = "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。"
@@ -609,6 +610,8 @@ class ScenarioHarness:
         self.cleanup_status = "not-needed"
         self.cleanup_diagnostic: dict[str, Any] = {}
         self.diagnostics: dict[str, Any] = {}
+        self.question_counts: dict[str, int] = {}
+        self.current_goal = getattr(args, "initial_prompt", DEFAULT_INITIAL_PROMPT)
         self.summaries: dict[str, Any] = {}
         self.snapshots: dict[str, Any] = {}
         self.failure_stage = ""
@@ -664,6 +667,8 @@ class ScenarioHarness:
         images: list[dict[str, Any]] | None = None,
     ) -> StreamSummary:
         prompt = self._ci_owned_prompt(prompt)
+        if context_id == "" or "我改需求" in prompt or "停止旧目标" in prompt:
+            self.current_goal = prompt
         summary = stream_message(
             server_url=self.server_url,
             cwd=self.cwd,
@@ -709,6 +714,8 @@ class ScenarioHarness:
         wait_for_identity: bool = True,
     ) -> BackgroundStream:
         prompt = self._ci_owned_prompt(prompt)
+        if context_id == "" or "我改需求" in prompt or "停止旧目标" in prompt:
+            self.current_goal = prompt
         stream = BackgroundStream(
             server_url=self.server_url,
             cwd=self.cwd,
@@ -759,6 +766,8 @@ class ScenarioHarness:
         task_id: str | None = None,
         prompt: str = IMAGE_TEXT_PROMPT,
     ) -> BackgroundStream:
+        if image_key == "rollback-interrupt":
+            self.current_goal = self._ci_owned_prompt(text)
         return self.start_stream(
             prompt=prompt,
             name=name,
@@ -1153,8 +1162,11 @@ def _run_scenario1(
                 and backup_restore["backupStillPresentAfterSelection"]
             )
             _write_json(h.run_dir / "step4.backup-only-restore.json", backup_restore)
+        selection = _finish_pipeline_after_possible_input(h, selection, args)
         h.checks["selection completed pipeline"] = _pipeline_completed(selection)
         h.checks["selection produced normal handoff"] = selection.normal_handoff_ready
+        if not h.checks["selection completed pipeline"] or not h.checks["selection produced normal handoff"]:
+            raise RuntimeError("pipeline did not complete with normal handoff before follow-up")
         h.snapshots["after_pipeline"] = h.fetch_state("after-pipeline")
         _add_completed_snapshot_checks(
             h.checks,
@@ -1782,9 +1794,16 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
         snapshot = h.fetch_state("after-restart")
         h.checks["state endpoint returned snapshot after image interrupt restart"] = _snapshot(snapshot) is not None
         resumed = h.stream(prompt=CONTINUE_PROMPT, name="03-continue-after-restart")
+        h.current_goal = h._ci_owned_prompt(ROLLBACK_PROMPT)
         _finish_pipeline_after_possible_input(h, resumed, args, input_prompt=ROLLBACK_PROMPT)
         h.checks["pipeline completed after image interrupt recovery"] = _completed_snapshot_or_stream(h, resumed)
         final_state = h.fetch_state("after-image-interrupt-completion")
+        h.diagnostics["final_target_security_group"] = _has_any_marker(
+            _final_deployment_evidence(final_state), SECURITY_GROUP_MARKERS
+        )
+        h.diagnostics["final_target_vswitch"] = _has_any_marker(
+            _final_deployment_evidence(final_state), VSWITCH_MARKERS
+        )
         final_deploying = _final_deployment_evidence(final_state)
         h.checks["final deploying target is security group"] = _has_any_marker(
             final_deploying,
@@ -2246,11 +2265,19 @@ def _finish_pipeline_after_possible_input(
     args: argparse.Namespace,
     *,
     input_prompt: str = CONTINUE_PROMPT,
-) -> None:
+) -> StreamSummary:
     current = summary
-    for idx in range(1, 5):
+    for idx in range(1, 13):
         if _pipeline_completed(current):
-            return
+            return current
+        if current.last_status_state in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
+            return current
+        kind = _latest_pending_kind(h.run_dir / f"{current.name}.events.jsonl")
+        if _reached_input_required(current) and kind == "ask_user_question":
+            goal = getattr(h, "current_goal", "") or input_prompt
+            response = _answer_pending_legacy_question(h, current, goal)
+            current = h.stream(prompt=response, name=f"answer-after-resume-{idx}")
+            continue
         if current.last_input_required_step_id == "confirm_and_select":
             current = h.stream(prompt=args.selection_prompt, name=f"select-after-resume-{idx}")
             continue
@@ -2258,10 +2285,10 @@ def _finish_pipeline_after_possible_input(
             current = h.stream(prompt=input_prompt, name=f"continue-after-input-{idx}")
             continue
         if current.last_status_state in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
-            return
+            return current
         snapshot = h.fetch_state(f"post-resume-{idx}")
         if _snapshot_value(snapshot, "status") == "completed":
-            return
+            return current
         if (
             _snapshot_value(snapshot, "status") == "waiting_input"
             and _pending_step_id(snapshot) == "confirm_and_select"
@@ -2269,6 +2296,7 @@ def _finish_pipeline_after_possible_input(
             current = h.stream(prompt=args.selection_prompt, name=f"select-from-snapshot-{idx}")
             continue
         current = h.stream(prompt=input_prompt, name=f"continue-loop-{idx}")
+    raise RuntimeError("pipeline remained pending after bounded supplemental inputs")
 
 
 def _apply_event(summary: StreamSummary, payload: Any) -> None:
@@ -2431,8 +2459,16 @@ def _wait_for_with_intervening_ask_inputs(
                 h.notes.append(
                     f"answered intervening input_required({input_name}) while waiting for {description}: {stream.name}"
                 )
+                goal = (
+                    answer_prompt if answer_prompt != INTERVENING_ASK_ANSWER
+                    else getattr(h, "current_goal", "") or answer_prompt
+                )
+                response = (
+                    _answer_pending_legacy_question(h, stream.summary, goal)
+                    if kind == "ask_user_question" else answer_prompt
+                )
                 answer = h.start_stream(
-                    prompt=answer_prompt,
+                    prompt=response,
                     name=f"{name_prefix}-answer-{input_name}-{answered_count}",
                 )
                 active_streams.append(answer)
@@ -2467,6 +2503,38 @@ def _wait_or_note(
         h.notes.append(f"did not observe {description}: {exc}")
 
 
+def _latest_pending_input(path: Path) -> dict[str, Any]:
+    pending: dict[str, Any] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return pending
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        for envelope in _extract_pipeline_envelopes(row):
+            if envelope.get("eventType") == "input_required":
+                pending = {**(envelope.get("data") or {}), **(envelope.get("input") or {})}
+    return pending
+
+
+def _answer_pending_legacy_question(h: ScenarioHarness, summary: StreamSummary, goal: str) -> str:
+    pending = _latest_pending_input(h.run_dir / f"{summary.name}.events.jsonl")
+    if not pending.get("question"):
+        raise RuntimeError("pending clarification has no question text")
+    counts = getattr(h, "question_counts", None)
+    if not isinstance(counts, dict):
+        counts = h.question_counts = {}
+    diagnostics = getattr(h, "diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = h.diagnostics = {}
+    config_dir = Path(h.server_env["IAC_CODE_CONFIG_DIR"])
+    response, _ = answer_question(config_dir, pending, {"goal": goal}, counts, diagnostics)
+    return response
+
+
 def _answer_intervening_ask_inputs(
     h: ScenarioHarness,
     summary: StreamSummary,
@@ -2484,7 +2552,13 @@ def _answer_intervening_ask_inputs(
         if kind != "ask_user_question":
             return current
         h.notes.append(f"answered intervening ask_user_question before step4 selection: {current.name}")
-        current = h.stream(prompt=answer_prompt, name=f"{name_prefix}-answer-ask-{idx}")
+        goal = (
+            answer_prompt if answer_prompt != INTERVENING_ASK_ANSWER
+            else getattr(h, "current_goal", "")
+            or getattr(getattr(h, "args", None), "initial_prompt", answer_prompt)
+        )
+        response = _answer_pending_legacy_question(h, current, goal)
+        current = h.stream(prompt=response, name=f"{name_prefix}-answer-ask-{idx}")
     return current
 
 

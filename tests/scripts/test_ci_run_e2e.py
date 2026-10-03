@@ -826,3 +826,17 @@ def test_legacy_a2a_hard_timeout_starts_independent_cleanup(
     assert result["status"] == "timeout"
     assert result["cleanupStatus"] == "completed"
     assert (tmp_path / "report" / "runs" / case.name / "cleanup-called").read_text(encoding="utf-8") == "yes"
+
+
+def test_local_failure_facts_expose_only_fixed_types_and_repo_locations(tmp_path):
+    runner = run_e2e
+    (tmp_path / 'server-1.log').write_text(
+        'Traceback (most recent call last):\n'
+        '  File "/private/worker/src/iac_code/providers/example.py", line 123, in request\n'
+        'ValueError: sk-real-secret-token /private/user/home response-body\n'
+    )
+    evidence = runner._local_failure_facts(tmp_path)
+    assert evidence['local_error_types'] == ['ValueError']
+    assert evidence['local_error_sites'] == ['src/iac_code/providers/example.py:123']
+    assert 'sk-real' not in json.dumps(evidence)
+    assert '/private' not in json.dumps(evidence)

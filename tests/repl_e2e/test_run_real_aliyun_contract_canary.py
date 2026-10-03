@@ -94,3 +94,15 @@ def test_real_canary_child_env_removes_deterministic_fixtures(monkeypatch, tmp_p
     assert env["IAC_CODE_MODEL"] == "deepseek-v4-flash-0731"
     assert env["OTEL_EXPORTER_OTLP_ENDPOINT"] == "fixture"
     assert not any(key.startswith("IAC_CODE_E2E_") for key in env)
+
+
+def test_canary_deduplicates_persisted_invocation_but_not_separate_calls(tmp_path):
+    path = tmp_path / 'session.jsonl'
+    block = {'type': 'tool_use', 'id': 'call-1', 'name': 'aliyun_api', 'input': {
+        'product': 'vpc', 'version': '2016-04-28', 'action': 'DescribeVpcs', 'params': {'PageSize': 10}}}
+    rows = [{'content': [block]}, {'content': [block]}]
+    path.write_text(''.join(json.dumps(x) + '\n' for x in rows))
+    assert len(_aliyun_tool_uses(path)) == 1
+    rows.append({'content': [{**block, 'id': 'call-2'}]})
+    path.write_text(''.join(json.dumps(x) + '\n' for x in rows))
+    assert len(_aliyun_tool_uses(path)) == 2
