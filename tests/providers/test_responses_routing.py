@@ -3,7 +3,7 @@ from dataclasses import replace
 import pytest
 
 from iac_code.providers.anthropic_provider import AnthropicProvider
-from iac_code.providers.manager import create_provider
+from iac_code.providers.manager import _telemetry_provider_name, create_provider
 from iac_code.providers.openai_provider import OpenAIProvider
 from iac_code.providers.qwen_provider import QwenProvider
 from iac_code.providers.registry import PROVIDER_REGISTRY, ModelEntry
@@ -44,14 +44,67 @@ def test_invalid_model_api_mode_rejected(mode):
     "key,model",
     [
         ("anthropic", "claude-opus-5"),
-        ("openai_compatible", "custom"),
-        ("dashscope_token_plan", "qwen3.8-max"),
-        ("dashscope", "qwen3-coder-plus"),
+        ("anthropic_compatible", "custom"),
+        ("minimax_cn", "MiniMax-M3"),
     ],
 )
-def test_unsupported_responses_provider_or_model_fails(key, model):
-    with pytest.raises(ValueError):
+def test_non_openai_transports_reject_responses(key, model):
+    with pytest.raises(ValueError, match="OpenAI-style provider"):
         create(key, model, {"models": {model: {"apiMode": "responses"}}})
+
+
+@pytest.mark.parametrize(
+    "key,base,expected,telemetry_name",
+    [
+        ("azure_openai", "https://resource.openai.azure.com/openai/v1/", ResponsesProvider, "azureopenai"),
+        ("openai_compatible", "http://127.0.0.1:8765/custom/v1", ResponsesProvider, "openai"),
+        ("openai", "https://proxy.example.test/v1", ResponsesProvider, "openai"),
+        ("deepseek", None, ResponsesProvider, "deepseek"),
+        ("openrouter", None, ResponsesProvider, "openrouter"),
+        ("ollama", None, ResponsesProvider, "ollama"),
+        ("lmstudio", None, ResponsesProvider, "lmstudio"),
+        ("dashscope", None, DashScopeResponsesProvider, "dashscope"),
+        ("dashscope_token_plan", None, DashScopeResponsesProvider, "dashscope"),
+        ("aliyun_codingplan", None, DashScopeResponsesProvider, "dashscope"),
+        ("aliyun_codingplan_intl", None, DashScopeResponsesProvider, "dashscope"),
+        (
+            "openai_compatible",
+            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            DashScopeResponsesProvider,
+            "dashscope",
+        ),
+    ],
+)
+def test_openai_transports_can_explicitly_select_responses_for_new_models(key, base, expected, telemetry_name):
+    model = "future-model"
+    cfg = {"models": {model: {"apiMode": "responses"}}}
+    if base is not None:
+        cfg["apiBase"] = base
+    assert not isinstance(create(key, model, {"apiBase": base} if base else {}), ResponsesProvider)
+    p = create(key, model, cfg)
+    assert type(p) is expected
+    assert p._logical_provider_key == key
+    assert p._responses_identity["profile"] == expected.responses_profile
+    assert p._responses_identity["provider"] == p._PROVIDER_KEY
+    assert _telemetry_provider_name(p) == telemetry_name
+    assert type(create(key, "other-model", cfg)) is not expected
+
+
+def test_responses_reuses_openrouter_client_headers():
+    p = create("openrouter", "future-model", {"models": {"future-model": {"apiMode": "responses"}}})
+    assert p._client.default_headers["HTTP-Referer"] == "https://github.com/aliyun/iac-code"
+    assert p._client.default_headers["X-Title"] == "iac-code"
+
+
+@pytest.mark.parametrize("key,default_key", [("ollama", "ollama"), ("lmstudio", "lm-studio")])
+def test_responses_reuses_local_provider_default_api_key(key, default_key):
+    p = create_provider(
+        "local-model",
+        {},
+        provider_key_override=key,
+        provider_config_override={"models": {"local-model": {"apiMode": "responses"}}},
+    )
+    assert p._client.api_key == default_key
 
 
 @pytest.mark.parametrize(

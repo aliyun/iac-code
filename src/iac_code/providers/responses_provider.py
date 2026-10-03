@@ -1,4 +1,4 @@
-"""Opt-in OpenAI and DashScope Responses providers."""
+"""Opt-in Responses providers for OpenAI-style transports."""
 
 from __future__ import annotations
 
@@ -24,84 +24,16 @@ from iac_code.providers.thinking import get_thinking_spec, normalize_effort
 from iac_code.providers.thinking_intent import ResolvedThinkingIntent
 from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, StreamEvent
 
-# Models documented in Bailian's Responses API reference, 2026-10-03.
-DASHSCOPE_RESPONSES_MODELS = frozenset(
-    {
-        "qwen3.8-max",
-        "qwen3.8-max-0902",
-        "qwen3.8-flash",
-        "qwen3.8-2.4t-a95b",
-        "qwen3.8-27b",
-        "qwen3.8-omni-flash",
-        "qwen3.7-max",
-        "qwen3.7-max-2026-05-20",
-        "qwen3.7-max-2026-06-08",
-        "qwen3.7-max-2026-05-17",
-        "qwen3.7-max-preview",
-        "qwen3-max",
-        "qwen3-max-2026-01-23",
-        "qwen3.7-plus",
-        "qwen3.7-plus-2026-05-26",
-        "qwen3.6-plus",
-        "qwen3.6-plus-2026-04-02",
-        "qwen3.5-plus",
-        "qwen3.5-plus-2026-04-20",
-        "qwen3.5-plus-2026-02-15",
-        "qwen3.7-flash",
-        "qwen3.7-flash-2026-07-15",
-        "qwen3.6-flash",
-        "qwen3.6-flash-2026-04-16",
-        "qwen3.5-flash",
-        "qwen3.5-flash-2026-02-23",
-        "qwen3.6-35b-a3b",
-        "qwen3.5-397b-a17b",
-        "qwen3.5-122b-a10b",
-        "qwen3.5-27b",
-        "qwen3.5-35b-a3b",
-    }
-)
-_DASHSCOPE_REGIONS = {
-    "cn-beijing",
-    "ap-southeast-1",
-    "us-east-1",
-    "eu-central-1",
-    "ap-northeast-1",
-    "cn-hongkong",
-}
 
-
-def validate_responses_endpoint(provider_key: str, base_url: str | None, model: str) -> None:
-    if provider_key not in {"openai", "dashscope"}:
-        raise ResponsesConfigurationError(
-            "Responses API is supported only for OpenAI and standard DashScope in this release."
-        )
-    if provider_key == "dashscope" and model not in DASHSCOPE_RESPONSES_MODELS:
-        raise ResponsesConfigurationError("This DashScope model is not registered for Responses API.")
+def validate_responses_endpoint(base_url: str | None) -> None:
+    """Validate URL syntax without restricting providers, hosts, ports, or models."""
     try:
         endpoint = urlsplit(base_url or "https://api.openai.com/v1")
-        port = endpoint.port
+        endpoint.port
     except ValueError as error:
-        raise ResponsesConfigurationError("Responses API requires a supported HTTPS base URL.") from error
-    if endpoint.scheme != "https" or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment:
-        raise ResponsesConfigurationError("Responses API requires a supported HTTPS base URL.")
-    if port not in {None, 443}:
-        raise ResponsesConfigurationError("Responses API requires a supported HTTPS base URL.")
-    host = endpoint.hostname or ""
-    if provider_key == "openai":
-        supported = host == "api.openai.com" and endpoint.path.rstrip("/") == "/v1"
-    else:
-        workspace = host.split(".")
-        supported = (
-            host in {"dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com"}
-            or (
-                len(workspace) == 5
-                and workspace[0] not in {"token-plan", "coding", "coding-intl"}
-                and workspace[1] in _DASHSCOPE_REGIONS
-                and workspace[2:] == ["maas", "aliyuncs", "com"]
-            )
-        ) and endpoint.path.rstrip("/") == "/compatible-mode/v1"
-    if not supported:
-        raise ResponsesConfigurationError("This base URL is not registered for Responses API.")
+        raise ResponsesConfigurationError("Responses API requires a valid HTTP or HTTPS base URL.") from error
+    if endpoint.scheme not in {"http", "https"} or not endpoint.hostname:
+        raise ResponsesConfigurationError("Responses API requires a valid HTTP or HTTPS base URL.")
 
 
 class ResponsesProvider(OpenAIProvider):
@@ -109,15 +41,14 @@ class ResponsesProvider(OpenAIProvider):
 
     api_mode = "responses"
     input_window_ratio = 1.0
+    responses_profile = "openai"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         actual_base_url = getattr(self._client, "base_url", None)
-        validate_responses_endpoint(
-            self._PROVIDER_KEY, str(actual_base_url) if actual_base_url else self._base_url, self._model
-        )
+        validate_responses_endpoint(str(actual_base_url) if actual_base_url else self._base_url)
         self._responses_identity = {
-            "profile": self._PROVIDER_KEY,
+            "profile": self.responses_profile,
             "provider": self._PROVIDER_KEY,
             "model": self._model,
             "endpoint": self._metadata_endpoint_id,
@@ -160,11 +91,11 @@ class ResponsesProvider(OpenAIProvider):
         if system:
             kwargs["instructions"] = system
         if tools:
-            kwargs["tools"] = encode_tools(tools, strict=self._PROVIDER_KEY == "openai")
+            kwargs["tools"] = encode_tools(tools, strict=self.responses_profile == "openai")
         effort = self._responses_effort()
         if effort is not None:
             kwargs["reasoning"] = {"effort": effort}
-        if self._PROVIDER_KEY == "openai":
+        if self.responses_profile == "openai":
             kwargs["include"] = ["reasoning.encrypted_content"]
         headers = get_provider_request_headers()
         if headers:
@@ -232,6 +163,7 @@ class ResponsesProvider(OpenAIProvider):
 class DashScopeResponsesProvider(ResponsesProvider):
     # Bailian silently truncates at about 80%; leave additional local headroom.
     input_window_ratio = 0.75
+    responses_profile = "dashscope"
 
     def __init__(self, *args: Any, thinking_intent: ResolvedThinkingIntent | None = None, **kwargs: Any) -> None:
         self._thinking_intent = thinking_intent

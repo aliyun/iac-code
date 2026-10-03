@@ -571,15 +571,25 @@ def create_provider(
         if wire_desc is not None:
             provider_class_path = wire_desc.provider_class
     provider_cls = _import_provider_class(provider_class_path)
+    from iac_code.providers.openai_provider import OpenAIProvider
+
+    responses_cls = None
+    uses_dashscope_responses = False
     if api_mode == "responses":
+        from iac_code.providers.responses_codec import ResponsesConfigurationError
         from iac_code.providers.responses_provider import (
             DashScopeResponsesProvider,
             ResponsesProvider,
             validate_responses_endpoint,
         )
 
-        validate_responses_endpoint(provider_key, effective_base_url, model)
-        provider_cls = DashScopeResponsesProvider if provider_key == "dashscope" else ResponsesProvider
+        if not issubclass(provider_cls, OpenAIProvider):
+            raise ResponsesConfigurationError("Responses API requires an OpenAI-style provider.")
+        validate_responses_endpoint(effective_base_url)
+        uses_dashscope_responses = (
+            wire_provider_key in DASHSCOPE_WIRE_PROVIDER_KEYS or is_bailian_compatible_endpoint(effective_base_url)
+        )
+        responses_cls = DashScopeResponsesProvider if uses_dashscope_responses else ResponsesProvider
     elif _should_use_qwen_provider(provider_cls, model):
         from iac_code.providers.qwen_provider import QwenProvider
 
@@ -587,8 +597,6 @@ def create_provider(
     request_policy_kwargs: dict[str, Any] = {}
     if thinking_enabled is not None:
         request_policy_kwargs["thinking_enabled"] = thinking_enabled
-    from iac_code.providers.openai_provider import OpenAIProvider
-
     if issubclass(provider_cls, OpenAIProvider):
         if thinking_budget is not None:
             request_policy_kwargs["thinking_budget"] = thinking_budget
@@ -596,7 +604,7 @@ def create_provider(
             request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
         from iac_code.providers.qwen_provider import QwenProvider
 
-        if issubclass(provider_cls, QwenProvider) or (api_mode == "responses" and provider_key == "dashscope"):
+        if issubclass(provider_cls, QwenProvider) or uses_dashscope_responses:
             request_policy_kwargs["thinking_intent"] = thinking_intent
     else:
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -605,14 +613,19 @@ def create_provider(
             request_policy_kwargs["thinking_budget"] = thinking_budget
         if max_completion_tokens is not None and issubclass(provider_cls, AnthropicProvider):
             request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
-    provider = provider_cls(
-        model=model,
-        api_key=api_key or None,
-        base_url=effective_base_url,
-        effort=effort,
-        provider_key=wire_provider_key,
+    provider_kwargs: dict[str, Any] = {
+        "model": model,
+        "api_key": api_key or None,
+        "base_url": effective_base_url,
+        "effort": effort,
+        "provider_key": wire_provider_key,
         **request_policy_kwargs,
-    )
+    }
+    provider = provider_cls(**provider_kwargs)
+    if responses_cls is not None:
+        # Preserve provider-specific client setup, including local keys and headers.
+        provider = responses_cls(client=provider._client, **provider_kwargs)
+        setattr(provider, "_responses_transport_name", provider_class_path.rsplit(".", 1)[-1])
     setattr(provider, "_logical_provider_key", provider_key)
     endpoint_url = _provider_endpoint_url(provider) or effective_base_url
     setattr(provider, "_session_endpoint_origin", sanitize_endpoint_origin(endpoint_url))
@@ -845,6 +858,9 @@ def _telemetry_provider_name(provider: Any) -> str:
         return "dashscope"
     if _is_bailian_compatible_endpoint(_provider_endpoint_url(provider)):
         return "dashscope"
+    transport_name = _string_provider_attr(provider, "_responses_transport_name")
+    if transport_name is not None:
+        return transport_name.replace("Provider", "").lower()
     if wire_provider_key == "openai" and getattr(provider, "api_mode", None) == "responses":
         return "openai"
     return type(provider).__name__.replace("Provider", "").lower()

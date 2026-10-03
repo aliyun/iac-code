@@ -233,21 +233,29 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
 一次模型更新要分别核验默认协议、显式切换协议后的可用性，以及思考模式与工具调用的组合：
 
 - `registry.py` 的 `ModelEntry.api_mode` 是未配置时的默认协议，默认值为 `chat_completions`。
-  当前 OpenAI 的 `gpt-6-astra/sol/luna` 声明为 `responses`；其他模型保持原默认协议。
+  根据已核验的模型能力声明 `responses`；网站说明默认选择规则，不重复列出模型名单。
 - 用户可在 `settings.yml` 的 `providers.<key>.models.<model_id>.apiMode` 设置
   `chat_completions` 或 `responses`。默认协议不等于另一个协议也支持该模型的全部能力。
 - `ModelEntry.chat_completions_tool_efforts` 声明 Chat 工具调用允许的实际 `reasoning_effort`：
   `None` 表示不添加此项限制，空元组 `()` 表示不允许 Chat 工具调用，`("none",)` 表示仅在关闭
-  reasoning 时允许。当前 Astra 使用 `()`，Sol/Luna 使用 `("none",)`；该声明按 provider 和精确
+  reasoning 时允许。该声明按 provider 和精确
   model ID 生效，不应自动复制到 Azure、兼容端点或其他 provider。
 - `openai_provider.py` 读取上述声明，并用归一化后的 effort 校验工具请求；无工具的 Chat 请求不受
   此限制。新增或替换模型时更新声明，不要在 adapter 中再添加模型 ID 集合、代际前缀或模型名分支。
   `thinking.py` 中的允许值和默认 effort 也必须同步，否则省略 effort 时会按错误默认值校验。
-- 当前 Responses 路径仅开放官方 OpenAI 和标准 DashScope 已核验端点。
-  [`responses_provider.py`](../src/iac_code/providers/responses_provider.py) 中的
-  `DASHSCOPE_RESPONSES_MODELS` 与 `validate_responses_endpoint()` 分别维护百炼支持的精确模型 ID 和
-  endpoint 范围；新增 Qwen 模型要独立核验 Responses 文档，不能因为 Chat 目录存在就自动加入。
-  标准百炼模型仍默认使用 Chat，只有用户显式配置才切换；Token Plan/Coding Plan 不自动继承支持。
+- 使用 OpenAI 协议的 provider 可通过模型级配置显式选择 Responses。新增模型应核验服务端能力，
+  不在 adapter 中添加 provider、端点或模型白名单。`validate_responses_endpoint()` 仅检查 HTTP(S)
+  URL 格式，允许自定义网关、本地端口和新增模型；配置不会替服务端补充协议能力，也不自动降级到 Chat。
+  Anthropic/Messages 适配器不能借此切换。
+- Responses 路由复用原 provider 的 SDK 客户端初始化，保留厂商请求头、本地默认凭据和有效端点。
+  `ResponsesProvider.responses_profile` 与 `DashScopeResponsesProvider.responses_profile`
+  区分通用 OpenAI 和百炼请求规则，不以 provider key 代替 wire profile。Token Plan 和识别出的
+  百炼兼容端点使用百炼 profile；原生历史仍按 provider、模型、端点隔离。
+- 标准百炼和 Token Plan 仍默认使用 Chat，只有用户显式配置才切换。
+  [Azure OpenAI](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle) 使用
+  `/openai/v1/` 基础地址和部署名称；[百炼 Token Plan](https://help.aliyun.com/zh/model-studio/codex)
+  的模型支持范围应按套餐独立核验。[阿里云 Coding Plan](https://help.aliyun.com/zh/model-studio/coding-plan-faq)
+  明确不支持 Responses；其他编程套餐需分别核验端点、模型和请求格式，不能直接继承此结论。
 - Responses 的 effort、输出限制、工具 schema 和输入窗口规则由 `responses_provider.py` 组装。
   更新时核对 `_responses_effort()`、`max_output_tokens` 和 DashScope 输入窗口比例，不能直接复制
   Chat 的 `enable_thinking`、`thinking_budget` 或 `max_completion_tokens` 请求字段。
@@ -459,7 +467,7 @@ git diff HEAD -- iac-code-rs
 - 产品版本名、控制台显示名和实际 API model ID 没有混为一谈。
 - 同名模型在不同 provider 下的思考协议没有被错误复用。
 - 新模型的默认 `api_mode`、显式协议切换和 `chat_completions_tool_efforts` 已独立核验；adapter 中没有
-  新增模型名单判断。新增百炼 Responses 模型已同步其支持列表，未外推到套餐或未核验端点。
+  新增模型名单判断。新增百炼 Responses 模型已核验其服务端能力，未外推到套餐或未核验端点。
 - effort 的 UI 标准值、wire alias、默认值和关闭语义已经分别验证。
 - 新模型已加入遥测白名单和必要的降级链。
 - 终端与 Web 的 model/effort 选择器均已验证，新增标签在所有 locale 中有正确翻译。

@@ -13653,3 +13653,11 @@ msgstr "Responses 流已结束，但没有最终响应。"
 #: src/iac_code/providers/responses_provider.py
 msgid "DashScope Responses max_output_tokens must be at least 16."
 msgstr "DashScope Responses 的 max_output_tokens 必须至少为 16。"
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses API requires a valid HTTP or HTTPS base URL."
+msgstr "Responses API 要求使用有效的 HTTP 或 HTTPS 基础地址。"
+
+#: src/iac_code/providers/manager.py
+msgid "Responses API requires an OpenAI-style provider."
+msgstr "Responses API 要求提供商使用 OpenAI 风格协议。"

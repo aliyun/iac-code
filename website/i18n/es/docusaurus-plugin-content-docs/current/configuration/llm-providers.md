@@ -79,24 +79,26 @@ CLI arguments > environment variables > configuration files
 
 ## Responses API
 
-Los proveedores que usan el protocolo de OpenAI utilizan Chat Completions de forma predeterminada. Los modelos OpenAI registrados `gpt-6-astra`, `gpt-6-sol` y `gpt-6-luna` utilizan Responses API de forma predeterminada. Los proveedores Anthropic conservan su protocolo Messages actual.
+Los proveedores que usan el protocolo de OpenAI utilizan Chat Completions de forma predeterminada. El protocolo integrado de un modelo puede ser Responses si sus llamadas a herramientas lo requieren. Los protocolos predeterminados y las restricciones de herramientas de Chat se mantienen en el catálogo integrado de modelos; no se incluye aquí una lista separada. Los proveedores Anthropic conservan su protocolo Messages actual.
 
-Actualmente, Responses está disponible para el endpoint oficial de OpenAI y los endpoints y modelos verificados de DashScope estándar, como `qwen3.8-max`. Azure OpenAI, `openai_compatible`, DashScope Token Plan y los proveedores CodingPlan no admiten este cambio.
+Los proveedores que utilizan el protocolo OpenAI pueden seleccionar Responses de forma explícita para cada modelo, incluidos Azure OpenAI, `openai_compatible` y DashScope Token Plan. Configure `apiBase` con la URL base de un servicio que admita Responses. Para Azure OpenAI, utilice la URL base con `/openai/v1/` y establezca `model` en el nombre del despliegue.
 
-Para usar Responses con un modelo Qwen, añada esta configuración a nivel de modelo en `settings.yml`:
+[Azure OpenAI](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle) y [DashScope Token Plan](https://help.aliyun.com/en/model-studio/codex) documentan la compatibilidad con Responses para determinados endpoints y modelos. En los endpoints compatibles personalizados y los planes de programación, la compatibilidad depende del servicio. [Alibaba Cloud Coding Plan](https://help.aliyun.com/en/model-studio/coding-plan-faq) indica expresamente que no admite Responses. Si se selecciona Responses para un servicio o modelo que no lo admite, la solicitud devuelve un error; IaC Code no cambia automáticamente a Chat.
+
+Para usar Responses con un modelo Qwen compatible, añada esta configuración a nivel de modelo en `settings.yml` y sustituya `<model-id>` por el ID real del modelo:
 
 ```yaml
 activeProvider: dashscope
 providers:
   dashscope:
-    model: qwen3.8-max
+    model: <model-id>
     models:
-      qwen3.8-max:
+      <model-id>:
         apiMode: responses
 ```
 
 Cambie `apiMode` a `chat_completions` para volver al protocolo anterior. Si lo omite, se utiliza el protocolo predeterminado del modelo; para los modelos de DashScope estándar sigue siendo Chat Completions. La configuración solo se aplica al modelo indicado dentro del proveedor indicado.
 
-Si selecciona Chat explícitamente para GPT-6, Astra no puede llamar a herramientas; Sol y Luna solo pueden hacerlo con `effort: none`. Use Responses para llamadas a herramientas con razonamiento habilitado.
+Si selecciona Chat de forma explícita, el modelo debe admitir llamadas a herramientas con el nivel de razonamiento elegido. Utilice Responses cuando la API Chat del modelo no admita esa combinación.
 
 Consulte la [configuración de ejecución](./runtime-configuration.md) para conocer los parámetros de solicitud y los límites de salida.

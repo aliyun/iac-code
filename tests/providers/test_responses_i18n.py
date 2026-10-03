@@ -108,5 +108,5 @@ async def test_responses_a2a_errors_use_the_callers_language(compiled_catalogs, 
 )
 def test_malformed_responses_urls_have_a_localizable_configuration_error(base_url):
     with pytest.raises(ResponsesConfigurationError) as raised:
-        validate_responses_endpoint("openai", base_url, "gpt-6-sol")
-    assert raised.value.i18n_message_id == "Responses API requires a supported HTTPS base URL."
+        validate_responses_endpoint(base_url)
+    assert raised.value.i18n_message_id == "Responses API requires a valid HTTP or HTTPS base URL."

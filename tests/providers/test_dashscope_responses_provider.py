@@ -143,21 +143,47 @@ def test_qwen_responses_input_window_does_not_change_chat_window():
         "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
         "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
         "https://workspace.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+        "https://coding.dashscope.aliyuncs.com/v1",
+        "https://custom.test/v1",
+        "http://127.0.0.1:8765/v1",
     ],
 )
-def test_documented_endpoints_are_accepted(base):
-    validate_responses_endpoint("dashscope", base, "qwen3.8-max")
+def test_custom_and_plan_endpoints_are_not_blocked_locally(base):
+    validate_responses_endpoint(base)
 
 
 @pytest.mark.parametrize(
     "base",
     [
-        "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
-        "https://coding.dashscope.aliyuncs.com/v1",
-        "https://custom.test/v1",
-        BASE + "/chat/completions",
+        "not-a-url",
+        "ftp://custom.test/v1",
+        "https:///v1",
+        "http://127.0.0.1:invalid/v1",
     ],
 )
-def test_other_endpoints_are_not_enabled(base):
+def test_invalid_endpoint_syntax_is_rejected(base):
     with pytest.raises(ValueError):
-        validate_responses_endpoint("dashscope", base, "qwen3.8-max")
+        validate_responses_endpoint(base)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["dashscope_token_plan", "openai_compatible"])
+async def test_bailian_profile_keeps_adjacent_results_and_omits_openai_extensions(key):
+    client = FakeResponsesClient(response(), base_url=BASE)
+    p = provider(client, provider_key=key)
+    await p.complete(
+        [
+            Message.assistant_tool_use(tool_use_id="call1", name="lookup", input={}),
+            Message.assistant_tool_use(tool_use_id="call2", name="lookup", input={}),
+            Message.tool_result(tool_use_id="call2", content="two"),
+            Message.tool_result(tool_use_id="call1", content="one"),
+        ],
+        "system",
+        TOOLS,
+    )
+    kwargs = client.calls[0]
+    assert [item["call_id"] for item in kwargs["input"]] == ["call1", "call1", "call2", "call2"]
+    assert "include" not in kwargs and "strict" not in kwargs["tools"][0]
+    assert p._responses_identity["profile"] == "dashscope"
+    assert p._responses_identity["provider"] == key

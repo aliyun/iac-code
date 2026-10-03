@@ -15141,3 +15141,11 @@ msgstr "Der Responses-Stream wurde ohne abschließende Antwort beendet."
 #: src/iac_code/providers/responses_provider.py
 msgid "DashScope Responses max_output_tokens must be at least 16."
 msgstr "max_output_tokens für DashScope Responses muss mindestens 16 betragen."
+
+#: src/iac_code/providers/responses_provider.py
+msgid "Responses API requires a valid HTTP or HTTPS base URL."
+msgstr "Die Responses API benötigt eine gültige HTTP- oder HTTPS-Basis-URL."
+
+#: src/iac_code/providers/manager.py
+msgid "Responses API requires an OpenAI-style provider."
+msgstr "Die Responses API benötigt einen Anbieter mit OpenAI-Protokoll."

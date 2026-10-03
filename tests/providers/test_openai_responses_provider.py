@@ -1,11 +1,14 @@
 import asyncio
 import copy
+import json
 
 import httpx
 import pytest
 from openai import AsyncOpenAI, BadRequestError
 
+import iac_code.providers.openai_provider as openai_provider
 from iac_code.providers.base import ContentBlock, Message, ToolDefinition
+from iac_code.providers.manager import create_provider
 from iac_code.providers.request_headers import use_provider_request_headers
 from iac_code.providers.responses_codec import (
     ResponsesContextLimitError,
@@ -76,6 +79,117 @@ async def test_real_sdk_posts_responses_with_extension_fields_offline():
     assert requests[0].url.path == "/v1/responses"
     assert result.provider_metadata["responses"]["output"][1]["phase"] == "final_answer"
     assert result.provider_metadata["responses"]["output"][0]["encrypted_content"] == "opaque-fixture"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+@pytest.mark.parametrize(
+    "key,model,base,path,profile",
+    [
+        ("azure_openai", "my-deployment", "https://resource.openai.azure.com/openai/v1", "/openai/v1", "openai"),
+        ("openai_compatible", "custom-model", "http://localhost:8765/custom/v1", "/custom/v1", "openai"),
+        ("openai", "custom-model", "https://proxy.example.test/v1", "/v1", "openai"),
+        (
+            "dashscope_token_plan",
+            "qwen3.8-max",
+            "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "/compatible-mode/v1",
+            "dashscope",
+        ),
+        (
+            "openai_compatible",
+            "qwen3.8-max",
+            "https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+            "/compatible-mode/v1",
+            "dashscope",
+        ),
+    ],
+)
+async def test_configured_transports_use_real_sdk_for_two_tool_turns_offline(
+    monkeypatch, streaming, key, model, base, path, profile
+):
+    requests = []
+    first = response([reasoning(encrypted_content="opaque-fixture" if profile == "openai" else None), call()])
+    if profile == "dashscope":
+        del first["output"][0]["encrypted_content"]
+    second = response()
+
+    def handle(request):
+        requests.append(request)
+        data = first if len(requests) == 1 else second
+        if not streaming:
+            return httpx.Response(200, json=data)
+        events = tool_events([call()]) if len(requests) == 1 else []
+        for event in events:
+            event["output_index"] += 1
+        events.append(terminal(data))
+        body = "".join("data: " + json.dumps(event) + "\n\n" for event in events)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        monkeypatch.setattr(
+            openai_provider, "AsyncOpenAI", lambda **kwargs: AsyncOpenAI(http_client=http_client, **kwargs)
+        )
+        p = create_provider(
+            model,
+            {key: "fake"},
+            provider_key_override=key,
+            provider_config_override={"apiBase": base, "models": {model: {"apiMode": "responses"}}},
+        )
+        messages = [Message.user("go")]
+        if streaming:
+            events = [event async for event in p.stream(messages, "system", TOOLS)]
+            assert [event.input for event in events if isinstance(event, ToolUseEndEvent)] == [{"value": 1}]
+            result = events[-1]
+        else:
+            result = await p.complete(messages, "system", TOOLS)
+            assert result.tool_uses[0]["input"] == {"value": 1}
+        history = [
+            *messages,
+            Message(role="assistant", metadata=result.provider_metadata),
+            Message.tool_result(tool_use_id="call1", content="found"),
+        ]
+        if streaming:
+            result = [event async for event in p.stream(history, "system", TOOLS)][-1]
+        else:
+            result = await p.complete(history, "system", TOOLS)
+        assert result.stop_reason == "end_turn"
+        await p._client.close()
+    assert len(requests) == 2 and all(request.url.path == path + "/responses" for request in requests)
+    assert all(request.headers["authorization"] == "Bearer fake" for request in requests)
+    kwargs = json.loads(requests[1].content)
+    assert kwargs["model"] == model and kwargs["store"] is False
+    assert kwargs["input"][1 : 1 + len(first["output"])] == first["output"]
+    assert kwargs["input"][-1]["call_id"] == "call1"
+    if profile == "openai":
+        assert kwargs["include"] == ["reasoning.encrypted_content"]
+        assert kwargs["tools"][0]["strict"] is False
+    else:
+        assert "include" not in kwargs and "strict" not in kwargs["tools"][0]
+
+
+@pytest.mark.asyncio
+async def test_unsupported_service_returns_error_without_chat_downgrade(monkeypatch):
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(400, json={"error": {"message": "Responses is not supported", "code": "unsupported_api"}})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        monkeypatch.setattr(
+            openai_provider, "AsyncOpenAI", lambda **kwargs: AsyncOpenAI(http_client=http_client, **kwargs)
+        )
+        p = create_provider(
+            "custom-model",
+            {"aliyun_codingplan": "fake"},
+            provider_key_override="aliyun_codingplan",
+            provider_config_override={"models": {"custom-model": {"apiMode": "responses"}}},
+        )
+        with pytest.raises(BadRequestError):
+            await p.complete([Message.user("go")], "system")
+        await p._client.close()
+    assert len(requests) == 1 and requests[0].url.path == "/v1/responses"
 
 
 @pytest.mark.asyncio
@@ -322,6 +436,9 @@ async def test_stream_context_limit_uses_local_compaction_error(event):
             pass
 
 
-def test_actual_sdk_endpoint_cannot_bypass_profile_validation():
+def test_actual_sdk_endpoint_is_used_for_validation_and_history_scope():
     with pytest.raises(ValueError, match="base URL"):
-        provider(FakeResponsesClient(base_url="https://custom.invalid/v1"))
+        provider(FakeResponsesClient(base_url="ftp://custom.invalid/v1"))
+    p = provider(FakeResponsesClient(base_url="http://localhost:8765/v1"))
+    assert p._responses_identity["endpoint"] == p._endpoint_id("http://localhost:8765/v1")
+    assert p._responses_identity["endpoint"] != p._endpoint_id("https://api.openai.com/v1")

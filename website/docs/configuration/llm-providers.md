@@ -79,24 +79,26 @@ CLI arguments > environment variables > configuration files
 
 ## Responses API
 
-OpenAI-style providers use Chat Completions by default. The registered OpenAI models `gpt-6-astra`, `gpt-6-sol`, and `gpt-6-luna` default to Responses API. Anthropic providers continue to use their existing Messages protocol.
+OpenAI-style providers use Chat Completions by default. A model's built-in protocol default may select Responses when needed for its tool-calling capabilities. Model defaults and Chat tool restrictions are maintained in the built-in model catalog; they are not listed separately here. Anthropic providers continue to use their existing Messages protocol.
 
-Responses is currently available for official OpenAI and verified standard DashScope endpoints and models, such as `qwen3.8-max`. Azure OpenAI, `openai_compatible`, DashScope Token Plan, and CodingPlan providers do not support this switch.
+Providers that use the OpenAI protocol can explicitly select Responses for individual models, including Azure OpenAI, `openai_compatible`, and DashScope Token Plan. Configure `apiBase` with a base URL whose service supports Responses. For Azure OpenAI, use the `/openai/v1/` base URL and set `model` to the deployment name.
 
-To opt a Qwen model into Responses, add this model-level setting to `settings.yml`:
+[Azure OpenAI](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle) and [DashScope Token Plan](https://help.aliyun.com/en/model-studio/codex) document Responses support for applicable endpoints and models. Custom compatible endpoints and coding plans depend on their service capabilities. [Alibaba Cloud Coding Plan](https://help.aliyun.com/en/model-studio/coding-plan-faq) explicitly does not support Responses. Selecting Responses for an unsupported service or model returns an error; IaC Code does not automatically downgrade to Chat.
+
+To opt a supported Qwen model into Responses, add this model-level setting to `settings.yml`, replacing `<model-id>` with the actual model ID:
 
 ```yaml
 activeProvider: dashscope
 providers:
   dashscope:
-    model: qwen3.8-max
+    model: <model-id>
     models:
-      qwen3.8-max:
+      <model-id>:
         apiMode: responses
 ```
 
 Set `apiMode` to `chat_completions` to switch back. Omitting it restores the model's built-in protocol default; for standard DashScope models, that default remains Chat Completions. The setting applies only to the named model under the named provider.
 
-If you explicitly choose Chat for GPT-6, Astra cannot make tool calls; Sol and Luna can make tool calls only with `effort: none`. Use Responses for tool calls with reasoning enabled.
+If you explicitly select Chat, the model must support tool calls with the selected reasoning effort. Use Responses when the model's Chat API does not support that combination.
 
 See [runtime configuration](./runtime-configuration.md) for request settings and output limits.

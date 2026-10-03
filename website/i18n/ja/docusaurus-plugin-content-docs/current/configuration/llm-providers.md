@@ -79,24 +79,26 @@ CLI 引数 > 環境変数 > 設定ファイル
 
 ## Responses API
 
-OpenAI 形式のプロトコルを使うプロバイダーは、デフォルトで Chat Completions を使用します。登録済みの OpenAI モデル `gpt-6-astra`、`gpt-6-sol`、`gpt-6-luna` は、デフォルトで Responses API を使用します。Anthropic プロバイダーは従来の Messages プロトコルを引き続き使用します。
+OpenAI 形式のプロトコルを使うプロバイダーは、デフォルトで Chat Completions を使用します。ツール呼び出しの仕様に応じて、モデルのデフォルトプロトコルが Responses に設定されている場合があります。各モデルのデフォルトプロトコルと Chat のツール呼び出し制限は、組み込みのモデルカタログで一元管理し、ここでは別のモデル一覧を掲載しません。Anthropic プロバイダーは従来の Messages プロトコルを引き続き使用します。
 
-現在 Responses を利用できるのは、OpenAI 公式エンドポイントと、検証済みの標準 DashScope エンドポイントおよびモデル（`qwen3.8-max` など）です。Azure OpenAI、`openai_compatible`、DashScope Token Plan、CodingPlan プロバイダーは、この切り替えに対応していません。
+OpenAI プロトコルを使用するプロバイダーでは、モデルごとに Responses を明示的に選択できます。Azure OpenAI、`openai_compatible`、DashScope Token Plan も対象です。`apiBase` には Responses に対応するサービスのベース URL を設定します。Azure OpenAI では `/openai/v1/` を含むベース URL を使い、`model` にデプロイ名を指定します。
 
-Qwen モデルで Responses を使うには、`settings.yml` に次のモデル単位の設定を追加します。
+[Azure OpenAI](https://learn.microsoft.com/en-us/azure/foundry/openai/api-version-lifecycle) と [DashScope Token Plan](https://help.aliyun.com/en/model-studio/codex) は、対応するエンドポイントとモデルでの Responses の利用方法を公開しています。カスタムの互換エンドポイントやコーディングプランの対応状況は、サービスによって異なります。[Alibaba Cloud Coding Plan](https://help.aliyun.com/en/model-studio/coding-plan-faq) は Responses に対応していないと明記しています。未対応のサービスやモデルで Responses を選択すると、リクエストはエラーになります。IaC Code は自動で Chat に切り替えません。
+
+対応する Qwen モデルで Responses を使うには、`settings.yml` に次のモデル単位の設定を追加し、`<model-id>` を実際のモデル ID に置き換えます。
 
 ```yaml
 activeProvider: dashscope
 providers:
   dashscope:
-    model: qwen3.8-max
+    model: <model-id>
     models:
-      qwen3.8-max:
+      <model-id>:
         apiMode: responses
 ```
 
 元に戻すには、`apiMode` を `chat_completions` に変更します。省略すると、モデルに組み込まれたデフォルトのプロトコルが使われます。標準 DashScope モデルのデフォルトは引き続き Chat Completions です。この設定は、指定したプロバイダーの指定したモデルにのみ適用されます。
 
-GPT-6 で明示的に Chat を選択した場合、Astra はツールを呼び出せません。Sol と Luna は `effort: none` の場合のみツールを呼び出せます。推論を有効にしたツール呼び出しには Responses を使用してください。
+Chat を明示的に選ぶ場合、モデルは指定した推論レベルでのツール呼び出しに対応している必要があります。モデルの Chat API がその組み合わせに対応していなければ、Responses を使用してください。
 
 リクエスト設定と出力上限は[実行時の設定](./runtime-configuration.md)を参照してください。
