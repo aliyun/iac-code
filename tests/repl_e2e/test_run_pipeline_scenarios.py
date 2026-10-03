@@ -3894,8 +3894,10 @@ def test_candidate_controls_already_drained_require_real_unsubmitted_display_bou
     args = runner.parse_args(['--allow-real-cloud'])
     assert runner._durable_candidate_boundary(pty) in runner.CANDIDATE_SELECTION_PATTERNS
     runner._expect_candidate_selection_ready(pty, args)
-    journal.write_text(journal.read_text() + json.dumps({'type': 'candidate_selection_submitted'}) + '\n',
-                       encoding='utf-8')
+    journal.write_text(
+        journal.read_text(encoding='utf-8') + json.dumps({'type': 'candidate_selection_submitted'}) + '\n',
+        encoding='utf-8',
+    )
     assert runner._durable_candidate_boundary(pty) is None
     with pytest.raises(AssertionError, match='controls already consumed'):
         runner._expect_candidate_selection_ready(pty, args)

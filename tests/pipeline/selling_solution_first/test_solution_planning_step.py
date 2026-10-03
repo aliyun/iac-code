@@ -15,6 +15,8 @@ from unittest.mock import MagicMock
 import pytest
 import yaml
 
+from iac_code.agent.message import Message
+from iac_code.pipeline.engine.complete_step_tool import CompletionValidationError
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
 from iac_code.pipeline.engine.types import StepResult, StepStatus
@@ -211,6 +213,64 @@ async def _run_to_selection_wait(runner) -> list:
     finally:
         await stream.aclose()
     raise AssertionError("pipeline never waited for candidate selection")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("index", [0, 1])
+async def test_accepted_candidate_selection_survives_restart_before_result_consumption(tmp_path, monkeypatch, index):
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_E2E_USER_ID", "iac_user_e2e_" + "0" * 32)
+    runner, _executor = _build_runner(tmp_path, _pipeline_dir(), [_awaiting()])
+    await _run_to_selection_wait(runner)
+    attempt = runner._current_parent_attempt(STEP_ID)
+    assert attempt is not None and runner._transcript_storage is not None
+    runner._transcript_storage.append(str(tmp_path), attempt["transcript_id"],
+        Message(role="assistant", content="Candidate plans have been displayed; awaiting the user's choice."),
+    )
+    choice = encode_selected_candidate(CANDIDATES[index]["name"], index)
+    selected = _selected(index=index, name=CANDIDATES[index]["name"], candidate=CANDIDATES[index])
+    result = StepResult(step_id=STEP_ID, status=StepStatus.COMPLETED, conclusion=selected)
+    runner._step_executor.finalize_completion_input_from_transcript = MagicMock(return_value=result)
+    stream = runner.resume(choice)
+    try:
+        async for event in stream:
+            if isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_RECEIVED:
+                break
+        else:
+            raise AssertionError("choice was never durably accepted")
+    finally:
+        await stream.aclose()
+
+    restored, executor = _build_runner(
+        tmp_path, _pipeline_dir(), [{"status": "cancelled", "continue_pipeline": False}],
+    )
+    checkpoint = restored.restore_from_sidecar_sync()
+    assert checkpoint.ok and checkpoint.status == "running"
+    finalize = MagicMock(return_value=result)
+    restored._step_executor.finalize_completion_input_from_transcript = finalize
+    events = await _drain(restored._continue_from_current(resume_running_step=True))
+
+    finalize.assert_called_once()
+    assert finalize.call_args.kwargs["user_message"] == choice
+    assert finalize.call_args.kwargs["tool_input"] == {
+        "conclusion": {"status": "selected", "selected_candidate_index": index},
+    }
+    assert executor.calls[0]["resolved_step_result"].conclusion == selected
+    assert restored.context.get_conclusion("solution_selection")["selected_candidate_index"] == index
+    assert not [event for event in _input_required(events) if event.step_id == STEP_ID]
+
+
+@pytest.mark.parametrize("input_matches", [False, True])
+def test_restored_selection_requires_saved_input_and_original_completion_validation(tmp_path, input_matches):
+    runner, _executor = _build_runner(tmp_path, _pipeline_dir(), [])
+    choice = encode_selected_candidate(CANDIDATES[1]["name"], 1)
+    conclusion = _awaiting()
+    conclusion["user_input"] = choice if input_matches else "different user input"
+    runner.context.set_conclusion("solution_selection", conclusion)
+    finalize = MagicMock(return_value=CompletionValidationError("original guard rejected selection", phase="guard"))
+    runner._step_executor.finalize_completion_input_from_transcript = finalize
+
+    assert runner._resolve_restored_candidate_selection(runner.state_machine.current_step, choice, None) is None
+    assert finalize.call_count == int(input_matches)
 
 
 @pytest.fixture

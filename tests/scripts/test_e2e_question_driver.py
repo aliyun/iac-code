@@ -441,7 +441,7 @@ def test_network_failure_diagnostic_keeps_only_known_codes_not_private_stderr(tm
         returncode=1, stdout='private cloud data', stderr='EntityNotExist.Stack private credential'))
     with pytest.raises(RuntimeError) as error:
         driver.network_facts('python', {'IAC_CODE_CONFIG_DIR': str(tmp_path)}, tmp_path, '10.0.1.0/24')
-    value = json.loads((tmp_path / driver.NETWORK_DIAGNOSTIC_FILENAME).read_text())
+    value = json.loads((tmp_path / driver.NETWORK_DIAGNOSTIC_FILENAME).read_text(encoding='utf-8'))
     assert value == {'network_fixture_failure_category': 'stack_disappeared', 'network_fixture_exit_code': 1,
                      'network_fixture_known_codes': ['EntityNotExist.Stack']}
     assert 'private' not in json.dumps(value) and 'credential' not in str(error.value)
