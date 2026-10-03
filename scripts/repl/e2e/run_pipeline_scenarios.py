@@ -923,6 +923,21 @@ def _run_with_pty(
     try:
         if args.source_config_dir:
             _copy_runtime_config(Path(args.source_config_dir), runtime_paths.config_dir)
+        if scenario in STACK_CREATING_SCENARIOS:
+            # Always-on instructions survive phase transitions that summarize the
+            # initial prompt. Only this run's isolated configuration is written.
+            instruction_name = "IAC-CODE-E2E.md"
+            stack_name = _scenario_stack_name(run_dir, scenario)
+            runtime_paths.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            (runtime_paths.config_dir / instruction_name).write_text(
+                "# E2E resource identity\n"
+                f"本次 ROS StackName 必须等于 `{stack_name}` 或以 `{stack_name}-` 开头。"
+                "这是跨阶段必须保留的测试身份。\n"
+                "不得生成其它名称、复用已有 Stack，或删除本次测试之外的资源。\n",
+                encoding="utf-8",
+            )
+            env["IAC_CODE_INSTRUCTION_MEMORY_FILE"] = instruction_name
+            _write_json(run_dir / "owned-stack-names.json", [stack_name])
         pty.spawn()
         callback(pty, checks)
         _apply_acceptance_checks(scenario, args, pty, checks)
@@ -2090,13 +2105,25 @@ def _apply_stack_creating_acceptance_checks(scenario: str, pty: Any, checks: dic
     stack_ids = _observed_create_stack_ids(pty)
     run_dir = Path(getattr(pty, "run_dir", ""))
     stack_names = _observed_create_stack_names(pty)
+    ros_states = _ros_stack_states_for_acceptance(pty, stack_ids, "acceptance-before-teardown") if stack_ids else {}
+    missing_names = [stack_id for stack_id in stack_ids if not _observed_cleanup_stack_name(pty, stack_id)]
+    # A missing ledger label can be resolved only from GetStack for the actually
+    # observed ID. A nonempty conflicting label is never replaced.
+    stack_names.extend(str(ros_states.get(stack_id, {}).get("stack_name") or "") for stack_id in missing_names)
+    diagnostics = getattr(pty, "question_diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = pty.question_diagnostics = {}
+    diagnostics["cleanup_missing_name_count"] = len(missing_names)
+    diagnostics["cleanup_unexpected_name_count"] = sum(
+        not _is_scenario_stack_name(run_dir, scenario, str(ros_states.get(stack_id, {}).get("stack_name") or ""))
+        and not _ros_stack_deleted(ros_states.get(stack_id, {})) for stack_id in stack_ids
+    )
     _add_acceptance_check(checks, "ROS stack observed in cleanup ledger", bool(stack_ids))
     _add_acceptance_check(
         checks,
         "ROS stack name is test-owned",
         bool(stack_ids) and any(_is_scenario_stack_name(run_dir, scenario, stack_name) for stack_name in stack_names),
     )
-    ros_states = _ros_stack_states_for_acceptance(pty, stack_ids, "acceptance-before-teardown") if stack_ids else {}
     _add_acceptance_check(
         checks,
         "ROS created stack retained before teardown",
@@ -2199,16 +2226,17 @@ def _teardown_real_cloud_scenario_resources(
         if not stack_id:
             continue
         expected_stack_name = _string_from_mapping(resource, "resource_name", "resourceName", "stack_name", "stackName")
+        state = _fresh_ros_stack_state(pty, stack_id)
+        if _ros_stack_deleted(state):
+            continue
+        if not expected_stack_name:
+            expected_stack_name = str(state.get("stack_name") or "")
         if not _is_scenario_stack_name(run_dir, scenario, expected_stack_name):
             deletion_failures.append(
                 f"{stack_id} has unexpected test-owned stack name {expected_stack_name or '<unknown>'}; "
                 f"expected {expected_scenario_stack_name} or a generated suffix"
             )
             continue
-        state = _fresh_ros_stack_state(pty, stack_id)
-        if _ros_stack_deleted(state):
-            continue
-
         actual_stack_name = str(state.get("stack_name") or "")
         if not expected_stack_name:
             deletion_failures.append(f"{stack_id} has no observed stack name in cleanup ledger")

@@ -3717,3 +3717,20 @@ def test_native_completion_wait_requires_successful_handoff(tmp_path):
     assert runner._durable_completion_boundary(pty) is None
     meta.write_text('status: completed\nnormal_handoff: {status: succeeded}\n')
     assert runner._durable_completion_boundary(pty) == runner.PIPELINE_FULLY_COMPLETED_PATTERNS[0]
+
+
+@pytest.mark.parametrize('owned', [True, False])
+def test_missing_ledger_label_requires_exact_cloud_name_before_cleanup(monkeypatch, tmp_path, owned):
+    runner = _load_runner()
+    args = runner.parse_args(['--allow-real-cloud', '--run-dir', str(tmp_path)])
+    expected_name = runner._scenario_stack_name(tmp_path, 'scenario1')
+    pty = SimpleNamespace(run_dir=tmp_path, env={}, cleanup_ledger={'observed_resources': [
+        {'provider': 'ros', 'resource_type': 'stack', 'resource_id': 'observed-created-stack',
+         'observed_action': 'CreateStack', 'resource_name': ''}]})
+    deleted = _install_observed_stack_teardown_fakes(monkeypatch, runner,
+        stack_name=expected_name if owned else 'unrelated-stack')
+    checks, notes = {}, []
+    runner._teardown_real_cloud_scenario_resources(args=args, scenario='scenario1', pty=pty,
+                                                 checks=checks, notes=notes)
+    assert deleted == (['observed-created-stack'] if owned else [])
+    assert checks['teardown: observed ROS stacks deleted'] is owned

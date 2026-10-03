@@ -509,6 +509,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "repl_supplemental_reselections",
             "canary_aliyun_call_count", "canary_allowed_call_count", "canary_wrong_action_count",
             "canary_wrong_params_count",
+            "cleanup_missing_name_count", "cleanup_unexpected_name_count",
             "confirmation_event_count", "unstructured_confirmation_count", "image_confirmation_count",
             "ros_deploy_event_count", "public_tool_event_count",
             "public_journal_aliyun_count", "persisted_aliyun_public_tool_event_count",
