@@ -56,7 +56,7 @@ class HandoffPrepareRequest(HandoffDocument):
     cwd: str = Field(min_length=1)
     internal_session_id: str = Field(min_length=1)
     context_id: str = Field(min_length=1)
-    task_id: str = Field(min_length=1)
+    task_id: str | None = Field(default=None, min_length=1)
     protocol: Literal["a2a", "agui"]
     mode: Literal["normal", "pipeline"]
     source: PhysicalExecutionIdentity
@@ -71,12 +71,29 @@ class HandoffPrepareRequest(HandoffDocument):
     @model_validator(mode="after")
     def validate_protocol_identity(self):
         validate_protocol_id(self.context_id)
-        validate_protocol_id(self.task_id)
+        if self.task_id is not None:
+            validate_protocol_id(self.task_id)
+        elif self.protocol != "agui":
+            raise ValueError("A2A handoff requires its actual task identity")
+        identity = self.agui_identity or {}
+        if self.protocol == "agui" and not all(
+            isinstance(identity.get(name), str) and identity[name]
+            for name in ("threadId", "executionId", "rosInvocationId")
+        ):
+            raise ValueError("AG-UI handoff requires its original execution identities")
         validate_protocol_id(self.internal_session_id)
         return self
 
+    def matches_receipt(self, receipt: MigrationReceipt) -> bool:
+        return all(
+            getattr(receipt, name) == getattr(self, name)
+            or (name == "task_id" and self.protocol == "agui" and self.task_id is None)
+            for name in HandoffPrepareRequest.model_fields
+        )
+
 
 class MigrationReceipt(HandoffPrepareRequest):
+    task_id: str = Field(min_length=1)
     version: Literal["session-handoff-v1"] = HANDOFF_VERSION
     commit_id: str = Field(min_length=1)
     manifest_digest: str = Field(pattern="^[0-9a-f]{64}$")
@@ -206,6 +223,11 @@ class SessionHandoffService:
         keys = self._keys(request)
         if self.fence.owner("context:" + request.context_id) != request.source.model_dump(mode="json", by_alias=True):
             return HandoffResult(status="NOT_READY", reason="source_physical_owner_proof_missing")
+        if request.protocol == "agui":
+            resolved = self._resolve_agui_task(request)
+            if isinstance(resolved, HandoffResult):
+                return resolved
+            request = resolved
         assert self.shared_root is not None
         destination = self._migration_dir(self.shared_root, request)
         if (destination / "commit.json").exists():
@@ -265,6 +287,22 @@ class SessionHandoffService:
         )
         return HandoffResult(status="PREPARED", receipt=receipt)
 
+    def _resolve_agui_task(self, request: HandoffPrepareRequest) -> HandoffPrepareRequest | HandoffResult:
+        state = self.agui_store.load_thread((request.agui_identity or {})["threadId"])
+        if not isinstance(state, dict):
+            return HandoffResult(status="NOT_READY", reason="agui_execution_proof_missing")
+        execution = state.get("execution")
+        if not isinstance(execution, dict):
+            return HandoffResult(status="NOT_READY", reason="agui_execution_proof_missing")
+        task_id = execution.get("taskId") or execution.get("lastTaskId")
+        if not isinstance(task_id, str) or not task_id:
+            return HandoffResult(status="NOT_READY", reason="agui_actual_task_proof_missing")
+        validate_protocol_id(task_id)
+        resolved = request.model_copy(update={"task_id": task_id})
+        if (request.task_id is not None and request.task_id != task_id) or not self._agui_matches(resolved, state):
+            return HandoffResult(status="CONFLICT", reason="agui_execution_binding_changed")
+        return resolved
+
     @staticmethod
     def _agui_matches(request: HandoffPrepareRequest, state: dict[str, Any] | None) -> bool:
         identity = request.agui_identity or {}
@@ -283,6 +321,8 @@ class SessionHandoffService:
         )
 
     def _roots(self, request: HandoffPrepareRequest) -> dict[str, Path]:
+        if request.task_id is None:
+            raise ValueError("Handoff checkpoint requires its resolved task identity")
         assert self.persistence_root is not None
         roots = {
             "session": self.storage.session_dir(request.cwd, request.internal_session_id),
@@ -444,6 +484,12 @@ class SessionHandoffService:
             return HandoffResult(status="UNSUPPORTED", reason="handoff_storage_not_configured")
         request = discovery.request
         assert self.shared_root is not None
+        destination = self._migration_dir(self.shared_root, request)
+        if discovery.checkpoint is None and (destination / "commit.json").is_file():
+            existing = (await asyncio.to_thread(self._read_committed, destination))[1]
+            if not existing.source_checkpoint_commit_id or not request.matches_receipt(existing):
+                return HandoffResult(status="CONFLICT", reason="migration_identity_changed")
+            return HandoffResult(status="PREPARED", receipt=existing)
         mutable_fields = {
             "migration_id",
             "epoch",
@@ -471,6 +517,7 @@ class SessionHandoffService:
                 getattr(receipt, field) != getattr(request, field)
                 for field in HandoffPrepareRequest.model_fields
                 if field not in mutable_fields
+                and not (field == "task_id" and request.protocol == "agui" and request.task_id is None)
             ):
                 continue
             candidates.append((manifest, receipt, directory))
@@ -479,6 +526,8 @@ class SessionHandoffService:
         manifest, checkpoint, directory = max(
             candidates, key=lambda item: (item[1].business_revision, item[1].backup_generation)
         )
+        if request.protocol == "agui" and request.task_id is None:
+            request = request.model_copy(update={"task_id": checkpoint.task_id})
         if request.epoch <= checkpoint.epoch or request.migration_id == checkpoint.migration_id:
             return HandoffResult(status="CONFLICT", reason="migration_epoch_must_follow_checkpoint")
         receipt = await asyncio.to_thread(self._adopt_checkpoint, request, manifest, checkpoint, directory)

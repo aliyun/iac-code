@@ -57,7 +57,11 @@ def test_runtime_fence_never_reauthorizes_source_after_quiesce(monkeypatch, tmp_
 
 
 @pytest.mark.asyncio
-async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_agui_checkpoint(monkeypatch, tmp_path):
+@pytest.mark.parametrize("requested_task_id", [None, "task-1"])
+@pytest.mark.parametrize("terminal", [False, True])
+async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_agui_checkpoint(
+    monkeypatch, tmp_path, requested_task_id, terminal
+):
     from iac_code.a2a.handoff import (
         HandoffAuthorizeRequest,
         HandoffPrepareRequest,
@@ -109,7 +113,10 @@ async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_ag
     )
     persistence.save_task(
         A2ATaskSnapshot(
-            task_id="task-1", context_id="ctx-1", state="input-required", expected_permission_backup_generation=7
+            task_id="task-1",
+            context_id="ctx-1",
+            state="completed" if terminal else "input-required",
+            expected_permission_backup_generation=7,
         )
     )
     snapshot = {
@@ -117,9 +124,9 @@ async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_ag
         "taskId": "task-1",
         "executionId": "exec-a2a-1",
         "revision": 9,
-        "inputHandoffReady": True,
+        "inputHandoffReady": not terminal,
         "externalOperations": [],
-        "releaseReady": False,
+        "releaseReady": terminal,
     }
     atomic_write_json(source_config / "a2a" / "execution-control" / "ctx-1.json", snapshot)
     state = {
@@ -130,7 +137,8 @@ async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_ag
         "cwd": str(cwd),
         "userId": "user-1",
         "execution": {
-            "taskId": "task-1",
+            "taskId": None if terminal else "task-1",
+            "lastTaskId": "task-1" if terminal else None,
             "executionId": "exec-agui-1",
             "rosInvocationId": "invocation-1",
             "pending": {"input-1": {"deadline": 1900000000}},
@@ -140,7 +148,9 @@ async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_ag
     }
     source_agui = FileAguiThreadStateStore(source_config / "agui")
     source_agui.save_thread("thread-1", state)
-    task = SimpleNamespace(context_id="ctx-1", state="input-required", expected_permission_backup_generation=7)
+    task = SimpleNamespace(
+        context_id="ctx-1", state="completed" if terminal else "input-required", expected_permission_backup_generation=7
+    )
     context = SimpleNamespace(session_id="internal-1", cwd=str(cwd))
 
     class Store:
@@ -169,7 +179,7 @@ async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_ag
         cwd=str(cwd),
         internal_session_id="internal-1",
         context_id="ctx-1",
-        task_id="task-1",
+        task_id=requested_task_id,
         protocol="agui",
         mode="pipeline",
         source=PhysicalExecutionIdentity(
@@ -183,13 +193,32 @@ async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_ag
         agui_identity={"threadId": "thread-1", "executionId": "exec-agui-1", "rosInvocationId": "invocation-1"},
     )
     service.fence.bind_owner("context:ctx-1", request.source.model_dump(mode="json", by_alias=True))
+    for field in ("executionId", "rosInvocationId", "threadId"):
+        foreign = request.model_copy(update={"agui_identity": {**request.agui_identity, field: "foreign"}})
+        rejected = await service.prepare_handoff(foreign)
+        assert rejected.status in {"CONFLICT", "NOT_READY"}
+    assert (await service.prepare_handoff(request.model_copy(update={"user_id": "foreign"}))).status == "CONFLICT"
+    task.context_id = "foreign-context"
+    assert (await service.prepare_handoff(request)).status == "CONFLICT"
+    task.context_id = "ctx-1"
+    assert service.fence.epoch("context:ctx-1") == 0
     prepared = await service.prepare_handoff(request)
     assert prepared.status == "PREPARED"
+    assert prepared.receipt.task_id == "task-1"
+    assert (await service.prepare_handoff(request)).receipt == prepared.receipt
+    changed = {**state, "execution": {**state["execution"], "taskId": "different-actual-task"}}
+    atomic_write_json(source_agui.path_for_thread("thread-1"), changed)
+    assert (await service.prepare_handoff(request)).status == "CONFLICT"
+    atomic_write_json(source_agui.path_for_thread("thread-1"), state)
     assert prepared.receipt.permission_generation == 7
-    assert prepared.receipt.recovery_kind == "input_required"
+    assert prepared.receipt.recovery_kind == ("terminal" if terminal else "input_required")
     rebound_request = request.model_copy(update={"migration_id": "migration-2", "epoch": 3})
     from iac_code.a2a.handoff import HandoffDiscoverRequest
 
+    if terminal:
+        discovered = await service.discover_completed_session(HandoffDiscoverRequest(request=rebound_request))
+        assert discovered.status == "PREPARED"
+        assert discovered.receipt.task_id == "task-1"
     rebound = await service.discover_completed_session(
         HandoffDiscoverRequest(request=rebound_request, checkpoint=prepared.receipt)
     )
@@ -197,6 +226,13 @@ async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_ag
     assert rebound.receipt.migration_id == "migration-2"
     assert rebound.receipt.source_checkpoint_commit_id == prepared.receipt.commit_id
     assert rebound.receipt.business_revision == prepared.receipt.business_revision
+    if terminal:
+        discovered = await service.discover_completed_session(HandoffDiscoverRequest(request=rebound_request))
+        assert discovered.receipt == rebound.receipt
+        foreign = rebound_request.model_copy(
+            update={"agui_identity": {**request.agui_identity, "executionId": "foreign"}}
+        )
+        assert (await service.discover_completed_session(HandoffDiscoverRequest(request=foreign))).status == "CONFLICT"
     with pytest.raises(HandoffFrozenError):
         persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="working"))
     with pytest.raises(Exception):
@@ -238,7 +274,7 @@ async def test_input_wait_handoff_restores_only_after_authorization_and_keeps_ag
         )
     )
     assert ack.status == "NOT_READY"
-    assert ack.reason == "agui_input_delivery_required"
+    assert ack.reason == ("guidance_execution_already_terminal" if terminal else "agui_input_delivery_required")
     assert prepared.receipt.input_acceptance == "NOT_APPLIED_CONFIRMED"
     assert (target_storage.session_dir(str(cwd), "internal-1") / "permission.json").read_text(
         encoding="utf-8"
@@ -484,6 +520,29 @@ def test_migration_receipt_requires_explicit_proof(field):
     payload.pop(field)
     with pytest.raises(ValidationError):
         MigrationReceipt.model_validate(payload)
+
+
+@pytest.mark.parametrize("protocol", ["a2a", "agui"])
+def test_handoff_missing_task_requires_real_agui_execution_identity(protocol):
+    from pydantic import ValidationError
+
+    from iac_code.a2a.handoff import HandoffPrepareRequest
+
+    payload = dict(
+        user_id="user",
+        backend_scope="acs",
+        session_id="session",
+        cwd="/workspace/session",
+        internal_session_id="internal",
+        context_id="context",
+        protocol=protocol,
+        mode="normal",
+        source=dict(sandbox_id="source", activation_id="activation", run_id="run", lease_id="lease"),
+        migration_id="migration",
+        epoch=1,
+    )
+    with pytest.raises(ValidationError):
+        HandoffPrepareRequest.model_validate(payload)
 
 
 @pytest.mark.parametrize(
