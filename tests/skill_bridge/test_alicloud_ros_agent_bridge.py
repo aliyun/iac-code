@@ -5321,13 +5321,20 @@ def test_stop_chat_failure_is_persisted_as_failed(monkeypatch, tmp_path: Path, f
     assert job["error"]["retryable"] is True
 
 
-def test_remote_check_exposes_executor_reconnect_release_gate(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("executor_version", "executor_capabilities"),
+    [(None, None), ("", ""), ("executor-1.2.3", "other"), ("executor-1.2.3", "startchat-reconnect-bootstrap-v1")],
+)
+def test_remote_check_does_not_require_executor_metadata(monkeypatch, executor_version, executor_capabilities) -> None:
     monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/remote/aliyun")
-    monkeypatch.setenv(bridge.REMOTE_EXECUTOR_VERSION_ENV, "executor-1.2.3")
-    monkeypatch.setenv(
-        bridge.REMOTE_EXECUTOR_CAPABILITIES_ENV,
-        "other",
-    )
+    for name, value in (
+        ("ALICLOUD_ROS_AGENT_EXECUTOR_VERSION", executor_version),
+        ("ALICLOUD_ROS_AGENT_EXECUTOR_CAPABILITIES", executor_capabilities),
+    ):
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
     args = argparse.Namespace(command="check", aliyun_path="aliyun")
     bridge.apply_skill_config(
         args,
@@ -5338,21 +5345,23 @@ def test_remote_check_exposes_executor_reconnect_release_gate(monkeypatch) -> No
         },
     )
 
-    incomplete = bridge.run_check(args)
-
-    assert incomplete["startChatReconnectReady"] is False
-    assert "remote_bootstrap_capability_unavailable" in incomplete["startChatReconnectBlockers"]
-
-    monkeypatch.setenv(
-        bridge.REMOTE_EXECUTOR_CAPABILITIES_ENV,
-        bridge.REMOTE_BOOTSTRAP_CAPABILITY,
-    )
     result = bridge.run_check(args)
 
     assert result["startChatReconnectReady"] is True
-    assert result["remoteExecutorVersion"] == "executor-1.2.3"
-    assert bridge.REMOTE_BOOTSTRAP_CAPABILITY in result["remoteExecutorCapabilities"]
+    assert "remoteExecutorVersion" not in result
+    assert "remoteExecutorCapabilities" not in result
     assert "startChatReconnectBlockers" not in result
+
+
+def test_remote_check_still_requires_an_available_executor(monkeypatch) -> None:
+    monkeypatch.setattr(bridge.shutil, "which", lambda _path: None)
+    args = argparse.Namespace(command="check", aliyun_path="aliyun")
+    bridge.apply_skill_config(args, {"transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote"})
+
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge.run_check(args)
+
+    assert error.value.code == "cli_not_found"
 
 
 def test_cli_size_limits_are_distinct_and_enforced_after_wrapper_decode(monkeypatch) -> None:

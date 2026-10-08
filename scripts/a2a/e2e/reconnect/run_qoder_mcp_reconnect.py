@@ -21,7 +21,6 @@ from typing import Any
 ENDPOINT = "ros-pre.aliyuncs.com"
 PROFILE = "test-guima"
 MIN_ROS_PLUGIN_VERSION = (0, 9, 1)
-BOOTSTRAP_CAPABILITY = "startchat-reconnect-bootstrap-v1"
 MCP_TIMEOUT_SECONDS = 120.0
 TERMINAL_STATES = {"turn-completed", "completed"}
 FAILURE_STATES = {"failed", "canceled", "rejected"}
@@ -508,8 +507,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     env.update(
         {
             "ALICLOUD_ROS_AGENT_STATE_DIR": str(state_root),
-            "ALICLOUD_ROS_AGENT_EXECUTOR_VERSION": "qoder-mcp-e2e-v1",
-            "ALICLOUD_ROS_AGENT_EXECUTOR_CAPABILITIES": BOOTSTRAP_CAPABILITY,
             "IAC_CODE_E2E_MCP_SERVER": str(mcp_server),
             "IAC_CODE_E2E_REAL_ALIYUN": str(real_aliyun),
             "IAC_CODE_E2E_CLI_IDENTITY": PROFILE,
