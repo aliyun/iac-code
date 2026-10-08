@@ -2954,6 +2954,41 @@ class IacCodeA2AExecutor(AgentExecutor):
         if owner and task_record.owner and task_record.owner != owner:
             raise InvalidParamsError("Task belongs to a different owner")
 
+        async def bind_response_execution(pending: PendingResourceSelection) -> None:
+            if self._execution_control_service is None:
+                return
+            control = current_execution_control()
+            if control is None:
+                # This answer bypasses ordinary execution setup. A cold sandbox
+                # must consume the dispatcher's recovery admission before ROS
+                # can bind the first frame to the resumed execution.
+                frame = pending.event.continuation_frame or {}
+                assistant_ref = frame.get("assistantMessageRef")
+                pipeline = isinstance(assistant_ref, str) and assistant_ref.startswith("pipeline/transcripts/")
+                control = await self._execution_control_service.begin_execution(
+                    context_id=response.context_id,
+                    task_id=response.task_id,
+                    owner=owner,
+                    cwd=pending.cwd,
+                    execution_mode="pipeline" if pipeline else "normal",
+                    continue_input_required=pipeline,
+                    recoverable_input_admission=RecoverableInputAdmissionCarrier.read(context),
+                )
+                bind_execution_control(control)
+                await control.checkpoint()
+                await control.mark_execution_started()
+            control.bind_session(pending.session_id)
+            if PipelineLifecycleEventQueueCarrier.read(context) and not PipelineLifecycleEventQueueCarrier.is_bound(
+                context
+            ):
+                await self._publish_status(
+                    event_queue,
+                    task_id=response.task_id,
+                    context_id=response.context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                )
+                PipelineLifecycleEventQueueCarrier.mark_bound(context)
+
         pending = await self._resource_selection_registry.pending_for_response(response)
         context_record = None
         record = None
@@ -2963,6 +2998,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 response,
                 before_delivery=commit_llm_headers,
             )
+            await bind_response_execution(pending)
             if activate_bound_llm_headers is not None:
                 await activate_bound_llm_headers()
             await _persist_normal_resource_selection_snapshot_resolution(
@@ -3023,6 +3059,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 response,
                 before_delivery=commit_llm_headers,
             )
+            await bind_response_execution(pending)
             if activate_bound_llm_headers is not None:
                 await activate_bound_llm_headers()
             await _persist_normal_resource_selection_snapshot_resolution(
