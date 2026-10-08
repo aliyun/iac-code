@@ -1359,7 +1359,9 @@ class PermissionWaitCoordinator:
                         expected_generation=owner.generation,
                     )
                     owner.generation = int(record["generation"])
-                    if record.get("phase") not in {"SUSPENDING", "TIMEOUT_GRACE"}:
+                    # An early wakeup can leave the boundary in WAITING. Let
+                    # the existing retry loop wait out its absolute deadline.
+                    if record.get("phase") not in {"WAITING", "SUSPENDING", "TIMEOUT_GRACE"}:
                         return
                     grace_deadline = parse_utc(record.get("graceDeadlineAt"))
                 if grace_deadline is not None:

@@ -134,10 +134,15 @@ async def test_slow_mcp_runtime_does_not_block_slash_menu(tmp_path, monkeypatch)
     from iac_code.web.session_manager import WebSessionManager
 
     release = threading.Event()
+    started = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    runtime = _TrackedDynamicRuntime()
 
     def create_runtime(_options):
-        release.wait(timeout=2)
-        return _DynamicRuntime()
+        loop.call_soon_threadsafe(started.set)
+        if not release.wait(timeout=10):
+            raise TimeoutError("test did not release the MCP runtime")
+        return runtime
 
     monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", create_runtime)
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path)
@@ -145,18 +150,23 @@ async def test_slow_mcp_runtime_does_not_block_slash_menu(tmp_path, monkeypatch)
     app = create_app(session_manager=manager)
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-            started_at = time.monotonic()
-            response = await client.get(
-                "/api/suggestions",
-                params={"kind": "command", "q": "", "sessionId": session.session_id},
+            response = await asyncio.wait_for(
+                client.get(
+                    "/api/suggestions",
+                    params={"kind": "command", "q": "", "sessionId": session.session_id},
+                ),
+                timeout=5,
             )
-            elapsed = time.monotonic() - started_at
+            await asyncio.wait_for(started.wait(), timeout=5)
+            # The menu returns while the runtime is still blocked, independent
+            # of shared CI runner load or cold registry imports.
+            assert not release.is_set()
+            assert not runtime.closed
     finally:
         release.set()
+        await asyncio.wait_for(runtime.closed_event.wait(), timeout=5)
 
     assert response.status_code == 200
-    # Did NOT wait for the ~2s runtime build.
-    assert elapsed < 0.8
     # Static built-in commands are still served.
     suggestions = response.json()["suggestions"]
     assert suggestions
