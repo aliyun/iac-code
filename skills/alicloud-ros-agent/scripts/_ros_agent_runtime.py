@@ -1560,19 +1560,8 @@ def run_check(args: argparse.Namespace) -> Dict[str, Any]:
         current_profile = {"configured": True, "mode": "RemoteSandbox"}
         cli = "aliyun"
         version = None
-        executor_version = sanitize_text(os.environ.get(REMOTE_EXECUTOR_VERSION_ENV, ""), 120)
-        raw_capabilities = os.environ.get(REMOTE_EXECUTOR_CAPABILITIES_ENV, "")
-        executor_capabilities = {
-            value.strip() for value in raw_capabilities.split(",") if value.strip()
-        }
-        reconnect_ready = bool(
-            executor_version
-            and REMOTE_BOOTSTRAP_CAPABILITY in executor_capabilities
-        )
-        if not executor_version:
-            reconnect_blockers.append("remote_executor_version_unavailable")
-        if REMOTE_BOOTSTRAP_CAPABILITY not in executor_capabilities:
-            reconnect_blockers.append("remote_bootstrap_capability_unavailable")
+        # The host manages remote execution; check availability, not capability declarations.
+        reconnect_ready = True
     elif args.transport == "code" and not args.profile_pinned:
         assert sdk is not None
         region_id = _environment_region() or "cn-hangzhou"
@@ -1647,9 +1636,6 @@ def run_check(args: argparse.Namespace) -> Dict[str, Any]:
         result["aliyunCLIForwardEnvPresent"] = [
             name for name in args.aliyun_cli_forward_env if os.environ.get(name) is not None
         ]
-        if executor_version:
-            result["remoteExecutorVersion"] = executor_version
-        result["remoteExecutorCapabilities"] = sorted(executor_capabilities)
     if plugin_status is not None:
         result["rosPluginReady"] = plugin_status["ready"]
         result["pluginAutoInstallEnabled"] = plugin_auto_install
