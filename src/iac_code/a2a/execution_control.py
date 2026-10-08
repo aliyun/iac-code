@@ -29,6 +29,7 @@ from iac_code.a2a.backup import (
     run_sync_fenced,
     run_sync_fenced_with_cancel_completion,
 )
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.services.session_backup import BackupReason, BackupResult
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -130,9 +131,7 @@ def _claim_remnant_admits_input_recovery(document: dict[str, Any]) -> bool:
     if document.get("pauseId") is not None or document.get("externalOperations"):
         return False
     revisions = (document.get("revision"), document.get("persistedRevision"))
-    if any(
-        not isinstance(revision, int) or isinstance(revision, bool) or revision < 0 for revision in revisions
-    ):
+    if any(not isinstance(revision, int) or isinstance(revision, bool) or revision < 0 for revision in revisions):
         return False
     if revisions[0] != revisions[1]:
         # Only a fully persisted publication is a settled remnant.
@@ -275,7 +274,10 @@ class _RecoverableInputAdmissionStore:
             persisted_snapshot["persistedRevision"] = revision
             control_path = self._root / f"{admission.context_id}.json"
             previous_control = self._load_document(control_path)
-            atomic_write_json(control_path, persisted_snapshot)
+            with SessionWriterFence().operation(
+                "context:" + str(control_snapshot["contextId"]), actor_epoch=control_snapshot.get("handoffEpoch")
+            ):
+                atomic_write_json(control_path, persisted_snapshot)
         return _PersistedControlActivation(
             previous_control=previous_control,
             execution_id=str(control_snapshot["executionId"]),
@@ -354,7 +356,10 @@ class _RecoverableInputAdmissionStore:
             revision = int(control_snapshot["revision"])
             persisted_snapshot = dict(control_snapshot)
             persisted_snapshot["persistedRevision"] = revision
-            atomic_write_json(control_path, persisted_snapshot)
+            with SessionWriterFence().operation(
+                "context:" + str(control_snapshot["contextId"]), actor_epoch=control_snapshot.get("handoffEpoch")
+            ):
+                atomic_write_json(control_path, persisted_snapshot)
         return _PersistedControlActivation(
             previous_control=previous_control,
             execution_id=str(control_snapshot["executionId"]),
@@ -389,7 +394,10 @@ class _RecoverableInputAdmissionStore:
                     for current_revision in (current.get("persistedRevision"), current.get("revision"))
                 ):
                     return True
-            atomic_write_json(control_path, persisted_snapshot)
+            with SessionWriterFence().operation(
+                "context:" + str(control_snapshot["contextId"]), actor_epoch=control_snapshot.get("handoffEpoch")
+            ):
+                atomic_write_json(control_path, persisted_snapshot)
         return True
 
     def _persisted_control_allows_begin_without_admission(
@@ -882,6 +890,7 @@ class ExecutionController:
         if execution_mode not in {"normal", "pipeline"}:
             raise ValueError("execution_mode must be normal or pipeline")
         self.context_id = context_id
+        self.handoff_epoch = SessionWriterFence().epoch("context:" + context_id)
         self.task_id = task_id
         self.owner = owner
         self.cwd = cwd
@@ -1466,9 +1475,7 @@ class ExecutionController:
                     # hands ownership over before publishing its backup.
                     if self._pending_explicit_termination_reason is None:
                         self._pending_explicit_termination_reason = reason
-                    self._resolve_natural_finalization_waiter_locked(
-                        self._claimed_natural_completion_generation
-                    )
+                    self._resolve_natural_finalization_waiter_locked(self._claimed_natural_completion_generation)
                 return self.snapshot()
             termination_generation = self._claim_termination_locked(reason)
             snapshot = self.snapshot()
@@ -1636,6 +1643,7 @@ class ExecutionController:
                 blockers[activity.kind] = blockers.get(activity.kind, 0) + 1
         return {
             "contextId": self.context_id,
+            "handoffEpoch": self.handoff_epoch,
             "taskId": self.task_id,
             "executionId": self.execution_id,
             "owner": self.owner,
@@ -1671,6 +1679,7 @@ class ExecutionController:
         public_snapshot.pop("owner", None)
         public_snapshot.pop("ownerGeneration", None)
         public_snapshot.pop("ownerPid", None)
+        public_snapshot.pop("handoffEpoch", None)
         public_snapshot.pop("inputHandoffReady", None)
         public_snapshot.pop("localInputContinuationReady", None)
         return public_snapshot
@@ -2908,13 +2917,35 @@ class ExecutionControlService:
         continue_input_required: bool = False,
         recoverable_input_admission: str | None = None,
     ) -> ExecutionController:
+        async with SessionWriterFence().async_operation("context:" + context_id, kind="input"):
+            return await self._begin_execution(
+                context_id=context_id,
+                task_id=task_id,
+                owner=owner,
+                cwd=cwd,
+                execution_mode=execution_mode,
+                continue_input_required=continue_input_required,
+                recoverable_input_admission=recoverable_input_admission,
+            )
+
+    async def _begin_execution(
+        self,
+        *,
+        context_id: str,
+        task_id: str,
+        owner: str,
+        cwd: str,
+        execution_mode: str = "normal",
+        continue_input_required: bool = False,
+        recoverable_input_admission: str | None = None,
+    ) -> ExecutionController:
         task = asyncio.current_task()
         if task is None:
             raise RuntimeError("A2A execution requires an asyncio Task")
         await self._await_local_snapshot_quiescence(context_id)
         retired_control: ExecutionController | None = None
         async with self._context_start_locks.setdefault(context_id, asyncio.Lock()):
-            control = self._controls.get(context_id)
+            control = self.get_for_context(context_id)
             if control is not None and control.owner != owner:
                 raise ExecutionControlNotFoundError("Execution was not found")
             admission = self._recoverable_input_admissions.get(recoverable_input_admission)
@@ -3217,7 +3248,16 @@ class ExecutionControlService:
             await run_sync_fenced(self._recoverable_input_admissions.release, token)
 
     def get_for_context(self, context_id: str) -> ExecutionController | None:
-        return self._controls.get(context_id)
+        control = self._controls.get(context_id)
+        if control is not None and SessionWriterFence().epoch("context:" + context_id) != control.handoff_epoch:
+            if control.has_managed_work():
+                raise ExecutionControlConflictError("A stale controller has not drained")
+            self._controls.pop(context_id, None)
+            return None
+        return control
+
+    def activate_handoff_epoch(self, context_id: str) -> None:
+        self.get_for_context(context_id)
 
     async def require(self, *, context_id: str, owner: str) -> ExecutionController:
         control = self._controls.get(context_id)

@@ -61,6 +61,7 @@ from iac_code.agui.state import (
 )
 from iac_code.resource_selector.profiles import get_profile
 from iac_code.resource_selector.validation import validate_answer_value
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.services.session_backup import SESSION_BACKUP_NOT_READY_CODE
 
 logger = logging.getLogger(__name__)
@@ -85,6 +86,7 @@ class ThreadBinding:
     iac_code_session_id: str | None = None
     execution_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str | None = None
+    last_task_id: str | None = None
     pending: dict[str, PendingInput] = field(default_factory=dict)
     pipeline_sequence: int = 0
     pipeline_open_steps: set[str] = field(default_factory=set)
@@ -146,6 +148,7 @@ class AguiA2AAdapter:
         self._lock = asyncio.Lock()
         self._threads: dict[str, ThreadBinding] = {}
         self._executions: dict[str, ThreadBinding] = {}
+        self._thread_epochs: dict[str, int] = {}
         self._started = False
         self.last_activity = time.monotonic()
 
@@ -154,6 +157,18 @@ class AguiA2AAdapter:
         return not any(binding.active_run_id or binding.pending for binding in self._threads.values())
 
     async def admit(
+        self,
+        run_input: RunAgentInput,
+        request_digest: str,
+        *,
+        preferred_language: str | None = None,
+    ) -> RunTicket:
+        props = parse_forwarded_props(run_input.forwarded_props).iac_code
+        SessionWriterFence().bind_owner("thread:" + run_input.thread_id, (props.execution_fence or {}).get("owner"))
+        async with SessionWriterFence().async_operation("thread:" + run_input.thread_id, kind="input"):
+            return await self._admit(run_input, request_digest, preferred_language=preferred_language)
+
+    async def _admit(
         self,
         run_input: RunAgentInput,
         request_digest: str,
@@ -285,6 +300,17 @@ class AguiA2AAdapter:
             self._started = True
 
     async def stream(self, ticket: RunTicket) -> AsyncIterator[Any]:
+        async with SessionWriterFence().async_operation("thread:" + ticket.binding.thread_id):
+            stream = self._stream_fenced(ticket)
+            try:
+                async for event in stream:
+                    yield event
+            finally:
+                close = getattr(stream, "aclose", None)
+                if close is not None:
+                    await close()
+
+    async def _stream_fenced(self, ticket: RunTicket) -> AsyncIterator[Any]:
         run_input = ticket.run_input
         mapper = A2AEventMapper(
             thread_id=run_input.thread_id,
@@ -1157,6 +1183,7 @@ class AguiA2AAdapter:
         if self._executions.get(binding.execution_id) is binding:
             self._executions.pop(binding.execution_id, None)
         binding.terminal_execution_ids.add(binding.execution_id)
+        binding.last_task_id = binding.task_id or binding.last_task_id
         binding.task_id = None
 
     async def _cancel_unrecoverable(self, ticket: RunTicket) -> None:
@@ -1205,6 +1232,7 @@ class AguiA2AAdapter:
                 "executionId": binding.execution_id,
                 "rosInvocationId": binding.ros_invocation_id,
                 "taskId": binding.task_id,
+                "lastTaskId": binding.last_task_id,
                 "pipelineSequence": binding.pipeline_sequence,
                 "pipelineOpenSteps": sorted(binding.pipeline_open_steps),
                 "textSnapshotDigests": sorted(binding.text_snapshot_digests),
@@ -1219,6 +1247,17 @@ class AguiA2AAdapter:
         }
 
     def _load_thread(self, thread_id: str) -> ThreadBinding | None:
+        epoch = SessionWriterFence().epoch("thread:" + thread_id)
+        previous = self._thread_epochs.get(thread_id, epoch)
+        if previous != epoch:
+            stale = self._threads.pop(thread_id, None)
+            if stale is not None:
+                if stale.active_run_id:
+                    raise AguiStateStoreError("Prior AG-UI producer has not drained")
+                self._executions.pop(stale.execution_id, None)
+            if isinstance(self._state_store, FileAguiThreadStateStore):
+                self._state_store = FileAguiThreadStateStore(self._state_store.state_dir)
+        self._thread_epochs[thread_id] = epoch
         binding = self._threads.get(thread_id)
         if binding is not None:
             return binding
@@ -1315,6 +1354,7 @@ class AguiA2AAdapter:
                 iac_code_session_id=iac_code_session_id,
                 execution_id=_required_state_string(raw_execution, "executionId"),
                 task_id=task_id,
+                last_task_id=raw_execution.get("lastTaskId"),
                 pending=pending,
                 pipeline_sequence=sequence,
                 pipeline_open_steps={value for value in raw_open_steps if isinstance(value, str)},
@@ -1459,6 +1499,9 @@ def _a2a_request_options(
         "pipeline_name": props.pipeline_name,
         "cleanupOnly": props.cleanup_only,
         "rosInvocationId": props.ros_invocation_id,
+        "guidance_id": props.guidance_id,
+        "execution_fence": props.execution_fence,
+        "input_digest": props.input_digest,
     }
     if props.llm_headers is not None:
         metadata["llm_headers"] = props.llm_headers

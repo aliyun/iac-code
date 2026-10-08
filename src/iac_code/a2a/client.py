@@ -117,6 +117,21 @@ def _validated_extension_response(response: Any, name: str) -> dict[str, Any]:
 
 
 class A2AClient:
+    async def handoff_request(self, url: str, operation: str, payload: dict | None = None) -> dict:
+        endpoint = url.rstrip("/") + "/iac-code/handoff/" + operation
+        if operation == "capabilities":
+            response = await self._http_client.get(endpoint, headers=self._jsonrpc_headers())
+        else:
+            response = await self._http_client.post(endpoint, json=payload, headers=self._jsonrpc_headers())
+        if response.status_code == 404:
+            return (
+                {"version": "session-handoff-v1", "supported": False}
+                if operation == "capabilities"
+                else {"status": "UNSUPPORTED"}
+            )
+        response.raise_for_status()
+        return response.json()
+
     def __init__(
         self,
         *,

@@ -43,6 +43,7 @@ from iac_code.a2a.execution_control import (
     reset_execution_participants,
 )
 from iac_code.a2a.exposure import normalize_a2a_exposure_types
+from iac_code.a2a.guidance_input import GuidanceInputConflictError, GuidanceInputJournal
 from iac_code.a2a.input_required import (
     PermissionIdentityValidationError,
     PermissionInputRegistry,
@@ -149,6 +150,7 @@ from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.resource_selector.capability import ResourceSelectorCapability
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     RecoveredPermissionAuditBoundary,
@@ -1602,6 +1604,52 @@ class IacCodeA2AExecutor(AgentExecutor):
         return permission_ack_message(response, approved=approved)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        metadata = (
+            getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None) or {}
+        )
+        if not isinstance(metadata, dict):
+            metadata = MessageToDict(metadata, preserving_proto_field_name=False)
+        iac_metadata = metadata.get("iac_code", {})
+        fence_owner = (iac_metadata.get("execution_fence") or {}).get("owner")
+        if context.context_id:
+            SessionWriterFence().bind_owner("context:" + context.context_id, fence_owner)
+            await self._task_store.activate_handoff_snapshot(
+                context_id=context.context_id, task_id=context.task_id, force=False
+            )
+        guidance_id = iac_metadata.get("guidance_id")
+        input_digest = iac_metadata.get("input_digest")
+        context_id = context.context_id
+        identity = None
+        if guidance_id is not None or input_digest is not None:
+            if not context_id or not context.task_id or not guidance_id or not input_digest:
+                raise InvalidParamsError("Guidance requires its exact task, context and input digest.")
+            identity = dict(
+                context_id=context_id, task_id=context.task_id, guidance_id=guidance_id, input_digest=input_digest
+            )
+            try:
+                claim = GuidanceInputJournal().claim(**identity)
+            except GuidanceInputConflictError as exc:
+                raise InvalidParamsError(str(exc)) from exc
+            if claim["status"] == "APPLIED":
+                await self._publish_status(
+                    event_queue,
+                    task_id=context.task_id,
+                    context_id=context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                    metadata={
+                        "iac_code": {
+                            "guidanceAck": {"guidanceId": guidance_id, "inputDigest": input_digest, "accepted": True}
+                        }
+                    },
+                )
+                return
+        with GuidanceInputJournal.bind(identity):
+            if context_id:
+                async with SessionWriterFence().async_operation("context:" + context_id, kind="input"):
+                    return await self._execute_fenced(context, event_queue)
+            return await self._execute_fenced(context, event_queue)
+
+    async def _execute_fenced(self, context: RequestContext, event_queue: EventQueue) -> None:
         execution_scope = bind_execution_control(None)
         participant_scope = clear_execution_participants()
         metadata = getattr(context, "metadata", None) or getattr(getattr(context, "message", None), "metadata", None)
@@ -1792,6 +1840,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                         aliyun_credential=response_credential,
                         before_delivery=commit_llm_headers,
                     )
+                GuidanceInputJournal.mark_current_applied()
                 await activate_bound_llm_headers()
             except PermissionIdentityValidationError as exc:
                 await self._publish_permission_identity_error(
@@ -2963,6 +3012,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 response,
                 before_delivery=commit_llm_headers,
             )
+            GuidanceInputJournal.mark_current_applied()
             if activate_bound_llm_headers is not None:
                 await activate_bound_llm_headers()
             await _persist_normal_resource_selection_snapshot_resolution(
@@ -3023,6 +3073,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 response,
                 before_delivery=commit_llm_headers,
             )
+            GuidanceInputJournal.mark_current_applied()
             if activate_bound_llm_headers is not None:
                 await activate_bound_llm_headers()
             await _persist_normal_resource_selection_snapshot_resolution(
@@ -3919,6 +3970,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             storage = SessionStorage()
             persisted_messages = storage.load(context_record.cwd, context_record.session_id)
             result_digest = canonical_digest(persisted_messages[-1].to_dict()) if persisted_messages else ""
+            GuidanceInputJournal.mark_current_applied()
             store.resolve(
                 boundary_id,
                 result_digest=result_digest,

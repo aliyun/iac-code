@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.utils.path_locks import PathLockRegistry
 from iac_code.utils.state_io import cross_process_file_lock
 
@@ -43,7 +44,10 @@ def session_mutation_guard(session_dir: str | Path) -> Iterator[None]:
             finally:
                 depths[key] -= 1
             return
-        with cross_process_file_lock(lock_path):
+        with (
+            SessionWriterFence().operation(SessionWriterFence.session_key(session_dir)),
+            cross_process_file_lock(lock_path),
+        ):
             depths[key] = 1
             try:
                 yield

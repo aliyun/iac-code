@@ -788,6 +788,30 @@ def create_app(
         Route("/iac-code/execution/terminate", terminate_execution, methods=["POST"]),
         Route("/iac-code/session/recovery", get_session_recovery, methods=["GET"]),
     ]
+    from iac_code.a2a.handoff import SessionHandoffService
+    from iac_code.a2a.handoff_input import HandoffInputDelivery
+    from iac_code.a2a.handoff_routes import SessionHandoffRoutes
+    from iac_code.a2a.transport import A2AAuthConfig
+
+    handoff_executor = components.handler.agent_executor
+    handoff_service = SessionHandoffService(
+        task_store=components.task_store,
+        controls=components.execution_control_service,
+        persistence_root=Path(persistence_dir) if persistence_dir is not None else None,
+        input_delivery=HandoffInputDelivery(
+            f"http://127.0.0.1:{port}/",
+            A2AAuthConfig(
+                bearer_token=token,
+                basic_username=basic_username,
+                basic_password=basic_password,
+                api_key=api_key,
+                api_key_header=api_key_header,
+            ),
+        ),
+    )
+    routes.extend(
+        SessionHandoffRoutes(handoff_service, resolve_cwd=getattr(handoff_executor, "_resolve_cwd", None)).routes()
+    )
     install_jsonrpc_error_data_passthrough()
     jsonrpc_endpoint = create_jsonrpc_routes(components.handler, rpc_url="/", enable_v0_3_compat=True)[0].endpoint
     install_v03_jsonrpc_error_data_passthrough(jsonrpc_endpoint)

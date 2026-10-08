@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import cast
 
 from iac_code.a2a.types import validate_protocol_id
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
 from iac_code.utils.file_security import atomic_write_text
 
@@ -69,11 +70,15 @@ class A2APersistenceStore:
         self.tasks_dir = self.root / "tasks"
         self.contexts_dir = self.root / "contexts"
         self.routes_path = self.root / "routes.json"
+        self._writer_epochs: dict[str, int] = {}
 
     def save_task(self, snapshot: A2ATaskSnapshot) -> None:
         task_id = validate_protocol_id(snapshot.task_id)
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
-        self._write_json(self.tasks_dir / f"{_protocol_id_file_stem(task_id)}.json", asdict(snapshot))
+        with SessionWriterFence().operation(
+            "context:" + snapshot.context_id, actor_epoch=self._writer_epoch(snapshot.context_id)
+        ):
+            self._write_json(self.tasks_dir / f"{_protocol_id_file_stem(task_id)}.json", asdict(snapshot))
 
     def load_task(self, task_id: str) -> A2ATaskSnapshot | None:
         task_id = validate_protocol_id(task_id)
@@ -82,7 +87,10 @@ class A2APersistenceStore:
             data = self._read_json(self.tasks_dir / f"{task_id}.json")
         if data is None:
             return None
-        return self._task_from_dict(data)
+        snapshot = self._task_from_dict(data)
+        if snapshot is not None:
+            self._writer_epoch(snapshot.context_id)
+        return snapshot
 
     def restore_task(self, task_id: str) -> A2ATaskSnapshot | None:
         snapshot = self.load_task(task_id)
@@ -119,7 +127,8 @@ class A2APersistenceStore:
     def save_context(self, snapshot: A2AContextSnapshot) -> None:
         context_id = validate_protocol_id(snapshot.context_id)
         self.contexts_dir.mkdir(parents=True, exist_ok=True)
-        self._write_json(self.contexts_dir / f"{_protocol_id_file_stem(context_id)}.json", asdict(snapshot))
+        with SessionWriterFence().operation("context:" + context_id, actor_epoch=self._writer_epoch(context_id)):
+            self._write_json(self.contexts_dir / f"{_protocol_id_file_stem(context_id)}.json", asdict(snapshot))
 
     def load_context(self, context_id: str) -> A2AContextSnapshot | None:
         context_id = validate_protocol_id(context_id)
@@ -128,7 +137,20 @@ class A2APersistenceStore:
             data = self._read_json(self.contexts_dir / f"{context_id}.json")
         if data is None:
             return None
-        return self._context_from_dict(data)
+        snapshot = self._context_from_dict(data)
+        if snapshot is not None:
+            self._writer_epoch(snapshot.context_id)
+        return snapshot
+
+    def _writer_epoch(self, context_id: str) -> int:
+        from iac_code.a2a.execution_control import current_execution_control
+
+        control = current_execution_control()
+        if control is not None and control.context_id == context_id:
+            return control.handoff_epoch
+        if context_id not in self._writer_epochs:
+            self._writer_epochs[context_id] = SessionWriterFence().epoch("context:" + context_id)
+        return self._writer_epochs[context_id]
 
     def load_execution_control(self, context_id: str) -> dict[str, object] | None:
         """Load the cross-process execution fence; malformed state fails closed."""

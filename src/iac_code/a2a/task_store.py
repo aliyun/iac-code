@@ -43,6 +43,7 @@ from iac_code.a2a.types import (
     validate_protocol_id,
 )
 from iac_code.i18n import _
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_layout import SessionPaths, ensure_session_owned_parent
 from iac_code.services.session_storage import SessionStorage
@@ -79,6 +80,7 @@ class A2ATaskStore(TaskStore):
         self._expired_task_tombstones: dict[str, float] = {}
         self._metrics = metrics or NoOpA2AMetrics()
         self._persistence = persistence
+        self._handoff_epochs: dict[str, int] = {}
         self._idle_timeout_seconds = idle_timeout_seconds
         self._cleanup_interval_seconds = cleanup_interval_seconds
         self._cleanup_task: asyncio.Task[None] | None = None
@@ -950,6 +952,27 @@ class A2ATaskStore(TaskStore):
                     )
 
         raise ValueError(_("A2A context not found"))
+
+    async def activate_handoff_snapshot(
+        self, *, context_id: str, task_id: str | None = None, force: bool = True
+    ) -> None:
+        epoch = SessionWriterFence().epoch("context:" + context_id)
+        if not force and self._handoff_epochs.get(context_id, 0) == epoch:
+            return
+        await self.ensure_context_reconciliation_safe(context_id)
+        async with self._mutation_lock:
+            self._contexts.pop(context_id, None)
+            self._discard_context_llm_headers_locked(context_id)
+            for cached_id, task in list(self._tasks.items()):
+                if task.context_id == context_id:
+                    self._tasks.pop(cached_id, None)
+                    self._pending_permissions.pop(cached_id, None)
+                    self._task_persistence_dirty.discard(cached_id)
+                    self._remove_sdk_task_from_index(task.owner, cached_id, context_id)
+            if self._persistence is not None:
+                # Keep old store references fenced at their captured epoch.
+                self._persistence = A2APersistenceStore(self._persistence.root)
+            self._handoff_epochs[context_id] = epoch
 
     async def activate_restored_task(self, task: A2ATaskRecord, context: A2AContextRecord) -> A2AContextRecord:
         """Attach a permission recovery to live records without creating a cached runtime."""

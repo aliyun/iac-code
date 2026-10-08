@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from iac_code.config import get_config_dir
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.state_io import atomic_write_json, open_text_no_follow
 
@@ -49,6 +50,7 @@ class FileAguiThreadStateStore:
     def __init__(self, state_dir: str | Path | None = None) -> None:
         self.state_dir = resolve_agui_state_dir(state_dir)
         self.threads_dir = self.state_dir / _THREADS_DIR_NAME
+        self._writer_epochs: dict[str, int] = {}
 
     def path_for_thread(self, thread_id: str) -> Path:
         return self.threads_dir / f"{_thread_file_stem(thread_id)}.json"
@@ -69,6 +71,7 @@ class FileAguiThreadStateStore:
             or value.get("threadId") != thread_id
         ):
             raise AguiStateStoreError("Unsupported or invalid AG-UI thread state schema.")
+        self._writer_epochs.setdefault(thread_id, SessionWriterFence().epoch("thread:" + thread_id))
         return value
 
     def save_thread(self, thread_id: str, state: Mapping[str, Any]) -> None:
@@ -79,7 +82,10 @@ class FileAguiThreadStateStore:
             ensure_private_dir(self.state_dir)
             ensure_private_dir(self.threads_dir)
             path = self.path_for_thread(thread_id)
-            atomic_write_json(path, document)
+            fence = SessionWriterFence()
+            epoch = self._writer_epochs.setdefault(thread_id, fence.epoch("thread:" + thread_id))
+            with fence.operation("thread:" + thread_id, actor_epoch=epoch):
+                atomic_write_json(path, document)
             ensure_private_file(path)
         except Exception as exc:
             raise AguiStateStoreError("Unable to commit the AG-UI thread state.") from exc

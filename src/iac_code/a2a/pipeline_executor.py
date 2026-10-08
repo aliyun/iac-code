@@ -26,6 +26,7 @@ from iac_code.a2a.execution_control import (
     current_execution_termination_reason,
     execution_non_advancing_wait,
 )
+from iac_code.a2a.guidance_input import GuidanceInputJournal
 from iac_code.a2a.input_required import PendingPermission, staged_permission_backup_generation
 from iac_code.a2a.pipeline_continuation import (
     PipelineContinuationStore,
@@ -1628,6 +1629,7 @@ class IacCodeA2APipelineExecutor:
                 await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             return True
         if pending_question_route == _PENDING_QUESTION_ANSWERED:
+            GuidanceInputJournal.mark_current_applied()
             task.state = TASK_STATE_WORKING
             self._task_store.mirror_task(task)
             return True
@@ -1687,6 +1689,7 @@ class IacCodeA2APipelineExecutor:
                 await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             return True
         if pending_resume_routed:
+            GuidanceInputJournal.mark_current_applied()
             task.state = TASK_STATE_WORKING
             self._task_store.mirror_task(task)
             return True
@@ -1732,6 +1735,7 @@ class IacCodeA2APipelineExecutor:
 
             runner_input = _pipeline_runner_input(pipeline_input)
             verdict = await _maybe_await(handler(runner_input))
+            GuidanceInputJournal.mark_current_applied()
             async with _outbound_lock(runtime):
                 if bool(getattr(runtime, "terminal_publication_started", False)):
                     return True
@@ -5503,9 +5507,7 @@ def recoverable_task_id_from_sidecar(
         task_id=owner.task_id,
         context_id=context_id,
     )
-    normal_handoff = (
-        authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
-    )
+    normal_handoff = authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
     if (
         isinstance(normal_handoff, dict)
         and normal_handoff.get("action") == "switch_to_normal"
@@ -5552,9 +5554,7 @@ def current_pipeline_task_id_from_sidecar(*, cwd: str, session_id: str, context_
         task_id=owner.task_id,
         context_id=context_id,
     )
-    normal_handoff = (
-        authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
-    )
+    normal_handoff = authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
     if (
         isinstance(normal_handoff, dict)
         and normal_handoff.get("action") == "switch_to_normal"

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 from iac_code.a2a.execution_control import execution_activity, run_with_execution_budget
 from iac_code.i18n import _
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.services.telemetry import add_metric, log_event, start_span
 from iac_code.services.telemetry.config import should_capture_content_on_span
 from iac_code.services.telemetry.content_serializer import serialize_tool_arguments, serialize_tool_result
@@ -129,7 +130,10 @@ class ToolExecutor:
 
         try:
             with start_span(span_name, span_attrs) as span:
-                async with execution_activity("tool", check_gate=False, handoff_to_parent=True):
+                async with (
+                    SessionWriterFence().async_operation(SessionWriterFence.workspace_key(context.cwd), kind="tool"),
+                    execution_activity("tool", check_gate=False, handoff_to_parent=True),
+                ):
                     result = await run_with_execution_budget(
                         tool.execute(tool_input=call.input, context=context),
                         timeout=timeout,

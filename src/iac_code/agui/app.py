@@ -215,6 +215,12 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.run_adapter = run_adapter
+    from iac_code.agui.handoff_routes import AguiHandoffRoutes
+
+    app.routes.extend(AguiHandoffRoutes(run_adapter, expected_token).routes())
+    from iac_code.agui.subscribe_routes import AguiExecutionSubscriptions
+
+    app.routes.extend(AguiExecutionSubscriptions(run_adapter, expected_token).routes())
     return app
 
 

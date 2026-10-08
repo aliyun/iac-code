@@ -984,3 +984,22 @@ def test_staging_worker_runs_final_scan_after_stop(monkeypatch: pytest.MonkeyPat
 
     assert ready_event.was_set is True
     assert scans == [1, 2]
+
+
+def test_staged_publisher_cannot_overwrite_shared_backup_after_handoff_quiesce(monkeypatch, tmp_path):
+    from iac_code.services.handoff_fence import HandoffFrozenError, SessionWriterFence
+
+    monkeypatch.setenv("IAC_CODE_HANDOFF_SHARED_DIR", str(tmp_path / "handoff"))
+    service, session_dir, staging_root, backup_root = _create_staged_service(monkeypatch, tmp_path)
+    (session_dir / "session.jsonl").write_text("latest state\n", encoding="utf-8")
+    result = service.backup_session("/repo", "s1", reason=BackupReason.TERMINAL, critical=True)
+    worker = SessionBackupStagingWorker(staging_root, backup_root)
+    snapshot = worker.scan_snapshots()[0]
+    fence = SessionWriterFence()
+    keys = [fence.session_key(session_dir), fence.workspace_key("/repo")]
+    assert fence.prepare(keys, "migration-1", 2)
+    assert fence.quiesce(keys, "migration-1", 2)
+    with pytest.raises(HandoffFrozenError):
+        worker.publish_snapshot(snapshot)
+    assert not (backup_root / "projects" / snapshot.project / "s1" / "session.jsonl").exists()
+    assert result.generation == snapshot.generation

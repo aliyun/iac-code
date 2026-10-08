@@ -62,6 +62,9 @@ class IacCodeForwardedProps(StrictModel):
     pipeline_name: str | None = Field(default=None, alias="pipelineName")
     cleanup_only: bool = Field(default=False, alias="cleanupOnly")
     active_guidance: bool = Field(default=False, alias="activeGuidance")
+    execution_fence: dict[str, Any] | None = Field(default=None, alias="executionFence")
+    guidance_id: str | None = Field(default=None, alias="guidanceId", min_length=1)
+    input_digest: str | None = Field(default=None, alias="inputDigest", min_length=1)
     alibaba_cloud: AlibabaCloudOptions | None = Field(default=None, alias="alibabaCloud", repr=False)
 
 

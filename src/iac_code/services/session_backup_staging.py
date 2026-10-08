@@ -16,6 +16,7 @@ from typing import Any, Callable, Iterable, Mapping
 
 from loguru import logger
 
+from iac_code.services.handoff_fence import SessionWriterFence
 from iac_code.services.session_backup import (
     BACKUP_ENV_VAR,
     BackupReason,
@@ -34,6 +35,7 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.file_security import ensure_private_dir
 from iac_code.utils.state_io import atomic_write_json, cross_process_append_lock
 
+HANDOFF_SOURCE_MARKER = ".handoff-source-v1.json"
 BACKUP_TMP_ENV_VAR = "IAC_CODE_CONFIG_BACKUP_TMP_DIR"
 _COPYING_SUFFIX = ".copying"
 _COPYING_OWNER_MARKER_FILENAME = ".copying-owner-v1.lock"
@@ -253,6 +255,19 @@ class StagedSessionBackupService(SessionBackupService):
                             transcript = source / "session.jsonl"
                             with cross_process_append_lock(transcript):
                                 result = self._mirror(source, copying)
+                            fence = SessionWriterFence()
+                            if fence.enabled:
+                                source_key = fence.session_key(source)
+                                workspace_key = fence.workspace_key(cwd)
+                                atomic_write_json(
+                                    copying / HANDOFF_SOURCE_MARKER,
+                                    {
+                                        "sourceKey": source_key,
+                                        "workspaceKey": workspace_key,
+                                        "sourceEpoch": fence.epoch(source_key),
+                                        "workspaceEpoch": fence.epoch(workspace_key),
+                                    },
+                                )
                             self._write_state(copying, committed_state)
                             self._remove_copying_owner_marker(copying)
                             os.replace(copying, destination)
@@ -660,6 +675,22 @@ class SessionBackupStagingWorker:
         return sorted(snapshots, key=lambda item: (item.project, item.session_id, item.generation))
 
     def publish_snapshot(self, snapshot: StagedSessionSnapshot) -> None:
+        fence = SessionWriterFence()
+        if fence.enabled:
+            marker = snapshot.path / HANDOFF_SOURCE_MARKER
+            if not marker.is_file() or marker.is_symlink():
+                raise SessionBackupError("Staged writer has no handoff ownership proof")
+            import json
+
+            proof = json.loads(marker.read_bytes())
+            with (
+                fence.operation(proof["sourceKey"], actor_epoch=proof["sourceEpoch"]),
+                fence.operation(proof["workspaceKey"], actor_epoch=proof["workspaceEpoch"]),
+            ):
+                return self._publish_fenced_snapshot(snapshot)
+        return self._publish_fenced_snapshot(snapshot)
+
+    def _publish_fenced_snapshot(self, snapshot: StagedSessionSnapshot) -> None:
         with self._service._shared_session_lock(
             self.backup_root,
             project=snapshot.project,
