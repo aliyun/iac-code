@@ -27,4 +27,4 @@ steps:
       properties:
         status:
           type: string
-          const: selected
+          enum: [selected, canceled]

@@ -138,6 +138,36 @@ uv run pytest -q tests/a2a_e2e/test_live_resource_selector.py
 `IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_CONFIG_DIR` 指定配置目录。每次运行会保存有界 SSE、请求、server 日志、
 非敏感 readiness、server 生命周期和 `summary.json`；摘要只保存所选 VPC ID 的 SHA-256，不保存凭证明文。
 
+### 真实资源选择后重启恢复矩阵
+
+`resource_selector/run_live_resource_selector_restart.py` 覆盖 Normal/Pipeline ×
+SIGTERM/SIGKILL/先释放执行再重启 × 选择/取消，共 12 个场景。
+真实 LLM 触发选择器并进入等待后，runner 查询真实已有 VPC，仅重启自己启动的 A2A 进程，
+保留原 persistence 和 workspace，再回传关联的选择/取消结果。恢复后的第一条 SSE 消息到达时，
+执行状态必须已经登记，且为相同 task/context 的新 execution。Pipeline 必须完成并 handoff 到
+Normal，随后同会话的真实 LLM 对话必须成功，不能重复打开选择器或出现生命周期冲突。
+
+该 runner **直接使用原配置目录，不复制凭证、不使用隔离 config dir**。OAuth 需要刷新时通过正常
+逻辑更新原凭证文件；权限限制只写入临时 workspace。云查询均为只读。`released` 在有待选资源时
+主动调用执行释放 API，再正常重启进程，用于模拟旧 sandbox 已释放的边界；它不覆盖 ROS 自动空闲
+计时、前端 UI 或真正更换 sandbox。
+
+```bash
+uv run --all-extras python scripts/a2a/e2e/resource_selector/run_live_resource_selector_restart.py \
+  --allow-real-cloud --mode pipeline --restart-style released --answer selected \
+  --run-dir /tmp/iac-selector-pipeline-restart
+
+IAC_CODE_A2A_RESOURCE_SELECTOR_RESTART_LIVE_E2E=1 \
+uv run --all-extras pytest -q tests/a2a_e2e/test_live_resource_selector_restart.py
+```
+
+每次使用新的 `--run-dir`。`--mode` 为 `normal`/`pipeline`，`--restart-style` 为
+`sigterm`/`sigkill`/`released`，`--answer` 为 `selected`/`canceled`。
+配置目录默认遵循 `IAC_CODE_CONFIG_DIR` 或 `~/.iac-code`，可用 `--source-config-dir` 指定；
+pytest 入口也接受 `IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_CONFIG_DIR`，未显式开启时跳过真实云测试。
+证据包括脱敏 SSE/日志、重启前后及第一条 SSE 时的执行状态、进程生命周期和 `summary.json`。
+退出时关闭本次启动的服务，不打开浏览器页面。
+
 ## 真实 StartChat 权限等待矩阵
 
 `run_start_chat_permission_wait.py` 是本功能可重复执行、受凭证开关保护的真实链路：Qoder 真实 LLM

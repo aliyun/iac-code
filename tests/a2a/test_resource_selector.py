@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -10,6 +11,7 @@ from a2a.types import Message, Part, Role, Task, TaskState, TaskStatus
 from a2a.utils.errors import InvalidParamsError
 
 from iac_code.a2a.execution_control import (
+    ExecutionControlConflictError,
     ExecutionControlService,
     RecoverableInputAdmissionCarrier,
     current_execution_control,
@@ -44,6 +46,7 @@ from iac_code.types.stream_events import (
     TextDeltaEvent,
     Usage,
 )
+from iac_code.utils.state_io import atomic_write_json
 
 from .fakes import FakeEventQueue, FakeRequestContext, FakeRuntime
 
@@ -746,12 +749,15 @@ async def test_persisted_pipeline_resource_selection_recomputes_server_gate(
     ids=["normal", "pipeline-direct", "pipeline-sdk"],
 )
 @pytest.mark.parametrize("status", ["selected", "canceled"])
-@pytest.mark.parametrize("cold", [True, False], ids=["new-sandbox", "same-process"])
+@pytest.mark.parametrize(
+    "recovery", ["released", "dead-owner", "live", "live-owner", "unsettled", "external-operation", "begin-failed"]
+)
 async def test_resource_selection_resume_binds_execution_before_first_event(
-    monkeypatch, tmp_path, mode, lifecycle, status, cold
+    monkeypatch, tmp_path, mode, lifecycle, status, recovery
 ):
     from google.protobuf.json_format import MessageToDict
 
+    cold = recovery != "live"
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials.load", lambda: None)
     persistence = A2APersistenceStore(tmp_path / "a2a")
@@ -788,13 +794,29 @@ async def test_resource_selection_resume_binds_execution_before_first_event(
     current_task = asyncio.current_task()
     assert current_task is not None
     await original.detach_task(current_task, execution_status="input-required")
-    if cold:
+    if recovery == "released":
         # Model the durable release of the old sandbox, not an active owner's takeover.
         original.phase = "terminated"
         original.release_ready = True
         original.revision += 1
         await original._persist_snapshot(original.snapshot())
+    elif recovery != "live":
+        # A persisted selector wait can outlive its publisher without a release marker.
+        snapshot = original.snapshot()
+        snapshot["ownerPid"] = os.getpid() + 1
+        if recovery == "unsettled":
+            snapshot["revision"] += 1
+        elif recovery == "external-operation":
+            snapshot["externalOperations"] = [{"operationId": "external-1"}]
+        atomic_write_json(tmp_path / "a2a" / "execution-control" / "ctx-1.json", snapshot)
+        monkeypatch.setattr("iac_code.a2a.execution_control._pid_alive", lambda _pid: recovery == "live-owner")
     service = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=None) if cold else source
+    if recovery == "begin-failed":
+
+        async def fail_begin(**_kwargs):
+            raise ExecutionControlConflictError("test begin failure")
+
+        monkeypatch.setattr(service, "begin_execution", fail_begin)
     # A new sandbox reloads only persisted task/context records and has no live registry.
     if cold:
         await store.stop_cleanup_loop()
@@ -831,6 +853,8 @@ async def test_resource_selection_resume_binds_execution_before_first_event(
 
         async def execute(self, **kwargs):
             await assert_execution_bound()
+            assert kwargs["resource_selection_checkpoint"]["response"] == reply.to_dict()
+            assert kwargs["resource_selection_checkpoint"]["state"] == "claimed"
             if lifecycle:
                 assert queue.events  # Bind the SDK lifecycle before restoring Pipeline sidecars.
                 assert PipelineLifecycleEventQueueCarrier.is_bound(request)
@@ -881,16 +905,25 @@ async def test_resource_selection_resume_binds_execution_before_first_event(
     )
     if lifecycle:
         PipelineLifecycleEventQueueCarrier.attach(request)
-    if cold:
+    if recovery == "released":
         admission = await service.reserve_recoverable_input_continuation(
             context_id="ctx-1", task_id="task-1", owner="owner-1"
         )
         assert admission is not None
         RecoverableInputAdmissionCarrier.attach(request, admission)
-    else:
+    elif not cold:
         pending.continuation = live_continuation
         await executor._resource_selection_registry.register(pending)
     try:
+        if recovery in {"live-owner", "unsettled", "external-operation", "begin-failed"}:
+            error = "test begin failure" if recovery == "begin-failed" else "active in another process"
+            with pytest.raises(ExecutionControlConflictError, match=error):
+                await executor.execute(request, queue)
+            assert not observations
+            assert not queue.events
+            assert service.get_for_context("ctx-1") is None
+            assert not service._recoverable_input_admissions.has_active("ctx-1")
+            return
         await executor.execute(request, queue)
         assert observations
         assert checkpoints.load(event.input_id)["state"] == "resolved"

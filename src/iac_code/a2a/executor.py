@@ -2960,20 +2960,34 @@ class IacCodeA2AExecutor(AgentExecutor):
             control = current_execution_control()
             if control is None:
                 # This answer bypasses ordinary execution setup. A cold sandbox
-                # must consume the dispatcher's recovery admission before ROS
+                # must establish recovery admission before ROS
                 # can bind the first frame to the resumed execution.
                 frame = pending.event.continuation_frame or {}
                 assistant_ref = frame.get("assistantMessageRef")
                 pipeline = isinstance(assistant_ref, str) and assistant_ref.startswith("pipeline/transcripts/")
-                control = await self._execution_control_service.begin_execution(
-                    context_id=response.context_id,
-                    task_id=response.task_id,
-                    owner=owner,
-                    cwd=pending.cwd,
-                    execution_mode="pipeline" if pipeline else "normal",
-                    continue_input_required=pipeline,
-                    recoverable_input_admission=RecoverableInputAdmissionCarrier.read(context),
-                )
+                admission = RecoverableInputAdmissionCarrier.read(context)
+                reserved_admission = None
+                if admission is None:
+                    # The inactive structured-answer route can bypass dispatcher's
+                    # admission setup. The validated, claimed selector checkpoint
+                    # proves this input wait; existing fences still reject a live
+                    # owner, unsettled state or an outstanding external operation.
+                    reserved_admission = await self._execution_control_service.reserve_recoverable_input_continuation(
+                        context_id=response.context_id, task_id=response.task_id, owner=owner
+                    )
+                try:
+                    control = await self._execution_control_service.begin_execution(
+                        context_id=response.context_id,
+                        task_id=response.task_id,
+                        owner=owner,
+                        cwd=pending.cwd,
+                        execution_mode="pipeline" if pipeline else "normal",
+                        continue_input_required=pipeline,
+                        recoverable_input_admission=admission or reserved_admission,
+                    )
+                finally:
+                    if reserved_admission is not None:
+                        await self._execution_control_service.release_recoverable_input_continuation(reserved_admission)
                 bind_execution_control(control)
                 await control.checkpoint()
                 await control.mark_execution_started()
@@ -3072,7 +3086,11 @@ class IacCodeA2AExecutor(AgentExecutor):
                 ),
             )
         assert context_record is not None
-        assert record is not None
+        # claim() replaces the persisted document; the pre-claim cold-load
+        # dictionary does not contain the selected/canceled response.
+        record = store.load(response.input_id)
+        if record is None:
+            raise InvalidParamsError("resource_selection_resume_invalid: pending input not found")
         if replayed and record.get("state") == "resolved":
             await self._publish_status(
                 event_queue,
