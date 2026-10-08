@@ -181,7 +181,8 @@ auto_trigger:
 
 - 不确定的资源属性或Schema：
   - ROS → aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})
-  - Terraform → aliyun_api(product="IaCService", action="GetResourceType", style="ROA", method="GET", pathname="/resourceType/<类型>")
+  - Terraform → aliyun_api(product="IaCService", version="2021-08-06", action="GetResourceType", params={"resourceType": "<类型>"})
+    - `<类型>` 使用 Terraform 资源类型名（如 `alicloud_vpc`）；路径参数通过 `params.resourceType` 传入，由 API 元数据决定请求方式并编码路径，不显式设置 `style`、`method` 或 `pathname`。
 - 不熟悉的资源类型/属性 → aliyun_doc_search（ROS 传 category_id=28850，Terraform 传 category_id=95817）
 - 想要了解应用部署方案、解决方案、云产品相关知识 -> aliyun_doc_search
 - 摘要不够 → web_fetch 获取完整文档

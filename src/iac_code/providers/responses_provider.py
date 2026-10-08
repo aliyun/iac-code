@@ -78,16 +78,18 @@ class ResponsesProvider(OpenAIProvider):
         *,
         streaming: bool,
     ) -> dict[str, Any]:
-        limit = self._max_completion_tokens or max_tokens
-        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+        requested_limit = self._max_completion_tokens or max_tokens
+        if not isinstance(requested_limit, int) or isinstance(requested_limit, bool) or requested_limit < 1:
             raise ResponsesConfigurationError("Responses max_output_tokens must be a positive integer.")
+        limit = self._output_token_limit(requested_limit)
         kwargs: dict[str, Any] = {
             "model": self._model,
             "input": encode_input(messages, self._responses_identity),
-            "max_output_tokens": limit,
             "store": False,
             "stream": streaming,
         }
+        if limit is not None:
+            kwargs["max_output_tokens"] = limit
         if system:
             kwargs["instructions"] = system
         if tools:
@@ -197,6 +199,7 @@ class DashScopeResponsesProvider(ResponsesProvider):
 
     def _build_responses_kwargs(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
         result = super()._build_responses_kwargs(*args, **kwargs)
-        if result["max_output_tokens"] < 16:
+        limit = result.get("max_output_tokens")
+        if limit is not None and limit < 16:
             raise ResponsesConfigurationError("DashScope Responses max_output_tokens must be at least 16.")
         return result

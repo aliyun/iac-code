@@ -60,6 +60,7 @@ from iac_code.tools.cloud.aliyun.contract_store import (
 )
 from iac_code.tools.cloud.aliyun.ecs_credential_errors import ecs_credential_error_code
 from iac_code.tools.cloud.aliyun.public_errors import normalize_api_identity, public_aliyun_error
+from iac_code.tools.cloud.aliyun.read_only_policy import IacServiceReadOnlyPolicy
 from iac_code.tools.cloud.aliyun.result_contract import (
     ALIYUN_HTTP_METADATA_KEY,
     build_aliyun_http_metadata,
@@ -123,6 +124,7 @@ class _AliyunPermissionRuleMatch:
 
 
 _ALIYUN_API_PERMISSION_PROFILE = AliyunPermissionRuleProfile()
+_IAC_SERVICE_READ_ONLY_POLICY = IacServiceReadOnlyPolicy()
 
 
 VERSION_MAP = {
@@ -997,12 +999,16 @@ def _runtime_is_read_only(
     contract: CanonicalWireContract,
     shape: ApiCallShape,
     metadata_contract: CanonicalWireContract,
+    *,
+    tool_input: Mapping[str, Any] | None = None,
 ) -> bool:
     overrides_match = all(
         _normalized_override_value(name, getattr(shape, name))
         == _normalized_override_value(name, getattr(metadata_contract, name))
         for name in shape.explicit_overrides
     )
+    if not overrides_match:
+        overrides_match = _IAC_SERVICE_READ_ONLY_POLICY.matches(contract, shape, metadata_contract, tool_input)
     body_matches = _runtime_body_matches_contract(shape.body_source, contract.request_body_type)
     if not overrides_match or not body_matches:
         return False
@@ -1677,6 +1683,7 @@ class AliyunApi(BaseCloudApi):
             contract,
             final_shape,
             metadata_contract,
+            tool_input=normalized,
         )
         execution_class: ExecutionClass = "concurrent" if is_read_only else "serial"
         if is_read_only:
@@ -2475,6 +2482,7 @@ class AliyunApi(BaseCloudApi):
                         contract,
                         final_shape,
                         recovery_metadata_contract,
+                        tool_input=normalized,
                     )
                     else "serial"
                 )

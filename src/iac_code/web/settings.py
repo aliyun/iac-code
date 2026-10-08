@@ -24,6 +24,7 @@ from iac_code.config import (
 )
 from iac_code.i18n import LANGUAGE_DISPLAY_NAMES, SUPPORTED_LANGUAGES, _, set_language
 from iac_code.pipeline.config import is_selling_review_step_enabled, save_selling_review_step_enabled
+from iac_code.providers.output_limits import OutputTokenPolicy
 from iac_code.providers.registry import PROVIDER_GROUPS, PROVIDER_REGISTRY, ProviderDescriptor
 from iac_code.providers.thinking import get_thinking_spec, normalize_effort, resolve_thinking_active
 from iac_code.services.providers.aliyun import CREDENTIAL_MODES, DEFAULT_REGION, AliyunCredential, AliyunCredentials
@@ -41,10 +42,6 @@ _FOREIGN_SESSIONS_SETTINGS_KEY = "foreignSessions"
 
 # 区分「请求里没带该字段」(保持现状)与「带了但为空/null」(清除回落默认)。
 _UNSET = object()
-
-# 「最大输出 tokens」留空时的回落默认:与各 provider.stream(max_tokens=8192) 的请求层默认一致
-# (registry 无按模型上限,全局统一)。仅用于前端 placeholder 提示,让「留空使用模型默认」显示具体数值。
-_DEFAULT_MODEL_MAX_OUTPUT_TOKENS = 8192
 
 
 def is_foreign_pipeline_visible() -> bool:
@@ -885,8 +882,8 @@ def _model_payload(provider_key: str, model, provider_config: dict[str, Any] | N
         # 「思考预算」字段仅对支持独立预算的模型可见(能力门控);其余家族走 effort 推导。
         "supportsThinkingBudget": thinking.supports_thinking_budget,
         "defaultThinkingBudget": thinking.default_thinking_budget,
-        # 「最大输出 tokens」对所有模型生效,留空回落到该默认(前端 placeholder 展示)。
-        "defaultMaxCompletionTokens": _DEFAULT_MODEL_MAX_OUTPUT_TOKENS,
+        # GLM 留空使用服务端默认;其余模型展示请求层默认,与 provider 策略一致。
+        "defaultMaxCompletionTokens": OutputTokenPolicy(model.id).default_limit,
         # 已保存的两个旋钮按模型回填(providers.<key>.models.<id>,回落 provider 顶层)。
         "savedThinkingBudget": _saved("thinkingBudget"),
         "savedMaxCompletionTokens": _saved("maxCompletionTokens"),
