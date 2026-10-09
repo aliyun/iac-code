@@ -1,6 +1,6 @@
 """Identity generation for telemetry.
 
-user.id    = a configured 16-digit Alibaba Cloud account ID or iac_user_<uuid4>
+user.id    = an explicit E2E identity, a configured account/user ID, or iac_user_<uuid4>
 session.id = iac_sess_<uuid4>, per Identity instance (per process)
 tenant.id  = iac_tenant_<user-defined>, from IAC_CODE_TENANT_ID
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextvars
 import os
+import re
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -21,8 +22,19 @@ SESSION_ID_PREFIX = "iac_sess_"
 TENANT_ID_PREFIX = "iac_tenant_"
 
 _USER_ID_KEY = "userID"
+E2E_USER_ID_ENV = "IAC_CODE_TELEMETRY_E2E_USER_ID"
 _TENANT_ENV_VAR = "IAC_CODE_TENANT_ID"
 _ALIYUN_ACCOUNT_ID_LENGTH = 16
+_E2E_USER_ID_PATTERN = re.compile(r"iac_user_e2e_[0-9a-f]{32}\Z")
+
+
+def is_e2e_user_id(value: object) -> bool:
+    return isinstance(value, str) and _E2E_USER_ID_PATTERN.fullmatch(value) is not None
+
+
+def get_e2e_user_id() -> str | None:
+    value = os.environ.get(E2E_USER_ID_ENV, "")
+    return value if is_e2e_user_id(value) else None
 
 # Per-async-context override for session id. Set via use_session_id; when
 # present, Identity.get_session_id returns this instead of the process-level
@@ -84,9 +96,13 @@ class Identity:
         A ROS-deployed Web instance may use its 16-digit Alibaba Cloud account
         ID directly so restarts preserve the account-scoped identity.
 
-        Honors an active ``use_user_id`` override so a2a servers can report
-        per-task user ids in telemetry without mutating process state.
+        An explicit E2E identity wins over ``use_user_id`` so all test traffic,
+        including A2A server lifecycle events, carries the report filter tag.
+        Otherwise ``use_user_id`` supports per-task identities.
         """
+        e2e_user_id = get_e2e_user_id()
+        if e2e_user_id is not None:
+            return e2e_user_id
         override = _user_id_override.get()
         if override is not None:
             return override

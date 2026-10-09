@@ -192,3 +192,17 @@ async def test_streaming_output_resolves_question_future_when_prompt_raises():
     assert event.response_future.done()
     assert event.response_future.result() is None
     assert renderer._last_streaming_errors == ["Error: prompt failed"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allow_free_text", [False, True])
+async def test_question_image_path_requires_free_text_input(allow_free_text):
+    renderer = _renderer()
+    renderer.console.input = MagicMock(side_effect=["/fixtures/answer.png", EOFError()])
+    result = await renderer.prompt_user_question(_event(allow_free_text=allow_free_text))
+    if allow_free_text:
+        assert result == {"selected_id": "", "selected_label": "", "free_text": "/fixtures/answer.png"}
+        assert renderer.console.input.call_count == 1
+    else:
+        assert result is None
+        assert renderer.console.input.call_count == 2

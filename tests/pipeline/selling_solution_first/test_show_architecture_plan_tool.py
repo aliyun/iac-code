@@ -870,3 +870,46 @@ class TestWithoutEventQueue:
 
         assert result.is_error is False
         assert "方案A：经典三层" in result.content
+
+
+@pytest.mark.asyncio
+async def test_same_outline_details_can_be_corrected_after_completion_guard_rejects_lifecycle():
+    from iac_code.pipeline.engine.complete_step_tool import CompletionEnrichmentError
+    from iac_code.pipeline.selling_solution_first.hooks.solution_planning_and_selection import enrich_completion_input
+
+    outline = {'candidate_name': '方案 A', 'summary': 'A', 'total_monthly_cost': '¥1/月', 'key_tradeoff': 'A'}
+    detail = _tool_input(candidate_name='方案 A')
+    records = [
+        {'tool_name': 'show_architecture_plan', 'input': {'candidates': [outline]}, 'is_error': False,
+         'record_id': 'fake-batch', 'sequence': 1},
+        {'tool_name': 'show_candidate_detail', 'input': detail, 'is_error': False, 'sequence': 2},
+    ]
+    intent = {'resource_intents': [{'product': 'ECS', 'action': 'forbid', 'source': 'user'}]}
+    def complete():
+        return enrich_completion_input(tool_input={'conclusion': {'status': 'awaiting_selection', 'intent': intent}},
+                                       context_snapshot={}, tool_result_records=records, user_message='No ECS')
+    with pytest.raises(CompletionEnrichmentError, match='ECS:forbid'):
+        complete()
+    corrected = _tool_input(candidate_name='方案 A', resource_intents=intent['resource_intents'])
+    result = await ShowCandidateDetailTool({'tool_result_records': records}).execute(
+        tool_input=corrected, context=ToolContext(event_queue=asyncio.Queue()))
+    assert not result.is_error, result.content
+    records.append({'tool_name': 'show_candidate_detail', 'input': corrected, 'is_error': result.is_error,
+                    'candidate_set_id': 'fake-batch', 'sequence': 3})
+    assert complete()['conclusion']['candidates'][0]['resource_intents'] == intent['resource_intents']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('index', 'name'), [(1, '方案 A'), (True, '方案 A'), (-1, '方案 A'), (0, '旧方案')])
+async def test_detail_correction_still_requires_actual_outline_index_and_name(index, name):
+    outline = {'candidate_name': '方案 A', 'summary': 'A', 'total_monthly_cost': '¥1/月', 'key_tradeoff': 'A'}
+    state = {'tool_result_records': [
+        {'tool_name': 'show_architecture_plan', 'input': {'candidates': [outline]}, 'is_error': False, 'sequence': 1},
+        {'tool_name': 'show_candidate_detail', 'input': _tool_input(candidate_name='方案 A'),
+         'is_error': False, 'sequence': 2},
+    ]}
+    queue = asyncio.Queue()
+    result = await ShowCandidateDetailTool(state).execute(
+        tool_input=_tool_input(candidate_index=index, candidate_name=name), context=ToolContext(event_queue=queue))
+    assert result.is_error
+    assert queue.empty()

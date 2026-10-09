@@ -2977,16 +2977,22 @@ class NaturalCompletionProjectionGate:
             and task.status.state == TaskState.TASK_STATE_WORKING
             and record is not None
             and record.state == "input-required"
-            and _task_updated_at_from_sdk_task(task) > record.updated_at
         )
         if not should_delay:
             await self._save(task, context)
             return
 
         self._projection_intercepted = True
+        # This fixture specifically models a newer projection. Equal/coarse
+        # platform clocks must not prevent it from reaching the intended gate.
+        newer_task = Task()
+        newer_task.CopyFrom(task)
+        newer_task.status.timestamp.FromNanoseconds(
+            int(max(_task_updated_at_from_sdk_task(task), record.updated_at + 1) * 1_000_000_000)
+        )
         self.projection_waiting.set()
         await self._projection_release
-        await self._save(task, context)
+        await self._save(newer_task, context)
         record = self._store._tasks[task.id]
         if record.state == "working":
             self._projection_overwrote = True
@@ -3027,6 +3033,35 @@ class NaturalCompletionProjectionGate:
         self.projection_saved.set()
         if not self._record_read.done():
             self._record_read.set_result(None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("incoming_time", [999, 1000, 1001])
+async def test_natural_completion_projection_gate_controls_newer_timestamp(incoming_time) -> None:
+    record = SimpleNamespace(state="input-required", updated_at=1000)
+
+    async def save(task, context=None):
+        record.state = "working"
+        record.updated_at = _task_updated_at_from_sdk_task(task)
+
+    async def get_record(_task_id):
+        return record
+
+    gate = NaturalCompletionProjectionGate(SimpleNamespace(save=save, get_task_record=get_record, _tasks={"t": record}))
+    gate.target("t")
+    task = Task(id="t", context_id="c")
+    task.status.state = TaskState.TASK_STATE_WORKING
+    task.status.timestamp.seconds = incoming_time
+    pending = asyncio.create_task(gate.save(task))
+    try:
+        await asyncio.wait_for(gate.projection_waiting.wait(), timeout=1)
+        assert not pending.done()
+        gate.release_waiters()
+        await asyncio.wait_for(pending, timeout=1)
+        assert record.updated_at > 1000
+    finally:
+        gate.release_waiters()
+        await asyncio.gather(pending, return_exceptions=True)
 
 
 @pytest.mark.asyncio

@@ -5,10 +5,13 @@ import re
 import pytest
 import yaml
 
+from iac_code.services.telemetry.attributes import AttributeBuilder
 from iac_code.services.telemetry.identity import (
+    E2E_USER_ID_ENV,
     SESSION_ID_PREFIX,
     USER_ID_PREFIX,
     Identity,
+    use_user_id,
 )
 
 
@@ -40,6 +43,25 @@ def test_user_id_persists_to_settings_yml(settings_path):
     assert settings_path.exists()
     data = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
     assert data["userID"] == user_id
+
+
+def test_e2e_user_id_tags_telemetry_even_during_a2a_user_override(settings_path, monkeypatch):
+    settings_path.write_text(yaml.safe_dump({"userID": "iac_user_regular"}), encoding="utf-8")
+    e2e_id = "iac_user_e2e_" + "a" * 32
+    monkeypatch.setenv(E2E_USER_ID_ENV, e2e_id)
+
+    with use_user_id("iac_user_a2a_server"):
+        identity = Identity(settings_path)
+        assert identity.get_user_id() == e2e_id
+        assert AttributeBuilder(identity, "iac-code").build_resource()["user.id"] == e2e_id
+    assert yaml.safe_load(settings_path.read_text(encoding="utf-8"))["userID"] == "iac_user_regular"
+
+
+def test_invalid_e2e_user_id_does_not_override_settings(settings_path, monkeypatch):
+    settings_path.write_text(yaml.safe_dump({"userID": "iac_user_regular"}), encoding="utf-8")
+    monkeypatch.setenv(E2E_USER_ID_ENV, "not-an-e2e-id")
+
+    assert Identity(settings_path).get_user_id() == "iac_user_regular"
 
 
 def test_user_id_accepts_aliyun_main_account_id(settings_path):

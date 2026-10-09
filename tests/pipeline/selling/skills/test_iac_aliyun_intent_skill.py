@@ -19,6 +19,13 @@ def _parse_frontmatter(text: str) -> dict:
     return yaml.safe_load(text[3:end])
 
 
+def test_intent_preserves_explicit_candidate_count_as_planning_not_resource_count():
+    body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    assert "`additional_notes`：保留用户明确指定的候选方案数量" in body
+    assert "方案数量不是单个方案内的云资源数量" in body
+    assert "不要将其转换成资源数量硬约束" in body
+
+
 def test_intent_skill_mentions_ask_user_question_for_low_confidence():
     body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
 

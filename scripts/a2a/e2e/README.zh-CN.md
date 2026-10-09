@@ -520,7 +520,7 @@ provider、tool、真实云调用场景默认会被保护住。只有确认要�
 | `image-ask-waiting` | `ask_user_question` 等待用户输入，随后重启 server | 不带 `taskId` 发送静态 `ask-first-answer.png` / `ask-second-answer.png` 图片 fixture | pending ask 输入能恢复，图片回答能 hydrate 到恢复后的 task，最终完成并产生 VSwitch 证据。 |
 | `image-selection-waiting` | step4 等待候选方案选择，随后重启 server | 不带 `taskId` 发送静态 `selection.png` 图片 fixture | 能恢复等待中的 step4 task，图片选择被接受，并产生 VSwitch 证据。 |
 | `image-normal-handoff` | pipeline 完成并 handoff 到 normal chat；normal follow-up 是静态 `normal-followup.png`，随后重启 server | 不带 `taskId` 发送 normal-chat 恢复问题 | 图片 follow-up 保持同一个 `contextId`，使用新的 normal-chat task；completed handoff 状态重启后仍可恢复。 |
-| `image-interrupt` | step3 收到静态 `rollback-interrupt.png` 图片，表示回滚到 `intent_parsing`，随后重启 server | `继续`，必要时再选择方案 | 图片 interrupt 能被识别；pipeline 以安全组任务完成，最终部署证据不是 VSwitch。 |
+| `image-interrupt` | step3 收到 `rollback-interrupt.png`，图片附注明确请求从 `intent_parsing` 重新解析；只有该新尝试开始后才强杀并重启 server | `继续`，必要时再选择方案 | 图片 interrupt 能被识别；pipeline 以安全组任务完成，最终部署证据不是 VSwitch。 |
 | `step1-running` | `intent_parsing` 运行中 | `继续` | running pipeline task 能恢复并完成；存在 VSwitch 证据。 |
 | `step2-running` | `architecture_planning` 运行中 | `继续` | running pipeline task 能恢复并完成；存在 VSwitch 证据。 |
 | `step3-running` | `evaluate_candidates` 的 candidate/sub-pipeline 运行中 | `继续` | sub-pipeline 状态能恢复并完成；存在 VSwitch 证据。 |

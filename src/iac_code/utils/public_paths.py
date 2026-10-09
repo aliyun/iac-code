@@ -331,10 +331,14 @@ def _candidate_norm_paths(path: str, *, windows: bool) -> list[str]:
 
     if expanded.startswith("/"):
         absolute = posixpath.normpath(expanded)
-        real_path = posixpath.realpath(absolute)
     else:
         absolute = os.path.abspath(expanded)
-        real_path = os.path.realpath(absolute)
+    try:
+        real_path = posixpath.realpath(absolute) if expanded.startswith("/") else os.path.realpath(absolute)
+    except ValueError:
+        # Display text may contain null bytes and is not necessarily a file path.
+        # Keep the lexical candidate already used for root matching.
+        real_path = absolute
     candidates = [_normalize_posix_path(absolute)]
     real = _normalize_posix_path(real_path)
     if real.startswith("/") and real not in candidates:

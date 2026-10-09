@@ -105,9 +105,15 @@ class TestSkillContentRosOnly:
         assert "先尽量补齐或生成参数" in body
         assert "普通密码" in body
 
-    def test_create_stack_name_has_random_suffix(self, body):
+    @pytest.mark.parametrize("flow", ["selling", "selling_solution_first"])
+    def test_create_stack_name_has_random_suffix(self, flow):
+        body = (SKILL_DIR.parents[2] / flow / "skills" / "iac-aliyun-deploying" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
         assert "StackName" in body
-        assert "用户指定名称时将其作为基础名" in body
+        assert "用户仅指定基础名或前缀时" in body
+        assert "用户明确要求精确名称、不可变名称或不得追加后缀时，必须原样使用该名称" in body
+        assert "不得因重名自行改名" in body
         assert "随机串后缀" in body
         assert "避免重名" in body
 

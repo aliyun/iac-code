@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from a2a.types import Message, Part, Role, Task, TaskState, TaskStatus
@@ -91,6 +92,51 @@ def response(*, value="i-test123") -> ResourceSelectionResponse:
         value=value,
         label="app-server",
     )
+
+
+@pytest.mark.parametrize(
+    ("run_mode", "proven_handoff"),
+    [("normal", False), ("pipeline", True)],
+)
+@pytest.mark.asyncio
+async def test_normal_selector_answer_starts_new_execution_after_released_input_wait(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    run_mode: str,
+    proven_handoff: bool,
+) -> None:
+    task_store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    owner = task_store.owner_for_context(None)
+    old_control = SimpleNamespace(
+        owner=owner, phase="terminated", release_ready=True,
+        has_managed_work=Mock(return_value=False), attach_task=AsyncMock(),
+    )
+    new_control = SimpleNamespace(
+        task_id="task-1", mark_execution_started=AsyncMock(), detach_task=AsyncMock(return_value=None),
+    )
+    execution_control = SimpleNamespace(
+        get_for_context=Mock(return_value=old_control),
+        begin_execution=AsyncMock(return_value=new_control),
+        set_termination_cleanup=Mock(), set_resume_callback=Mock(),
+    )
+    executor = IacCodeA2AExecutor(
+        task_store=task_store, model="test-model", execution_control_service=execution_control,
+    )
+    executor._execute = AsyncMock()
+    handoff_probe = AsyncMock(return_value=proven_handoff)
+    monkeypatch.setattr(executor, "_should_route_pipeline_handoff_to_normal", handoff_probe)
+    monkeypatch.setattr("iac_code.a2a.executor.parse_resource_selection_response", lambda _message: response())
+
+    await executor.execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path), "run_mode": run_mode}}), FakeEventQueue()
+    )
+
+    old_control.attach_task.assert_not_called()
+    execution_control.begin_execution.assert_awaited_once()
+    new_control.mark_execution_started.assert_awaited_once()
+    new_control.detach_task.assert_awaited_once()
+    if proven_handoff:
+        handoff_probe.assert_awaited_once_with(context_id="ctx-1", cwd=str(tmp_path))
 
 
 def test_private_resume_result_preserves_empty_cancel_without_registered_tool() -> None:

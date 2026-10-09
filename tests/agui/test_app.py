@@ -1053,6 +1053,87 @@ async def test_resource_selector_resume_uses_structured_a2a_contract(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('continuation', ['input', 'completed', 'failed', 'eof'])
+@pytest.mark.parametrize('send_boundary', ['working', 'empty-input', 'consumed-input'])
+async def test_pipeline_selector_resume_observes_native_continuation_after_send_stream_eof(
+    tmp_path, monkeypatch, continuation, send_boundary,
+):
+    monkeypatch.setenv('IAC_CODE_AGUI_ALLOWED_CWDS', str(tmp_path))
+
+    class ContinuingClient(FakeA2AClient):
+        accepted = False
+        subscribe_calls = 0
+
+        def stream_message(self, _url, prompt, *, context_id, task_id=None, **kwargs):
+            self.resumed_prompts.append((prompt, task_id))
+
+            async def events():
+                self.accepted = True
+                yield _text_event(context_id=context_id, text='Returning to candidate selection')
+                if send_boundary == 'consumed-input':
+                    yield _input_event(context_id=context_id, value=_resource_selector_input())
+                else:
+                    state = 'TASK_STATE_WORKING' if send_boundary == 'working' else 'TASK_STATE_INPUT_REQUIRED'
+                    yield _event(context_id=context_id, state=state)
+
+            return events()
+
+        async def get_task(self, _url, _task_id, *, history_length=None):
+            if not self.accepted:
+                return await super().get_task(_url, _task_id, history_length=history_length)
+            # The task store still has the prior wait state, but the consumed
+            # selector is gone and the pipeline is publishing its next wait.
+            return _event(context_id=self.context_id, state='TASK_STATE_INPUT_REQUIRED')
+
+        def subscribe_task(self, _url, _task_id):
+            self.subscribe_calls += 1
+
+            async def events():
+                if continuation == 'eof':
+                    return
+                if continuation in {'completed', 'failed'}:
+                    yield _event(context_id=self.context_id, state='TASK_STATE_' + continuation.upper())
+                    return
+                yield _event(context_id=self.context_id, state='TASK_STATE_WORKING')
+                yield _input_event(context_id=self.context_id, value={
+                    'schemaVersion': 1, 'kind': 'candidate_selection', 'required': True,
+                    'requestTaskId': 'task-1', 'contextId': self.context_id, 'inputId': 'next-selection',
+                    'prompt': 'Choose the replanned candidate', 'options': [{'id': '0', 'label': 'Candidate A'}],
+                })
+
+            return events()
+
+    fake = ContinuingClient(input_value=_resource_selector_input())
+    adapter = AguiA2AAdapter(a2a_url='http://a2a/', client=fake, state_dir=tmp_path / 'state')
+
+    def payload(run_id, resume=None):
+        value = _payload(tmp_path, run_id=run_id, resume=resume)
+        value['forwardedProps']['iacCode'].update(runMode='pipeline', pipelineName='selling_solution_first')
+        return value
+
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(adapter=adapter)),
+                                 base_url='http://test') as client:
+        initial = _events(await client.post('/', json=payload('initial')))
+        interrupt = initial[-1]['outcome']['interrupts'][0]
+        fake.context_id = adapter._threads['thread-1'].context_id
+        resumed = _events(await client.post('/', json=payload('resumed', [{
+            'interruptId': interrupt['id'], 'status': 'cancelled', 'payload': {'optionsEmpty': False},
+        }])))
+    if continuation == 'input':
+        assert resumed[-1]['type'] == 'RUN_FINISHED'
+        assert resumed[-1]['outcome']['type'] == 'interrupt'
+        assert resumed[-1]['outcome']['interrupts'][0]['id'] == 'next-selection'
+        assert set(adapter._threads['thread-1'].pending) == {'next-selection'}
+    elif continuation == 'completed':
+        assert resumed[-1]['type'] == 'RUN_FINISHED' and resumed[-1]['outcome']['type'] == 'success'
+    else:
+        assert resumed[-1]['type'] == 'RUN_ERROR'
+        assert resumed[-1]['code'] == ('A2A_EXECUTION_FAILED' if continuation == 'failed' else 'A2A_UNAVAILABLE')
+    assert fake.subscribe_calls == 1 and len(fake.resumed_prompts) == 1
+    assert fake.cancelled == (['task-1'] if continuation == 'eof' else [])
+
+
+@pytest.mark.asyncio
 async def test_resource_selector_invalid_answer_is_retryable_after_adapter_restart(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
     fake = FakeA2AClient(input_value=_resource_selector_input())

@@ -33,15 +33,19 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
+from scripts.e2e_question_driver import answer_question, case_facts, network_facts, question_conversation  # noqa: E402
+
 PIPELINE_NAME = "selling_solution_first"
 NEW_STEPS = (
     "solution_planning_and_selection",
@@ -405,6 +409,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cleanup-vpc-cidr", default="")
     parser.add_argument("--cleanup-zone-id", default="")
     parser.add_argument("--occupied-cidr", action="append", default=[])
+    parser.add_argument("--cidr-pool", default="", help="Override the CIDR pool reserved for this runner process.")
     return parser.parse_args(argv)
 
 
@@ -681,6 +686,11 @@ class ScenarioResult:
     notes: list[str]
     cleanup_status: str
     error: str = ""
+    error_type: str = ""
+    error_site: str = ""
+    watchdog: dict[str, Any] | None = None
+    control_state: dict[str, Any] | None = None
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -702,8 +712,15 @@ class ScenarioRuntime:
     processes: list[subprocess.Popen[Any]] = field(default_factory=list)
     checks: dict[str, bool] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
+    watchdog: dict[str, Any] | None = None
+    control_state: dict[str, Any] | None = None
     cloud_resources: list[dict[str, Any]] = field(default_factory=list)
     owned_stack_names: set[str] = field(default_factory=set)
+    question_facts: dict[str, str] = field(default_factory=dict)
+    question_counts: dict[str, int] = field(default_factory=dict)
+    pending_question: dict[str, Any] = field(default_factory=dict)
+    answered_parameter_fields: set[str] = field(default_factory=set)
     repl_candidate_wait_count: int = 0
     repl_confirmation_wait_count: int = 0
     repl_confirmation_action_count: int = 0
@@ -789,6 +806,57 @@ def case_run_dir(root: Path, spec: ScenarioSpec, explicit: str = "") -> Path:
     return root.expanduser().resolve() / spec.name / token
 
 
+def _write_runtime_identity_instructions(runtime: ScenarioRuntime) -> None:
+    name = "IAC-CODE-E2E.md"
+    runtime.paths.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    (runtime.paths.config_dir / name).write_text(
+        "# E2E resource isolation\n"
+        "不得复用已有 Stack 或删除本次测试之外的资源。Stack 名称由实际部署决定。\n",
+        encoding="utf-8",
+    )
+    runtime.env["IAC_CODE_INSTRUCTION_MEMORY_FILE"] = name
+
+
+LOCAL_TELEMETRY_CASE_IDS = frozenset({"A01", "A24", "W01"})
+
+
+def _prepare_case_telemetry_identity(config_dir: Path, env: dict[str, str], *, local_capture: bool) -> None:
+    from iac_code.services.telemetry.identity import E2E_USER_ID_ENV, is_e2e_user_id
+    from iac_code.utils.file_security import ensure_private_file
+
+    path = config_dir / "settings.yml"
+    settings = yaml.safe_load(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    if settings is None:
+        settings = {}
+    if not isinstance(settings, dict):
+        raise ValueError("isolated settings.yml must contain a mapping")
+    user_id = settings.get("userID")
+    if not is_e2e_user_id(user_id):
+        user_id = "iac_user_e2e_" + uuid.uuid4().hex
+        settings["userID"] = user_id
+        path.write_text(yaml.safe_dump(settings, allow_unicode=True), encoding="utf-8")
+        ensure_private_file(path)
+    env[E2E_USER_ID_ENV] = user_id
+    if local_capture:
+        env["IAC_CODE_TELEMETRY_LOCAL_ONLY"] = "1"
+    else:
+        env.pop("IAC_CODE_TELEMETRY_LOCAL_ONLY", None)
+        env.pop("IAC_CODE_ENABLE_LOCAL_TELEMETRY", None)
+        for key in tuple(env):
+            if (key.startswith("IAC_CODE_TELEMETRY_") or key.startswith("OTEL_EXPORTER_OTLP")) and key.endswith(
+                "ENDPOINT"
+            ):
+                try:
+                    host = urlparse(env[key]).hostname or ""
+                except ValueError:
+                    continue
+                local = host.lower() == "localhost"
+                with contextlib.suppress(ValueError):
+                    local = local or ipaddress.ip_address(host).is_loopback
+                if local:
+                    env.pop(key)
+
+
 def create_runtime(
     spec: ScenarioSpec,
     args: argparse.Namespace,
@@ -818,6 +886,7 @@ def create_runtime(
             "IAC_CODE_E2E_RESERVED_CIDR": cidr,
         }
     )
+    _prepare_case_telemetry_identity(paths.config_dir, env, local_capture=spec.case_id in LOCAL_TELEMETRY_CASE_IDS)
     provider = args.provider or runtime_defaults.get("provider", "")
     model = (
         args.model
@@ -860,6 +929,7 @@ def create_runtime(
             "unique cloud identity assigned": stack_name.startswith(STACK_PREFIX + "-") and bool(cidr),
         }
     )
+    _write_runtime_identity_instructions(runtime)
     write_json(paths.run_dir / "config-audit.json", _credential_audit_payload(runtime))
     write_json(paths.run_dir / "cloud-resources.json", [])
     return runtime
@@ -896,7 +966,35 @@ def _track_a2a_server_processes(runtime: ScenarioRuntime, harness: Any) -> None:
     start_server = harness.start_server
 
     def tracked_start_server() -> None:
-        start_server()
+        try:
+            start_server()
+        except Exception:
+            server = getattr(harness, "server", None)
+            process = getattr(server, "process", None)
+            _record_diagnostic(runtime, "server_startup_process_alive", process is not None and process.poll() is None)
+            return_code = process.poll() if process is not None else None
+            if isinstance(return_code, int):
+                _record_diagnostic(runtime, "server_startup_return_code", return_code)
+            prefix = getattr(server, "_log_prefix", None)
+            text = ""
+            if isinstance(prefix, Path):
+                for suffix in (".stdout.log", ".stderr.log"):
+                    with contextlib.suppress(OSError):
+                        path = prefix.with_suffix(suffix)
+                        with path.open("rb") as handle:
+                            handle.seek(max(0, path.stat().st_size - 32000))
+                            text += handle.read(32000).decode("utf-8", errors="replace")
+            _record_diagnostic(runtime, "server_startup_error_types", sorted({
+                name for name in ("ModuleNotFoundError", "ImportError", "PermissionError", "FileNotFoundError",
+                                   "ValueError", "RuntimeError", "OSError", "ClientException", "MemoryError")
+                if re.search(r"\b" + name + r"\b", text)
+            }))
+            _record_diagnostic(runtime, "server_startup_port_in_use", bool(re.search(
+                r"address already in use|Errno 98|Errno 48", text, re.I,
+            )))
+            if isinstance(process, subprocess.Popen):
+                runtime.register_process(process)
+            raise
         process = getattr(getattr(harness, "server", None), "process", None)
         if isinstance(process, subprocess.Popen):
             runtime.register_process(process)
@@ -926,6 +1024,7 @@ def _python_namespace(runtime: ScenarioRuntime) -> argparse.Namespace:
         server_timeout=args.timeout,
         stream_timeout=args.stream_timeout,
         event_timeout=args.timeout,
+        wait_diagnosis_after=120.0,
         leave_server_running=args.leave_running,
         no_auto_approve_permissions=False,
         initial_prompt="",
@@ -959,15 +1058,28 @@ def _python_namespace(runtime: ScenarioRuntime) -> argparse.Namespace:
 
 def _initial_prompt(runtime: ScenarioRuntime) -> str:
     spec = runtime.spec
-    stack = runtime.stack_name
     cidr = runtime.cidr
-    base = (
+    request = (
         "请在阿里云杭州地域为一个测试应用设计并部署网络基础设施。至少给出两个详细架构方案，"
-        "说明架构图、资源清单、价格概览和费用明细。最终 ROS StackName 必须使用 "
-        f"{stack}，如需 VSwitch 使用 runner 预留网段 {cidr}。"
+        "说明架构图、资源清单、价格概览和费用明细。"
+    )
+    base = request + f"如需 VSwitch 使用 runner 预留网段 {cidr}。"
+    network_fixture = (
+        "本次网络目标只新建一个 VPC 和一个 VSwitch，不复用已有 VPC，不引入 NAT、公网 IP、ECS 或数据库。"
+        "每个候选都必须包含这两个新建资源；两个方案可以选择不同的真实可用区，等待我选择。"
+        "VPC 网段必须覆盖预留的 VSwitch 网段，VSwitch 初始网段使用上述预留值。"
     )
     prompts = {
+        "happy_single": base + network_fixture,
         "happy_multi": base,
+        # This scenario deliberately replaces the first Preview's subnet.
+        # Its fixture value must not also declare a permanent final constraint.
+        "natural_adjust": (
+            request
+            + f"VSwitch 先使用预留网段 {cidr} 作为首次 Preview 的初始值；"
+            "后续允许只调整 VSwitch 网段，最终值以我确认前的最新请求为准。"
+            + network_fixture
+        ),
         "safe_cancel": base + "本轮只完成模板、Preview 和询价，不创建资源。",
         "step1_clarify": "我有个产品要上线。",
         "step1_replace": base + "先提供两个网络方案，等待我修改。",
@@ -978,7 +1090,12 @@ def _initial_prompt(runtime: ScenarioRuntime) -> str:
             f"拿到两个回答后才能 Preview 和询价。预留 VSwitch 网段为 {cidr}，本轮不部署。"
         ),
         "structured_override": base + "候选选择后允许我覆盖 VSwitch 网段，本轮不部署。",
-        "reselect_new_intent": base + "必须给出两个可独立选择的方案，本轮不部署。",
+        "reselect_new_intent": (
+            base + "最初的网络目标只新建 VPC 和 VSwitch，不引入 ECS、数据库或公网 IP。"
+            "VPC 网段必须覆盖上述预留的 VSwitch 网段，不复用网段不兼容的已有 VPC。"
+            "给出两个可独立选择的网络方案，每个方案各包含一个 VPC 和一个 VSwitch，"
+            "可在可用区等真实可选配置上区别，本轮不部署。"
+        ),
         "early_exit": "请为 AWS 账号创建一个 Amazon VPC，不使用阿里云，也不生成 ROS 模板。",
         "backup_restore": ("我有个产品要上线；请先向我澄清需求。后续方案必须复用已有 VPC，并在实现阶段询问 VPC ID。"),
         "input_during_backup": (
@@ -988,20 +1105,37 @@ def _initial_prompt(runtime: ScenarioRuntime) -> str:
         "redaction": (
             "在阿里云创建一个收费数据库测试方案，模板包含 NoEcho 管理员密码参数。展示真实询价数字和"
             "必要模板参数但绝不展示凭证；只到部署确认，不创建资源。"
+            "数据库密码由你生成满足模板约束的随机值，完整保留到 Preview 和询价；"
+            "不要向我索要密码，也不要在公开载荷中展示密码值。"
+            "先用实际参数约束确认数据库规格、引擎版本及网络/可用区的合法组合，不猜测规格。"
+            "密码优先生成16位随机大小写字母和数字，三类字符都要包含；若实际约束不同则以实际约束为准。"
+            "不要把掩码、脱敏占位符或省略后的密码传给 Preview 和询价：脱敏仅用于公开展示。"
         ),
         "image_initial": base + "本轮不部署。",
-        "image_asks": "我有个产品要上线；需要通过问题澄清，并在实现阶段询问必要参数。本轮不部署。",
-        "image_interrupt": base,
+        "image_asks": (
+            "请为阿里云杭州的小团队产品规划低成本网络，只新建 VPC 和 VSwitch。"
+            "先用 ask_user_question 澄清产品用途，然后生成可选方案，等待我选择。"
+            "两个资源都必须设置标签 ExternalProjectCode，其值是公司外部业务系统分配的项目代号。"
+            "我尚未提供这个代号；它是只能由我提供的 user_required 外部输入，"
+            "不能随机生成、从云账号查询或复制其它资源的标签。"
+            "实现阶段用模板参数 ExternalProjectCode 接收它，先用 ask_user_question 向我询问，"
+            "收到回答后才进行 Preview 和询价，再等待部署确认。"
+            "本轮仅调参、Preview 和询价，不部署、不创建资源。"
+        ),
+        # Exercise image rollback/handoff with the prepared network fixture;
+        # a generic infrastructure request can introduce unprepared ECS inputs.
+        "image_interrupt": base + network_fixture,
         "legacy_smoke": "在已有 VPC 中创建一个 VSwitch，给出多个候选，本轮不部署。",
     }
     if spec.profile.startswith("rollback"):
-        return base + "稍后我会改变部署目标，用于验证回滚恢复。"
+        initial = base + network_fixture if spec.profile in {"rollback_cleanup", "rollback_cleanup_recovery"} else base
+        return initial + "稍后我会改变部署目标，用于验证回滚恢复。"
     if (
         spec.profile.startswith("running")
         or spec.profile.startswith("cancel")
         or spec.profile in {"fault_checkpoints", "normal_running"}
     ):
-        return base
+        return base + network_fixture if spec.profile == "fault_checkpoints" else base
     return prompts.get(spec.profile, base)
 
 
@@ -1053,6 +1187,76 @@ def _all_event_values(run_dir: Path) -> list[Any]:
     return values
 
 
+def _public_journal_tool_names(config_dir: Path) -> list[str]:
+    """Read tool attribution from translated A2A envelopes, without result bodies."""
+    names: list[str] = []
+    for path in (config_dir / "projects").glob("*/*/pipeline/a2a-events.jsonl"):
+        for row in _read_json_lines(path):
+            envelopes = row.get("events") if isinstance(row, dict) else None
+            for envelope in envelopes if isinstance(envelopes, list) else [row]:
+                if not isinstance(envelope, dict) or envelope.get("eventType") not in {
+                    "tool_started", "tool_result", "artifact_created",
+                }:
+                    continue
+                data = envelope.get("data")
+                tool_name = data.get("toolName") if isinstance(data, dict) else None
+                if isinstance(tool_name, str):
+                    names.append(tool_name.lower())
+    return names
+
+
+def _public_a2a_tool_use_ids(values: Sequence[Any]) -> set[str]:
+    extract = _legacy_a2a_module()._extract_pipeline_envelopes
+    ids: set[str] = set()
+    for value in values:
+        for envelope in extract(value):
+            if envelope.get("eventType") not in {"tool_started", "tool_result", "artifact_created"}:
+                continue
+            data = envelope.get("data")
+            tool_use_id = data.get("toolUseId") if isinstance(data, dict) else None
+            if isinstance(tool_use_id, str) and tool_use_id:
+                ids.add(tool_use_id)
+    return ids
+
+
+def _public_a2a_tool_events_for_id(values: Sequence[Any], tool_use_id: str) -> list[dict[str, Any]]:
+    """Find exposed tool events; an artifact reference alone is not a tool event."""
+
+    extract = _legacy_a2a_module()._extract_pipeline_envelopes
+    events: list[dict[str, Any]] = []
+    for value in values:
+        for envelope in extract(value):
+            if envelope.get("eventType") not in {"tool_started", "tool_result"}:
+                continue
+            data = envelope.get("data")
+            if isinstance(data, dict) and data.get("toolUseId") == tool_use_id:
+                events.append(data)
+    return events
+
+
+def _public_aliyun_attribution_consistent(
+    events: Sequence[dict[str, Any]], expected_tool_name: str = "aliyun_api"
+) -> bool:
+    # A public tool contract requires evidence, not just the absence of a
+    # conflicting name. Artifact references do not substitute for tool events.
+    return bool(events) and all(
+        str(item.get("toolName") or "").lower() == expected_tool_name.lower() for item in events
+    )
+
+
+def _public_tool_name_category(value: Any) -> str:
+    if value is None or value == "":
+        return "missing"
+    if not isinstance(value, str):
+        return "non_string"
+    normalized = re.sub(r"[^a-z0-9]", "", value.lower())
+    if normalized == "aliyunapi":
+        return "aliyun_api_alias"
+    if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", value.lower()):
+        return "other_tool_name"
+    return "other_string"
+
+
 def _walk(value: Any) -> Iterator[tuple[str, Any]]:
     if isinstance(value, dict):
         for key, item in value.items():
@@ -1070,39 +1274,139 @@ def _json_text(values: Any) -> str:
     return json.dumps(values, ensure_ascii=False, default=str)
 
 
+def _record_diagnostic(runtime: ScenarioRuntime, key: str, value: Any) -> None:
+    diagnostics = getattr(runtime, "diagnostics", None)
+    if isinstance(diagnostics, dict):
+        diagnostics[key] = value
+
+
+def _pipeline_event_records(values: Sequence[Any]) -> Iterator[tuple[int, dict[str, Any]]]:
+    """Read transport envelopes and REPL display rows, never events quoted in tool output."""
+    extract = _legacy_a2a_module()._extract_pipeline_envelopes
+    for event_index, value in enumerate(values):
+        envelopes = extract(value)
+        if not envelopes and isinstance(value, dict) and isinstance(value.get("type"), str):
+            envelopes = [value]
+        for envelope in envelopes:
+            yield event_index, envelope
+
+
 def _tool_sequence(values: Sequence[Any]) -> list[dict[str, Any]]:
     sequence: list[dict[str, Any]] = []
-    tool_keys = {"toolName", "tool_name", "name"}
-    for event_index, value in enumerate(values):
-        for key, item in _walk(value):
-            if key not in tool_keys or not isinstance(item, str):
-                continue
-            lowered = item.lower()
-            if any(marker in lowered for marker in ("aliyun_api", "ros_deploy", "write", "edit", "bash")):
-                sequence.append({"index": len(sequence), "eventIndex": event_index, "tool": item})
+    for event_index, event in _pipeline_event_records(values):
+        kind = event.get("eventType") or event.get("event_type") or event.get("type")
+        if kind not in {"tool_started", "tool_result", "tool_used"}:
+            continue
+        payload = event.get("data") or event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        name = payload.get("toolName") or payload.get("tool_name") or payload.get("name")
+        if isinstance(name, str):
+            sequence.append({"index": len(sequence), "eventIndex": event_index, "tool": name})
     return sequence
 
 
 def _started_steps(values: Sequence[Any]) -> list[tuple[int, str]]:
     result: list[tuple[int, str]] = []
-    for event_index, value in enumerate(values):
-        candidates = [item for _, item in _walk(value) if isinstance(item, dict)]
-        if isinstance(value, dict):
-            candidates.append(value)
-        for item in candidates:
-            event_type = item.get("eventType") or item.get("event_type") or item.get("type")
-            if event_type != "step_started":
-                continue
-            step = item.get("step")
-            step_id = step.get("id") if isinstance(step, dict) else item.get("step_id")
-            if isinstance(step_id, str):
-                pair = (event_index, step_id)
-                if pair not in result:
-                    result.append(pair)
+    for event_index, item in _pipeline_event_records(values):
+        if (item.get("eventType") or item.get("type")) != "step_started":
+            continue
+        step = item.get("step")
+        step_id = step.get("id") if isinstance(step, dict) else item.get("step_id")
+        if isinstance(step_id, str) and (event_index, step_id) not in result:
+            result.append((event_index, step_id))
     return result
 
 
-def _has_unhandled_terminal_error(value: Any) -> bool:
+def _step1_materialization_calls(values: Sequence[Any]) -> list[str]:
+    """Use actual calls in each planning attempt, never names mentioned by a tool result."""
+    active_step = NEW_STEPS[0]
+    calls: list[str] = []
+    for _, event in _pipeline_event_records(values):
+        kind = event.get('eventType') or event.get('event_type') or event.get('type')
+        step = event.get('step')
+        explicit_step = step.get('id') if isinstance(step, dict) else event.get('step_id')
+        if kind == 'step_started' and isinstance(explicit_step, str):
+            active_step = explicit_step
+        if kind not in {'tool_started', 'tool_result', 'tool_used'}:
+            continue
+        payload = event.get('data') or event.get('payload')
+        if not isinstance(payload, dict):
+            continue
+        call_step = explicit_step or payload.get('stepId') or payload.get('step_id') or active_step
+        if call_step != NEW_STEPS[0]:
+            continue
+        name = payload.get('toolName') or payload.get('tool_name') or payload.get('name')
+        if not isinstance(name, str):
+            continue
+        name = name.lower()
+        if name in {'write', 'write_file', 'edit', 'edit_file',
+                    'ros_preview_template', 'ros_estimate_template_cost'}:
+            calls.append(name)
+        inputs = payload.get('input')
+        action = inputs.get('action') if isinstance(inputs, dict) else None
+        if name == 'aliyun_api' and isinstance(action, str) and action in {
+            'PreviewStack', 'GetTemplateEstimateCost',
+        }:
+            calls.append(str(inputs['action']))
+    return calls
+
+
+def _quote_without_billing_period(value: Any) -> bool:
+    """Recognize a real nonzero ROS order that cannot establish a monthly price.
+
+    Transport success is not price completeness. Only this evidenced response
+    shape is exempt from the succeeded-price assertion; malformed results,
+    failed resources and results with a possible billing period stay strict.
+    """
+    from iac_code.pipeline.engine.completion_guard_state import _json_object
+
+    result = _json_object(value, log_failure=False, allow_ros_preflight_suffix=True)
+    resources = result.get("Resources") if isinstance(result, dict) else None
+    if not isinstance(resources, dict) or not resources:
+        return False
+    found = False
+    for resource in resources.values():
+        if not isinstance(resource, dict) or resource.get("Success") is not True:
+            return False
+        response = resource.get("Result")
+        if not isinstance(response, dict):
+            return False
+        order = response.get("Order")
+        if not isinstance(order, dict) or str(order.get("Currency", "")).upper() != "CNY":
+            return False
+        amounts = [order[key] for key in ("OriginalAmount", "TradeAmount") if key in order]
+        try:
+            numbers = [Decimal(str(amount)) for amount in amounts if not isinstance(amount, bool)]
+        except InvalidOperation:
+            return False
+        if (not numbers or len(numbers) != len(amounts)
+            or any(not amount.is_finite() or amount < 0 for amount in numbers)):
+            return False
+        if isinstance(response.get("OrderSupplement"), dict):
+            continue
+        if not any(amount > 0 for amount in numbers):
+            return False
+        if any(field in container for container in (response, order, resource.get("Properties"))
+               if isinstance(container, dict) for field in ("PriceUnit", "PeriodUnit", "Period")):
+            return False
+        found = True
+    return found
+
+
+def _observed_step_ids(values: Sequence[Any]) -> set[str]:
+    """Read structured step IDs without matching incidental text in LLM output."""
+    observed: set[str] = set()
+    for value in values:
+        for key, item in _walk(value):
+            if key in {"step_id", "stepId"} and isinstance(item, str):
+                observed.add(item)
+            elif key == "step" and isinstance(item, dict) and isinstance(item.get("id"), str):
+                observed.add(item["id"])
+    return observed
+
+
+def _has_unhandled_terminal_error(value: Any, origins: set[str] | None = None, origin: str = 'other') -> bool:
     """Detect runner/transport terminal errors without treating handled tool failures as fatal."""
     if isinstance(value, dict):
         event_type = value.get("eventType") or value.get("event_type")
@@ -1112,16 +1416,27 @@ def _has_unhandled_terminal_error(value: Any) -> bool:
         # contains handled tool stdout/stderr. PTY/expect failures are recorded as
         # separate structured events, so inspect those instead of treating a tool's
         # traceback text as a crash of the REPL itself.
-        return any(_has_unhandled_terminal_error(item) for key, item in value.items() if key != "transcript")
+        if value.get('role') == 'assistant':
+            origin = 'assistant_text'
+        elif value.get('role') == 'user':
+            origin = 'user_text'
+        return any(
+            _has_unhandled_terminal_error(item, origins, (
+                'rpc_error' if isinstance(item, dict) and type(item.get('code')) is int else 'explicit_error'
+            ) if key == 'error' else origin)
+            for key, item in value.items() if key != 'transcript'
+        )
     if isinstance(value, list):
-        return any(_has_unhandled_terminal_error(item) for item in value)
+        return any(_has_unhandled_terminal_error(item, origins, origin) for item in value)
     if not isinstance(value, str):
         return False
-    return any(marker in value for marker in ("Traceback (most recent call last)", "pexpect.TIMEOUT", "pexpect.EOF"))
+    failed = any(marker in value for marker in ("Traceback (most recent call last)", "pexpect.TIMEOUT", "pexpect.EOF"))
+    if failed and origins is not None:
+        origins.add(origin)
+    return failed
 
 
 def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> None:
-    text = _json_text(values)
     sequence = _tool_sequence(values)
     write_json(runtime.paths.run_dir / "tool-sequence.json", sequence)
     runtime.checks["pipeline name is correct"] = runtime.env["IAC_CODE_PIPELINE_NAME"] == (
@@ -1135,31 +1450,50 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
         )
         if runtime.checks.get("A2A waiting input was exercised") or observed_input_required:
             runtime.checks["A2A waiting input was exercised"] = True
-    runtime.checks["no unhandled terminal error"] = not any(_has_unhandled_terminal_error(value) for value in values)
+    terminal_origins: set[str] = set()
+    runtime.checks["no unhandled terminal error"] = not any(
+        _has_unhandled_terminal_error(value, terminal_origins) for value in values
+    )
+    if terminal_origins:
+        _record_diagnostic(runtime, 'terminal_error_origins', sorted(terminal_origins))
     if runtime.spec.surface is Surface.LEGACY:
-        runtime.checks["legacy pipeline not rewritten"] = "selling_solution_first" not in text
+        # Tool results can describe other flows. Verify the actual parent
+        # pipeline coordinates and steps, never arbitrary text or examples.
+        names = [event['pipelineName'] for _, event in _pipeline_event_records(values)
+                 if isinstance(event.get('pipelineName'), str) and event['pipelineName']]
+        steps = [step for _, step in _started_steps(values)]
+        legacy_steps = {'intent_parsing', 'architecture_planning', 'evaluate_candidates', 'confirm_and_select',
+                        'deploying'}
+        unexpected_steps = sum(step not in legacy_steps for step in steps)
+        runtime.checks["legacy pipeline not rewritten"] = (
+            bool(names) and set(names) == {'selling'} and bool(steps) and not unexpected_steps
+        )
+        for key, count in {
+            'legacy_native_pipeline_event_count': len(names),
+            'legacy_other_pipeline_event_count': sum(name != 'selling' for name in names),
+            'legacy_native_step_count': len(steps),
+            'legacy_unexpected_step_count': unexpected_steps,
+            'legacy_new_pipeline_text_mention_count': _json_text(values).count(PIPELINE_NAME),
+        }.items():
+            _record_diagnostic(runtime, key, count)
         return
-    runtime.checks["old step ids absent"] = not any(step in text for step in OLD_ONLY_STEPS)
+    runtime.checks["old step ids absent"] = not bool(_observed_step_ids(values).intersection(OLD_ONLY_STEPS))
     started_steps = _started_steps(values)
     first_positions = [
         next((event_index for event_index, observed in started_steps if observed == step), -1) for step in NEW_STEPS
     ]
     observed_positions = [position for position in first_positions if position >= 0]
     runtime.checks["new step order preserved"] = observed_positions == sorted(observed_positions)
-    runtime.checks["candidate sub-pipeline absent"] = "candidate_step_started" not in text
-    event_texts = [_json_text(value) for value in values]
-    step2_index = next(
-        (event_index for event_index, step in started_steps if step == NEW_STEPS[1]),
-        len(event_texts),
+    runtime.checks["candidate sub-pipeline absent"] = not any(
+        (event.get("eventType") or event.get("event_type") or event.get("type")) == "candidate_step_started"
+        for _, event in _pipeline_event_records(values)
     )
-    step1_text = "".join(event_texts[:step2_index])
-    runtime.checks["Step 1 has no materialization or exact quote"] = not any(
-        marker in step1_text
-        for marker in ("PreviewStack", "GetTemplateEstimateCost", '"toolName": "write"', '"tool_name": "write"')
-    )
+    runtime.checks["Step 1 has no materialization or exact quote"] = not _step1_materialization_calls(values)
     ros_event_indexes = [item["eventIndex"] for item in sequence if item["tool"].lower() == "ros_deploy"]
     confirmation_indexes: list[int] = []
     repl_unstructured_confirmation_indexes: list[int] = []
+    unstructured_confirmation_count = 0
+    image_confirmation_count = 0
     for event_index, value in enumerate(values):
         candidates = [item for _, item in _walk(value) if isinstance(item, dict)]
         if isinstance(value, dict):
@@ -1177,6 +1511,10 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
                 confirmation_indexes.append(event_index)
             elif runtime.spec.surface is Surface.REPL and payload.get("structured") is False:
                 repl_unstructured_confirmation_indexes.append(event_index)
+            if payload.get("structured") is False:
+                unstructured_confirmation_count += 1
+            if payload.get("has_images") is True:
+                image_confirmation_count += 1
     if runtime.spec.surface is Surface.REPL:
         step3_indexes = [event_index for event_index, step in started_steps if step == NEW_STEPS[2]]
         if step3_indexes:
@@ -1193,6 +1531,10 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
     runtime.checks["no deploy before confirmation"] = not ros_event_indexes or (
         bool(confirmation_indexes) and min(ros_event_indexes) > min(confirmation_indexes)
     )
+    _record_diagnostic(runtime, "confirmation_event_count", len(confirmation_indexes))
+    _record_diagnostic(runtime, "unstructured_confirmation_count", unstructured_confirmation_count)
+    _record_diagnostic(runtime, "image_confirmation_count", image_confirmation_count)
+    _record_diagnostic(runtime, "ros_deploy_event_count", len(ros_event_indexes))
     if runtime.spec.profile == "safe_cancel":
         runtime.checks["cancel kept the deployment unattempted"] = not ros_event_indexes
         runtime.checks["safe mode and cancel made no cloud write"] = not discover_cloud_resources(runtime)
@@ -1200,9 +1542,8 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
         runtime.checks["early exit made no cloud write"] = not ros_event_indexes
     confirmation_payloads = [
         item.get("data")
-        for _, item in _walk(values)
-        if isinstance(item, dict)
-        and (item.get("eventType") == "input_required" or item.get("event_type") == "input_required")
+        for _, item in _pipeline_event_records(values)
+        if (item.get("eventType") == "input_required" or item.get("event_type") == "input_required")
         and isinstance(item.get("data"), dict)
         and item["data"].get("kind") == "deployment_confirmation"
     ]
@@ -1215,14 +1556,57 @@ def _common_pipeline_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> 
             and isinstance(payload["cost"].get("resources"), list)
             for payload in confirmation_payloads
         )
-        successful_quote_result = any(
-            (item.get("eventType") == "tool_result" or item.get("event_type") == "tool_result")
+        quote_results = [
+            item["data"]
+            for _, item in _pipeline_event_records(values)
+            if (item.get("eventType") == "tool_result" or item.get("event_type") == "tool_result")
             and isinstance(item.get("data"), dict)
             and item["data"].get("toolName") == "ros_estimate_template_cost"
-            and item["data"].get("isError") is not True
-            for _, item in _walk(values)
-            if isinstance(item, dict)
-        )
+        ]
+        _record_diagnostic(runtime, 'quote_tool_result_count', len(quote_results))
+        for label, key in (('top_resources', 'Resources'), ('wrapped_result', 'result'),
+                           ('wrapped_result_upper', 'Result'), ('wrapped_data', 'data'),
+                           ('wrapped_body', 'body'), ('tool_content', 'content'),
+                           ('original_amount', 'OriginalAmount'), ('trade_amount', 'TradeAmount')):
+            _record_diagnostic(runtime, 'quote_shape_' + label + '_count', sum(
+                key in _result_mapping(item.get('result')) for item in quote_results
+            ))
+        for status in ('succeeded', 'failed', 'unavailable', 'not_run'):
+            _record_diagnostic(runtime, 'confirmation_quote_' + status + '_count', sum(
+                isinstance(payload.get('cost'), dict) and payload['cost'].get('quote_status') == status
+                for payload in confirmation_payloads
+            ))
+        _record_diagnostic(runtime, 'quote_missing_resources_count', sum(
+            item.get("isError") is not True
+            and not isinstance(_result_mapping(item.get("result")).get("Resources"), (list, dict))
+            for item in quote_results
+        ))
+        _record_diagnostic(runtime, 'quote_marked_failure_count', sum(
+            any(_result_mapping(item.get("result")).get(key) is False
+                for key in ("is_success", "isSuccess", "success")) for item in quote_results
+        ))
+        unpriced_quotes = [item for item in quote_results if item.get("isError") is not True
+                           and _quote_without_billing_period(item.get("result"))]
+        _record_diagnostic(runtime, "quote_without_billing_period_count", len(unpriced_quotes))
+        successful_quote_result = any(item.get("isError") is not True and item not in unpriced_quotes
+                                      for item in quote_results)
+        if unpriced_quotes:
+            from iac_code.i18n import SUPPORTED_LANGUAGES, translate_message
+
+            unavailable_labels = {
+                translate_message("Pricing unavailable", language=language) for language in SUPPORTED_LANGUAGES
+            }
+            honest_unavailable = [
+                isinstance(payload.get("cost"), dict)
+                and payload["cost"].get("quote_status") == "unavailable"
+                and payload["cost"].get("resources") == []
+                and bool(str(payload["cost"].get("error") or "").strip())
+                and str(payload["cost"].get("monthly_estimate") or "").strip() in unavailable_labels
+                for payload in confirmation_payloads
+            ]
+            runtime.checks["ROS quote without a billing period is reported unavailable"] = (
+                any(honest_unavailable) if successful_quote_result else all(honest_unavailable)
+            )
         if successful_quote_result:
             runtime.checks["successful ROS quote projected into confirmation"] = any(
                 isinstance(payload, dict)
@@ -1237,6 +1621,184 @@ def _pending_kind(a2a: Any, path: Path) -> str:
     return str(a2a._latest_pending_kind(path) or "")
 
 
+def _facts_for_current_goal(goal: str, supplied: dict[str, str]) -> dict[str, str]:
+    """Actual user-provided parameters take precedence over retained fixture defaults."""
+    literal = case_facts(goal)
+    retained = dict(supplied)
+    for key in ('cidr', 'vpc_id', 'zone_id', 'region', 'cloud_vendor'):
+        if key in literal:
+            retained.pop(key, None)
+    if 'cidr' in literal:
+        retained.pop('cidr_prefix', None)
+    return case_facts(goal, retained)
+
+
+def _question_facts(runtime: ScenarioRuntime) -> dict[str, str]:
+    facts = getattr(runtime, "question_facts", None)
+    if not isinstance(facts, dict):
+        facts = runtime.question_facts = {}
+    profile = runtime.spec.profile
+    if (profile == "step2_parameter" or profile.startswith("rollback")) and "vpc_id" not in facts:
+        supplied = {
+            "vpc_id": getattr(runtime.args, "cleanup_vpc_id", ""),
+            "zone_id": getattr(runtime.args, "cleanup_zone_id", ""),
+            "cidr": runtime.cidr,
+        }
+        if not supplied["vpc_id"] or not supplied["zone_id"]:
+            supplied = network_facts(runtime.args.python, runtime.env, REPO_ROOT, runtime.cidr)
+            runtime.cidr = supplied["cidr"]
+        facts.update(supplied)
+    if getattr(runtime, "current_goal", "") == getattr(runtime, "partial_adjustment_goal", None):
+        facts = {**facts, **getattr(runtime, "partial_adjustment_facts", {})}
+    facts.update(_network_location_facts(facts))
+    goal = _initial_prompt(runtime)
+    # Changing resource scope does not revoke the user's declared location.
+    # Retain only those literal facts; rebuild scope and constraints below.
+    initial_facts = case_facts(goal)
+    for key in ('region', 'cloud_vendor'):
+        if key in initial_facts:
+            facts.setdefault(key, initial_facts[key])
+    if profile == "step1_clarify":
+        goal = (
+            "我要上线一个小团队 Node.js 电商 API，只规划阿里云杭州低成本网络，先展示候选方案，"
+            "本轮不部署、不创建资源。"
+        )
+    elif profile == "step2_parameter":
+        goal = (
+            "只在杭州复用指定已有 VPC 创建 VSwitch；VpcId 和 ZoneId 必须逐项分别询问，"
+            "每次只回答当前参数。两个答案收齐后进行 Preview 和询价，本轮不部署。"
+        )
+    elif profile in {"backup_restore", "input_during_backup", "waiting_resume"}:
+        # The vague initial prompt establishes the first question boundary.
+        # Answers describe the actual fixture goal, not that initial request to ask questions.
+        goal = (
+            "为阿里云杭州的测试应用复用已有 VPC 创建一个 VSwitch；先规划可选方案，"
+            "实现阶段 VpcId 为 user_required，必须向我询问，不能自行查询或默认选择。"
+            "可用区和其他非必填参数使用低成本推荐；本轮仅 Preview 和询价，不部署。"
+        )
+    facts["goal"] = getattr(runtime, "current_goal", "") or goal
+    if profile == "early_exit":
+        # The literal request is AWS; its prohibition on Alibaba is not a
+        # second provider preference, and Alibaba fixture facts do not apply.
+        return case_facts(facts["goal"], {"cloud_vendor": "AWS"})
+    facts.setdefault("cidr", runtime.cidr)
+    stack_name = getattr(runtime, "stack_name", "")
+    if stack_name:
+        facts["stack_name"] = stack_name
+    return _facts_for_current_goal(facts['goal'], facts)
+
+
+def _network_location_facts(facts: dict[str, str]) -> dict[str, str]:
+    """Retain the actual Alibaba fixture location when the user changes resource scope."""
+    zone = facts.get("zone_id", "")
+    # The network fixture validates its Alibaba Cloud zone. A vague changed goal
+    # must not erase that established fact, nor may we invent a location without it.
+    if facts.get("vpc_id") and re.fullmatch(r"cn-[a-z0-9]+-[a-z]", zone):
+        return {"region": zone.rsplit("-", 1)[0], "cloud_vendor": "阿里云"}
+    return {}
+
+
+def _resolve_runtime_question_facts(runtime: ScenarioRuntime, requested: tuple[str, ...]) -> dict[str, str]:
+    """Resolve fixture parameters on demand, after the question actually asks for them."""
+    if getattr(getattr(runtime, 'spec', None), 'profile', '') == 'early_exit':
+        return {}  # Alibaba fixture location/resources cannot answer an AWS request.
+    if not set(requested).intersection({"vpc_id", "zone_id", "cidr", "region", "cloud_vendor"}):
+        return {}
+    # Geography is only derived from an already selected fixture, not from a
+    # speculative cloud lookup for a general planning preference (e.g. AWS).
+    if not set(requested).intersection({"vpc_id", "zone_id", "cidr"}):
+        existing = getattr(runtime, "network_question_facts", None) or getattr(runtime, "question_facts", {})
+        return {k: v for k, v in _network_location_facts(existing).items() if k in requested}
+    supplied = getattr(runtime, "network_question_facts", None)
+    if not isinstance(supplied, dict):
+        supplied = {
+            "vpc_id": getattr(runtime.args, "cleanup_vpc_id", ""),
+            "zone_id": getattr(runtime.args, "cleanup_zone_id", ""),
+            "cidr": runtime.cidr,
+        }
+        if not supplied["vpc_id"] or not supplied["zone_id"]:
+            supplied = network_facts(runtime.args.python, runtime.env, REPO_ROOT, runtime.cidr)
+        runtime.network_question_facts = supplied
+    return {k: v for k, v in {**supplied, **_network_location_facts(supplied)}.items() if k in requested}
+
+
+def _answer_runtime_question(
+    runtime: ScenarioRuntime, pending: dict[str, Any], *, goal_override: str = ""
+) -> str:
+    facts = _question_facts(runtime).copy()
+    if goal_override:
+        # Rebuild semantic clauses for the current goal; old scope/constraints
+        # must not override a changed target. Keep only authoritative fixture values.
+        facts = _facts_for_current_goal(goal_override, {k: v for k, v in facts.items()
+                                          if k in {'vpc_id', 'zone_id', 'cidr', 'stack_name',
+                                                   'region', 'cloud_vendor'}})
+    fixture = getattr(runtime, "network_question_facts", None)
+    if (runtime.spec.profile in {"backup_restore", "input_during_backup", "waiting_resume"}
+        and pending.get("_step_id") == NEW_STEPS[1]
+        and isinstance(fixture, dict) and fixture.get("cidr")
+        and "cidr" not in case_facts(facts["goal"])):
+        # A lazy VPC lookup may reserve a subnet different from the initial
+        # default. Subsequent Step 2 answers must use that compatible subnet,
+        # without querying early or replacing an explicit user parameter.
+        runtime.cidr = fixture["cidr"]
+        runtime.question_facts["cidr"] = runtime.cidr
+        facts = _facts_for_current_goal(facts["goal"], {**facts, "cidr": runtime.cidr})
+        runtime.diagnostics["question_driver_fixture_cidr_synced"] = True
+    driver_pending = pending
+    if runtime.spec.profile == "step2_parameter":
+        driver_pending = {**pending, "one_parameter_at_a_time": True}
+    withheld = set()
+    if pending.get("_step_id") == NEW_STEPS[0] and runtime.spec.profile in {
+        "step2_parameter", "backup_restore", "input_during_backup", "waiting_resume", "multimodal_lifecycle",
+    }:
+        # A queried fixture value is not yet a user-provided parameter. These
+        # requests explicitly defer ID confirmation to Step 2. Keep that state
+        # across text/image clarification instead of answering early.
+        withheld = {key for key in ("vpc_id", "zone_id")
+                    if not facts.get(key) or facts[key] not in facts.get("goal", "")}
+        facts = {key: value for key, value in facts.items() if key not in withheld}
+        declared = {"vpc_id", "zone_id"} if runtime.spec.profile == "step2_parameter" else {"vpc_id"}
+        driver_pending = {**driver_pending, "_deferred_fact_fields": sorted(withheld.intersection(declared))}
+    counts = getattr(runtime, "question_counts", None)
+    if not isinstance(counts, dict):
+        counts = runtime.question_counts = {}
+    answer, category = answer_question(
+        runtime.paths.config_dir, driver_pending, facts, counts, runtime.diagnostics,
+        conversation=question_conversation(runtime),
+        fact_resolver=lambda requested: _resolve_runtime_question_facts(
+            runtime, tuple(key for key in requested if key not in withheld)
+        ),
+    )
+    fields = getattr(runtime, "answered_parameter_fields", None)
+    if not isinstance(fields, set):
+        fields = runtime.answered_parameter_fields = set()
+    fields.add(category)
+    pending["answer_fact_category"] = category
+    return answer
+
+
+def _verify_required_parameter_confirmation(runtime: ScenarioRuntime, payload: dict[str, Any]) -> None:
+    facts = _question_facts(runtime)
+    parameters = payload.get("effective_deployment_parameters")
+    values = list(parameters.values()) if isinstance(parameters, dict) else []
+    runtime.diagnostics['required_parameter_vpc_confirmed'] = facts.get('vpc_id') in values
+    runtime.diagnostics['required_parameter_zone_confirmed'] = facts.get('zone_id') in values
+    valid = all(facts.get(key) in values for key in ("vpc_id", "zone_id"))
+    runtime.checks["both required parameter values preserved in confirmation"] = valid
+    if not valid:
+        raise RuntimeError("confirmation did not preserve both supplied required parameter values")
+
+
+def _latest_a2a_pending_question(a2a: Any, path: Path) -> dict[str, Any]:
+    pending: dict[str, Any] = {}
+    for row in _read_json_lines(path):
+        for envelope in a2a._extract_pipeline_envelopes(row):
+            if envelope.get("eventType") == "input_required" and isinstance(envelope.get("data"), dict):
+                pending = {**envelope["data"], **(envelope.get("input") or {}),
+                           "_step_id": envelope.get("stepId") or envelope.get("step_id")}
+    return pending
+
+
 def _a2a_turn(
     runtime: ScenarioRuntime,
     harness: Any,
@@ -1244,12 +1806,32 @@ def _a2a_turn(
     prompt: str,
     name: str,
     image_key: str = "",
+    task_id: str | None = None,
 ) -> Any:
+    if "我改需求" in prompt or "停止旧目标" in prompt:
+        runtime.current_goal = prompt
     runtime.event("a2a-turn-started", name=name, image=bool(image_key))
+    identity = {"task_id": task_id} if task_id is not None else {}
     if image_key:
-        summary = harness.stream_image_text(text=prompt, image_key=image_key, name=name)
+        image_instruction = (
+            {"prompt": _legacy_a2a_module().IMAGE_INTERRUPT_PROMPT}
+            if runtime.spec.profile == "image_interrupt" and image_key == "rollback-interrupt" else {}
+        )
+        if runtime.spec.profile == "image_asks" and image_key == "confirmation-adjust":
+            image_instruction = {"prompt": (
+                "这轮图片回答是参数调整，不是确认部署。请读取图片中的具体参数和调整要求，"
+                "按图修改后重新 Preview 和询价，再等待下一轮明确确认；当前没有部署授权，不要创建资源。"
+            )}
+        summary = harness.stream_image_text(
+            text=prompt, image_key=image_key, name=name, **identity, **image_instruction
+        )
     else:
-        summary = harness.stream(prompt=prompt, name=name)
+        summary = harness.stream(prompt=prompt, name=name, **identity)
+    run_dir = getattr(getattr(runtime, "paths", None), "run_dir", None)
+    if isinstance(run_dir, Path):
+        runtime.pending_question = _latest_a2a_pending_question(
+            _legacy_a2a_module(), run_dir / f"{summary.name}.events.jsonl"
+        )
     runtime.event(
         "a2a-turn-finished",
         name=name,
@@ -1272,6 +1854,8 @@ class A2AConversationPlan:
 
 def _a2a_plan(runtime: ScenarioRuntime) -> A2AConversationPlan:
     profile = runtime.spec.profile
+    if profile == "step2_parameter":
+        _question_facts(runtime)
     plan = A2AConversationPlan(
         ask_answers=[
             "部署在 cn-hangzhou，使用低成本按量资源；继续生成可选架构。",
@@ -1310,7 +1894,10 @@ def _a2a_plan(runtime: ScenarioRuntime) -> A2AConversationPlan:
         plan.candidate_answers = [_candidate_payload(0), _candidate_payload(1), _candidate_payload(0)]
         plan.confirmation_answers = [
             _confirmation_payload("reselect"),
-            "我改需求了：只创建一个安全组，不创建 VPC 或 VSwitch，请重新规划。",
+            "我改需求了：只创建一个安全组，不创建 VPC 或 VSwitch，请重新规划。"
+            "在阿里云杭州复用已有 VPC，安全组为空，不新增自定义入方向或出方向规则，"
+            "不开放公网来源、管理端口或应用端口，也不添加公网 IP；无需选择规则的来源网段。"
+            "本轮只进行 Preview 和询价，等待我确认，不部署。",
             _confirmation_payload("cancel"),
         ]
     elif profile.startswith("rollback"):
@@ -1335,15 +1922,24 @@ def _a2a_plan(runtime: ScenarioRuntime) -> A2AConversationPlan:
         zone = runtime.args.cleanup_zone_id or "请用 aliyun_api 选择杭州可用区"
         plan.ask_answers = [vpc, zone, runtime.cidr]
     elif profile == "image_asks":
+        initial_cidr = str(next(ipaddress.ip_network(runtime.cidr).subnets(prefixlen_diff=1)))
+        plan.ask_answers = [
+            "这是一个小团队的 Node.js 电商后端 API，需要阿里云杭州低成本 VPC 和 VSwitch 网络。"
+            "两个资源都需要 ExternalProjectCode 标签；外部业务系统的真实项目代号尚未提供，"
+            "留到实现阶段向我询问，不能生成、查询或推断。请继续提供可选方案。",
+            "公司外部业务系统提供的项目代号为 partner-project-e2e-node-api，"
+            "ExternalProjectCode 参数和两个资源的同名标签都使用这个值。"
+            f"CidrBlock 使用 {initial_cidr}，其它参数按最小成本推荐；只 Preview 和询价，不部署。",
+        ]
         plan.image_kinds = {"ask_user_question", "deployment_confirmation"}
         plan.confirmation_answers = [
-            f"调整参数：将网段改为 {runtime.cidr}，重新 Preview 和询价。",
+            f"调整参数：将网段改为 {runtime.cidr}，重新 Preview 和询价，然后再次等待我确认。不要部署或创建资源。",
             _confirmation_payload("cancel"),
         ]
     elif profile == "image_interrupt":
         plan.image_kinds = {"deployment_confirmation"}
         plan.confirmation_answers = [
-            "我改需求了：只创建安全组，请回到方案规划重新选择。",
+            _rollback_new_intent(runtime),
             _confirmation_payload("confirm"),
         ]
         plan.candidate_answers = [_candidate_payload(0), _candidate_payload(0)]
@@ -1361,7 +1957,7 @@ def _drive_a2a_waiting(
     a2a: Any,
     plan: A2AConversationPlan,
     *,
-    before_response: Callable[[str, str, Any], None] | None = None,
+    before_response: Callable[[str, str, Any], bool] | None = None,
 ) -> Any:
     initial_image = runtime.spec.profile == "image_initial"
     summary = _a2a_turn(
@@ -1392,6 +1988,9 @@ def _run_a2a_legacy_smoke(runtime: ScenarioRuntime, harness: Any, a2a: Any) -> N
     )
     waiting_sequence: list[str] = []
     for turn_index in range(1, 5):
+        runtime.pending_question = _latest_a2a_pending_question(
+            a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl"
+        )
         kind = _pending_kind(a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl")
         step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         waiting_sequence.append(f"{step_id}:{kind}" if step_id else kind)
@@ -1426,7 +2025,7 @@ def _continue_a2a_from_summary(
     plan: A2AConversationPlan,
     summary: Any,
     *,
-    before_response: Callable[[str, str, Any], None] | None = None,
+    before_response: Callable[[str, str, Any], bool] | None = None,
 ) -> Any:
     seen_waiting: list[str] = []
     for turn_index in range(1, 18):
@@ -1437,6 +2036,9 @@ def _continue_a2a_from_summary(
             break
         path = runtime.paths.run_dir / f"{summary.name}.events.jsonl"
         kind = _pending_kind(a2a, path)
+        diagnostics = getattr(runtime, "diagnostics", None)
+        if isinstance(diagnostics, dict):
+            diagnostics.setdefault("a2a_pending_kinds", []).append(kind or "none")
         step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         if not kind:
             # A rejected/early-exit pipeline may already have handed off without a pending input.
@@ -1444,11 +2046,10 @@ def _continue_a2a_from_summary(
                 break
             response = "继续"
         else:
-            response, image_key = _a2a_response_for_pending(runtime, kind, plan)
+            response, image_key = _a2a_response_for_pending(runtime, kind, plan, step_id)
         if kind:
             seen_waiting.append(f"{step_id}:{kind}")
-        if before_response is not None and kind:
-            before_response(step_id, kind, summary)
+        omit_task_id = bool(before_response(step_id, kind, summary)) if before_response is not None and kind else False
         if not kind:
             image_key = ""
         summary = _a2a_turn(
@@ -1457,6 +2058,7 @@ def _continue_a2a_from_summary(
             prompt=response,
             name=f"turn-{turn_index:02d}-{kind}",
             image_key=image_key,
+            task_id="" if omit_task_id else None,
         )
     else:
         raise RuntimeError("A2A conversation exceeded the bounded 18-turn state machine")
@@ -1474,7 +2076,7 @@ def _raise_for_unexpected_a2a_terminal(summary: Any) -> None:
     state = str(getattr(summary, "last_status_state", "") or "")
     if state not in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
         return
-    detail = str(getattr(summary, "text", "") or "").strip()
+    detail = str(getattr(summary, "terminal_status_text", "") or "").strip()
     if len(detail) > 500:
         detail = detail[-500:]
     suffix = f": {detail}" if detail else ""
@@ -1485,12 +2087,25 @@ def _a2a_response_for_pending(
     runtime: ScenarioRuntime,
     kind: str,
     plan: A2AConversationPlan,
+    step_id: str = "",
 ) -> tuple[str, str]:
+    image_question_stage = (
+        runtime.spec.profile == "image_asks" and kind == "ask_user_question" and step_id in NEW_STEPS[:2]
+    )
     if kind == "ask_user_question":
-        response = plan.ask_answers.pop(0) if plan.ask_answers else "使用低成本默认值继续。"
+        pending = getattr(runtime, "pending_question", {})
+        pending = {**pending, "_step_id": step_id}
+        if pending and pending.get("kind") == "ask_user_question" and runtime.spec.profile != "image_asks":
+            response = _answer_runtime_question(runtime, pending)
+        elif image_question_stage:
+            response = plan.ask_answers[NEW_STEPS.index(step_id)]
+        else:
+            response = plan.ask_answers.pop(0) if plan.ask_answers else "使用低成本默认值继续。"
     elif kind in {"candidate_select", "candidate_selection"}:
         response = plan.candidate_answers.pop(0) if plan.candidate_answers else _candidate_payload(0)
     elif kind == "deployment_confirmation":
+        if runtime.spec.profile == "step2_parameter":
+            _verify_required_parameter_confirmation(runtime, getattr(runtime, "pending_question", {}))
         response = (
             plan.confirmation_answers.pop(0)
             if plan.confirmation_answers
@@ -1501,17 +2116,24 @@ def _a2a_response_for_pending(
     normalized_kind = "candidate_selection" if kind == "candidate_select" else kind
     image_key = ""
     if normalized_kind in plan.image_kinds:
-        image_index = plan.image_counts.get(normalized_kind, 0)
-        image_limit = 2 if runtime.spec.profile == "image_asks" and normalized_kind == "ask_user_question" else 1
+        slot = f"{normalized_kind}:{step_id}" if image_question_stage else normalized_kind
+        image_index = plan.image_counts.get(slot, 0)
+        image_limit = (
+            2 if runtime.spec.profile == "image_asks" and normalized_kind == "ask_user_question"
+            and not image_question_stage else 1
+        )
         if image_index < image_limit:
             image_key = {
-                "ask_user_question": "ask-first-answer" if image_index == 0 else "ask-second-answer",
+                "ask_user_question": (
+                    "ask-second-answer" if (image_question_stage and step_id == NEW_STEPS[1]) or image_index == 1
+                    else "ask-first-answer"
+                ),
                 "candidate_selection": "selection",
                 "deployment_confirmation": (
                     "rollback-interrupt" if runtime.spec.profile == "image_interrupt" else "confirmation-adjust"
                 ),
             }.get(normalized_kind, "")
-            plan.image_counts[normalized_kind] = image_index + 1
+            plan.image_counts[slot] = image_index + 1
     return response, image_key
 
 
@@ -1527,17 +2149,22 @@ def _advance_a2a_to_pending(
 ) -> Any:
     summary = _a2a_turn(runtime, harness, prompt=_initial_prompt(runtime), name=f"{name_prefix}-initial")
     for index in range(12):
+        _raise_for_unexpected_a2a_terminal(summary)
+        runtime.pending_question = _latest_a2a_pending_question(
+            a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl"
+        )
         kind = _pending_kind(a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl")
         step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         if kind and seen_waiting is not None:
             seen_waiting.append(f"{step_id}:{kind}")
+        step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         normalized_kind = "candidate_selection" if kind == "candidate_select" else kind
         normalized_target = "candidate_selection" if target_kind == "candidate_select" else target_kind
         if normalized_kind == normalized_target:
             return summary
         if not kind:
             raise RuntimeError(f"pipeline completed before pending input {target_kind}")
-        response, image_key = _a2a_response_for_pending(runtime, kind, plan)
+        response, image_key = _a2a_response_for_pending(runtime, kind, plan, step_id)
         summary = _a2a_turn(
             runtime,
             harness,
@@ -1559,7 +2186,12 @@ def _continue_a2a_to_pending(
     name_prefix: str,
 ) -> Any:
     for index in range(12):
+        _raise_for_unexpected_a2a_terminal(summary)
+        runtime.pending_question = _latest_a2a_pending_question(
+            a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl"
+        )
         kind = _pending_kind(a2a, runtime.paths.run_dir / f"{summary.name}.events.jsonl")
+        step_id = str(getattr(summary, "last_input_required_step_id", "") or "")
         normalized_kind = "candidate_selection" if kind == "candidate_select" else kind
         normalized_target = "candidate_selection" if target_kind == "candidate_select" else target_kind
         if normalized_kind == normalized_target:
@@ -1572,7 +2204,7 @@ def _continue_a2a_to_pending(
                 name=f"{name_prefix}-resume-{index:02d}",
             )
             continue
-        response, image_key = _a2a_response_for_pending(runtime, kind, plan)
+        response, image_key = _a2a_response_for_pending(runtime, kind, plan, step_id)
         summary = _a2a_turn(
             runtime,
             harness,
@@ -1633,8 +2265,48 @@ def _start_a2a_step(
 def _rollback_new_intent(runtime: ScenarioRuntime) -> str:
     return (
         "我改需求了：只创建一个安全组，不创建 VPC 或 VSwitch；请替换旧目标重新规划。"
-        f"最终 ROS StackName 仍必须使用 {runtime.stack_name}。"
     )
+
+
+def _wait_a2a_step_with_pending_inputs(
+    runtime: ScenarioRuntime, harness: Any, a2a: Any, plan: A2AConversationPlan,
+    background: Any, *, target_step: str, description: str, name_prefix: str,
+) -> Any:
+    """Answer native planning handoffs while preserving the actual Step 2 crash boundary."""
+    deadline = time.monotonic() + runtime.args.timeout
+    for turn in range(12):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f"Timed out waiting for {description}")
+        try:
+            background.wait_for(a2a._step_started(target_step), description=description, timeout=remaining)
+            return background
+        except RuntimeError as error:
+            # Only a clean native input handoff may request another user response.
+            # Stream errors, completion, and a later step cannot bypass the fault point.
+            if (str(error) != f"{background.name} ended before {description}"
+                or background.done is not True or background.exception is not None):
+                raise
+            # The done notification closes the response and freezes its summary;
+            # Thread bookkeeping may still be finishing after that notification.
+            summary = background.summary
+            if (summary.last_status_state != "TASK_STATE_INPUT_REQUIRED"
+                or summary.last_input_required_step_id != NEW_STEPS[0]):
+                raise
+            path = runtime.paths.run_dir / f"{summary.name}.events.jsonl"
+            kind = _pending_kind(a2a, path)
+            if kind not in {"candidate_selection", "candidate_select", "ask_user_question"}:
+                raise
+            runtime.pending_question = _latest_a2a_pending_question(a2a, path)
+            response, image_key = _a2a_response_for_pending(runtime, kind, plan, NEW_STEPS[0])
+            if time.monotonic() >= deadline:
+                raise TimeoutError(f"Timed out waiting for {description}")
+            _record_diagnostic(runtime, "rollback_planning_pending_input_count", turn + 1)
+            background = harness.start_stream(
+                prompt=response, name=f"{name_prefix}-pending-{turn:02d}",
+                images=[harness.image_fixtures.part(image_key, response)] if image_key else None,
+            )
+    raise RuntimeError(f"A2A planning handoffs exceeded the bounded 12-turn wait for {description}")
 
 
 def _run_a2a_rollback_recovery(
@@ -1654,6 +2326,7 @@ def _run_a2a_rollback_recovery(
     )
     del confirmation
     new_intent = _rollback_new_intent(runtime)
+    runtime.current_goal = new_intent
     if plan.confirmation_answers:
         plan.confirmation_answers.pop(0)
     step1_stream = harness.start_stream(prompt=new_intent, name="rollback-new-intent-step1")
@@ -1680,10 +2353,9 @@ def _run_a2a_rollback_recovery(
         del selection
         selected_response, _ = _a2a_response_for_pending(runtime, "candidate_selection", plan)
         step2_stream = harness.start_stream(prompt=selected_response, name="rollback-selected-step2")
-        step2_stream.wait_for(
-            a2a._step_started(NEW_STEPS[1]),
-            description="rollback Step 2 started",
-            timeout=runtime.args.timeout,
+        step2_stream = _wait_a2a_step_with_pending_inputs(
+            runtime, harness, a2a, plan, step2_stream, target_step=NEW_STEPS[1],
+            description="rollback Step 2 started", name_prefix="rollback-selected-step2",
         )
         active_stream = step2_stream
         if target_step == NEW_STEPS[1]:
@@ -1719,12 +2391,39 @@ def _run_a2a_rollback_recovery(
     _continue_a2a_from_summary(runtime, harness, a2a, plan, recovered)
 
 
+def _backup_checkpoint_is_current(primary: Path, backup: Path, session_id: str) -> bool:
+    """A directory may contain an older asynchronously published checkpoint."""
+    from iac_code.services.session_backup import BACKUP_STATE_FILENAME
+    from iac_code.services.session_backup_state import SessionBackupState, SessionBackupStateError
+
+    try:
+        primary_marker = primary / BACKUP_STATE_FILENAME
+        backup_marker = backup / BACKUP_STATE_FILENAME
+        primary_state = SessionBackupState.from_dict(json.loads(primary_marker.read_text(encoding="utf-8")))
+        backup_bytes = backup_marker.read_bytes()
+        backup_state = SessionBackupState.from_dict(json.loads(backup_bytes), shared=True)
+        if (primary_state.session_id != session_id or backup_state.session_id != session_id
+            or primary_state.status != "succeeded" or primary_state.generation == 0
+            or not primary_state.same_lineage(backup_state)):
+            return False
+        for filename in ("meta.yaml", "context.yaml"):
+            if (primary / "pipeline" / filename).read_bytes() != (backup / "pipeline" / filename).read_bytes():
+                return False
+        # Publication writes the commit marker last. Reject a concurrently
+        # changing source or shared checkpoint instead of deleting the primary.
+        return (backup_marker.read_bytes() == backup_bytes
+                and SessionBackupState.from_dict(json.loads(primary_marker.read_text(encoding="utf-8")))
+                .same_lineage(primary_state))
+    except (OSError, ValueError, SessionBackupStateError):
+        return False
+
+
 def _backup_restore_hook(
     runtime: ScenarioRuntime, harness: Any, a2a: Any
-) -> tuple[Callable[[str, str, Any], None], set[str]]:
+) -> tuple[Callable[[str, str, Any], bool], set[str]]:
     restored: set[str] = set()
 
-    def restore(step_id: str, kind: str, _summary: Any) -> None:
+    def restore(step_id: str, kind: str, _summary: Any) -> bool:
         normalized = "candidate_selection" if kind == "candidate_select" else kind
         key = f"{step_id}:{normalized}"
         expected = {
@@ -1734,24 +2433,26 @@ def _backup_restore_hook(
             f"{NEW_STEPS[1]}:deployment_confirmation",
         }
         if key not in expected or key in restored:
-            return
+            return False
         snapshot = harness.fetch_state(f"backup-before-{len(restored) + 1}")
         write_json(runtime.paths.snapshots_dir / f"backup-before-{len(restored) + 1}.json", snapshot)
         cwd, session_id = a2a._pipeline_session_identity(harness)
         primary_storage = a2a.SessionStorage(projects_dir=runtime.paths.config_dir / "projects")
         backup_storage = a2a.SessionStorage(projects_dir=runtime.paths.backup_dir / "projects")
+        primary_session = primary_storage.v2_session_dir(cwd, session_id)
+        if primary_session is None or not primary_session.is_dir():
+            raise RuntimeError(f"primary session is unavailable for {key}")
         deadline = time.monotonic() + runtime.args.timeout
         backup_session = None
         while time.monotonic() < deadline:
             backup_session = backup_storage.v2_session_dir(cwd, session_id)
-            if backup_session is not None and backup_session.is_dir():
+            if backup_session is not None and _backup_checkpoint_is_current(
+                primary_session, backup_session, session_id
+            ):
                 break
             time.sleep(0.25)
-        if backup_session is None or not backup_session.is_dir():
-            raise RuntimeError(f"backup session was not written for {key}")
-        primary_session = primary_storage.v2_session_dir(cwd, session_id)
-        if primary_session is None or not primary_session.is_dir():
-            raise RuntimeError(f"primary session is unavailable for {key}")
+        else:
+            raise RuntimeError(f"current backup checkpoint was not published for {key}")
         primary_resolved = primary_session.resolve()
         config_projects = (runtime.paths.config_dir / "projects").resolve()
         if config_projects not in primary_resolved.parents or primary_resolved.name != session_id:
@@ -1762,7 +2463,9 @@ def _backup_restore_hook(
             raise RuntimeError("failed to establish backup-only recovery state")
         harness.start_server()
         restored.add(key)
+        runtime.checks[f"backup restore checkpoint {len(restored)}"] = True
         runtime.event("backup-restored", pending=key, sessionId=session_id)
+        return True
 
     return restore, restored
 
@@ -1805,7 +2508,8 @@ def _arm_a2a_backup_delay(runtime: ScenarioRuntime, harness: Any, a2a: Any, chec
     harness.server_env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] = str(runtime.paths.artifacts_dir)
     write_json(
         _backup_delay_marker(control, "arm"),
-        {"checkpoint": checkpoint, "armedAt": time.time(), "delaySeconds": a2a.BACKUP_DELAY_SECONDS},
+        {"checkpoint": checkpoint, "armedAt": time.time(), "delaySeconds": a2a.BACKUP_DELAY_SECONDS,
+         "awaitRequestDispatch": True, "dispatchWaitSeconds": 180.0},
     )
     return control
 
@@ -1983,6 +2687,35 @@ def _first_pending_resource_option_id_from_data(pending: dict[str, Any]) -> str:
     return ""
 
 
+def _wait_a2a_backup_window_started(
+    runtime: ScenarioRuntime, a2a: Any, control: Path, stream: Any, checkpoint: int
+) -> dict[str, Any]:
+    """Stop waiting if the active A2A stream ends or makes no progress."""
+
+    started_at = time.monotonic()
+    deadline = started_at + runtime.args.stream_timeout
+    last_progress_at = started_at
+    seen_events = len(stream.events)
+    while time.monotonic() < deadline:
+        if _backup_delay_marker(control, "started").is_file():
+            return a2a._wait_for_backup_delay_marker(control, "started", timeout=1.0)
+        if stream.done:
+            raise RuntimeError(f"backup window {checkpoint} stream ended before delay started")
+        event_count = len(stream.events)
+        if event_count > seen_events:
+            seen_events = event_count
+            last_progress_at = time.monotonic()
+        idle_seconds = time.monotonic() - last_progress_at
+        if idle_seconds >= 600.0:
+            runtime.watchdog = {
+                "state": "no_output", "action": "early_abort",
+                "waitingFor": "A2A backup delay marker", "elapsedSeconds": round(idle_seconds, 1), "cue": "none",
+            }
+            raise TimeoutError(f"backup window {checkpoint} had no stream progress for 600s")
+        time.sleep(0.2)
+    raise TimeoutError(f"backup window {checkpoint} did not reach input-required backup before timeout")
+
+
 def _run_a2a_input_during_backup(
     runtime: ScenarioRuntime,
     harness: Any,
@@ -2014,13 +2747,7 @@ def _run_a2a_input_during_backup(
             # response would necessarily miss the backup window. The mirrored
             # pipeline snapshot is already authoritative at this point, so read it
             # after the delay marker and use its pendingInput to prepare the request.
-            started = a2a._wait_for_backup_delay_marker(
-                control,
-                "started",
-                # Reaching the next waiting boundary can include a real LLM turn.
-                # The short delay-sized timeout only applies after the marker exists.
-                timeout=runtime.args.timeout,
-            )
+            started = _wait_a2a_backup_window_started(runtime, a2a, control, current, control_index)
             pending_state = harness.fetch_state(f"backup-window-{control_index:02d}-pending")
             observed_step, observed_kind, pending_data = _pending_from_pipeline_state(pending_state)
             if not observed_step or not observed_kind:
@@ -2034,16 +2761,31 @@ def _run_a2a_input_during_backup(
             )
             if not matched_target and not supplemental_ask:
                 raise RuntimeError(f"expected {expected_step}:{expected_kind}, got {observed_step}:{observed_kind}")
+            # The server can reach its next input_required backup as soon as it
+            # consumes this response. Arm that window before sending, so a
+            # fast turn cannot pass the fixture's bounded arm wait.
+            next_control = (
+                _arm_a2a_backup_delay(runtime, harness, a2a, control_index + 1)
+                if control_index < 12 and not (matched_target and index == len(expected))
+                else None
+            )
             unfinished_at_dispatch = not _backup_delay_marker(control, "finished").exists()
-            response, image_key = _a2a_response_for_pending(runtime, observed_kind, plan)
-            if observed_step == NEW_STEPS[1] and observed_kind == "ask_user_question":
-                response = _first_pending_resource_option_id_from_data(pending_data) or response
+            # Publication is gated here, so use the native snapshot question
+            # rather than the not-yet-published event journal. The step identity
+            # keeps Step 1 IDs deferred and lets Step 2 answer the actual parameter.
+            runtime.pending_question = pending_data
+            response, image_key = _a2a_response_for_pending(runtime, observed_kind, plan, observed_step)
             response_stream = harness.start_stream(
                 prompt=response,
                 name=f"backup-window-{control_index:02d}-response-{observed_kind}",
                 images=[harness.image_fixtures.part(image_key, response)] if image_key else None,
                 wait_for_identity=False,
             )
+            # start_stream waits for the HTTP request dispatch timestamp. This
+            # releases only the test fixture; native consumption is checked below.
+            write_json(_backup_delay_marker(control, "dispatched"), {
+                "dispatchedMonotonic": response_stream.request_started_monotonic,
+            })
             pending = current.wait_for(
                 _input_required_after_sequence_kind_and_step(
                     a2a,
@@ -2113,7 +2855,9 @@ def _run_a2a_input_during_backup(
             control_index += 1
             if control_index > 12:
                 raise RuntimeError("too many supplemental pending inputs during backup-window coverage")
-            control = _arm_a2a_backup_delay(runtime, harness, a2a, control_index)
+            if next_control is None:
+                raise RuntimeError("backup-window arm budget exhausted")
+            control = next_control
             with contextlib.suppress(Exception):
                 response_stream.join(timeout=5)
             if matched_target:
@@ -2132,13 +2876,23 @@ def _run_a2a_input_during_backup(
 
 
 def _event_contains(*markers: str) -> Callable[[Any, Any], bool]:
-    lowered_markers = tuple(marker.lower() for marker in markers)
-
-    def predicate(event: Any, _summary: Any) -> bool:
-        text = _json_text(event).lower()
-        return all(marker in text for marker in lowered_markers)
-
-    return predicate
+    """Legacy name retained; match a real operation boundary, never arbitrary JSON text."""
+    a2a = _legacy_a2a_module()
+    if markers == ("validate", "template"):
+        return _successful_tool_result(a2a, "ros_validate_template")
+    if markers == ("CreateStack", "StackId"):
+        def created(event: Any, _summary: Any) -> bool:
+            return any(
+                item.get("action") in {"CreateStack", "ContinueCreateStack"}
+                and item.get("isSuccess") is True and bool(item.get("stackId"))
+                for _, envelope in _pipeline_event_records([event])
+                if envelope.get("eventType") == "stack_current_changed"
+                for item in [envelope.get("data") or {}]
+            )
+        return created
+    if len(markers) == 1:
+        return a2a._event_type(markers[0])
+    raise ValueError("checkpoint requires an explicit structural event predicate")
 
 
 def _successful_tool_result(a2a: Any, expected_tool_name: str) -> Callable[[Any, Any], bool]:
@@ -2149,7 +2903,12 @@ def _successful_tool_result(a2a: Any, expected_tool_name: str) -> Callable[[Any,
             data = envelope.get("data")
             if not isinstance(data, dict):
                 continue
-            if data.get("toolName") == expected_tool_name and data.get("isError") is not True:
+            result = _result_mapping(data.get("result"))
+            if (
+                data.get("toolName") == expected_tool_name and data.get("isError") is not True
+                and data.get("result") is not None
+                and not any(result.get(key) is False for key in ("is_success", "isSuccess", "valid", "is_valid"))
+            ):
                 return True
         return False
 
@@ -2162,8 +2921,48 @@ def _kill_restart_at(
     stream: Any,
     predicate: Callable[[Any, Any], bool],
     checkpoint: str,
+    *,
+    plan: A2AConversationPlan | None = None,
 ) -> None:
-    stream.wait_for(predicate, description=checkpoint, timeout=runtime.args.stream_timeout)
+    matched = False
+
+    def observe(event: Any, summary: Any) -> bool:
+        nonlocal matched
+        matched = bool(predicate(event, summary))
+        return matched
+
+    try:
+        deadline = time.monotonic() + runtime.args.stream_timeout
+        for input_index in range(5):
+            try:
+                stream.wait_for(observe, description=checkpoint, timeout=max(0.01, deadline - time.monotonic()))
+                break
+            except RuntimeError:
+                summary = stream.summary
+                if (plan is None or input_index == 4 or time.monotonic() >= deadline
+                    or getattr(stream, "exception", None) is not None
+                    or getattr(summary, "last_status_state", "") != "TASK_STATE_INPUT_REQUIRED"):
+                    raise
+                a2a = _legacy_a2a_module()
+                path = runtime.paths.run_dir / f"{summary.name}.events.jsonl"
+                kind = _pending_kind(a2a, path)
+                if kind not in {"ask_user_question", "candidate_selection", "candidate_select"}:
+                    raise
+                runtime.pending_question = _latest_a2a_pending_question(a2a, path)
+                response, image_key = _a2a_response_for_pending(
+                    runtime, kind, plan, str(getattr(summary, "last_input_required_step_id", "") or "")
+                )
+                if image_key:
+                    raise RuntimeError("fault checkpoint input handler requires a text fixture")
+                stream.join(timeout=5)
+                _record_diagnostic(runtime, 'fault_pending_input_count', input_index + 1)
+                stream = harness.start_stream(prompt=response, name=f"fault-{checkpoint}-input-{input_index:02d}")
+    except (RuntimeError, TimeoutError):
+        _record_diagnostic(runtime, 'fault_failed_checkpoint', checkpoint)
+        raise
+    if not matched:
+        raise RuntimeError("fault checkpoint did not verify a real event")
+    runtime.checks[checkpoint + " event verified"] = True
     harness.kill9()
     with contextlib.suppress(Exception):
         stream.join(timeout=5)
@@ -2210,7 +3009,8 @@ def _run_a2a_fault_checkpoints(
     checkpoints.append("candidate-selected")
 
     stream = harness.start_stream(prompt="继续恢复选中方案的实现。", name="fault-template")
-    _kill_restart_at(runtime, harness, stream, _event_contains("validate", "template"), "template-written-validated")
+    _kill_restart_at(runtime, harness, stream, _event_contains("validate", "template"), "template-written-validated",
+                     plan=plan)
     checkpoints.append("template-written-validated")
 
     stream = harness.start_stream(prompt="继续恢复并完成询价。", name="fault-quote")
@@ -2220,6 +3020,7 @@ def _run_a2a_fault_checkpoints(
         stream,
         _successful_tool_result(a2a, "ros_estimate_template_cost"),
         "quote-saved",
+        plan=plan,
     )
     checkpoints.append("quote-saved")
 
@@ -2236,15 +3037,36 @@ def _run_a2a_fault_checkpoints(
     if plan.confirmation_answers:
         plan.confirmation_answers.pop(0)
     stream = harness.start_stream(prompt=_confirmation_payload("confirm"), name="fault-confirmation-saved")
-    _kill_restart_at(runtime, harness, stream, _event_contains("input_received"), "confirmation-saved")
+    _kill_restart_at(
+        runtime, harness, stream,
+        _input_received_kind_and_step(a2a, NEW_STEPS[1], "deployment_confirmation"), "confirmation-saved"
+    )
     checkpoints.append("confirmation-saved")
 
     stream = harness.start_stream(prompt="继续执行已确认部署。", name="fault-create-stack")
     _kill_restart_at(runtime, harness, stream, _event_contains("CreateStack", "StackId"), "create-stack-returned")
     checkpoints.append("create-stack-returned")
 
-    final = harness.stream(prompt="继续等待原 Stack 完成，禁止创建第二个 Stack。", name="fault-final-recovery")
+    from scripts.ci.stack_ownership import case_pipeline_dirs, creation_receipts
+
+    receipts = creation_receipts(case_pipeline_dirs(runtime.paths.config_dir, str(runtime.paths.workspace_dir)))
+    if len(receipts) != 1:
+        raise RuntimeError("fault recovery requires exactly one accepted original Stack receipt")
+    original = receipts[0]
+    runtime.checks["fault recovery original Stack receipt verified"] = True
+    final = harness.stream(
+        prompt=(f"继续等待本任务已创建的原 Stack 完成：stack_id={original['stackId']}，"
+                f"region_id={original['regionId']}。仅等待这份创建回执对应的 Stack，禁止创建第二个 Stack。"),
+        name="fault-final-recovery",
+    )
     _continue_a2a_from_summary(runtime, harness, a2a, plan, final)
+    restored_receipts = creation_receipts(
+        case_pipeline_dirs(runtime.paths.config_dir, str(runtime.paths.workspace_dir))
+    )
+    retained_original = restored_receipts == [original]
+    runtime.checks["fault recovery retained original Stack receipt"] = retained_original
+    if not retained_original:
+        raise RuntimeError("fault recovery created a replacement Stack instead of completing the original")
     write_json(runtime.paths.artifacts_dir / "fault-checkpoints.json", {"checkpoints": checkpoints})
     runtime.checks["all six fault checkpoints exercised"] = len(checkpoints) == 6
 
@@ -2257,11 +3079,6 @@ def _run_a2a_rollback_cleanup(
     *,
     recover_cleanup: bool,
 ) -> None:
-    base = runtime.stack_name[:61]
-    first_name = f"{base}-a"[:64]
-    second_name = f"{base}-b"[:64]
-    runtime.owned_stack_names.update({first_name, second_name})
-    runtime.stack_name = first_name
     _advance_a2a_to_pending(
         runtime,
         harness,
@@ -2281,11 +3098,11 @@ def _run_a2a_rollback_cleanup(
         description="first Stack observed",
         timeout=runtime.args.stream_timeout,
     )
-    runtime.stack_name = second_name
     new_intent = (
         "我改需求了：停止旧目标，改为只创建一个安全组，不创建 VPC 或 VSwitch。"
-        f"新 ROS StackName 必须是 {second_name}；请回滚并清理旧 Stack 后重新规划。"
+        "请回滚并清理旧 Stack 后重新规划。"
     )
+    runtime.current_goal = new_intent
     rollback_stream = harness.start_stream(prompt=new_intent, name="cleanup-rollback-new-intent")
     rollback_stream.wait_for(
         _event_contains("rollback_completed"),
@@ -2301,6 +3118,9 @@ def _run_a2a_rollback_cleanup(
         harness.kill9_and_restart()
         with contextlib.suppress(Exception):
             first_deploy.join(timeout=5)
+        runtime.control_state = a2a._control_state_diagnostic(
+            harness.run_dir, harness.context_id, harness.pipeline_task_id
+        )
         runtime.event("server-restarted", checkpoint="rollback-cleanup-started")
         recovered = harness.stream(prompt="继续恢复旧 Stack 清理和新目标规划。", name="cleanup-after-restart")
         current = recovered
@@ -2346,7 +3166,6 @@ def _run_a2a_rollback_cleanup(
         name="cleanup-second-deploy",
     )
     _continue_a2a_from_summary(runtime, harness, a2a, plan, final)
-    runtime.checks["rollback cleanup used distinct StackNames"] = first_name != second_name
 
 
 def _run_a2a(runtime: ScenarioRuntime) -> None:
@@ -2485,6 +3304,8 @@ def _run_a2a(runtime: ScenarioRuntime) -> None:
             with contextlib.suppress(Exception):
                 harness.capture_task_snapshots("final-task")
     finally:
+        _record_diagnostic(runtime, "pre_teardown_control_state", a2a._control_state_diagnostic(
+            harness.run_dir, harness.context_id, harness.pipeline_task_id))
         harness.terminate()
     values = _all_event_values(runtime.paths.run_dir)
     _common_pipeline_checks(runtime, values)
@@ -2518,10 +3339,40 @@ REPL_STACK_CREATED_PATTERNS = (r"CREATE_COMPLETE", r"Stack ID", r"StackId", r"st
 REPL_CLEANUP_PATTERNS = (r"cleanup", r"回滚清理", r"DeleteStack", r"开始清理")
 
 
+def _repl_selection_submission_count(pty: Any) -> int | None:
+    env = getattr(pty, "env", None)
+    if not isinstance(env, dict) or not isinstance(env.get("IAC_CODE_CONFIG_DIR"), str):
+        return None
+    projects = Path(env["IAC_CODE_CONFIG_DIR"]) / "projects"
+    return sum(
+        event.get("type") == "candidate_selection_submitted"
+        for path in projects.glob("*/*/pipeline/display.jsonl")
+        for event in _read_json_lines(path)
+        if isinstance(event, dict)
+    )
+
+
 def _repl_select_current(pty: Any, *, next_candidate: bool = False) -> None:
+    submitted_before = _repl_selection_submission_count(pty)
     if next_candidate:
         pty.send("\x1b[C", label="candidate-right")
-    pty.send("\r", label="candidate-enter")
+        # RawInputCapture reads one terminal key at a time. Let the arrow
+        # update selection before the confirmation Enter arrives.
+        time.sleep(0.25)
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
+    for attempt in range(1, 4):
+        pty.send("\r", label="candidate-enter" if attempt == 1 else f"candidate-enter-retry-{attempt}")
+        if submitted_before is None:
+            return
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            pty.drain_output()
+            if _repl_selection_submission_count(pty) > submitted_before:
+                return
+            time.sleep(0.1)
+    raise TimeoutError("candidate selection Enter was not accepted after three attempts")
 
 
 def _repl_focus_confirmation_input(runtime: ScenarioRuntime, pty: Any) -> None:
@@ -2533,24 +3384,33 @@ def _repl_focus_confirmation_input(runtime: ScenarioRuntime, pty: Any) -> None:
 
 
 def _repl_choose_direct_input(runtime: ScenarioRuntime, pty: Any, text: str) -> None:
+    if isinstance(getattr(getattr(runtime, 'paths', None), 'config_dir', None), Path):
+        runtime.repl_last_confirmation_input_boundary = len(_read_repl_display_events(runtime))
     _repl_focus_confirmation_input(runtime, pty)
     pty.send(f"\x1b[200~{text}\x1b[201~", label="confirmation-direct-input-paste")
     time.sleep(0.1)
     pty.drain_output()
     pty.send("\r", label="confirmation-direct-input-enter")
+    if "我改需求" in text or "架构再次变化" in text:
+        runtime.current_goal = text
 
 
-def _repl_paste_generated_image(runtime: ScenarioRuntime, pty: Any, key: str, text: str) -> None:
+def _repl_paste_generated_image(
+    runtime: ScenarioRuntime, pty: Any, key: str, text: str, *, line_input: bool = False,
+) -> None:
     store = _legacy_a2a_module().TextImageFixtureStore(runtime.paths.run_dir / "image-fixtures")
     store.part(key, text)
     manifest = json.loads(store.manifest_path.read_text(encoding="utf-8"))
     image_path = str(manifest[key]["path"])
-    pty.send(f"\x1b[200~{image_path}\x1b[201~", label=f"paste-image-{key}")
+    pty.send(image_path if line_input else f"\x1b[200~{image_path}\x1b[201~", label=f"paste-image-{key}")
     pty.events.append({"type": "paste-image-fixture", "image_key": key, "path": image_path, "at": utc_now()})
 
 
-def _repl_submit_image_fixture(pty: Any, key: str, *, label: str) -> None:
-    pty.paste_image_fixture(key)
+def _repl_submit_image_fixture(pty: Any, key: str, *, label: str, line_input: bool = False) -> None:
+    if line_input:
+        pty.paste_image_fixture(key, line_input=True)
+    else:
+        pty.paste_image_fixture(key)
     time.sleep(0.1)
     pty.drain_output()
     pty.send("\r", label=label)
@@ -2563,11 +3423,46 @@ def _repl_submit_generated_image(
     text: str,
     *,
     label: str,
+    line_input: bool = False,
 ) -> None:
-    _repl_paste_generated_image(runtime, pty, key, text)
+    # Active questions use Console.input, which preserves bracketed-paste
+    # controls as answer text. PromptInput/candidate dialogs require the paste.
+    if line_input:
+        _repl_paste_generated_image(runtime, pty, key, text, line_input=True)
+    else:
+        _repl_paste_generated_image(runtime, pty, key, text)
     time.sleep(0.1)
     pty.drain_output()
     pty.send("\r", label=label)
+    if key in {"initial", "rollback-interrupt"}:
+        # These are the user's actual requests, sent as images. Subsequent
+        # clarification must not fall back to the unrelated base text goal.
+        runtime.current_goal = text
+
+
+def _repl_submit_multimodal_selection(
+    runtime: ScenarioRuntime, pty: Any, *, label: str, text: str | None = None
+) -> None:
+    """Keep the image input until the candidate selection is durably accepted."""
+
+    count_submissions = getattr(_legacy_repl_module(), "_repl_selection_submission_count", None)
+    submitted_before = count_submissions(pty) if callable(count_submissions) else None
+    for attempt in range(1, 4):
+        attempt_label = label if attempt == 1 else f"{label}-retry-{attempt}"
+        if text is None:
+            _repl_submit_image_fixture(pty, "selection", label=attempt_label)
+        else:
+            _repl_submit_generated_image(runtime, pty, "selection", text, label=attempt_label)
+        if submitted_before is None:
+            return
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            pty.drain_output()
+            if count_submissions(pty) > submitted_before:
+                _record_diagnostic(runtime, "repl_selection_image_retries", attempt - 1)
+                return
+            time.sleep(0.1)
+    raise TimeoutError("multimodal selection image was not accepted after three submissions")
 
 
 def _repl_choose_direct_image(runtime: ScenarioRuntime, pty: Any, key: str, text: str) -> None:
@@ -2576,6 +3471,8 @@ def _repl_choose_direct_image(runtime: ScenarioRuntime, pty: Any, key: str, text
     time.sleep(0.1)
     pty.drain_output()
     pty.send("\r", label="confirmation-direct-image-enter")
+    if key == "rollback-interrupt":
+        runtime.current_goal = text
 
 
 def _read_repl_display_events(runtime: ScenarioRuntime) -> list[dict[str, Any]]:
@@ -2596,17 +3493,97 @@ def _read_repl_display_events(runtime: ScenarioRuntime) -> list[dict[str, Any]]:
 
 
 def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None:
+    credential_values = sorted(set(_copied_credential_values(runtime)), key=len, reverse=True)
     raw = repl._redact_sensitive_text(pty.transcript, runtime.env)
+    raw = _redact_copied_credential_values(raw, credential_values)
     normalized = repl._normalize_transcript(raw)
     (runtime.paths.run_dir / "transcript.raw.log").write_text(raw, encoding="utf-8")
     (runtime.paths.run_dir / "transcript.normalized.log").write_text(normalized, encoding="utf-8")
     with (runtime.paths.run_dir / "repl-events.jsonl").open("w", encoding="utf-8") as handle:
         for event in pty.events:
-            handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+            line = json.dumps(event, ensure_ascii=False, default=str)
+            handle.write(_redact_copied_credential_values(line, credential_values) + "\n")
     # Display events are ordered pipeline facts. Put them before the PTY-only
     # interaction records so Step 1/2 boundaries cannot be inferred from a
     # monolithic transcript that also contains later Preview/quote output.
-    _common_pipeline_checks(runtime, _read_repl_display_events(runtime) + pty.events + [{"transcript": normalized}])
+    display_events = _read_repl_display_events(runtime)
+    for event_type, key in (
+        ("candidate_selection_ready", "repl_selection_ready_count"),
+        ("candidate_selection_submitted", "repl_selection_submitted_count"),
+        ("candidate_selected", "repl_candidate_selected_count"),
+        ("step_started", "repl_step_started_count"),
+    ):
+        _record_diagnostic(runtime, key, sum(event.get("type") == event_type for event in display_events))
+    _record_diagnostic(
+        runtime, "repl_step_started_ids",
+        [event.get("step_id") for event in display_events if event.get("type") == "step_started"],
+    )
+    if getattr(getattr(runtime, "spec", None), "profile", None) == "multimodal":
+        _record_diagnostic(runtime, "repl_image_keys", sorted({
+            str(event.get("image_key")) for event in pty.events
+            if isinstance(event, dict) and event.get("type") == "paste-image-fixture"
+        }))
+        failed_expects = [
+            str(event.get("description") or "") for event in pty.events
+            if isinstance(event, dict) and event.get("type") == "expect" and event.get("passed") is False
+        ]
+        if failed_expects:
+            description = failed_expects[-1]
+            if description.startswith("initial image ask or confirmation"):
+                phase = "initial_image_input"
+            elif description.startswith("adjustment image ask or confirmation"):
+                phase = "adjustment_image_input"
+            elif description.startswith("rollback image ask or confirmation"):
+                phase = "rollback_image_input"
+            elif description == "multimodal pipeline handoff":
+                phase = "pipeline_handoff"
+            elif description == "normal image follow-up response":
+                phase = "normal_followup"
+            else:
+                phase = "other"
+            _record_diagnostic(runtime, "repl_failed_wait_phase", phase)
+    if getattr(getattr(runtime, "spec", None), "profile", None) == "interrupt_rollback":
+        meta_paths = list((runtime.paths.config_dir / "projects").glob("*/*/pipeline/meta.yaml"))
+        if meta_paths:
+            with contextlib.suppress(OSError, yaml.YAMLError):
+                meta = yaml.safe_load(max(meta_paths, key=lambda path: path.stat().st_mtime_ns).read_text("utf-8"))
+                if isinstance(meta, dict):
+                    execution = meta.get("execution")
+                    if isinstance(execution, dict):
+                        _record_diagnostic(runtime, "repl_pending_step_id", meta.get("current_step"))
+                        _record_diagnostic(
+                            runtime, "repl_pending_input_kind", execution.get("pending_input_kind") or "none"
+                        )
+                        pending = execution.get("pending_ask_user_question_input")
+                        if isinstance(pending, dict):
+                            _record_diagnostic(
+                                runtime, "repl_pending_question_answered", isinstance(pending.get("answer"), dict)
+                            )
+        for step_index in (1, 2):
+            step_paths = _repl_step_transcript_paths(runtime, NEW_STEPS[step_index - 1])
+            step_tool_names = [
+                str(item.get("name") or "").lower()
+                for path in step_paths for value in _read_json_lines(path)
+                for item in [value, *(child for _, child in _walk(value))]
+                if isinstance(item, dict) and item.get("type") == "tool_use" and isinstance(item.get("name"), str)
+            ]
+            _record_diagnostic(runtime, f"repl_step{step_index}_attempt_count", len(step_paths))
+            _record_diagnostic(runtime, f"repl_step{step_index}_tool_use_count", len(step_tool_names))
+            _record_diagnostic(runtime, f"repl_step{step_index}_tool_use_names", sorted(set(step_tool_names)))
+        confirmation_inputs = [
+            event.get("payload", {}).get("selected_value")
+            for event in display_events
+            if event.get("type") == "user_input_received"
+            and isinstance(event.get("payload"), dict)
+            and event["payload"].get("kind") == "deployment_confirmation"
+        ]
+        _record_diagnostic(
+            runtime, "repl_first_rollback_input_intact",
+            bool(confirmation_inputs)
+            and isinstance(confirmation_inputs[0], str)
+            and all(marker in confirmation_inputs[0] for marker in ("改需求", "安全组", "不创建")),
+        )
+    _common_pipeline_checks(runtime, display_events + pty.events + [{"transcript": normalized}])
     runtime.checks["REPL transcript captured"] = bool(normalized.strip())
     unexpected_exit = any(
         event.get("type") == "terminate"
@@ -2621,21 +3598,87 @@ def _write_repl_artifacts(runtime: ScenarioRuntime, pty: Any, repl: Any) -> None
     )
 
 
-def _repl_wait_selection(pty: Any, runtime: ScenarioRuntime) -> None:
-    runtime.repl_candidate_wait_count += 1
-    event, path = _wait_repl_display_event(
-        runtime,
-        event_type="candidate_selection_ready",
-        occurrence=runtime.repl_candidate_wait_count,
-        timeout=runtime.args.stream_timeout,
-        drain_output=getattr(pty, "drain_output", None),
+def _repl_wait_selection(
+    pty: Any,
+    runtime: ScenarioRuntime,
+    *,
+    after_restart: bool = False,
+    await_controls: bool = False,
+    terminal_offset: int | None = None,
+    timeout: float | None = None,
+    clarification_answer: str | None = None,
+    adaptive_questions: bool = True,
+) -> None:
+    occurrence = runtime.repl_candidate_wait_count + 1
+    offset = (
+        (0 if await_controls else len(getattr(pty, "transcript", "")))
+        if terminal_offset is None else terminal_offset
     )
+    answered_tool_ids: set[str] = set()
+    for question_index in range(5):
+        kwargs: dict[str, Any] = {}
+        if clarification_answer is not None or adaptive_questions:
+            kwargs["alternate_input"] = lambda: _pending_repl_parameter_question(
+                runtime, answered_tool_ids, step_id=NEW_STEPS[0]
+            )
+        event, path = _wait_repl_display_event(
+            runtime,
+            event_type="candidate_selection_ready",
+            occurrence=occurrence,
+            timeout=runtime.args.stream_timeout if timeout is None else timeout,
+            # Drain while planning: a full PTY buffer can block persistence.
+            drain_output=getattr(pty, "drain_output", None),
+            pty=pty,
+            **kwargs,
+        )
+        if event.get("type") == "candidate_selection_ready":
+            break
+        payload = event.get("payload", {})
+        if question_index >= 4 or payload.get("kind") != "ask_user_question":
+            raise RuntimeError("candidate planning did not reach selection after four clarification asks")
+        _repl_wait_ask(pty, runtime, description="Step 1 clarification question", allow_captured_prompt=True)
+        answer = _answer_runtime_question(runtime, payload, goal_override=clarification_answer or "")
+        if not payload.get("allow_free_text", True):
+            answer = str(1 + next(
+                i for i, option in enumerate(payload["options"])
+                if option.get("id") == answer
+            ))
+        _repl_submit_question_answer(
+            pty, runtime, answer, (event, path), label=f"step1-clarification-answer-{question_index + 1}"
+        )
+        answered_tool_ids.add(payload["tool_use_id"])
+        _record_diagnostic(runtime, "repl_step1_clarification_asks", question_index + 1)
+    options = event.get("payload", {}).get("options") if isinstance(event.get("payload"), dict) else None
+    if isinstance(options, list):
+        _record_diagnostic(runtime, "candidate_option_count", len(options))
+    if after_restart or await_controls:
+        repl = _legacy_repl_module()
+        deadline = time.monotonic() + min(runtime.args.stream_timeout, 30.0)
+        while time.monotonic() < deadline:
+            pty.drain_output()
+            rendered = repl._normalize_transcript(pty.transcript[offset:])
+            if any(re.search(pattern, rendered) for pattern in repl.CANDIDATE_SELECTION_READY_PATTERNS):
+                break
+            time.sleep(0.1)
+        else:
+            raise TimeoutError("candidate selection controls were not rendered after durable ready event")
+        # The durable marker is recorded after waiting_input is set; one
+        # rendered controls frame is sufficient to accept the next key.
+        time.sleep(0.25)
+    else:
+        # The journal entry precedes the terminal renderer. Let its cbreak key
+        # reader become active before the scenario sends arrow or Enter keys.
+        time.sleep(0.5)
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
+    runtime.repl_candidate_wait_count = occurrence
     pty.events.append(
         {
             "type": "display-event",
             "description": "selling_solution_first candidate selection",
             "event_type": event.get("type"),
-            "occurrence": runtime.repl_candidate_wait_count,
+            "occurrence": occurrence,
             "path": str(path),
             "at": utc_now(),
         }
@@ -2650,14 +3693,40 @@ def _repl_wait_step_started(
     occurrence: int,
     description: str,
 ) -> None:
-    event, path = _wait_repl_display_event(
-        runtime,
-        event_type="step_started",
-        occurrence=occurrence,
-        timeout=runtime.args.stream_timeout,
-        drain_output=getattr(pty, "drain_output", None),
-        predicate=lambda item: item.get("step_id") == step_id,
-    )
+    answered_tool_ids: set[str] = set()
+    deadline = time.monotonic() + runtime.args.stream_timeout
+
+    def pending_input() -> tuple[dict[str, Any], Path] | None:
+        question = _pending_repl_parameter_question(runtime, answered_tool_ids, step_id=NEW_STEPS[0])
+        return question or _pending_repl_input_before_confirmation(runtime, answered_tool_ids)
+
+    for question_index in range(8):
+        event, path = _wait_repl_display_event(
+            runtime,
+            event_type="step_started",
+            occurrence=occurrence,
+            timeout=max(0.0, deadline - time.monotonic()),
+            drain_output=getattr(pty, "drain_output", None),
+            predicate=lambda item: item.get("step_id") == step_id,
+            pty=pty,
+            alternate_input=pending_input if step_id == NEW_STEPS[1] else None,
+        )
+        if event.get("type") == "step_started":
+            break
+        if event.get("type") == "candidate_selection_ready":
+            _record_diagnostic(runtime, "repl_unexpected_candidate_before_step2", True)
+            raise RuntimeError("new candidate selection boundary appeared before expected Step 2 start")
+        payload = event.get("payload")
+        if not isinstance(payload, dict) or payload.get("kind") != "ask_user_question":
+            raise RuntimeError("unexpected input before expected step start")
+        answer = _answer_runtime_question(runtime, payload)
+        _repl_wait_ask(pty, runtime, description="clarification before step start", allow_captured_prompt=True)
+        if not payload.get("allow_free_text", True):
+            answer = str(1 + next(i for i, option in enumerate(payload["options"]) if option.get("id") == answer))
+        _repl_submit_question_answer(pty, runtime, answer, (event, path), label=f"pre-step-answer-{question_index + 1}")
+        answered_tool_ids.add(payload["tool_use_id"])
+    else:
+        raise RuntimeError("question budget exhausted before expected step start")
     pty.events.append(
         {
             "type": "display-event",
@@ -2733,7 +3802,11 @@ def _wait_repl_transcript_tool_use(
     after the target tool call had actually been persisted.
     """
 
-    deadline = time.monotonic() + runtime.args.stream_timeout
+    started = time.monotonic()
+    deadline = started + runtime.args.stream_timeout
+    transcript_offset = len(getattr(pty, "transcript", ""))
+    diagnosis_attempted = False
+    answered_tool_ids: set[str] = set()
     while time.monotonic() < deadline:
         pty.drain_output()
         terminal_event = _repl_latest_terminal_display_event(runtime)
@@ -2745,6 +3818,27 @@ def _wait_repl_transcript_tool_use(
         # next waiting boundary for an in-flight checkpoint.
         if step_id == NEW_STEPS[1] and _repl_reached_step2_confirmation(runtime):
             raise RuntimeError(f"REPL reached deployment confirmation before {description}")
+        if step_id == NEW_STEPS[1]:
+            pending = _pending_repl_parameter_question(runtime, answered_tool_ids, step_id=step_id)
+            if pending is not None:
+                if len(answered_tool_ids) >= 8:
+                    raise RuntimeError(f"parameter question budget exhausted before {description}")
+                payload = pending[0]["payload"]
+                answer = _answer_runtime_question(runtime, payload)
+                _repl_wait_ask(pty, runtime, description="parameter before tool checkpoint", allow_captured_prompt=True)
+                if not payload.get("allow_free_text", True):
+                    answer = str(1 + next(
+                        i for i, option in enumerate(payload["options"]) if option.get("id") == answer
+                    ))
+                _repl_submit_question_answer(
+                    pty, runtime, answer, pending,
+                    label=f"tool-checkpoint-parameter-answer-{len(answered_tool_ids) + 1}",
+                )
+                answered_tool_ids.add(payload["tool_use_id"])
+                _record_diagnostic(runtime, "repl_tool_checkpoint_parameter_asks", len(answered_tool_ids))
+                transcript_offset = len(getattr(pty, "transcript", ""))
+                diagnosis_attempted = False
+                continue
         for path in _repl_step_transcript_paths(runtime, step_id):
             tool_use = _find_transcript_tool_use(path, tool_names)
             if tool_use is None:
@@ -2761,6 +3855,14 @@ def _wait_repl_transcript_tool_use(
                 }
             )
             return
+        diagnosis_attempted = _observe_repl_wait(
+            pty,
+            runtime,
+            description=f"REPL tool use {step_id}",
+            started=started,
+            transcript_offset=transcript_offset,
+            diagnosis_attempted=diagnosis_attempted,
+        )
         time.sleep(0.1)
     raise TimeoutError(
         f"timed out waiting for {description}; expected one of {sorted(tool_names)!r} "
@@ -2774,16 +3876,32 @@ def _repl_wait_ask(
     *,
     description: str,
     reject_confirmation: bool = False,
+    allow_captured_prompt: bool = False,
 ) -> None:
     # Question wording is model-generated and must not be constrained by a list
     # of Chinese keywords. The actual console-input prompt is the durable UI
     # boundary and also prevents an answer from racing the preceding key reader.
     patterns = REPL_ASK_INPUT_READY_PATTERNS + (REPL_CONFIRMATION_INPUT_READY_PATTERNS if reject_confirmation else ())
-    matched = pty.expect_any(
-        patterns,
-        description=f"{description} input ready",
-        timeout=runtime.args.stream_timeout,
-    )
+    matched = None
+    if allow_captured_prompt:
+        # The durable pending-question checkpoint can be observed after the
+        # polling drain already consumed its prompt. Check the current tail.
+        time.sleep(0.25)
+        pty.drain_output()
+        rendered = _legacy_repl_module()._normalize_transcript(getattr(pty, "transcript", ""))
+        if re.search(r"[ \t]+>[ \t]*$", rendered):
+            matched = REPL_ASK_INPUT_READY_PATTERNS[0]
+            if isinstance(getattr(pty, "events", None), list):
+                pty.events.append({
+                    "type": "expect", "description": f"{description} input ready",
+                    "source": "captured_prompt", "at": utc_now(),
+                })
+    if matched is None:
+        matched = pty.expect_any(
+            patterns,
+            description=f"{description} input ready",
+            timeout=runtime.args.stream_timeout,
+        )
     if reject_confirmation and matched in REPL_CONFIRMATION_INPUT_READY_PATTERNS:
         raise RuntimeError(f"deployment confirmation appeared before {description}")
     # Cancelling the candidate key task cannot cancel a read_key() already
@@ -2841,6 +3959,178 @@ def _repl_submit_line_input(pty: Any, text: str, *, label: str) -> None:
     pty.send("\r", label=f"{label}-enter")
 
 
+def _repl_submit_question_answer(
+    pty: Any, runtime: ScenarioRuntime, text: str, pending: tuple[dict[str, Any], Path], *, label: str,
+    restored: bool = False,
+) -> None:
+    if restored:
+        # Sidecar recovery reads through PromptInput, which handles bracketed paste.
+        _repl_submit_line_input(pty, text, label=label)
+    else:
+        # Active pipeline questions use Renderer.console.input, whose line reader
+        # treats paste escape sequences as answer characters. Send plain text.
+        pty.send(text, label=f"{label}-text")
+        pty.drain_output()
+        pty.send("\r", label=f"{label}-enter")
+    _repl_wait_question_acknowledgement(pty, runtime, pending, label=label)
+
+
+def _repl_wait_question_acknowledgement(
+    pty: Any, runtime: ScenarioRuntime, pending: tuple[dict[str, Any], Path], *, label: str
+) -> None:
+    event, path = pending
+    tool_id = event["payload"]["tool_use_id"]
+    _record_diagnostic(runtime, 'repl_question_ack_free_text_allowed',
+                       event['payload'].get('allow_free_text', True) is not False)
+    options = event['payload'].get('options')
+    _record_diagnostic(runtime, 'repl_question_ack_option_count',
+                       min(len(options), 10000) if isinstance(options, list) else 0)
+    # Enter is asynchronous. Until its checkpoint acknowledges this answer,
+    # the next wait can mistake the same question for a new parameter ask and
+    # wait for a prompt that the first answer already consumed.
+    deadline = time.monotonic() + min(20.0, runtime.args.stream_timeout)
+    while time.monotonic() < deadline:
+        pty.drain_output()
+        try:
+            state = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            time.sleep(0.1)
+            continue
+        execution = state.get("execution") if isinstance(state, dict) else None
+        if isinstance(execution, dict):
+            question = execution.get("pending_ask_user_question_input")
+            same_question = (
+                state.get("current_step") == event.get("step_id")
+                and execution.get("pending_input_kind") == "ask_user_question"
+                and isinstance(question, dict)
+                and (question.get("toolUseId") or question.get("tool_use_id")) == tool_id
+                and not isinstance(question.get("answer"), dict)
+            )
+            if not same_question:
+                runtime.checks[label + " acknowledged"] = True
+                pty.events.append({
+                    "type": "question-answer-acknowledged", "step_id": event.get("step_id"),
+                    "tool_use_id": tool_id, "fact_category": event["payload"].get("answer_fact_category"),
+                })
+                question_conversation(runtime).acknowledge(event['payload'])
+                return
+        time.sleep(0.1)
+    runtime.checks[label + " acknowledged"] = False
+    raise TimeoutError("timed out waiting for question answer acknowledgement")
+
+
+def _repl_submit_restored_parameter_answer(pty: Any, runtime: ScenarioRuntime) -> None:
+    pending = _pending_repl_parameter_question(runtime, set())
+    if pending is None:
+        raise RuntimeError("restored Step 2 question checkpoint was not observed")
+    payload = pending[0]["payload"]
+    text = _answer_runtime_question(runtime, payload)
+    if not payload.get("allow_free_text", True):
+        text = str(1 + next(i for i, option in enumerate(payload["options"]) if option.get("id") == text))
+    _repl_submit_question_answer(pty, runtime, text, pending, label="restored Step 2 answer", restored=True)
+
+
+def _repl_durable_progress_signature(runtime: ScenarioRuntime) -> tuple[tuple[str, int, int], ...]:
+    config_dir = getattr(getattr(runtime, "paths", None), "config_dir", None)
+    if not isinstance(config_dir, Path):
+        return ()
+    projects = config_dir / "projects"
+    paths = [
+        *projects.glob("*/*/pipeline/display.jsonl"),
+        *projects.glob("*/*/pipeline/meta.yaml"),
+        *projects.glob("*/*/pipeline/transcripts/*/session.jsonl"),
+    ]
+    signature: list[tuple[str, int, int]] = []
+    for path in paths:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        signature.append((str(path), stat.st_size, stat.st_mtime_ns))
+    return tuple(sorted(signature))
+
+
+def _observe_repl_wait(
+    pty: Any,
+    runtime: ScenarioRuntime,
+    *,
+    description: str,
+    started: float,
+    transcript_offset: int,
+    diagnosis_attempted: bool,
+) -> bool:
+    """Apply the REPL idle guard while polling durable pipeline files."""
+
+    now = time.monotonic()
+    if getattr(pty, "_durable_wait_started", None) != started:
+        pty._durable_wait_started = started
+        pty._durable_progress_signature = _repl_durable_progress_signature(runtime)
+        pty._durable_progress_checked_at = now
+        pty._durable_last_progress_at = started
+    elif now - getattr(pty, "_durable_progress_checked_at", 0.0) >= 2.0:
+        signature = _repl_durable_progress_signature(runtime)
+        if signature != pty._durable_progress_signature:
+            pty._durable_progress_signature = signature
+            pty._durable_last_progress_at = now
+        pty._durable_progress_checked_at = now
+    durable_progress_at = float(getattr(pty, "_durable_last_progress_at", started))
+    last_output_at = getattr(pty, "_last_output_at", None)
+    if isinstance(last_output_at, (int, float)) and not isinstance(last_output_at, bool):
+        # Ignore a prior cloud operation retained in the PTY tail. Only output
+        # emitted during this wait may extend the cloud idle allowance.
+        recent_output = str(getattr(pty, "transcript", ""))[transcript_offset:][-2000:]
+        cloud_wait = _repl_active_deploy_step(runtime) or bool(
+            re.search(
+                r"(?i)Deploying\s*\(|CreateStack|ROS Deploy|CREATE_IN_PROGRESS|DELETE_IN_PROGRESS|回滚清理",
+                recent_output,
+            )
+        )
+        repl = _legacy_repl_module()
+        idle_limit = repl.WAIT_CLOUD_IDLE_SECONDS if cloud_wait else repl.WAIT_IDLE_SECONDS
+        if now - max(float(last_output_at), started, durable_progress_at) >= idle_limit:
+            record = {
+                "state": "no_output",
+                "confidence": 1.0,
+                "waitingFor": description,
+                "elapsedSeconds": round(now - started, 1),
+                "action": "early_abort",
+                "cue": "none",
+            }
+            diagnoses = getattr(pty, "_wait_diagnoses", [])
+            diagnoses.append(record)
+            pty._wait_diagnoses = diagnoses
+            pty.events.append({"type": "wait_diagnosis", **record, "at": utc_now()})
+            runtime.watchdog = record
+            raise TimeoutError(f"no terminal output for {round(idle_limit)}s while waiting for {description}")
+    if not diagnosis_attempted and now - max(started, durable_progress_at) >= 120.0:
+        diagnose = getattr(pty, "_diagnose_wait", None)
+        if callable(diagnose):
+            try:
+                diagnose(description, transcript_offset, now - started)
+            finally:
+                diagnoses = getattr(pty, "_wait_diagnoses", [])
+                if diagnoses and isinstance(diagnoses[-1], dict):
+                    runtime.watchdog = diagnoses[-1]
+        return True
+    return diagnosis_attempted
+
+
+def _repl_active_deploy_step(runtime: ScenarioRuntime) -> bool:
+    paths = getattr(runtime, "paths", None)
+    if not isinstance(getattr(paths, "config_dir", None), Path):
+        return False
+    active = False
+    for event in _read_repl_display_events(runtime):
+        event_type = event.get("type")
+        if event_type == "step_started" and event.get("step_id") == NEW_STEPS[2]:
+            active = True
+        elif event_type in {"step_completed", "step_failed"} and event.get("step_id") == NEW_STEPS[2]:
+            active = False
+        elif event_type in {"pipeline_completed", "pipeline_failed"}:
+            active = False
+    return active
+
+
 def _wait_repl_display_event(
     runtime: ScenarioRuntime,
     *,
@@ -2850,8 +4140,13 @@ def _wait_repl_display_event(
     drain_output: Callable[[], None] | None = None,
     predicate: Callable[[dict[str, Any]], bool] | None = None,
     check_before_drain: bool = False,
+    pty: Any | None = None,
+    alternate_input: Callable[[], tuple[dict[str, Any], Path] | None] | None = None,
 ) -> tuple[dict[str, Any], Path]:
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
+    transcript_offset = len(getattr(pty, "transcript", "")) if pty is not None else 0
+    diagnosis_attempted = False
     latest_count = 0
     terminal_types = {"pipeline_user_aborted", "pipeline_failed", "backup_blocked", "pipeline_completed"}
     while time.monotonic() < deadline:
@@ -2881,15 +4176,31 @@ def _wait_repl_display_event(
                     f"REPL pipeline reached terminal display event {terminal_event.get('type')!r} "
                     f"before {event_type!r} occurrence {occurrence}"
                 )
+        if alternate_input is not None:
+            pending = alternate_input()
+            if pending is not None:
+                return pending
         if drain_output is not None and check_before_drain:
             drain_output()
+        if pty is not None:
+            diagnosis_attempted = _observe_repl_wait(
+                pty,
+                runtime,
+                description=f"REPL display {event_type} occurrence {occurrence}",
+                started=started,
+                transcript_offset=transcript_offset,
+                diagnosis_attempted=diagnosis_attempted,
+            )
         time.sleep(0.1)
+    runtime.checks[f"REPL display {event_type} occurrence {occurrence} observed"] = False
+    runtime.checks["REPL display matched at least once before timeout"] = latest_count > 0
     raise TimeoutError(
         f"timed out waiting for REPL display event {event_type!r} occurrence {occurrence}; observed {latest_count}"
     )
 
 
 def _repl_submit_candidate_interrupt(pty: Any, runtime: ScenarioRuntime, text: str) -> None:
+    runtime.current_goal = text
     repl = _legacy_repl_module()
     pty.send("\x1b", label="candidate-interrupt")
     repl._expect_interrupt_input_ready(
@@ -2927,15 +4238,32 @@ def _repl_submit_pipeline_interrupt(pty: Any, runtime: ScenarioRuntime, text: st
     time.sleep(0.25)
     pty.drain_output()
     _repl_submit_line_input(pty, text, label="pipeline-stream-interrupt-input")
+    runtime.current_goal = text
 
 
 def _is_repl_deployment_confirmation(event: dict[str, Any]) -> bool:
     payload = event.get("payload")
     return (
-        event.get("step_id") == NEW_STEPS[1]
+        event.get("type") == "user_input_required"
+        and event.get("step_id") == NEW_STEPS[1]
         and isinstance(payload, dict)
         and payload.get("kind") == "deployment_confirmation"
     )
+
+
+def _repl_confirmation_has_cost_lines(events: Sequence[dict[str, Any]]) -> bool:
+    for event in events:
+        if not _is_repl_deployment_confirmation(event):
+            continue
+        payload = event.get("payload")
+        cost = payload.get("cost") if isinstance(payload, dict) else None
+        resources = cost.get("resources") if isinstance(cost, dict) else None
+        if isinstance(resources, list) and any(
+            isinstance(item, dict) and any(item.get(key) for key in ("type", "spec", "cost"))
+            for item in resources
+        ):
+            return True
+    return False
 
 
 def _record_repl_confirmation_options(runtime: ScenarioRuntime, event: dict[str, Any]) -> None:
@@ -2963,15 +4291,16 @@ def _prepare_restored_repl_confirmation(pty: Any, runtime: ScenarioRuntime) -> N
 
 
 def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input_ready: bool = True) -> None:
-    runtime.repl_confirmation_wait_count += 1
+    occurrence = runtime.repl_confirmation_wait_count + 1
     event, path = _wait_repl_display_event(
         runtime,
         event_type="user_input_required",
-        occurrence=runtime.repl_confirmation_wait_count,
+        occurrence=occurrence,
         timeout=runtime.args.stream_timeout,
         drain_output=getattr(pty, "drain_output", None),
         predicate=_is_repl_deployment_confirmation,
         check_before_drain=True,
+        pty=pty,
     )
     # The display record is written before the REPL renders the confirmation.
     # Normal flows can wait for the selector's terminal frame. Recovery flows
@@ -2981,7 +4310,7 @@ def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input
     if require_input_ready:
         pty.expect_any(
             REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-            description=f"deployment confirmation selector ready #{runtime.repl_confirmation_wait_count}",
+            description=f"deployment confirmation selector ready #{occurrence}",
             timeout=runtime.args.stream_timeout,
         )
         time.sleep(0.25)
@@ -2989,47 +4318,204 @@ def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input
         time.sleep(0.5)
     pty.drain_output()
     _record_repl_confirmation_options(runtime, event)
+    runtime.repl_confirmation_wait_count = occurrence
     pty.events.append(
         {
             "type": "display-event",
             "description": "selling_solution_first deployment confirmation",
             "event_type": event.get("type"),
-            "occurrence": runtime.repl_confirmation_wait_count,
+            "occurrence": occurrence,
             "path": str(path),
             "at": utc_now(),
         }
     )
 
 
-def _repl_wait_confirmation_after_optional_parameter_asks(pty: Any, runtime: ScenarioRuntime) -> None:
-    """Answer legitimate Step 2 parameter asks before the confirmation boundary."""
+def _pending_repl_parameter_question(
+    runtime: ScenarioRuntime, answered_tool_ids: set[str], *, step_id: str = NEW_STEPS[1]
+) -> tuple[dict[str, Any], Path] | None:
+    """Native ask_user_question is persisted in meta, not the display journal."""
 
-    for ask_index in range(1, 4):
-        matched = pty.expect_any(
-            REPL_ASK_INPUT_READY_PATTERNS + REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-            description=f"post-rollback Step 2 ask or confirmation #{ask_index}",
+    for path in sorted((runtime.paths.config_dir / "projects").glob("*/*/pipeline/meta.yaml")):
+        try:
+            metadata = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(metadata, dict) or metadata.get("current_step") != step_id:
+            continue
+        execution = metadata.get("execution")
+        if not isinstance(execution, dict) or execution.get("pending_input_kind") != "ask_user_question":
+            continue
+        pending = execution.get("pending_ask_user_question_input")
+        if not isinstance(pending, dict) or isinstance(pending.get("answer"), dict):
+            continue
+        tool_id = pending.get("toolUseId") or pending.get("tool_use_id")
+        if not isinstance(tool_id, str) or not tool_id or tool_id in answered_tool_ids:
+            continue
+        return {
+            "type": "user_input_required", "step_id": step_id,
+            "payload": {
+                "kind": "ask_user_question", "tool_use_id": tool_id,
+                "_step_id": step_id,
+                "allow_free_text": pending.get("allowFreeText", pending.get("allow_free_text", True)),
+                "question": pending.get("question", ""), "options": pending.get("options", []),
+            },
+        }, path
+    return None
+
+
+def _pending_repl_input_before_confirmation(
+    runtime: ScenarioRuntime, answered_tool_ids: set[str]
+) -> tuple[dict[str, Any], Path] | None:
+    for step_id in NEW_STEPS:
+        question = _pending_repl_parameter_question(runtime, answered_tool_ids, step_id=step_id)
+        if question:
+            return question
+    # Counts cannot establish ordering: several ready events may all precede
+    # the accepted Enter. Only a ready event after the latest durable submission
+    # creates a new boundary for this wait.
+    events = _read_repl_display_events(runtime)
+    submitted = [i for i, event in enumerate(events) if event.get("type") == "candidate_selection_submitted"]
+    if not submitted:
+        return None
+    for event in reversed(events[submitted[-1] + 1:]):
+        if event.get("type") == "candidate_selection_ready":
+            return event, runtime.paths.run_dir / "repl-events.jsonl"
+    return None
+
+
+def _repl_wait_confirmation_after_optional_parameter_asks(pty: Any, runtime: ScenarioRuntime) -> None:
+    """Follow this selection's durable Step 2 inputs, ignoring stale terminal redraws."""
+
+    display_events = _read_repl_display_events(runtime)
+    selection_indexes = [
+        index for index, event in enumerate(display_events) if event.get("type") == "candidate_selection_submitted"
+    ]
+    if not selection_indexes:
+        raise RuntimeError("candidate selection was not persisted before Step 2 input")
+    selection_index = selection_indexes[-1]
+    confirmation_occurrence = max(
+        getattr(runtime, "repl_confirmation_wait_count", 0) + 1,
+        1 + sum(_is_repl_deployment_confirmation(event) for event in display_events[:selection_index]),
+    )
+    answered_tool_ids: set[str] = set()
+    reselections = 0
+    for input_index in range(1, 9):
+        event, question_path = _wait_repl_display_event(
+            runtime,
+            event_type="user_input_required",
+            occurrence=confirmation_occurrence,
             timeout=runtime.args.stream_timeout,
+            drain_output=getattr(pty, "drain_output", None),
+            predicate=_is_repl_deployment_confirmation,
+            check_before_drain=True,
+            pty=pty,
+            alternate_input=lambda: _pending_repl_input_before_confirmation(runtime, answered_tool_ids),
         )
-        if matched in REPL_CONFIRMATION_INPUT_READY_PATTERNS:
-            # The readiness line was consumed above; use the durable display
-            # record without trying to match the same transient hint twice.
+        if _is_repl_deployment_confirmation(event):
+            if runtime.spec.profile == "step2_parameter":
+                _verify_required_parameter_confirmation(runtime, event.get("payload") or {})
+            runtime.repl_confirmation_wait_count = confirmation_occurrence - 1
             _repl_wait_confirmation(pty, runtime, require_input_ready=False)
             return
-        time.sleep(0.25)
-        pty.drain_output()
-        answer = runtime.args.cleanup_vpc_id or "请使用上面列出的第一个可用杭州 VPC"
-        _repl_submit_line_input(pty, answer, label=f"post-rollback-parameter-answer-{ask_index}")
-    raise RuntimeError("post-rollback Step 2 did not reach deployment confirmation after three parameter asks")
+        if event.get("type") == "candidate_selection_ready":
+            if reselections >= 2:
+                raise RuntimeError("candidate reselection budget exhausted before Step 2")
+            _repl_wait_selection(pty, runtime)
+            _repl_select_current(pty, next_candidate=runtime.spec.profile == "reselect_progress")
+            reselections += 1
+            _record_diagnostic(runtime, "repl_supplemental_reselections", reselections)
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict) or payload.get("kind") != "ask_user_question":
+            raise RuntimeError("unexpected input kind before deployment confirmation")
+        answer = _answer_runtime_question(runtime, payload)
+        step_number = NEW_STEPS.index(event.get("step_id")) + 1
+        description = f"Step {step_number} parameter ask #{input_index}"
+        if runtime.spec.profile == "step2_parameter" and step_number == 2:
+            description = "Step 2 {} parameter question".format(payload.get("answer_fact_category", "unknown"))
+        _repl_wait_ask(pty, runtime, description=description, allow_captured_prompt=True)
+        if not payload.get("allow_free_text", True):
+            answer = str(1 + next(
+                i for i, option in enumerate(payload["options"])
+                if option.get("id") == answer
+            ))
+        _repl_submit_question_answer(
+            pty, runtime, answer, (event, question_path), label=f"step{step_number}-parameter-answer-{input_index}"
+        )
+        if isinstance(payload.get("tool_use_id"), str):
+            answered_tool_ids.add(payload["tool_use_id"])
+        _record_diagnostic(runtime, "repl_native_parameter_asks", input_index)
+    raise RuntimeError("Step 2 input budget exhausted before deployment confirmation")
 
 
 def _repl_wait_pipeline_completed(pty: Any, runtime: ScenarioRuntime) -> None:
-    event, path = _wait_repl_display_event(
-        runtime,
-        event_type="pipeline_completed",
-        occurrence=1,
-        timeout=runtime.args.stream_timeout,
-        drain_output=getattr(pty, "drain_output", None),
-    )
+    # A natural-language confirmation can still elicit a parameter question.
+    # Answer actual pending questions using the same user intent as before the
+    # confirmation, while preserving the original terminal milestone/deadline.
+    deadline = time.monotonic() + runtime.args.stream_timeout
+    answered_tool_ids: set[str] = set()
+
+    def pending_question() -> tuple[dict[str, Any], Path] | None:
+        paths = getattr(runtime, 'paths', None)
+        if isinstance(getattr(paths, 'config_dir', None), Path):
+            events = _read_repl_display_events(runtime)
+            starts = [event.get('step_id') for event in events
+                      if event.get('type') == 'step_started']
+            # Completion requires the confirmed deployment to finish. A real
+            # return to planning needs a fresh user selection, which this flow
+            # does not authorize; report it instead of waiting the full deadline.
+            if starts and starts[-1] == NEW_STEPS[0] and NEW_STEPS[2] in starts:
+                runtime.checks['REPL display pipeline_completed occurrence 1 observed'] = False
+                raise RuntimeError('REPL returned to planning after deployment before pipeline completion')
+            boundary = getattr(runtime, 'repl_last_confirmation_input_boundary', None)
+            if type(boundary) is int:
+                received = [i for i, event in enumerate(events)
+                            if i >= boundary and event.get('type') == 'user_input_received'
+                            and event.get('step_id') == NEW_STEPS[1]]
+                if received and events and _is_repl_deployment_confirmation(events[-1]):
+                    # The submitted answer has been accepted and a new input is
+                    # required. Waiting for completion cannot advance this flow;
+                    # report the real boundary without silently confirming again.
+                    runtime.checks['REPL display pipeline_completed occurrence 1 observed'] = False
+                    _record_diagnostic(runtime, 'repl_completion_reconfirmation_pending', True)
+                    raise RuntimeError('REPL requested another deployment confirmation after final user input')
+        for step_id in NEW_STEPS:
+            pending = _pending_repl_parameter_question(runtime, answered_tool_ids, step_id=step_id)
+            if pending is not None:
+                return pending
+        return None
+
+    for input_index in range(9):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("timed out waiting for REPL pipeline completion")
+        event, path = _wait_repl_display_event(
+            runtime,
+            event_type="pipeline_completed",
+            occurrence=1,
+            timeout=remaining,
+            drain_output=getattr(pty, "drain_output", None),
+            pty=pty,
+            alternate_input=pending_question,
+        )
+        if event.get("type") == "pipeline_completed":
+            break
+        if input_index >= 8:
+            raise RuntimeError("question budget exhausted before REPL pipeline completion")
+        payload = event.get("payload")
+        if not isinstance(payload, dict) or payload.get("kind") != "ask_user_question":
+            raise RuntimeError("unexpected input kind before REPL pipeline completion")
+        answer = _answer_runtime_question(runtime, payload)
+        _repl_wait_ask(pty, runtime, description="post-confirmation parameter ask", allow_captured_prompt=True)
+        if not payload.get("allow_free_text", True):
+            answer = str(1 + next(
+                i for i, option in enumerate(payload["options"]) if option.get("id") == answer
+            ))
+        _repl_submit_question_answer(
+            pty, runtime, answer, (event, path), label=f"post-confirmation-parameter-answer-{input_index + 1}"
+        )
+        answered_tool_ids.add(payload["tool_use_id"])
     pty.events.append(
         {
             "type": "display-event",
@@ -3055,20 +4541,59 @@ def _repl_step1_clarification_answer(runtime: ScenarioRuntime) -> str:
     )
 
 
+def _remember_partial_adjustment_context(runtime: ScenarioRuntime, goal: str, parameters: Any) -> None:
+    """Retain prior user context and actually confirmed IDs for a parameter-only edit."""
+    previous = _question_facts(runtime)
+    retained = {key: previous[key] for key in ('cloud_vendor', 'region', 'purpose', 'workload', 'scale', 'budget')
+                if key in previous}
+    if isinstance(parameters, dict):
+        for key, names, pattern in (
+            ('zone_id', {'zoneid', 'availabilityzone', 'availabilityzoneid', 'vswitchzoneid'}, r'cn-hangzhou-[a-z]'),
+            ('vpc_id', {'vpcid', 'existingvpcid'}, r'vpc-[a-zA-Z0-9]+'),
+        ):
+            values = {value for name, value in parameters.items()
+                      if isinstance(name, str) and re.sub(r'[^a-z]', '', name.lower()) in names
+                      and isinstance(value, str) and re.fullmatch(pattern, value)}
+            if len(values) == 1:
+                retained[key] = values.pop()
+    runtime.partial_adjustment_goal = goal
+    runtime.partial_adjustment_facts = retained
+
+
+def _repl_natural_adjusted_cidr(runtime: ScenarioRuntime, initial_cidrs: Sequence[str] = ()) -> str:
+    """Pick a distinct deployable subnet inside this case's reserved CIDR."""
+    reserved = ipaddress.IPv4Network(runtime.cidr)
+    if reserved.prefixlen >= 29:
+        raise ValueError("natural adjustment requires a reserved CIDR wider than /29")
+    initial = set(initial_cidrs)
+    for prefix in range(reserved.prefixlen + 1, 30):
+        candidates = list(reserved.subnets(new_prefix=prefix))
+        for network in [*candidates[1:], candidates[0]]:
+            if str(network) not in initial:
+                return str(network)
+    raise ValueError("no distinct deployable subnet in the case reservation")
+
+
+def _repl_wait_normal_resume_confirmation(pty: Any, runtime: ScenarioRuntime) -> None:
+    """Follow fresh native selection/questions before the initial confirmation."""
+    _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+
+
 def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
     profile = runtime.spec.profile
+    if profile == "step2_parameter":
+        _question_facts(runtime)
     _repl_submit_initial_prompt(pty, runtime)
     if profile == "step1_clarify":
-        _repl_wait_ask(pty, runtime, description="pipeline question")
-        pty.sendline(_repl_step1_clarification_answer(runtime))
-    _repl_wait_selection(pty, runtime)
-    if profile == "step1_clarify":
+        _repl_wait_selection(pty, runtime, clarification_answer=_repl_step1_clarification_answer(runtime))
         _repl_submit_candidate_interrupt(
             pty,
             runtime,
             _repl_step1_replan_prompt(runtime),
         )
         _repl_wait_selection(pty, runtime)
+    else:
+        _repl_wait_selection(pty, runtime, await_controls=profile in {"natural_adjust", "reselect_progress"})
     if profile == "replace_invalid":
         # Invalid numeric shortcuts are rejected locally and keep the current
         # candidate selector open; they do not produce a second display event.
@@ -3082,31 +4607,52 @@ def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
         )
         _repl_wait_selection(pty, runtime)
     _repl_select_current(pty, next_candidate=profile in {"natural_adjust", "reselect_progress"})
+    if profile == "normal_resume":
+        _repl_wait_normal_resume_confirmation(pty, runtime)
+    else:
+        _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
     if profile == "step2_parameter":
-        _repl_wait_ask(
-            pty,
-            runtime,
-            description="Step 2 VPC parameter question",
-            reject_confirmation=True,
-        )
-        pty.sendline(runtime.args.cleanup_vpc_id or "请从账号内已有 VPC 中自动选择测试可用项")
-        _repl_wait_ask(
-            pty,
-            runtime,
-            description="Step 2 zone parameter question",
-            reject_confirmation=True,
-        )
-        pty.sendline(runtime.args.cleanup_zone_id or "cn-hangzhou-h")
-    _repl_wait_confirmation(pty, runtime)
+        fields = getattr(runtime, "answered_parameter_fields", set())
+        runtime.checks["both required parameters answered"] = {"vpc_id", "zone_id"}.issubset(fields)
+        if not runtime.checks["both required parameters answered"]:
+            raise RuntimeError("deployment confirmation appeared before both required parameters were answered")
     if profile == "natural_adjust":
-        _repl_choose_direct_input(runtime, pty, f"把 VSwitch 网段调整为 {runtime.cidr}，重新 Preview 和询价。")
-        _repl_wait_confirmation(pty, runtime)
-        _repl_choose_direct_input(runtime, pty, "确认部署，参数覆盖保持刚才的值。")
+        initial_cidrs = _initial_preview_vswitch_cidrs(
+            _read_repl_transcript_values(runtime),
+            allowed_roots=(runtime.paths.workspace_dir, runtime.paths.config_dir),
+            diagnostics=runtime.diagnostics,
+        )
+        runtime.checks["REPL initial VSwitch CIDR captured"] = bool(initial_cidrs)
+        if not initial_cidrs:
+            raise RuntimeError("initial ROS Preview has no inspectable VSwitch CIDR")
+        target_cidr = _repl_natural_adjusted_cidr(runtime, initial_cidrs)
+        runtime.requested_adjusted_cidr = target_cidr
+        _record_diagnostic(
+            runtime, 'repl_requested_adjusted_cidr_hash', hashlib.sha256(target_cidr.encode()).hexdigest())
+        _record_diagnostic(runtime, 'repl_initial_preview_cidr_hashes', [
+            hashlib.sha256(cidr.encode()).hexdigest() for cidr in initial_cidrs
+        ])
+        runtime.checks["REPL requested CIDR differs from initial Preview"] = target_cidr not in initial_cidrs
+        confirmations = [event for event in _read_repl_display_events(runtime)
+                         if _is_repl_deployment_confirmation(event)]
+        parameters = (confirmations[-1].get("payload", {}).get("effective_deployment_parameters")
+                      if confirmations else None)
+        if isinstance(parameters, (dict, list)) and parameters:
+            _record_diagnostic(runtime, "repl_adjustment_target_already_present", any(
+                value == target_cidr for _, value in _walk(parameters)
+            ))
+        adjustment_goal = f"仅把 VSwitch 网段调整为 {target_cidr}，其余参数保持刚才方案，重新 Preview 和询价。"
+        _remember_partial_adjustment_context(runtime, adjustment_goal, parameters)
+        _repl_choose_direct_input(runtime, pty, adjustment_goal)
+        runtime.current_goal = adjustment_goal
+        _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+        _record_repl_adjustment_preview(runtime, target_cidr)
+        _repl_choose_direct_input(runtime, pty, "确认部署。")
     elif profile == "reselect_progress":
         _repl_choose_direct_input(runtime, pty, "重新选择方案")
         _repl_wait_selection(pty, runtime)
         _repl_select_current(pty, next_candidate=True)
-        _repl_wait_confirmation(pty, runtime)
+        _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
         _repl_choose_direct_input(runtime, pty, "取消")
     elif runtime.spec.cloud_write:
         # Confirm is the first option, so Enter avoids relying on natural-language parsing.
@@ -3116,6 +4662,12 @@ def _repl_basic_flow(runtime: ScenarioRuntime, pty: Any) -> None:
 
 
 def _restart_repl_at_waiting(pty: Any, patterns: tuple[str, ...], runtime: ScenarioRuntime, label: str) -> None:
+    checks = getattr(runtime, "checks", None)
+
+    def record_restored() -> None:
+        if isinstance(checks, dict):
+            checks[f"{label} restored"] = True
+
     if patterns == REPL_SELECTION_PATTERNS:
         _repl_wait_selection(pty, runtime)
         pty.terminate(force=True)
@@ -3127,8 +4679,12 @@ def _restart_repl_at_waiting(pty: Any, patterns: tuple[str, ...], runtime: Scena
         # instead of matching already-consumed terminal text.
         time.sleep(0.5)
         pty.drain_output()
+        record_restored()
         return
-    pty.expect_any(patterns, description=f"{label} before restart", timeout=runtime.args.stream_timeout)
+    if patterns == REPL_CONFIRMATION_PATTERNS:
+        _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+    else:
+        pty.expect_any(patterns, description=f"{label} before restart", timeout=runtime.args.stream_timeout)
     pty.terminate(force=True)
     pty.spawn(extra_args=["--continue"])
     if patterns == REPL_CONFIRMATION_PATTERNS:
@@ -3136,29 +4692,30 @@ def _restart_repl_at_waiting(pty: Any, patterns: tuple[str, ...], runtime: Scena
         # Matching a broad confirmation pattern first consumes that hint, so
         # wait for the exact readiness marker directly after restart.
         _prepare_restored_repl_confirmation(pty, runtime)
+        record_restored()
         return
     pty.expect_any(patterns, description=f"{label} restored", timeout=runtime.args.stream_timeout)
     if patterns == REPL_ASK_INPUT_READY_PATTERNS:
         time.sleep(0.25)
         pty.drain_output()
+    record_restored()
 
 
 def _run_repl_waiting_resume_all(runtime: ScenarioRuntime, pty: Any) -> None:
+    runtime.args.stream_timeout = min(runtime.args.stream_timeout, 600.0)
     _repl_submit_initial_prompt(pty, runtime)
     _restart_repl_at_waiting(pty, REPL_ASK_INPUT_READY_PATTERNS, runtime, "Step 1 ask")
-    _repl_submit_line_input(
-        pty,
-        "在杭州复用已有 VPC 创建一个 VSwitch；实现阶段再询问 VPC ID。",
-        label="restored-step1-ask-answer",
+    pending = _pending_repl_parameter_question(runtime, set(), step_id=NEW_STEPS[0])
+    if pending is None:
+        raise RuntimeError("restored Step 1 question has no pending checkpoint")
+    _repl_submit_question_answer(
+        pty, runtime, _answer_runtime_question(runtime, pending[0]["payload"]), pending,
+        label="restored-step1-ask-answer", restored=True,
     )
     _restart_repl_at_waiting(pty, REPL_SELECTION_PATTERNS, runtime, "candidate selection")
     _repl_select_current(pty)
     _restart_repl_at_waiting(pty, REPL_ASK_INPUT_READY_PATTERNS, runtime, "Step 2 parameter ask")
-    _repl_submit_line_input(
-        pty,
-        runtime.args.cleanup_vpc_id or "请只读查询账号已有 VPC 并使用测试可用项",
-        label="restored-step2-ask-answer",
-    )
+    _repl_submit_restored_parameter_answer(pty, runtime)
     _restart_repl_at_waiting(pty, REPL_CONFIRMATION_PATTERNS, runtime, "deployment confirmation")
     _repl_choose_direct_input(runtime, pty, "取消，不创建任何云资源。")
     runtime.checks["all four REPL waiting states resumed"] = (
@@ -3171,13 +4728,23 @@ def _run_repl_waiting_resume_all(runtime: ScenarioRuntime, pty: Any) -> None:
     )
 
 
+def _repl_wait_selection_after_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
+    clarification_answer = (
+        "本次只在杭州创建一个最小测试安全组；不创建 VPC、VSwitch、ECS 或公网资源。"
+        "如果需要 VPC，请复用上面列出的第一个已有杭州 VPC。其他参数使用测试默认值。"
+    )
+    # This case verifies rollback progress without an additional crash/restart.
+    # Propagate stalls to run_one_scenario so failure and teardown are preserved.
+    _repl_wait_selection(pty, runtime, clarification_answer=clarification_answer)
+
+
 def _run_repl_interrupt_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
     _repl_submit_initial_prompt(pty, runtime)
     _repl_wait_selection(pty, runtime)
     _repl_select_current(pty)
-    _repl_wait_confirmation(pty, runtime)
+    _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
     _repl_choose_direct_input(runtime, pty, "我改需求了：只创建安全组，不创建 VPC 或 VSwitch；请重新规划。")
-    _repl_wait_selection(pty, runtime)
+    _repl_wait_selection_after_rollback(runtime, pty)
     _repl_select_current(pty)
     _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
     pty.send("\r", label="confirmation-confirm")
@@ -3193,31 +4760,154 @@ def _run_repl_interrupt_rollback(runtime: ScenarioRuntime, pty: Any) -> None:
         runtime,
         "架构再次变化：改为只创建一个空 VPC，不创建安全组；请重新规划。",
     )
-    _repl_wait_selection(pty, runtime)
+    _repl_wait_selection(
+        pty, runtime,
+        clarification_answer=f"在杭州只创建一个空 VPC，网段 {runtime.cidr}，不创建安全组或其他资源。",
+    )
     _repl_select_current(pty)
     _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
     _repl_choose_direct_input(runtime, pty, "取消，不再部署。")
     runtime.checks["REPL Step 2 and Step 3 rollback inputs submitted"] = True
 
 
+def _wait_repl_created_stack(runtime: ScenarioRuntime, pty: Any, *, exclude: set[str]) -> str:
+    """The accepted SDK receipt precedes the deployment tool's final renderer."""
+    from scripts.ci.stack_ownership import case_pipeline_dirs, creation_receipts
+
+    started = time.monotonic()
+    deadline = started + min(runtime.args.stream_timeout, 600.0)
+    diagnosed = False
+    offset = len(pty.transcript)
+    while time.monotonic() < deadline:
+        pty.drain_output()
+        receipts = creation_receipts(case_pipeline_dirs(runtime.paths.config_dir, str(runtime.paths.workspace_dir)))
+        # A completed deployment is too late for this case's running fault point.
+        if not _repl_active_deploy_step(runtime):
+            raise RuntimeError("deployment left its running step before the rollback creation checkpoint")
+        for receipt in receipts:
+            if receipt["stackId"] not in exclude:
+                return receipt["stackId"]
+        diagnosed = _observe_repl_wait(
+            pty, runtime, description="first Stack accepted creation", started=started,
+            transcript_offset=offset, diagnosis_attempted=diagnosed,
+        )
+        time.sleep(0.1)
+    runtime.checks["first Stack accepted creation observed"] = False
+    raise TimeoutError("timed out waiting for first Stack accepted creation")
+
+
+def _repl_wait_cleanup_after_restart(
+    runtime: ScenarioRuntime, pty: Any, stack_id: str, *, since_offset: int,
+) -> None:
+    """A resumed cleanup may finish before the REPL can accept another message."""
+    repl = _legacy_repl_module()
+    deadline = time.monotonic() + min(runtime.args.stream_timeout, 600.0)
+    submitted = False
+    while time.monotonic() < deadline:
+        pty.drain_output()
+        resource = repl._cleanup_resource_for_stack(pty, stack_id)
+        if repl._cleanup_resource_completed(resource):
+            return
+        status = (resource or {}).get("cleanup_status") or (resource or {}).get("cleanupStatus")
+        if status == "failed":
+            raise RuntimeError("old Stack cleanup failed after restart")
+        if not submitted and any(
+            re.search(pattern, pty.transcript[since_offset:]) for pattern in repl.REPL_INPUT_READY_PATTERNS
+        ):
+            # --continue is the user's restart/resume action. Only submit an
+            # additional continuation when the restarted process accepts input.
+            # Never wait for an input marker before checking actual completion.
+            pty.sendline_reliable("继续恢复本会话待清理列表；不要操作其他会话的资源，也不要创建新资源。")
+            runtime.checks["REPL explicit cleanup continuation submitted"] = True
+            submitted = True
+        time.sleep(0.2)
+    raise TimeoutError("timed out waiting for restarted old Stack cleanup completion")
+
+
 def _run_repl_cleanup_recovery(runtime: ScenarioRuntime, pty: Any) -> None:
+    repl = _legacy_repl_module()
+    # Select the second deployment's independent fixture before the first
+    # CreateStack. A newly created VPC can appear between the ROS ownership
+    # inventory read and DescribeVpcs; a one-time exclusion snapshot cannot
+    # prove independence during that creation window.
+    fixture = _resolve_runtime_question_facts(runtime, ("vpc_id", "zone_id"))
+    if not fixture.get("vpc_id"):
+        raise RuntimeError("rollback cleanup requires an independent existing VPC fixture")
     _repl_submit_initial_prompt(pty, runtime)
     _repl_wait_selection(pty, runtime)
     _repl_select_current(pty)
     _repl_wait_confirmation(pty, runtime)
     pty.send("\r", label="confirmation-confirm")
-    pty.expect_any(REPL_STACK_CREATED_PATTERNS, description="first Stack observed", timeout=runtime.args.stream_timeout)
-    pty.send("\x1b", label="post-stack-rollback")
-    pty.sendline("我改需求了：只创建安全组，请重新规划并部署新目标。")
-    pty.expect_any(REPL_CLEANUP_PATTERNS, description="rollback cleanup started", timeout=runtime.args.stream_timeout)
-    pty.terminate(force=True)
-    pty.spawn(extra_args=["--continue"])
-    pty.expect_any(
-        REPL_CLEANUP_PATTERNS + REPL_SELECTION_PATTERNS,
-        description="cleanup recovery restored",
-        timeout=runtime.args.stream_timeout,
+    # Do not await Stack ID text: ros_deploy can wait for completion before
+    # producing that text, although the accepted creation is already durable.
+    _repl_wait_step_started(
+        pty, runtime, step_id=NEW_STEPS[2], occurrence=1, description="cleanup first deploying started",
     )
+    first_stack_id = _wait_repl_created_stack(runtime, pty, exclude=set())
+    runtime.checks["first Stack accepted creation observed"] = True
+    new_goal = (_rollback_new_intent(runtime)
+                + "安全组必须复用独立测试夹具 VpcId=" + fixture["vpc_id"]
+                + "；不得依赖旧 Stack 创建的 VPC。请清理本会话旧 Stack 并部署新目标。")
+    runtime.current_goal = new_goal
+    _repl_submit_pipeline_interrupt(pty, runtime, new_goal)
+    # Rollback marks the old Stack for cleanup. REPL starts cleanup only
+    # after the new pipeline hands off to normal chat, so drive the second
+    # deployment first instead of waiting for a lifecycle that cannot start.
+    _repl_wait_selection(pty, runtime)
+    _repl_select_current(pty)
+    _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+    pty.send("\r", label="cleanup-second-confirm")
+    _repl_wait_pipeline_completed(pty, runtime)
+    resources = discover_cloud_resources(runtime)
+    second = [item["stackId"] for item in resources if item.get("createdByCase") == "true"
+              and item["stackId"] != first_stack_id]
+    runtime.checks["rollback cleanup observed two distinct Stacks"] = len(second) == 1
+    if len(second) != 1:
+        raise RuntimeError("rollback cleanup did not create one distinct new Stack")
+    runtime.checks["cleanup snapshot does not target new Stack"] = (
+        repl._cleanup_resource_for_stack(pty, second[0]) is None
+    )
+    # Match the old resource's real cleanup lifecycle, not words in an LLM answer.
+    repl._wait_for_cleanup_resource_status(
+        pty, first_stack_id, {"started", "in_progress"}, timeout=min(runtime.args.stream_timeout, 120.0),
+    )
+    runtime.checks["old Stack cleanup started before restart"] = True
+    pty.terminate(force=True)
+    resume_offset = len(pty.transcript)
+    pty.spawn(extra_args=["--continue"])
+    runtime.event("server-restarted", checkpoint="rollback-cleanup-started")
+    # The legacy helper waits the entire stream timeout when a five-second
+    # render-text probe misses the resume summary. Neither slow startup nor
+    # localization is evidence that cleanup finished or that the user resumed it.
+    # Use the actual ledger, and submit at most one explicit continuation once
+    # this restarted process accepts input (including already buffered output).
+    runtime.checks["old Stack cleanup completed after restart"] = False
+    try:
+        _repl_wait_cleanup_after_restart(runtime, pty, first_stack_id, since_offset=resume_offset)
+        runtime.checks["old Stack cleanup completed after restart"] = repl._cleanup_resource_completed(
+            repl._cleanup_resource_for_stack(pty, first_stack_id)
+        )
+    finally:
+        resource = repl._cleanup_resource_for_stack(pty, first_stack_id) or {}
+        status = resource.get("cleanup_status") or resource.get("cleanupStatus") or "unknown"
+        _record_diagnostic(runtime, "cleanup_first_ledger_status", status)
+        if runtime.checks["old Stack cleanup completed after restart"] is False:
+            states = repl._capture_ros_stack_states(pty, [first_stack_id], "cleanup-resume-state")
+            _record_diagnostic(
+                runtime, "cleanup_first_ros_status", states.get(first_stack_id, {}).get("status", "unknown"),
+            )
+            try:
+                _record_cleanup_dependency_probe(runtime, first_stack_id, second)
+            except Exception:
+                # Diagnostic collection cannot replace the original failed gate.
+                _record_diagnostic(runtime, 'cleanup_dependency_probe_unavailable', True)
     runtime.checks["REPL cleanup resumed with --continue"] = True
+    states = repl._capture_ros_stack_states(pty, [first_stack_id, *second], "cleanup-recovery-final")
+    runtime.checks["ROS old Stack deleted before teardown"] = repl._ros_stack_deleted(states.get(first_stack_id, {}))
+    runtime.checks["ROS new Stack retained before teardown"] = (
+        repl._ros_stack_retained(states.get(second[0], {}))
+        and states.get(second[0], {}).get("status") == "CREATE_COMPLETE"
+    )
 
 
 def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
@@ -3225,13 +4915,26 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         runtime,
         pty,
         "initial",
-        "选择一个已有 VPC 创建一个 VSwitch。架构规划阶段先直接给出方案；"
-        "方案选定后、写模板前必须列出可用 VPC 并向我提问，由我选择，不能代选。"
+        "在阿里云杭州使用一个已有 VPC 创建 VSwitch，不新增其他云资源。架构规划阶段先给出方案。"
+        "VpcId 是必须由我确认的外部参数；我还没有选定 VPC。"
+        "方案选定后，请列出可用 VPC 并问我选哪一个。"
+        "我会用图片补充 VPC 选择信息，请使用允许自由补充的问答（allow_free_text=true），"
+        "不能使用仅接受编号或选项 ID 的封闭式选择。"
+        "在我回答前不能生成模板，也不能替我选择 VPC。"
         "可用区和网段可以推荐合法且低成本的默认值。",
         label="initial-image-enter",
     )
     _repl_wait_selection(pty, runtime)
-    _repl_submit_image_fixture(pty, "selection", label="selection-image-enter")
+    _repl_submit_multimodal_selection(
+        runtime,
+        pty,
+        label="selection-image-enter",
+        text=(
+            "我选择当前候选方案，但还没有选 VPC。VpcId 必须由我明确提供；"
+            "先列出可用 VPC 并问我选哪一个，等我回答后再生成模板。不要自行选择 VPC。"
+            "我将以图片作答，问题必须允许自由补充（allow_free_text=true），不能仅接受编号或选项 ID。"
+        ),
+    )
     _repl_wait_multimodal_confirmation(
         runtime,
         pty,
@@ -3259,10 +4962,11 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         runtime,
         pty,
         "rollback-interrupt",
-        "我改需求了：使用已有 VPC 创建一个安全组，不创建 VSwitch。请重新规划。",
+        "我改需求了：使用已有 VPC 创建一个安全组，不创建 VSwitch。请重新规划。"
+        "后续需要我确认的参数，我仍用图片作答，请允许自由补充（allow_free_text=true），不能仅接受编号。",
     )
     _repl_wait_multimodal_selection(runtime, pty, phase="rollback")
-    _repl_submit_image_fixture(pty, "selection", label="rollback-selection-image-enter")
+    _repl_submit_multimodal_selection(runtime, pty, label="rollback-selection-image-enter")
     _repl_wait_multimodal_confirmation(
         runtime,
         pty,
@@ -3286,7 +4990,14 @@ def _run_repl_multimodal_lifecycle(runtime: ScenarioRuntime, pty: Any) -> None:
         for event in pty.events
         if isinstance(event, dict) and event.get("type") == "paste-image-fixture"
     }
-    runtime.checks["REPL full image lifecycle exercised"] = {
+    _record_diagnostic(runtime, "repl_image_keys", sorted(observed_keys))
+    # The initial request explicitly forbids selecting a VPC for the user.
+    # Its first question and image answer are part of this case's acceptance.
+    runtime.checks["REPL full image lifecycle exercised"] = _multimodal_image_lifecycle_complete(observed_keys)
+
+
+def _multimodal_image_lifecycle_complete(observed_keys: set[str]) -> bool:
+    return {
         "initial",
         "ask-first-answer",
         "selection",
@@ -3330,6 +5041,10 @@ def _repl_wait_multimodal_selection(runtime: ScenarioRuntime, pty: Any, *, phase
             continue
 
         if any(re.search(pattern, suffix) for pattern in REPL_ASK_INPUT_READY_PATTERNS):
+            pending = _pending_repl_parameter_question(runtime, set(), step_id=NEW_STEPS[0])
+            if pending is None:
+                scan_offset = len(transcript)
+                continue
             ask_index += 1
             if ask_index > 4:
                 raise RuntimeError(f"{phase} multimodal Step 1 asked more than four questions")
@@ -3348,7 +5063,10 @@ def _repl_wait_multimodal_selection(runtime: ScenarioRuntime, pty: Any, *, phase
                 pty,
                 f"{phase}-step1-answer-{ask_index}",
                 "选择问题列表中的第一个已有 VPC，继续规划安全组；不创建 VSwitch 或其他资源。",
-                label=f"{phase}-step1-image-ask-enter-{ask_index}",
+                label=f"{phase}-step1-image-ask-enter-{ask_index}", line_input=True,
+            )
+            _repl_wait_question_acknowledgement(
+                pty, runtime, pending, label=f"{phase} Step 1 image question {ask_index}",
             )
             scan_offset = len(pty.transcript)
             deadline = time.monotonic() + runtime.args.stream_timeout
@@ -3367,17 +5085,46 @@ def _repl_wait_multimodal_confirmation(
 ) -> None:
     """Answer one or more legitimate Step 2 asks with image inputs."""
 
+    display_events = _read_repl_display_events(runtime)
+    selection_indexes = [
+        index for index, event in enumerate(display_events) if event.get("type") == "candidate_selection_submitted"
+    ]
+    selection_index = selection_indexes[-1] if selection_indexes else 0
+    confirmation_occurrence = max(
+        getattr(runtime, "repl_confirmation_wait_count", 0) + 1,
+        1 + sum(_is_repl_deployment_confirmation(event) for event in display_events[:selection_index]),
+    )
+    answered_tool_ids: set[str] = set()
     for ask_index in range(1, 5):
-        matched = pty.expect_any(
-            REPL_ASK_INPUT_READY_PATTERNS + REPL_CONFIRMATION_INPUT_READY_PATTERNS,
-            description=f"{phase} image ask or confirmation #{ask_index}",
+        # Model output can contain a prompt example before the UI asks anything.
+        # Require the native checkpoint or confirmation event before touching stdin.
+        event, question_path = _wait_repl_display_event(
+            runtime,
+            event_type="user_input_required",
+            occurrence=confirmation_occurrence,
             timeout=runtime.args.stream_timeout,
+            drain_output=getattr(pty, "drain_output", None),
+            predicate=_is_repl_deployment_confirmation,
+            check_before_drain=True,
+            pty=pty,
+            alternate_input=lambda: _pending_repl_parameter_question(runtime, answered_tool_ids),
         )
-        if matched in REPL_CONFIRMATION_INPUT_READY_PATTERNS:
+        if _is_repl_deployment_confirmation(event):
+            runtime.repl_confirmation_wait_count = confirmation_occurrence - 1
             _repl_wait_confirmation(pty, runtime, require_input_ready=False)
             return
-        time.sleep(0.25)
-        pty.drain_output()
+        pending = event, question_path
+        if event["payload"].get("allow_free_text", True) is False:
+            # Active REPL questions read through console.input, which accepts
+            # an image path only as free text, never as a numbered option.
+            # Preserve the required image answer instead of substituting text.
+            _record_diagnostic(runtime, "repl_question_ack_free_text_allowed", False)
+            _record_diagnostic(runtime, "repl_question_ack_option_count", len(event["payload"].get("options", [])))
+            runtime.checks[f"{phase} image question {ask_index} acknowledged"] = False
+            raise RuntimeError("image question does not allow free text input")
+        _repl_wait_ask(
+            pty, runtime, description=f"{phase} image ask #{ask_index}", allow_captured_prompt=True,
+        )
         if ask_index == 1:
             label = f"{phase}-image-ask-enter-{ask_index}"
             if primary_image_text:
@@ -3386,19 +5133,23 @@ def _repl_wait_multimodal_confirmation(
                     pty,
                     primary_image_key,
                     primary_image_text,
-                    label=label,
+                    label=label, line_input=True,
                 )
             else:
-                _repl_submit_image_fixture(pty, primary_image_key, label=label)
+                _repl_submit_image_fixture(pty, primary_image_key, label=label, line_input=True)
         else:
-            _repl_paste_generated_image(
+            _repl_submit_generated_image(
                 runtime,
                 pty,
                 f"{phase}-parameter-{ask_index}",
-                "请直接选择问题选项中的第一个默认 VPC，并继续；"
-                "后续可用区和网段使用低成本且合法的默认值，不要再次询问。",
+                "请按当前问题选择列出的第一个可用项；若问 VPC 就选首个已有 VPC。"
+                "可用区、网段及其他参数使用合法且低成本的推荐默认值，不要重复询问。",
+                label=f"{phase}-image-ask-enter-{ask_index}", line_input=True,
             )
-            pty.send("\r", label=f"{phase}-image-ask-enter-{ask_index}")
+        _repl_wait_question_acknowledgement(
+            pty, runtime, pending, label=f"{phase} image question {ask_index}",
+        )
+        answered_tool_ids.add(event["payload"]["tool_use_id"])
     raise RuntimeError(f"{phase} multimodal Step 2 did not reach confirmation after four parameter asks")
 
 
@@ -3432,7 +5183,7 @@ def _run_repl(runtime: ScenarioRuntime) -> None:
                 _repl_wait_selection(pty, runtime)
                 _repl_select_current(pty)
                 if profile == "running_step3":
-                    _repl_wait_confirmation(pty, runtime)
+                    _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
                     pty.send("\r", label="confirmation-confirm")
             _repl_wait_step_started(
                 pty,
@@ -3458,20 +5209,27 @@ def _run_repl(runtime: ScenarioRuntime) -> None:
                     description="running_step3 persisted deployment tool checkpoint",
                 )
             pty.terminate(force=True)
+            terminal_offset = len(pty.transcript) if profile == "running_step1" else None
+            if profile == "running_step1":
+                runtime.repl_candidate_wait_count = max(
+                    runtime.repl_candidate_wait_count,
+                    sum(
+                        event.get("type") == "candidate_selection_ready"
+                        for event in _read_repl_display_events(runtime)
+                    ),
+                )
             pty.spawn(extra_args=["--continue"])
             runtime.checks["REPL used --continue"] = True
             if profile == "running_step1":
-                _repl_wait_selection(pty, runtime)
-                time.sleep(0.5)
-                pty.drain_output()
+                _repl_wait_selection(pty, runtime, after_restart=True, terminal_offset=terminal_offset)
                 _repl_select_current(pty)
-                _repl_wait_confirmation(pty, runtime)
+                _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
                 if runtime.spec.cloud_write:
                     pty.send("\r", label="confirmation-confirm")
                 else:
                     _repl_choose_direct_input(runtime, pty, "取消，不创建任何云资源。")
             elif profile == "running_step2":
-                _repl_wait_confirmation(pty, runtime)
+                _repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
                 if runtime.spec.cloud_write:
                     pty.send("\r", label="confirmation-confirm")
                 else:
@@ -3496,6 +5254,9 @@ def _run_repl(runtime: ScenarioRuntime) -> None:
             _repl_wait_pipeline_completed(pty, runtime)
     finally:
         pty.terminate()
+        diagnoses = getattr(pty, "_wait_diagnoses", [])
+        if diagnoses and isinstance(diagnoses[-1], dict):
+            runtime.watchdog = diagnoses[-1]
         _write_repl_artifacts(runtime, pty, repl)
 
 
@@ -4199,6 +5960,88 @@ def _mapping_string(value: Mapping[str, Any], *keys: str) -> str:
     return ""
 
 
+def _result_mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        with contextlib.suppress(json.JSONDecodeError):
+            value = json.loads(value)
+    return value if isinstance(value, dict) else {}
+
+
+def _cloud_result_observation(name: str, inputs: dict[str, Any], result: Any) -> dict[str, Any] | None:
+    if name not in {"ros_deploy", "ros_stack", "aliyun_api"}:
+        return None
+    params = inputs.get("params") if isinstance(inputs.get("params"), dict) else inputs
+    action = _mapping_string(inputs, "action", "Action")
+    if name == "aliyun_api" and (str(inputs.get("product", "")).lower() != "ros" or action != "CreateStack"):
+        return None
+    if name == "ros_stack" and action not in {"create", "CreateStack"}:
+        return None
+    if name == "ros_deploy" and action not in {"create", "delete_and_create"}:
+        return None
+    data = _result_mapping(result)
+    stack_id = _mapping_string(data, "StackId", "stackId", "stack_id")
+    if not stack_id:
+        outputs = _result_mapping(data.get("outputs"))
+        stack_id = _mapping_string(outputs, "StackId", "stackId", "stack_id")
+    if not stack_id:
+        return None
+    return {
+        "StackId": stack_id, "Action": "CreateStack",
+        "StackName": _mapping_string(data, "StackName", "stackName", "stack_name")
+        or _mapping_string(params, "StackName", "stackName", "stack_name"),
+        "RegionId": _mapping_string(data, "RegionId", "regionId", "region_id")
+        or _mapping_string(inputs, "RegionId", "regionId", "region_id"),
+    }
+
+
+def _authoritative_stack_observations(values: list[Any]) -> Iterator[dict[str, Any]]:
+    calls: dict[str, tuple[str, dict[str, Any]]] = {}
+    for value in values:
+        for _, envelope in _pipeline_event_records([value]):
+            kind = envelope.get("eventType") or envelope.get("type")
+            data = envelope.get("data") or envelope.get("payload") or {}
+            if not isinstance(data, dict):
+                continue
+            if (kind == "stack_current_changed" and data.get("isSuccess") is True
+                    and data.get("action") == "CreateStack"):
+                yield data
+            elif (kind == "resource_observed" and data.get("provider") == "ros"
+                    and data.get("resource_type") == "stack" and data.get("action") == "CreateStack"):
+                yield data
+            elif kind == "tool_result":
+                inputs = _result_mapping(data.get("input"))
+                observed = _cloud_result_observation(
+                    str(data.get("toolName") or ""), inputs, data.get("stackResult") or data.get("result")
+                )
+                if observed:
+                    yield observed
+        if not isinstance(value, dict):
+            continue
+        # Persisted assistant/user content blocks are the only other trusted operation source.
+        content = value.get("content")
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use":
+                    calls[str(block.get("id") or "")] = (
+                        str(block.get("name") or ""), _result_mapping(block.get("input"))
+                    )
+                elif block.get("type") == "tool_result":
+                    name, inputs = calls.get(str(block.get("tool_use_id") or ""), ("", {}))
+                    metadata = _result_mapping(block.get("metadata"))
+                    observed = _cloud_result_observation(
+                        name, inputs, metadata.get("stack_result") or block.get("content")
+                    )
+                    if observed:
+                        yield observed
+        # Old runner-owned transcript rows have a single flat tool_result object.
+        # No recursion: documentation examples nested in a result are never operations.
+        legacy = value.get("tool_result")
+        if isinstance(legacy, dict) and _mapping_string(legacy, "stack_id", "StackId", "stackId"):
+            yield legacy
+
+
 def discover_cloud_resources(runtime: ScenarioRuntime) -> list[dict[str, str]]:
     values: list[Any] = _all_event_values(runtime.paths.run_dir)
     # REPL does not write A2A ``*.events.jsonl`` files. Its authoritative tool
@@ -4212,45 +6055,43 @@ def discover_cloud_resources(runtime: ScenarioRuntime) -> list[dict[str, str]]:
             with contextlib.suppress(json.JSONDecodeError, OSError):
                 values.append(json.loads(path.read_text(encoding="utf-8")))
     resources: dict[str, dict[str, str]] = {}
-    for value in values:
-        candidates = [item for _, item in _walk(value) if isinstance(item, dict)]
-        if isinstance(value, dict):
-            candidates.append(value)
-        for item in candidates:
-            explicit_stack_id = _mapping_string(item, "stackId", "stack_id", "StackId")
-            resource_id = _mapping_string(item, "resourceId", "resource_id")
-            action = _mapping_string(item, "action", "Action", "apiName", "api_name")
-            resource_type = _mapping_string(item, "resourceType", "resource_type", "type").lower()
-            provider = _mapping_string(item, "provider", "Provider").lower()
-            is_create = action in {"CreateStack", "ContinueCreateStack"}
-            is_stack_resource = "stack" in resource_type and provider in {"", "ros", "aliyun"}
-            stack_id = explicit_stack_id or (resource_id if is_stack_resource else "")
-            if not stack_id or not re.fullmatch(r"[A-Za-z0-9_-]{6,}", stack_id):
-                continue
-            stack_name = _mapping_string(item, "stackName", "stack_name", "StackName", "resourceName", "resource_name")
-            region_id = _mapping_string(item, "regionId", "region_id", "RegionId")
-            if not is_create and not is_stack_resource and stack_name not in runtime.owned_stack_names:
-                continue
-            previous = resources.setdefault(
-                stack_id,
-                {
-                    "provider": "ros",
-                    "resourceType": "stack",
-                    "stackId": stack_id,
-                    "stackName": "",
-                    "regionId": "",
-                    "createdByCase": "true" if is_create else "false",
-                },
-            )
-            previous["stackName"] = previous["stackName"] or stack_name
-            previous["regionId"] = previous["regionId"] or region_id
-            if is_create:
-                previous["createdByCase"] = "true"
-    result = [
-        item
-        for item in resources.values()
-        if item["createdByCase"] == "true" or item["stackName"] in runtime.owned_stack_names
-    ]
+    for item in _authoritative_stack_observations(values):
+        explicit_stack_id = _mapping_string(item, "stackId", "stack_id", "StackId")
+        resource_id = _mapping_string(item, "resourceId", "resource_id")
+        action = _mapping_string(item, "action", "Action", "observed_action", "apiName", "api_name")
+        resource_type = _mapping_string(item, "resourceType", "resource_type", "type").lower()
+        provider = _mapping_string(item, "provider", "Provider").lower()
+        is_create = action == "CreateStack"
+        is_stack_resource = "stack" in resource_type and provider in {"", "ros", "aliyun"}
+        stack_id = explicit_stack_id or (resource_id if is_stack_resource else "")
+        if not stack_id or not re.fullmatch(r"[A-Za-z0-9_-]{6,}", stack_id):
+            continue
+        stack_name = _mapping_string(item, "stackName", "stack_name", "StackName", "resourceName", "resource_name")
+        region_id = _mapping_string(item, "regionId", "region_id", "RegionId")
+        if not is_create:
+            continue
+        previous = resources.setdefault(
+            stack_id,
+            {
+                "provider": "ros",
+                "resourceType": "stack",
+                "stackId": stack_id,
+                "stackName": "",
+                "regionId": "",
+                "createdByCase": "false",
+            },
+        )
+        previous["stackName"] = previous["stackName"] or stack_name
+        previous["regionId"] = previous["regionId"] or region_id
+    from scripts.ci.stack_ownership import case_pipeline_dirs, creation_receipts
+
+    config_dir = Path(getattr(runtime.paths, "config_dir", runtime.paths.run_dir / "config"))
+    cwd = str(getattr(runtime.paths, "workspace_dir", getattr(runtime, "env", {}).get("IAC_CODE_E2E_WORKSPACE", "")))
+    receipts = creation_receipts(case_pipeline_dirs(config_dir, cwd)) if cwd else []
+    # A genuine create result is evidence of a possible leak, but deletion
+    # additionally requires the durable receipt written after CreateStack acceptance.
+    resources.update({item["stackId"]: item for item in receipts})
+    result = list(resources.values())
     runtime.cloud_resources = result
     write_json(runtime.paths.run_dir / "cloud-resources.json", result)
     return result
@@ -4271,33 +6112,292 @@ client = RosClientFactory.create(credential, region)
 stack_id = item["stackId"]
 expected = item["stackName"]
 request = ros_models.GetStackRequest(stack_id=stack_id, region_id=region)
-deadline = time.monotonic() + 900
-while time.monotonic() < deadline:
-    try:
-        actual = client.get_stack(request).body.to_map()
-    except Exception as exc:
-        if "not found" in str(exc).lower() or "stacknotfound" in str(exc).lower():
-            print(json.dumps({"deleted": True, "notFound": True}))
-            raise SystemExit(0)
-        raise
-    if actual.get("StackName") != expected:
-        raise RuntimeError("Stack ownership mismatch; refusing delete")
-    status = actual.get("Status", "")
-    if status == "DELETE_COMPLETE":
-        print(json.dumps({"deleted": True, "status": status}))
-        raise SystemExit(0)
-    if status == "DELETE_IN_PROGRESS" or (isinstance(status, str) and status.endswith("_IN_PROGRESS")):
-        time.sleep(5)
-        continue
-    try:
-        client.delete_stack(ros_models.DeleteStackRequest(stack_id=stack_id, region_id=region))
-    except Exception as exc:
-        message = str(exc).lower()
-        if "actioninprogress" not in message and "action in progress" not in message:
+
+def stack_not_found(exc):
+    codes = ("entitynotexist.stack", "notfound.stack", "stacknotfound")
+    return str(getattr(exc, "code", "")).lower() in codes or any(code in str(exc).lower() for code in codes)
+
+diagnostic = {"stage": "get_stack", "status": "unknown"}
+def cleanup():
+    deadline = time.monotonic() + 900
+    delete_submitted = False
+    while time.monotonic() < deadline:
+        try:
+            diagnostic["stage"] = "get_stack"
+            actual = client.get_stack(request).body.to_map()
+        except Exception as exc:
+            if stack_not_found(exc):
+                print(json.dumps({"deleted": True, "notFound": True}))
+                raise SystemExit(0)
             raise
-    time.sleep(5)
-raise TimeoutError("timed out waiting for ROS Stack deletion")
+        if (actual.get("StackName") != expected or actual.get("ParentStackId") or actual.get("ServiceManaged")):
+            raise RuntimeError("Stack ownership mismatch; refusing delete")
+        status = actual.get("Status", "")
+        diagnostic["status"] = status if status in {
+            "CREATE_COMPLETE", "CREATE_IN_PROGRESS", "CREATE_FAILED", "DELETE_IN_PROGRESS", "DELETE_FAILED",
+            "DELETE_COMPLETE", "ROLLBACK_IN_PROGRESS", "ROLLBACK_COMPLETE",
+        } else "unknown"
+        if status == "DELETE_COMPLETE":
+            print(json.dumps({"deleted": True, "status": status}))
+            raise SystemExit(0)
+        if status == "DELETE_FAILED" and delete_submitted:
+            # Reissuing the same failed deletion for fifteen minutes cannot
+            # resolve its dependency. Preserve failure and diagnose the resource.
+            raise RuntimeError("ROS Stack deletion failed after accepted delete")
+        if status == "DELETE_IN_PROGRESS" or (isinstance(status, str) and status.endswith("_IN_PROGRESS")):
+            time.sleep(5)
+            continue
+        if delete_submitted:
+            time.sleep(5)
+            continue
+        try:
+            diagnostic["stage"] = "delete_stack"
+            client.delete_stack(ros_models.DeleteStackRequest(stack_id=stack_id, region_id=region))
+            delete_submitted = True
+        except Exception as exc:
+            if stack_not_found(exc):
+                print(json.dumps({"deleted": True, "notFound": True}))
+                raise SystemExit(0)
+            message = str(exc).lower()
+            if "actioninprogress" not in message and "action in progress" not in message:
+                raise
+        time.sleep(5)
+    raise TimeoutError("timed out waiting for ROS Stack deletion")
+
+try:
+    cleanup()
+except Exception as exc:
+    # Raw traceback remains private. Export only fixed stages/statuses and a known SDK code.
+    diagnostic["errorType"] = type(exc).__name__ if type(exc).__name__ in {
+        "TimeoutError", "RuntimeError", "ConnectionError", "PermissionError"} else "SDKError"
+    code = str(getattr(exc, "code", ""))
+    diagnostic["code"] = code if code in {
+        "Forbidden", "Forbidden.RAM", "SecurityTokenExpired", "InvalidAccessKeyId.NotFound",
+        "ActionInProgress", "Throttling", "Throttling.User", "DeleteFailed", "DependencyViolation"} else "unknown"
+    print(json.dumps({"cleanupDiagnostic": diagnostic}), flush=True)
+    raise
+
 """
+
+
+_CLOUD_CLEANUP_DEPENDENCY_PROBE_CODE = r"""
+import json, sys
+from alibabacloud_ros20190910 import models
+from iac_code.services.cloud_credentials import CloudCredentials
+from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+from scripts.repl.e2e.run_pipeline_scenarios import _call_aliyun_api
+
+stage = 'ownership'
+def probe():
+    global stage
+    with open(sys.argv[1], encoding='utf-8') as stream:
+        data = json.load(stream)
+    receipts = data['resources']
+    expected = {data['old_stack_id'], *data['new_stack_ids']}
+    if (len(receipts) > 20 or {r['stackId'] for r in receipts} != expected
+        or any(r.get('ownershipSource') != 'accepted_create_ledger' or not r.get('stackName')
+               or not r.get('regionId') for r in receipts)):
+        raise RuntimeError('missing accepted case ownership')
+    credential = CloudCredentials().get_provider('aliyun')
+    if credential is None:
+        raise RuntimeError('credential unavailable')
+    old_vpcs, new_groups = set(), []
+    result = {'owned_stacks': 0, 'old_vpc_count': 0, 'new_security_group_count': 0,
+              'new_group_depends_on_old_vpc_count': 0, 'fixture_is_old_vpc': False}
+    for receipt in receipts:
+        stage = 'get_stack'
+        region, stack_id = receipt['regionId'], receipt['stackId']
+        client = RosClientFactory.create(credential, region)
+        actual = client.get_stack(models.GetStackRequest(region_id=region, stack_id=stack_id)).body.to_map()
+        if (actual.get('StackName') != receipt['stackName'] or actual.get('ParentStackId')
+            or actual.get('ServiceManaged')):
+            raise RuntimeError('case ownership mismatch')
+        result['owned_stacks'] += 1
+        stage = 'list_stack_resources'
+        resources = client.list_stack_resources(models.ListStackResourcesRequest(
+            region_id=region, stack_id=stack_id)).body.to_map().get('Resources', [])
+        for resource in resources:
+            if resource.get('Status') == 'DELETE_COMPLETE' or not resource.get('PhysicalResourceId'):
+                continue
+            if stack_id == data['old_stack_id'] and resource.get('ResourceType') in {
+                'ALIYUN::ECS::VPC', 'ALIYUN::VPC::VPC'}:
+                old_vpcs.add(resource['PhysicalResourceId'])
+            elif stack_id != data['old_stack_id'] and resource.get('ResourceType') == 'ALIYUN::ECS::SecurityGroup':
+                new_groups.append((region, resource['PhysicalResourceId']))
+    if len(new_groups) > 12:
+        raise RuntimeError('bounded security group probe exceeded')
+    result['old_vpc_count'] = len(old_vpcs)
+    result['new_security_group_count'] = len(new_groups)
+    result['fixture_is_old_vpc'] = data.get('fixture_vpc_id') in old_vpcs
+    for region, group in new_groups:
+        stage = 'describe_security_group'
+        actual = _call_aliyun_api('ecs', 'DescribeSecurityGroupAttribute',
+                                {'RegionId': region, 'SecurityGroupId': group})
+        if actual.get('SecurityGroupId') != group:
+            raise RuntimeError('security group identity mismatch')
+        if actual.get('VpcId') in old_vpcs:
+            result['new_group_depends_on_old_vpc_count'] += 1
+    return result
+try:
+    print(json.dumps(probe()))
+except Exception:
+    # The response and private identities never leave the diagnostic process.
+    print(json.dumps({'unavailable_stage': stage}))
+    sys.exit(1)
+"""
+
+
+def _record_cleanup_dependency_probe(runtime: ScenarioRuntime, old_stack_id: str, new_stack_ids: list[str]) -> None:
+    """Read only this case's accepted stacks; export dependency counts, not cloud IDs."""
+    resources = discover_cloud_resources(runtime)
+    manifest = runtime.paths.artifacts_dir / 'cleanup-dependency-probe-input.json'
+    write_json(manifest, {'old_stack_id': old_stack_id, 'new_stack_ids': new_stack_ids, 'resources': resources,
+                         'fixture_vpc_id': getattr(runtime, 'network_question_facts', {}).get('vpc_id', '')})
+    try:
+        completed = subprocess.run(
+            [*shlex.split(runtime.args.python), '-c', _CLOUD_CLEANUP_DEPENDENCY_PROBE_CODE, str(manifest)],
+            cwd=REPO_ROOT, env=runtime.env, capture_output=True, text=True, encoding='utf-8', errors='replace',
+            timeout=min(runtime.args.stream_timeout, 60), check=False,
+        )
+        result = json.loads(completed.stdout)
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        _record_diagnostic(runtime, 'cleanup_dependency_probe_unavailable', True)
+        return
+    if not isinstance(result, dict):
+        return
+    for key in ('owned_stacks', 'old_vpc_count', 'new_security_group_count', 'new_group_depends_on_old_vpc_count'):
+        if type(result.get(key)) is int and 0 <= result[key] <= 10000:
+            _record_diagnostic(runtime, 'cleanup_dependency_' + key, result[key])
+    if type(result.get('fixture_is_old_vpc')) is bool:
+        _record_diagnostic(runtime, 'cleanup_dependency_fixture_is_old_vpc', result['fixture_is_old_vpc'])
+    if result.get('unavailable_stage') in {'ownership', 'get_stack', 'list_stack_resources', 'describe_security_group'}:
+        _record_diagnostic(runtime, 'cleanup_dependency_unavailable_stage', result['unavailable_stage'])
+
+
+_CLOUD_ADJUSTMENT_PROBE_CODE = r"""
+import hashlib, ipaddress, json, re, sys
+from alibabacloud_ros20190910 import models as ros_models
+from iac_code.services.cloud_credentials import CloudCredentials
+from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+from scripts.repl.e2e.run_pipeline_scenarios import _call_aliyun_api
+
+stage = "credentials"
+def probe():
+    global stage
+    data = json.load(open(sys.argv[1], encoding="utf-8"))
+    expected_cidr = ipaddress.IPv4Network(data["expected_cidr"])
+    credential = CloudCredentials().get_provider("aliyun")
+    if credential is None:
+        raise RuntimeError("Aliyun credential is unavailable")
+    result = {"owned_stack_count": 0, "vswitch_count": 0, "matching_vswitch_count": 0, "cidr_verified": False,
+              "actual_cidr_hashes": []}
+    for item in data["resources"][:20]:
+        stage = "ownership"
+        if (item.get("ownershipSource") != "accepted_create_ledger" or not item.get("stackName")
+            or not item.get("regionId") or not item.get("stackId")):
+            raise RuntimeError("native CIDR probe requires accepted case ownership")
+        region, stack_id = item["regionId"], item["stackId"]
+        client = RosClientFactory.create(credential, region)
+        stage = "get_stack"
+        actual = client.get_stack(ros_models.GetStackRequest(stack_id=stack_id, region_id=region)).body.to_map()
+        stage = "ownership"
+        if actual.get("StackName") != item["stackName"] or actual.get("ParentStackId") or actual.get("ServiceManaged"):
+            raise RuntimeError("native CIDR probe Stack ownership mismatch")
+        result["owned_stack_count"] += 1
+        if actual.get("Status") != "CREATE_COMPLETE":
+            continue
+        stage = "list_stack_resources"
+        resources = client.list_stack_resources(
+            ros_models.ListStackResourcesRequest(stack_id=stack_id, region_id=region)
+        ).body.to_map().get("Resources", [])
+        for resource in resources:
+            if resource.get("ResourceType") not in {"ALIYUN::ECS::VSwitch", "ALIYUN::VPC::VSwitch"}:
+                continue
+            vswitch_id = resource.get("PhysicalResourceId")
+            if (not isinstance(vswitch_id, str) or not re.fullmatch(r"vsw-[a-zA-Z0-9]+", vswitch_id)
+                or resource.get("StackId", stack_id) != stack_id):
+                raise RuntimeError("native CIDR probe resource identity invalid")
+            stage = "describe_vswitch"
+            actual_switch = _call_aliyun_api("vpc", "DescribeVSwitchAttributes",
+                                            {"RegionId": region, "VSwitchId": vswitch_id})
+            if actual_switch.get("VSwitchId") != vswitch_id:
+                raise RuntimeError("native CIDR probe VSwitch identity mismatch")
+            result["vswitch_count"] += 1
+            stage = "parse_cidr"
+            actual_cidr = ipaddress.IPv4Network(actual_switch["CidrBlock"])
+            digest = hashlib.sha256(str(actual_cidr).encode()).hexdigest()
+            if digest not in result["actual_cidr_hashes"] and len(result["actual_cidr_hashes"]) < 20:
+                result["actual_cidr_hashes"].append(digest)
+            if actual_cidr == expected_cidr:
+                result["matching_vswitch_count"] += 1
+    result["cidr_verified"] = result["matching_vswitch_count"] > 0
+    return result
+try:
+    print(json.dumps(probe()))
+except Exception as exc:
+    error_type = type(exc).__name__
+    code = str(getattr(exc, "code", ""))
+    print(json.dumps({"probe_error_stage": stage,
+                      "probe_error_type": error_type if error_type in {
+                          "RuntimeError", "TimeoutError", "ValueError", "PermissionError"} else "SDKError",
+                      "probe_error_code": code if code in {
+                          "Forbidden", "Forbidden.RAM", "SecurityTokenExpired", "InvalidAccessKeyId.NotFound",
+                          "Throttling", "Throttling.User", "EntityNotExist.Stack", "NotFound.Stack",
+                          "StackNotFound", "InvalidParameter"} else "unknown"}))
+    sys.exit(1)
+
+"""
+
+
+def _verify_requested_vswitch_cidr(runtime: ScenarioRuntime, *, expected_cidr: str = '') -> bool:
+    expected = expected_cidr or getattr(runtime, 'requested_adjusted_cidr', '')
+    if not expected:
+        return False
+    resources = discover_cloud_resources(runtime)
+    owned = [item for item in resources if item.get('ownershipSource') == 'accepted_create_ledger']
+    if not owned:
+        return False
+    manifest = runtime.paths.artifacts_dir / 'adjustment-cidr-probe-input.json'
+    write_json(manifest, {'expected_cidr': expected, 'resources': owned})
+    completed = subprocess.run(
+        [*shlex.split(runtime.args.python), '-c', _CLOUD_ADJUSTMENT_PROBE_CODE, str(manifest)],
+        cwd=REPO_ROOT, env=runtime.env, capture_output=True, text=True, encoding='utf-8', errors='replace',
+        timeout=min(runtime.args.stream_timeout, 90), check=False,
+    )
+    try:
+        result = json.loads(completed.stdout)
+    except ValueError:
+        result = {}
+    if not isinstance(result, dict):
+        result = {}
+    if completed.returncode != 0:
+        _record_diagnostic(runtime, 'repl_adjustment_native_probe_failed', True)
+        for key, allowed in {
+            'probe_error_stage': {'credentials', 'ownership', 'get_stack', 'list_stack_resources',
+                                  'describe_vswitch', 'parse_cidr'},
+            'probe_error_type': {'RuntimeError', 'TimeoutError', 'ValueError', 'PermissionError', 'SDKError'},
+            'probe_error_code': {'Forbidden', 'Forbidden.RAM', 'SecurityTokenExpired', 'InvalidAccessKeyId.NotFound',
+                                 'Throttling', 'Throttling.User', 'EntityNotExist.Stack', 'NotFound.Stack',
+                                 'StackNotFound', 'InvalidParameter', 'unknown'},
+        }.items():
+            if result.get(key) in allowed:
+                runtime.diagnostics['repl_adjustment_native_' + key] = result[key]
+        return False
+    counts: dict[str, int] = {}
+    hashes = result.get('actual_cidr_hashes')
+    if isinstance(hashes, list):
+        runtime.diagnostics['repl_adjustment_native_actual_cidr_hashes'] = sorted({
+            digest for digest in hashes[:20] if isinstance(digest, str) and re.fullmatch('[0-9a-f]{64}', digest)
+        })
+    for key in ('owned_stack_count', 'vswitch_count', 'matching_vswitch_count'):
+        count = result.get(key)
+        if isinstance(count, int) and not isinstance(count, bool) and 0 <= count <= 10000:
+            counts[key] = count
+            _record_diagnostic(runtime, 'repl_adjustment_native_' + key, count)
+    verified = (result.get('cidr_verified') is True and counts.get('owned_stack_count', 0) > 0
+                and 0 < counts.get('matching_vswitch_count', 0) <= counts.get('vswitch_count', 0))
+    _record_diagnostic(runtime, 'repl_adjustment_native_cidr_verified', verified)
+    return verified
 
 
 def cleanup_cloud_resources(runtime: ScenarioRuntime) -> str:
@@ -4313,13 +6413,9 @@ def cleanup_cloud_resources(runtime: ScenarioRuntime) -> str:
         stack_name = resource.get("stackName", "")
         if not stack_id:
             continue
-        # The Stack ID and the exact test-owned name are both mandatory before deletion.
-        if (
-            not stack_name
-            or stack_name not in runtime.owned_stack_names
-            or not stack_name.startswith(STACK_PREFIX + "-")
-        ):
-            failures.append(f"{stack_id}: ownership could not be proven with the exact test StackName")
+        if (not stack_name or not resource.get("regionId")
+                or resource.get("ownershipSource") != "accepted_create_ledger"):
+            failures.append(f"{stack_id}: ownership could not be proven with an accepted CreateStack receipt")
             continue
         manifest = runtime.paths.artifacts_dir / f"cleanup-{stack_id}.json"
         write_json(manifest, resource)
@@ -4397,36 +6493,56 @@ def _event_type_count(values: Sequence[Any], event_type: str) -> int:
     return count
 
 
-def _copied_credential_values(runtime: ScenarioRuntime) -> list[str]:
-    values: list[str] = []
+def _copied_credential_entries(runtime: ScenarioRuntime) -> list[tuple[str, str, str]]:
+    values: list[tuple[str, str, str]] = []
 
-    def collect(value: Any, sensitive: bool = False) -> None:
+    def collect(value: Any, source: str, sensitive: bool = False, *, kind: str = "other", depth: int = 0) -> None:
         if isinstance(value, dict):
             for key, item in value.items():
                 upper = str(key).upper()
-                collect(item, sensitive or any(marker in upper for marker in ("KEY", "SECRET", "TOKEN", "PASSWORD")))
+                provider_key = source == "llm" and depth == 0 and isinstance(item, str)
+                is_sensitive = sensitive or provider_key or any(
+                    marker in upper for marker in ("KEY", "SECRET", "TOKEN", "PASSWORD")
+                )
+                field = str(key).casefold().replace('_', '')
+                value_kind = {"accesskeyid": "access_key_id", "accesskeysecret": "access_key_secret",
+                              "ststoken": "security_token", "securitytoken": "security_token",
+                              "apikey": "api_key"}.get(field, "api_key" if provider_key else kind)
+                collect(item, source, is_sensitive, kind=value_kind, depth=depth + 1)
         elif isinstance(value, list):
             for item in value:
-                collect(item, sensitive)
+                collect(item, source, sensitive, kind=kind, depth=depth + 1)
         elif sensitive and isinstance(value, str) and len(value) >= 6:
-            values.append(value)
+            values.append((source, value, kind))
 
     for name in CREDENTIAL_FILES:
         path = runtime.paths.config_dir / name
         if not path.is_file():
             continue
         with contextlib.suppress(OSError, ValueError):
-            collect(yaml.safe_load(path.read_text(encoding="utf-8")))
+            collect(yaml.safe_load(path.read_text(encoding="utf-8")), "llm" if name == ".credentials.yml" else "cloud")
     return values
 
 
+def _copied_credential_values(runtime: ScenarioRuntime) -> list[str]:
+    return [value for _, value, _ in _copied_credential_entries(runtime)]
+
+
+def _redact_copied_credential_values(text: str, credential_values: Sequence[str]) -> str:
+    for value in credential_values:
+        text = text.replace(value, "[REDACTED]")
+    return text
+
+
 def credential_values_absent_from_artifacts(runtime: ScenarioRuntime) -> bool:
-    sensitive_values = set(_copied_credential_values(runtime))
-    if not sensitive_values:
+    sensitive_entries = _copied_credential_entries(runtime)
+    if not sensitive_entries:
         return True
     excluded_roots = (
         runtime.paths.config_dir.resolve(),
         runtime.paths.backup_dir.resolve(),
+        # The outer CI runner stages its protected input credentials here.
+        (runtime.paths.run_dir / "credential-source").resolve(),
         (runtime.paths.run_dir / ".preflight" / "config").resolve(),
         (runtime.paths.run_dir / ".preflight" / "config-backup").resolve(),
     )
@@ -4441,8 +6557,76 @@ def credential_values_absent_from_artifacts(runtime: ScenarioRuntime) -> bool:
             content = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if any(value in content for value in sensitive_values):
-            return False
+        for source, value, kind in sensitive_entries:
+            if value in content:
+                relative = path.relative_to(runtime.paths.run_dir)
+                location = relative.parts[0]
+                if location not in {"logs", "artifacts", "workspace", "templates"}:
+                    location = "other"
+                suffix = relative.suffix.lower().removeprefix(".")
+                if suffix not in {"json", "jsonl", "log", "txt", "yaml", "yml", "md"}:
+                    suffix = "other"
+                note = f"credential audit: source={source}; location={location}; suffix={suffix}"
+                if location == "other" and suffix == "json":
+                    filename = relative.name
+                    category = {
+                        "cleanup-result.json": "cleanup_result", "cloud-resources.json": "cloud_resources",
+                        "tool-sequence.json": "tool_sequence", "config-audit.json": "config_audit",
+                    }.get(filename, "other_json")
+                    if filename.endswith(".request.json"):
+                        category = "a2a_request"
+                    elif filename.endswith((".task-get.json", ".task-list.json")):
+                        category = "a2a_task"
+                    elif filename.endswith((".state.json", ".pipeline-state.json")):
+                        category = "pipeline_state"
+                    elif relative.parts[0] == ".preflight":
+                        category = "preflight"
+                    elif relative.parts[0] == 'a2a-persistence':
+                        category = 'a2a_persistence'
+                    elif filename.startswith('final-task-'):
+                        category = 'a2a_task'
+                    note += f"; artifact={category}"
+                runtime.notes.append(note)
+                _record_diagnostic(runtime, 'credential_audit_source', source)
+                _record_diagnostic(runtime, 'credential_audit_credential_kind', kind)
+                _record_diagnostic(runtime, 'credential_audit_location', location)
+                _record_diagnostic(runtime, 'credential_audit_suffix', suffix)
+                _record_diagnostic(runtime, 'credential_audit_file_hash', hashlib.sha256(
+                    str(relative).encode('utf-8')
+                ).hexdigest())
+                # Preserve the failure. Export only a bounded structural
+                # origin, never the credential, filename or matching content.
+                origins: set[str] = set()
+                field_categories: set[str] = set()
+                with contextlib.suppress(ValueError):
+                    def audit_origin(item: Any, origin: str = 'other', fields: tuple[str, ...] = ()) -> None:
+                        if isinstance(item, dict):
+                            kind = item.get('type') or item.get('eventType') or item.get('event_type')
+                            if kind in {'tool_use', 'tool_call'}:
+                                origin = 'tool_input'
+                            elif kind == 'tool_result':
+                                origin = 'tool_output'
+                            elif kind == 'text':
+                                origin = 'text'
+                            for key, child in item.items():
+                                audit_origin(child, origin, (*fields, str(key)))
+                        elif isinstance(item, list):
+                            for child in item:
+                                audit_origin(child, origin, fields)
+                        elif isinstance(item, str) and value in item:
+                            origins.add(origin)
+                            field_categories.update(set(fields).intersection({
+                                'error', 'message', 'detail', 'data', 'result', 'context', 'meta', 'conclusions',
+                                'tool_results', 'tool_result_records', 'input', 'output', 'stdout', 'stderr',
+                                'content', 'parts', 'text', 'history', 'parameter_values', 'resolved_params',
+                                'snapshot', 'events', 'display', 'pendingInput', 'normalHandoff', 'artifacts',
+                                'state', 'fields', 'value', 'inputs', 'execution', 'parameters', 'metadata',
+                                'toolInput', 'toolResult', 'config',
+                            }))
+                    audit_origin(json.loads(content))
+                _record_diagnostic(runtime, 'credential_audit_origins', sorted(origins))
+                _record_diagnostic(runtime, 'credential_audit_fields', sorted(field_categories))
+                return False
     return True
 
 
@@ -4502,8 +6686,12 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         with contextlib.suppress(OSError, json.JSONDecodeError):
             values.append(json.loads(web_payload_path.read_text(encoding="utf-8")))
     forbidden_values = _copied_credential_values(runtime)
+    persisted_tool_use_id = ""
+    persisted_tool_name = ""
     try:
         persisted_path, tool_result = contract.find_latest_aliyun_tool_result(runtime.paths.config_dir)
+        persisted_tool_use_id = str(tool_result.get("tool_use_id") or "")
+        persisted_tool_name = contract.find_persisted_tool_name(persisted_path, persisted_tool_use_id)
         content = tool_result.get("content")
         metadata = tool_result.get("metadata")
         if not isinstance(content, str) or not isinstance(metadata, dict):
@@ -4531,7 +6719,41 @@ def run_public_contract_audit(runtime: ScenarioRuntime) -> None:
         )
         runtime.checks["Aliyun business body and public payload contract passed"] = False
     tools = [item["tool"].lower() for item in _tool_sequence(values)]
-    runtime.checks["public events preserve Aliyun tool attribution"] = "aliyun_api" in tools
+    _record_diagnostic(runtime, "public_tool_event_count", len(tools))
+    _record_diagnostic(runtime, "public_tool_names", sorted(set(tools)))
+    journal_tools = _public_journal_tool_names(runtime.paths.config_dir)
+    _record_diagnostic(runtime, "public_journal_aliyun_count", journal_tools.count("aliyun_api"))
+    public_aliyun_tool_events: list[dict[str, Any]] = []
+    if runtime.spec.surface is Surface.A2A and persisted_tool_use_id:
+        public_aliyun_tool_events = _public_a2a_tool_events_for_id(values, persisted_tool_use_id)
+        _record_diagnostic(runtime, "persisted_aliyun_public_tool_event_count", len(public_aliyun_tool_events))
+        _record_diagnostic(runtime, "persisted_aliyun_public_tool_names", sorted({
+            str(item.get("toolName") or "none").lower() for item in public_aliyun_tool_events
+        }))
+        _record_diagnostic(runtime, "persisted_aliyun_public_tool_name_categories", sorted({
+            _public_tool_name_category(item.get("toolName")) for item in public_aliyun_tool_events
+        }))
+        _record_diagnostic(
+            runtime, "persisted_aliyun_tool_publicly_seen",
+            persisted_tool_use_id in _public_a2a_tool_use_ids(values),
+        )
+        _record_diagnostic(
+            runtime, "persisted_aliyun_publicly_attributed",
+            bool(public_aliyun_tool_events) and bool(persisted_tool_name)
+            and _public_aliyun_attribution_consistent(public_aliyun_tool_events, persisted_tool_name),
+        )
+    # Aliyun transport metadata also belongs to delegated ROS tools. Compare
+    # exposed events to the actual invoking tool in the persisted transcript.
+    # These public-tool audit cases require an exposed event for this call.
+    # An artifact-only contract must be audited separately, not reported here
+    # as a successful tool-attribution check.
+    runtime.checks["public events preserve Aliyun tool attribution"] = (
+        bool(persisted_tool_name)
+        and _public_aliyun_attribution_consistent(public_aliyun_tool_events, persisted_tool_name)
+        if runtime.spec.surface is Surface.A2A and persisted_tool_use_id else "aliyun_api" in tools
+    )
+    if "aliyun_api" not in tools:
+        runtime.notes.append("public tool attribution observed: " + ", ".join(sorted(set(tools))))
     if runtime.spec.case_id in {"A01", "W01"}:
         runtime.checks["deployed flow preserves ros_deploy attribution"] = "ros_deploy" in tools
 
@@ -4602,6 +6824,142 @@ def _read_repl_transcript_values(runtime: ScenarioRuntime) -> list[Any]:
     return values
 
 
+def _initial_preview_vswitch_cidrs(
+    values: Sequence[Any], *, allowed_roots: Sequence[Path] = (), diagnostics: dict[str, Any] | None = None,
+) -> list[str]:
+    """Read actual successful Preview results, correlated to native assistant calls."""
+    facts = diagnostics if diagnostics is not None else {}
+    facts['repl_initial_cidr_probe_stage'] = 'no_call'
+    preview_inputs: dict[str, dict[str, Any]] = {}
+    latest_inputs: dict[str, Any] = {}
+    latest: list[str] = []
+    for row in values:
+        if not isinstance(row, dict) or row.get('role') not in {'assistant', 'user'}:
+            continue
+        content = row.get('content')
+        for block in content if isinstance(content, list) else []:
+            if not isinstance(block, dict):
+                continue
+            if (row['role'] == 'assistant' and block.get('type') == 'tool_use'
+                and block.get('name') == 'ros_preview_template' and isinstance(block.get('id'), str)):
+                facts['repl_initial_cidr_probe_stage'] = 'no_success'
+                preview_inputs[block['id']] = block.get('input') if isinstance(block.get('input'), dict) else {}
+            if (row['role'] != 'user' or block.get('type') != 'tool_result'
+                or block.get('tool_use_id') not in preview_inputs or block.get('is_error') is True):
+                continue
+            latest_inputs = preview_inputs[block['tool_use_id']]
+            facts['repl_initial_cidr_probe_stage'] = 'no_native_cidr'
+            result = _result_mapping(block.get('content'))
+            metadata = block.get('metadata')
+            full_path = metadata.get('_iac_code_externalized_result_path') if isinstance(metadata, dict) else None
+            if not result and isinstance(full_path, str) and allowed_roots:
+                external = Path(full_path)
+                if (not external.is_symlink()
+                    and any(external.resolve().is_relative_to(Path(root).resolve()) for root in allowed_roots)):
+                    with contextlib.suppress(OSError, UnicodeError):
+                        if external.stat().st_size <= 2_000_000:
+                            result = _result_mapping(external.read_text(encoding='utf-8'))
+            stack = result.get('Stack')
+            resources = stack.get('Resources') if isinstance(stack, dict) else None
+            cidrs: list[str] = []
+            for resource in resources if isinstance(resources, list) else []:
+                if not isinstance(resource, dict) or resource.get('ResourceType') not in {
+                    'ALIYUN::ECS::VSwitch', 'ALIYUN::VPC::VSwitch',
+                }:
+                    continue
+                properties = resource.get('Properties')
+                value = properties.get('CidrBlock') if isinstance(properties, dict) else None
+                if isinstance(value, str):
+                    with contextlib.suppress(ValueError):
+                        cidrs.append(str(ipaddress.IPv4Network(value)))
+            latest = list(dict.fromkeys(cidrs))
+    facts['repl_initial_preview_call_count'] = len(preview_inputs)
+    if latest or not allowed_roots:
+        if latest:
+            facts['repl_initial_cidr_probe_stage'] = 'native_cidr'
+        return latest
+    # Some ROS Preview responses omit Properties. Inspect the exact local
+    # template submitted to the successful Preview, before the adjustment.
+    facts['repl_initial_cidr_probe_stage'] = 'template_url_missing'
+    url = latest_inputs.get('template_url')
+    if not isinstance(url, str) or url.startswith(('http://', 'https://', 'oss://')):
+        return []
+    facts['repl_initial_cidr_probe_stage'] = 'path_outside'
+    path = Path(url)
+    if not path.is_absolute():
+        path = Path(allowed_roots[0]) / path
+    if path.is_symlink() or not any(path.resolve().is_relative_to(Path(root).resolve()) for root in allowed_roots):
+        return []
+    facts['repl_initial_cidr_probe_stage'] = 'template_read'
+    try:
+        if path.stat().st_size > 2_000_000:
+            return []
+        body = path.read_text(encoding='utf-8')
+    except (OSError, UnicodeError):
+        return []
+    facts['repl_initial_cidr_probe_stage'] = 'template_parse'
+    from iac_code.tools.cloud.aliyun.ros_yaml import ros_yaml_load
+    try:
+        template = ros_yaml_load(body)
+    except yaml.YAMLError:
+        return []
+    facts['repl_initial_cidr_probe_stage'] = 'template_schema'
+    if not isinstance(template, dict) or not isinstance(template.get('Resources'), dict):
+        return []
+    parameters = latest_inputs.get('parameters')
+    parameters = parameters if isinstance(parameters, dict) else {}
+    schema = template.get('Parameters')
+    schema = schema if isinstance(schema, dict) else {}
+    facts['repl_initial_cidr_probe_stage'] = 'no_vswitch'
+    for resource in template['Resources'].values():
+        if not isinstance(resource, dict) or resource.get('Type') not in {
+            'ALIYUN::ECS::VSwitch', 'ALIYUN::VPC::VSwitch',
+        }:
+            continue
+        properties = resource.get('Properties')
+        value = properties.get('CidrBlock') if isinstance(properties, dict) else None
+        if isinstance(value, dict) and set(value) == {'Ref'} and isinstance(value['Ref'], str):
+            definition = schema.get(value['Ref'])
+            default = definition.get('Default') if isinstance(definition, dict) else None
+            value = parameters.get(value['Ref'], default)
+        facts['repl_initial_cidr_probe_stage'] = 'cidr_unresolved'
+        if not isinstance(value, str):
+            return []  # Do not guess unresolved intrinsic functions or IDs.
+        try:
+            latest.append(str(ipaddress.IPv4Network(value)))
+        except ValueError:
+            return []
+    if latest:
+        facts['repl_initial_cidr_probe_stage'] = 'template_cidr'
+    return list(dict.fromkeys(latest))
+
+
+def _record_repl_adjustment_preview(runtime: ScenarioRuntime, target_cidr: str) -> None:
+    """Keep a pre-deployment checkpoint without exporting template bodies or CIDRs."""
+    cidrs = _initial_preview_vswitch_cidrs(
+        _read_repl_transcript_values(runtime),
+        allowed_roots=(runtime.paths.workspace_dir, runtime.paths.config_dir),
+    )
+    _record_diagnostic(runtime, 'repl_adjustment_preview_cidr_inspected', bool(cidrs))
+    if cidrs:
+        _record_diagnostic(runtime, 'repl_adjustment_preview_matches_requested_cidr', target_cidr in cidrs)
+
+
+def _native_tool_use_names(values: Sequence[Any]) -> list[str]:
+    """Read top-level assistant tool blocks, excluding output text and schemas."""
+    calls: dict[str, str] = {}
+    for row in values:
+        if not isinstance(row, dict) or row.get('role') != 'assistant':
+            continue
+        content = row.get('content')
+        for block in content if isinstance(content, list) else []:
+            if (isinstance(block, dict) and block.get('type') == 'tool_use'
+                and isinstance(block.get('id'), str) and block['id']
+                and isinstance(block.get('name'), str)):
+                calls[block['id']] = block['name']
+    return list(calls.values())
+
+
 def _repl_natural_adjustment_checks(
     display_events: list[dict[str, Any]], transcript_values: list[Any]
 ) -> dict[str, bool]:
@@ -4637,11 +6995,7 @@ def _repl_natural_adjustment_checks(
         or first_confirmation.get("effective_deployment_parameters")
         != latest_confirmation.get("effective_deployment_parameters")
     )
-    exact_tool_names = [
-        item
-        for key, item in _walk(transcript_values)
-        if key in {"name", "tool_name", "toolName"} and item in {"ros_preview_template", "ros_estimate_template_cost"}
-    ]
+    exact_tool_names = _native_tool_use_names(transcript_values)
     return {
         "REPL direct text produced an adjustment": adjustment_input_index >= 0 and refreshed_after_adjustment,
         "REPL natural language confirmation was classified": (
@@ -4651,6 +7005,62 @@ def _repl_natural_adjustment_checks(
         "REPL adjustment reran Preview and quote": (
             exact_tool_names.count("ros_preview_template") >= 2
             and exact_tool_names.count("ros_estimate_template_cost") >= 2
+        ),
+    }
+
+
+def _a2a_image_asks_checks(runtime: ScenarioRuntime, values: Sequence[Any]) -> dict[str, bool]:
+    """Require accepted images in both question phases and a full adjustment/cancel cycle."""
+    extract = _legacy_a2a_module()._extract_pipeline_envelopes
+    image_ask_steps: set[str] = set()
+    for turn in _read_json_lines(runtime.events_path):
+        if not isinstance(turn, dict) or turn.get("type") != "a2a-turn-started" or turn.get("image") is not True:
+            continue
+        name = turn.get("name")
+        if not isinstance(name, str) or Path(name).name != name:
+            continue
+        for value in _read_json_lines(runtime.paths.run_dir / f"{name}.events.jsonl"):
+            for event in extract(value):
+                data, step = event.get("data"), event.get("step")
+                if (
+                    event.get("eventType") == "input_received" and isinstance(data, dict)
+                    and data.get("kind") == "ask_user_question" and isinstance(step, dict)
+                ):
+                    image_ask_steps.add(str(step.get("id") or ""))
+
+    records = list(_pipeline_event_records(values))
+    image_indexes = [
+        index for index, event in records
+        if event.get("eventType") == "input_received" and isinstance(event.get("data"), dict)
+        and event["data"].get("kind") == "deployment_confirmation" and event["data"].get("has_images") is True
+    ]
+    image_index = min(image_indexes, default=-1)
+    refreshed_indexes = [
+        index for index, event in records
+        if image_index >= 0 and index > image_index and event.get("eventType") == "input_required"
+        and isinstance(event.get("data"), dict) and event["data"].get("kind") == "deployment_confirmation"
+    ]
+    refreshed_index = min(refreshed_indexes, default=-1)
+    refresh_tools = {
+        item["tool"] for item in _tool_sequence(values)
+        if image_index >= 0 and image_index < item["eventIndex"] < refreshed_index
+    }
+    canceled = any(
+        refreshed_index >= 0 and index > refreshed_index and event.get("eventType") == "input_received"
+        and isinstance(event.get("data"), dict) and event["data"].get("kind") == "deployment_confirmation"
+        and event["data"].get("action") == "cancel"
+        for index, event in records
+    )
+    return {
+        "Step 1 clarification accepted an image answer": NEW_STEPS[0] in image_ask_steps,
+        "Step 2 parameter question accepted an image answer": NEW_STEPS[1] in image_ask_steps,
+        "image adjustment produced a second confirmation": image_index >= 0 and refreshed_index > image_index,
+        "image adjustment reran Preview and quote": (
+            {"ros_preview_template", "ros_estimate_template_cost"}.issubset(refresh_tools)
+        ),
+        "image adjustment was canceled without deployment": (
+            canceled and not any(item["tool"].lower() == "ros_deploy" for item in _tool_sequence(values))
+            and not any(step == NEW_STEPS[2] for _, step in _started_steps(values))
         ),
     }
 
@@ -4672,7 +7082,11 @@ def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
             or (runtime.paths.snapshots_dir / "final.json").is_file()
         )
     profile = spec.profile
-    if profile == "step1_clarify":
+    if profile == "happy_single":
+        runtime.checks["REPL happy path created requested VSwitch"] = _verify_requested_vswitch_cidr(
+            runtime, expected_cidr=runtime.cidr,
+        )
+    elif profile == "step1_clarify":
         if spec.surface is Surface.REPL:
             clarification_preceded_selection, candidate_edit_replanned = _repl_step1_clarification_checks(
                 _read_json_lines(runtime.paths.run_dir / "repl-events.jsonl"),
@@ -4758,6 +7172,8 @@ def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
             runtime.checks["deployment parameter was requested only in Step 2"] = any(
                 item == f"{NEW_STEPS[1]}:ask_user_question" for item in waiting
             ) and not any(item == f"{NEW_STEPS[0]}:ask_user_question" for item in waiting)
+    elif profile == "image_asks":
+        runtime.checks.update(_a2a_image_asks_checks(runtime, values))
     elif profile == "structured_override":
         runtime.checks["structured override caused a second confirmation"] = (
             sum(item.endswith(":deployment_confirmation") for item in waiting) >= 2
@@ -4768,6 +7184,25 @@ def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
     elif profile == "natural_adjust":
         display_events = _read_repl_display_events(runtime)
         runtime.checks.update(_repl_natural_adjustment_checks(display_events, _read_repl_transcript_values(runtime)))
+        runtime.checks["REPL adjustment applied requested VSwitch CIDR"] = _verify_requested_vswitch_cidr(runtime)
+        confirmations = [
+            event.get("payload")
+            for event in display_events
+            if event.get("type") == "user_input_required"
+            and event.get("step_id") == NEW_STEPS[1]
+            and isinstance(event.get("payload"), dict)
+        ]
+        _record_diagnostic(runtime, "repl_confirmation_count", len(confirmations))
+        if len(confirmations) >= 2:
+            _record_diagnostic(
+                runtime, "repl_solution_summary_changed",
+                confirmations[0].get("solution_summary") != confirmations[-1].get("solution_summary"),
+            )
+            _record_diagnostic(
+                runtime, "repl_effective_parameters_changed",
+                confirmations[0].get("effective_deployment_parameters")
+                != confirmations[-1].get("effective_deployment_parameters"),
+            )
     elif profile == "reselect_new_intent":
         runtime.checks["reselect and new intent both returned to Step 1"] = (
             sum(step == NEW_STEPS[0] for _, step in _started_steps(values)) >= 3
@@ -4840,9 +7275,12 @@ def apply_profile_acceptance(runtime: ScenarioRuntime) -> None:
             display_events,
             require_all=spec.cloud_write,
         )
-        if "询价概览" in transcript:
+        if "询价概览" in transcript or "Pricing overview" in transcript:
+            expected_headers = [("方案说明", "Solution description"), ("询价概览", "Pricing overview")]
+            if _repl_confirmation_has_cost_lines(display_events):
+                expected_headers.append(("费用明细", "Cost details"))
             runtime.checks["REPL confirmation focuses solution and quote"] = all(
-                marker in transcript for marker in ("方案说明", "询价概览", "费用明细")
+                any(marker in transcript for marker in localized_headers) for localized_headers in expected_headers
             )
     if spec.surface is Surface.WEB:
         runtime.checks["Web API payload artifact captured"] = (
@@ -4872,6 +7310,23 @@ def _write_case_summary(runtime: ScenarioRuntime, result: ScenarioResult) -> Non
         write_json(runtime.paths.run_dir / "cleanup-result.json", {"status": result.cleanup_status})
 
 
+def _exception_site(exc: BaseException) -> str:
+    """Keep only the last traceback location inside versioned application code."""
+    site = ""
+    traceback = exc.__traceback__
+    while traceback is not None:
+        filename = Path(traceback.tb_frame.f_code.co_filename)
+        try:
+            relative = filename.resolve().relative_to(REPO_ROOT)
+        except ValueError:
+            pass
+        else:
+            if relative.parts[0] in {"scripts", "src"} and relative.suffix == ".py":
+                site = f"{relative.as_posix()}:{traceback.tb_lineno}"
+        traceback = traceback.tb_next
+    return site
+
+
 def run_one_scenario(
     spec: ScenarioSpec,
     args: argparse.Namespace,
@@ -4883,6 +7338,8 @@ def run_one_scenario(
     started = time.monotonic()
     runtime: ScenarioRuntime | None = None
     error = ""
+    error_type = ""
+    error_site = ""
     cleanup_status = "not-needed"
     status_value = "failed"
     try:
@@ -4895,17 +7352,21 @@ def run_one_scenario(
         )
         if services.cancel_event.is_set():
             raise InterruptedError("suite cancellation requested before case start")
-        observe_module = importlib.import_module("scripts.observability.local_observe.e2e_audit")
-        observe = observe_module.ObserveCapture(runtime.paths.artifacts_dir / "telemetry").start()
-        runtime.env.update(observe.env)
+        observe = None
+        telemetry_records = []
+        if spec.case_id in LOCAL_TELEMETRY_CASE_IDS:
+            observe_module = importlib.import_module("scripts.observability.local_observe.e2e_audit")
+            observe = observe_module.ObserveCapture(runtime.paths.artifacts_dir / "telemetry").start()
+            runtime.env.update(observe.env)
+        _record_diagnostic(runtime, "telemetry_local_capture_enabled", observe is not None)
         try:
             with services.locks.acquire(spec.resource_lock):
                 _dispatch_surface(runtime)
         finally:
-            telemetry_records = observe.stop()
-        if spec.surface is not Surface.DESKTOP:
+            if observe is not None:
+                telemetry_records = observe.stop()
+        if spec.case_id in LOCAL_TELEMETRY_CASE_IDS:
             runtime.checks["real telemetry captured"] = bool(telemetry_records)
-        if spec.case_id in {"A01", "A24", "W01"}:
             telemetry_audit = observe_module.audit_provider_attempts(
                 telemetry_records,
                 output_path=runtime.paths.artifacts_dir / "provider-telemetry-audit.json",
@@ -4927,6 +7388,8 @@ def run_one_scenario(
         status_value = "canceled"
     except BaseException as exc:
         error = f"{type(exc).__name__}: {exc}"
+        error_type = type(exc).__name__
+        error_site = _exception_site(exc)
         status_value = "failed"
     if runtime is None:
         # Failure before runtime construction still receives a durable case directory.
@@ -4967,6 +7430,11 @@ def run_one_scenario(
         notes=notes,
         cleanup_status=cleanup_status,
         error=error,
+        error_type=error_type,
+        error_site=error_site,
+        watchdog=runtime.watchdog if runtime is not None else None,
+        control_state=runtime.control_state if runtime is not None else None,
+        diagnostics=runtime.diagnostics if runtime is not None else {},
     )
     if runtime is not None:
         services.unregister_runtime(runtime)
@@ -5310,7 +7778,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else []
     )
     occupied_cidrs = [*args.occupied_cidr, *inherited_occupied]
-    services = RunnerServices(cidrs=CidrAllocator(occupied_cidrs, args.cleanup_vpc_cidr or "10.250.0.0/16"))
+    cidr_pool = args.cidr_pool or args.cleanup_vpc_cidr or "10.250.0.0/16"
+    services = RunnerServices(cidrs=CidrAllocator(occupied_cidrs, cidr_pool))
     interrupted = False
     previous_handlers: dict[int, Any] = {}
 

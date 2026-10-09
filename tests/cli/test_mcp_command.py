@@ -3707,6 +3707,9 @@ def test_mcp_reset_auth_and_remove_clear_env_expanded_oauth_state(monkeypatch, t
 
 
 def test_mcp_reset_auth_and_remove_emit_revocation_warnings(monkeypatch, tmp_path: Path) -> None:
+    # ACL subprocesses have dedicated coverage; keep this CLI test focused on
+    # warning propagation and real encrypted OAuth state.
+    monkeypatch.setattr("iac_code.utils.file_security._restrict_windows", lambda *args, **kwargs: None)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("IAC_CODE_MCP_DISABLE_KEYRING", "1")

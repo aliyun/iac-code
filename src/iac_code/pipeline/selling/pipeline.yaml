@@ -452,6 +452,7 @@ steps:
     forward: evaluate_candidates
     skill: iac-aliyun-architecture
     prompt: prompts/architecture_planning.md
+    hooks_file: hooks/architecture_planning.py
     context_fields: [intent]
     tools:
       include: [read_memory, read_file, list_files, glob, grep, web_fetch, aliyun_doc_search]
@@ -471,6 +472,7 @@ steps:
     forward: deploying
     prompt: prompts/confirm_and_select.md
     context_fields: [evaluated_candidates]
+    hooks_file: hooks/confirm_and_select.py
     auto_advance: false
     ui_mode: candidate_selection
     inject_tools: [show_architecture_diagram, show_candidate_detail]

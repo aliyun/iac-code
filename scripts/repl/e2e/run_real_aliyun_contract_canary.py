@@ -33,6 +33,9 @@ PROMPT_MARKER = "[E5_REAL_ALIYUN_READONLY]"
 PROMPT = (
     "这是只读 E2E canary。必须且只能调用一次 aliyun_api：product=vpc，version=2016-04-28，"
     "action=DescribeVpcs，params 仅包含 PageSize=10；禁止调用任何写操作。工具返回后简短回答。"
+    '工具入参必须为 JSON：{"product":"vpc","version":"2016-04-28",'
+    '"action":"DescribeVpcs","params":{"PageSize":10}}。'
+    'PageSize 是整数；RegionId 由运行时配置提供，params 不得加入 RegionId 或 PageNumber。'
     + PROMPT_MARKER
 )
 CONFIG_FILES = (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
@@ -71,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     checks: dict[str, bool] = {}
     notes: list[str] = []
     records: list[dict[str, Any]] = []
+    diagnostics: dict[str, Any] = {}
     pty: ReplPty | None = None
     observe = ObserveCapture(run_dir / "telemetry").start()
     manifest: dict[str, Any] = {
@@ -105,6 +109,16 @@ def main(argv: list[str] | None = None) -> int:
         )
         session_path, tool_result = find_latest_aliyun_tool_result(config_dir)
         tool_uses = _aliyun_tool_uses(session_path)
+        diagnostics.update({
+            "canary_aliyun_call_count": len(tool_uses),
+            "canary_allowed_call_count": sum(_is_allowed_describe_vpcs(x) for x in tool_uses),
+            "canary_wrong_action_count": sum(x.get("action") != "DescribeVpcs" for x in tool_uses),
+            "canary_wrong_params_count": sum(x.get("params") != {"PageSize": 10} for x in tool_uses),
+            "canary_wrong_page_size_count": sum(
+                not isinstance(x.get('params'), dict) or x['params'].get('PageSize') != 10 for x in tool_uses),
+            "canary_extra_params_count": sum(
+                len(set(x['params']) - {'PageSize'}) for x in tool_uses if isinstance(x.get('params'), dict)),
+        })
         manifest["session_id"] = session_path.parent.name
         manifest["session_path"] = str(session_path)
         manifest["provider_attempt_count"] = _terminal_count(records)
@@ -148,7 +162,10 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     passed = bool(checks) and all(checks.values()) and not notes
-    summary = {"scenario": SCENARIO, "passed": passed, "checks": checks, "notes": notes, "run_dir": str(run_dir)}
+    summary = {
+        "scenario": SCENARIO, "passed": passed, "checks": checks, "notes": notes,
+        "run_dir": str(run_dir), "diagnostics": diagnostics,
+    }
     (run_dir / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0 if passed else 1
@@ -194,6 +211,7 @@ def _child_env(*, config_dir: Path, observe: ObserveCapture, model: str = DEFAUL
 
 def _aliyun_tool_uses(session_path: Path) -> list[dict[str, Any]]:
     uses: list[dict[str, Any]] = []
+    seen: dict[str, dict[str, Any]] = {}
     for line in session_path.read_text(encoding="utf-8").splitlines():
         if not line:
             continue
@@ -201,12 +219,21 @@ def _aliyun_tool_uses(session_path: Path) -> list[dict[str, Any]]:
         content = entry.get("content") if isinstance(entry, dict) else None
         if not isinstance(content, list):
             continue
-        uses.extend(
-            block.get("input") or {}
-            for block in content
-            if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "aliyun_api"
-        )
-    return [item for item in uses if isinstance(item, dict)]
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_use" or block.get("name") != "aliyun_api":
+                continue
+            inputs = block.get("input") or {}
+            if not isinstance(inputs, dict):
+                continue
+            tool_id = block.get("id")
+            if isinstance(tool_id, str) and tool_id:
+                if tool_id in seen:
+                    if seen[tool_id] != inputs:
+                        raise AssertionError("conflicting persisted inputs for the same tool invocation")
+                    continue
+                seen[tool_id] = inputs
+            uses.append(inputs)
+    return uses
 
 
 def _is_allowed_describe_vpcs(tool_input: dict[str, Any]) -> bool:

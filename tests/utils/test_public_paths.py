@@ -2,7 +2,21 @@ from __future__ import annotations
 
 import ntpath
 
+import pytest
+
 from iac_code.utils.public_paths import build_public_path_roots, redact_known_public_paths, sanitize_public_paths
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("/server-root/private/result\x00.json", "[PATH]"),
+        ("file:///server-root/private/result%00.json", "[PATH]"),
+        ("/home/cloud-user/result\x00.json", "/home/cloud-user/result\x00.json"),
+    ],
+)
+def test_public_path_redaction_handles_null_bytes_in_display_strings(value, expected) -> None:
+    assert redact_known_public_paths(value, [{"path": "/server-root", "label": "."}]) == expected
 
 
 def test_build_public_path_roots_includes_config_and_trusted_directories(tmp_path, monkeypatch) -> None:

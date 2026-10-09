@@ -143,10 +143,10 @@ class InterruptController:
                 system=system_prompt,
             )
             last_response_text = response.text
-            verdict = self._parse_verdict(response.text)
+            verdict = self._parse_verdict(response.text, retry_invalid=attempt < max_attempts - 1)
             if verdict is not None:
                 return verdict
-            logger.info("Retry judge call (%d/%d): hard_interrupt missing rollback_context", attempt + 1, max_attempts)
+            logger.info("Retry judge call (%d/%d): invalid or incomplete verdict", attempt + 1, max_attempts)
 
         # Retry exhausted — final attempt: try one more time with the last
         # response, accepting it even if rollback_context is missing.
@@ -223,7 +223,9 @@ class InterruptController:
             step_lines = []
             for s in steps:
                 marker = " [当前]" if s.get("is_current") else ""
-                step_lines.append(f"  - {s['step_id']}: {s.get('description', '')}{marker}")
+                field = s.get("conclusion_field")
+                owner = f" [输出结论: {field}]" if isinstance(field, str) and field else ""
+                step_lines.append(f"  - {s['step_id']}: {s.get('description', '')}{owner}{marker}")
             sections.append("=== Pipeline 步骤 ===\n" + "\n".join(step_lines))
 
         # Completed conclusions
@@ -281,7 +283,7 @@ class InterruptController:
 
         return "\n\n".join(sections)
 
-    def _parse_verdict(self, text: str) -> InterruptVerdict | None:
+    def _parse_verdict(self, text: str, *, retry_invalid: bool = False) -> InterruptVerdict | None:
         """Parse LLM response into InterruptVerdict. Returns None if retry needed."""
         text = text.strip()
         text = re.sub(r"^```\w*\n", "", text)
@@ -291,14 +293,23 @@ class InterruptController:
             data = json.loads(text)
         except json.JSONDecodeError:
             logger.warning("Failed to parse judge response as JSON. raw=%r", _safe_truncate(text, max_chars=500))
+            if retry_invalid:
+                return None
             return InterruptVerdict(
                 action="continue",
                 reason=f"parse failed: not JSON. raw={text[:120]!r}",
             )
 
+        if not isinstance(data, dict):
+            if retry_invalid:
+                return None
+            return InterruptVerdict(action="continue", reason="parse failed: expected JSON object")
+
         action = data.get("action", "continue")
         if action not in _ALLOWED_INTERRUPT_ACTIONS:
             logger.warning("Judge LLM returned invalid action %r, raw=%r", action, _safe_truncate(text, max_chars=500))
+            if retry_invalid:
+                return None
             return InterruptVerdict(
                 action="continue",
                 reason=f"parse failed: invalid action {action!r}",

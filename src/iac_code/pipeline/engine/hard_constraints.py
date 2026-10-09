@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import asdict, dataclass
 from decimal import Decimal, DecimalException, InvalidOperation
 from typing import Any
@@ -171,6 +172,17 @@ def constraint_satisfied(constraint: dict[str, Any], actual_value: Any, *, actua
         return matched if operator == "in" else not matched
 
     if operator in {"contains", "not_contains"}:
+        if (isinstance(actual_value, str) and isinstance(expected_value, str)
+            and "/" in actual_value and "/" in expected_value):
+            try:
+                actual_network = ipaddress.ip_network(actual_value, strict=False)
+                expected_network = ipaddress.ip_network(expected_value, strict=False)
+            except ValueError:
+                pass
+            else:
+                matched = (actual_network.version == expected_network.version
+                           and expected_network.subnet_of(actual_network))
+                return matched if operator == "contains" else not matched
         try:
             matched = expected_value in actual_value
         except TypeError:

@@ -4604,7 +4604,7 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
             except asyncio.CancelledError:
                 pass
         pipeline.release.set()
-        await asyncio.wait_for(first_task, timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.wait_for(first_task, timeout=15)
         await dispatcher.aclose()
         await components.aclose()
 

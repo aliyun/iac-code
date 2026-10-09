@@ -4442,12 +4442,13 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
-"- Prefer available ROS stack tools for deletion; if using aliyun_api, "
-"call DeleteStack first, then repeatedly call GetStack to check status."
+"- Use the ros_stack tool for DeleteStack. Do not use aliyun_api for "
+"DeleteStack when ros_stack is available; use aliyun_api GetStack to check"
+" status until DELETE_COMPLETE."
 msgstr ""
-"- Prefiera las herramientas de stack ROS disponibles para eliminar; si "
-"usa aliyun_api, llame primero a DeleteStack y luego llame repetidamente a"
-" GetStack para comprobar el estado."
+"- Use la herramienta ros_stack para DeleteStack. Si ros_stack está "
+"disponible, no use aliyun_api para DeleteStack; use aliyun_api GetStack "
+"para comprobar el estado hasta DELETE_COMPLETE."
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
@@ -4666,13 +4667,11 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
-"Submit the full first conclusion. On a resumed user-interaction branch, "
-"submit only changed fields; the pipeline merges them with the saved "
-"conclusion before full validation."
-msgstr ""
-"Envíe la conclusión completa la primera vez. En una rama de interacción "
-"reanudada, envíe solo los campos modificados; el pipeline los combina con"
-" la conclusión guardada antes de la validación completa."
+"Submit the full first conclusion. Always include required fields, even "
+"when unchanged. On a resumed user-interaction branch, submit changed "
+"optional fields; the pipeline merges them with the saved conclusion "
+"before full validation."
+msgstr "Envía la primera conclusión completa. Incluye siempre los campos obligatorios, aunque no hayan cambiado. Al reanudar una interacción, envía los campos opcionales modificados; la canalización los combina con la conclusión guardada antes de validarla por completo."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4706,14 +4705,9 @@ msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
 "{schema_hint}\n"
-"Do not repeat unchanged saved fields on a resumed interaction; submit "
-"only the corrected fields."
-msgstr ""
-"{error}\n"
-"Paso actual: {step_id}\n"
-"{schema_hint}\n"
-"En una interacción reanudada, no repita los campos guardados sin cambios;"
-" envíe solo los campos corregidos."
+"Always include required conclusion fields, even when unchanged. On a "
+"resumed interaction, omit only unchanged optional saved fields."
+msgstr "{error}\nPaso actual: {step_id}\n{schema_hint}\nIncluye siempre los campos obligatorios de la conclusión, aunque no hayan cambiado. Al reanudar una interacción, omite solo los campos opcionales guardados que no hayan cambiado."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4759,6 +4753,11 @@ msgstr "Valores de estado permitidos: {statuses}."
 #, python-brace-format
 msgid "Allowed conclusion fields: {fields}."
 msgstr "Campos de conclusión permitidos: {fields}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Required conclusion fields: {fields}."
+msgstr "Campos obligatorios de la conclusión: {fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "conclusion must match this schema summary:\n"
@@ -15038,3 +15037,11 @@ msgstr "Responses API requiere una URL base HTTP o HTTPS válida."
 #: src/iac_code/providers/manager.py
 msgid "Responses API requires an OpenAI-style provider."
 msgstr "Responses API requiere un proveedor que use el protocolo OpenAI."
+
+#: src/iac_code/pipeline/selling/hooks/architecture_planning.py
+msgid "requested_candidate_count must be a positive integer or null"
+msgstr "requested_candidate_count debe ser un entero positivo o null"
+
+#: src/iac_code/pipeline/selling/hooks/architecture_planning.py
+msgid "The user requested {expected} candidate plans; {actual} were submitted. Correct the candidates or ask for clarification; do not silently change the requested count."
+msgstr "El usuario solicitó {expected} planes candidatos; se enviaron {actual}. Corrige los planes candidatos o pide una aclaración; no cambies la cantidad solicitada sin avisar."

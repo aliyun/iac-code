@@ -4473,12 +4473,13 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
-"- Prefer available ROS stack tools for deletion; if using aliyun_api, "
-"call DeleteStack first, then repeatedly call GetStack to check status."
+"- Use the ros_stack tool for DeleteStack. Do not use aliyun_api for "
+"DeleteStack when ros_stack is available; use aliyun_api GetStack to check"
+" status until DELETE_COMPLETE."
 msgstr ""
-"- Verwenden Sie für die Löschung bevorzugt verfügbare ROS-Stack-Tools; "
-"wenn Sie aliyun_api verwenden, rufen Sie zuerst DeleteStack auf und "
-"anschließend wiederholt GetStack, um den Status zu prüfen."
+"- Verwenden Sie das Tool ros_stack für DeleteStack. Wenn ros_stack "
+"verfügbar ist, verwenden Sie aliyun_api nicht für DeleteStack; prüfen Sie"
+" den Status mit aliyun_api GetStack bis DELETE_COMPLETE."
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
@@ -4703,14 +4704,11 @@ msgstr ""
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
-"Submit the full first conclusion. On a resumed user-interaction branch, "
-"submit only changed fields; the pipeline merges them with the saved "
-"conclusion before full validation."
-msgstr ""
-"Senden Sie beim ersten Mal die vollständige Schlussfolgerung. In einem "
-"fortgesetzten Benutzerinteraktionszweig senden Sie nur geänderte Felder; "
-"die Pipeline führt sie vor der vollständigen Validierung mit der "
-"gespeicherten Schlussfolgerung zusammen."
+"Submit the full first conclusion. Always include required fields, even "
+"when unchanged. On a resumed user-interaction branch, submit changed "
+"optional fields; the pipeline merges them with the saved conclusion "
+"before full validation."
+msgstr "Reichen Sie zunächst die vollständige Schlussfolgerung ein. Pflichtfelder müssen auch unverändert enthalten sein. Bei einer fortgesetzten Benutzerinteraktion reichen Sie geänderte optionale Felder ein; die Pipeline führt sie vor der vollständigen Validierung mit der gespeicherten Schlussfolgerung zusammen."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4744,14 +4742,9 @@ msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
 "{schema_hint}\n"
-"Do not repeat unchanged saved fields on a resumed interaction; submit "
-"only the corrected fields."
-msgstr ""
-"{error}\n"
-"Aktueller Schritt: {step_id}\n"
-"{schema_hint}\n"
-"Wiederholen Sie bei einer fortgesetzten Interaktion keine unveränderten "
-"gespeicherten Felder; senden Sie nur die korrigierten Felder."
+"Always include required conclusion fields, even when unchanged. On a "
+"resumed interaction, omit only unchanged optional saved fields."
+msgstr "{error}\nAktueller Schritt: {step_id}\n{schema_hint}\nPflichtfelder der Schlussfolgerung müssen auch unverändert enthalten sein. Lassen Sie bei einer fortgesetzten Interaktion nur unveränderte gespeicherte optionale Felder weg."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4798,6 +4791,11 @@ msgstr "Zulässige Statuswerte: {statuses}."
 #, python-brace-format
 msgid "Allowed conclusion fields: {fields}."
 msgstr "Zulässige Schlussfolgerungsfelder: {fields}."
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Required conclusion fields: {fields}."
+msgstr "Pflichtfelder der Schlussfolgerung: {fields}."
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "conclusion must match this schema summary:\n"
@@ -15149,3 +15147,11 @@ msgstr "Die Responses API benötigt eine gültige HTTP- oder HTTPS-Basis-URL."
 #: src/iac_code/providers/manager.py
 msgid "Responses API requires an OpenAI-style provider."
 msgstr "Die Responses API benötigt einen Anbieter mit OpenAI-Protokoll."
+
+#: src/iac_code/pipeline/selling/hooks/architecture_planning.py
+msgid "requested_candidate_count must be a positive integer or null"
+msgstr "requested_candidate_count muss eine positive Ganzzahl oder null sein"
+
+#: src/iac_code/pipeline/selling/hooks/architecture_planning.py
+msgid "The user requested {expected} candidate plans; {actual} were submitted. Correct the candidates or ask for clarification; do not silently change the requested count."
+msgstr "Der Benutzer hat {expected} Planungsvorschläge angefordert; {actual} wurden eingereicht. Korrigieren Sie die Vorschläge oder fragen Sie nach; ändern Sie die angeforderte Anzahl nicht stillschweigend."

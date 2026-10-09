@@ -693,6 +693,18 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             )
             is None
         ):
+            state = finalized_state if isinstance(finalized_state, dict) else {}
+            blockers = state.get("blockers")
+            blocker_counts = {
+                item["kind"]: item["count"] for item in blockers if isinstance(item, dict)
+                and item.get("kind") in {"execution", "agent_loop", "background_agent", "permission_cleanup",
+                                         "tool", "tool_batch", "llm"}
+                and type(item.get("count")) is int and 0 < item["count"] <= 10000
+            } if isinstance(blockers, list) else {}
+            logger.warning(
+                "A2A natural handoff unavailable: phase=%s status=%s blocker_counts=%s",
+                state.get("phase"), state.get("executionStatus"), json.dumps(blocker_counts, sort_keys=True),
+            )
             raise RuntimeError("Natural completion did not produce an exact durable handoff receipt")
 
     async def _settle_nonstream_input_required_result(

@@ -664,7 +664,9 @@ class _Scenario:
         )
         payload = {"jsonrpc": "2.0", "id": str(uuid.uuid4()), "method": "CancelTask", "params": {"id": self.task_id}}
         _append_jsonl(self.run_dir / "requests.jsonl", {"name": "legacy-cancel", "payload": payload, "at": time.time()})
-        status, result = _http_json("POST", self.server.url + "/", payload)
+        # CancelTask drains the active turn and publishes its final backup before
+        # replying; it needs the scenario wait budget, unlike a quick state probe.
+        status, result = _http_json("POST", self.server.url + "/", payload, timeout=self.timeout)
         assert status == 200 and "result" in result, result
         assert "cancel" in str(result["result"]["status"]["state"]).lower()
         initial.join(self.timeout)

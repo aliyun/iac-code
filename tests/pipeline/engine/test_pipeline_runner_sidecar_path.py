@@ -1007,6 +1007,47 @@ async def test_continue_from_sidecar_reuses_persisted_current_step_user_input(tm
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("input_in_transcript", [False, True])
+async def test_restored_text_input_is_not_lost_between_sidecar_and_transcript_writes(
+    tmp_path, monkeypatch, input_in_transcript,
+):
+    monkeypatch.setenv("IAC_CODE_TELEMETRY_E2E_USER_ID", "iac_user_e2e_" + "0" * 32)
+    runner = _build_two_step_runner(tmp_path)
+    choice = "Use the existing VPC and create one VSwitch."
+    attempt = runner._ensure_parent_attempt("s1")
+    assert runner._transcript_storage is not None
+    history = [Message(role="assistant", content="Which resources should be used?")]
+    if input_in_transcript:
+        history.append(Message(role="user", content=choice))
+    for message in history:
+        runner._transcript_storage.append(str(tmp_path), attempt["transcript_id"], message)
+    runner._set_current_step_user_input(choice)
+    await runner._save_running("s1", reason="user input received")
+
+    restored = _build_two_step_runner(tmp_path, resume_from_sidecar=True)
+    captured = {}
+
+    async def execute(step, context, session_id, user_message=None, **kwargs):
+        captured["user_message"] = user_message
+        captured["resume_messages"] = kwargs["resume_messages"]
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"value": "done"})
+
+    restored._step_executor.execute = execute
+    stream = restored.continue_from_sidecar()
+    try:
+        async for _event in stream:
+            if captured:
+                break
+    finally:
+        await stream.aclose()
+
+    assert captured["user_message"] == (None if input_in_transcript else choice)
+    assert [(message.role, message.content) for message in captured["resume_messages"]] == [
+        (message.role, message.content) for message in history
+    ]
+
+
+@pytest.mark.asyncio
 async def test_continue_from_sidecar_reuses_persisted_current_step_image_input(tmp_path):
     from iac_code.pipeline.engine.user_input import PipelineUserInput
 

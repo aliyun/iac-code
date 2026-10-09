@@ -943,7 +943,9 @@ class TestCompleteStepSchemaGuidance:
         assert valid is True
         assert input_error == ""
         assert completion_error is not None
-        assert "required property" in completion_error
+        detail = json.loads(completion_error)
+        assert detail["validator"] == "required"
+        assert detail["path"].startswith("/")
         assert "Step 2 的完整物化与确认结论" not in completion_error
         assert len(completion_error) < 300
 

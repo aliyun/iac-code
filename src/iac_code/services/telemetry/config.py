@@ -7,6 +7,8 @@ from enum import Enum
 from ipaddress import ip_address
 from urllib.parse import urlparse
 
+from iac_code.services.telemetry.identity import get_e2e_user_id
+
 # =====================================================================
 # Privacy level
 # =====================================================================
@@ -46,10 +48,16 @@ def get_privacy_level() -> PrivacyLevel:
 
 
 def _is_local_build() -> bool:
-    # Empty __release_date__ means unpackaged source (see setup.py); don't ship telemetry from dev runs.
+    # Empty __release_date__ means unpackaged source (see setup.py).
     from iac_code import __release_date__
 
     return not __release_date__.strip()
+
+
+def _local_telemetry_only() -> bool:
+    # Explicit local-observability cases stay on loopback. Other E2E cases
+    # may export from source builds because their telemetry user ID is tagged.
+    return _is_env_truthy("IAC_CODE_TELEMETRY_LOCAL_ONLY") or (_is_local_build() and get_e2e_user_id() is None)
 
 
 def _is_local_endpoint(raw: str) -> bool:
@@ -77,11 +85,11 @@ def _local_telemetry_opt_in_enabled() -> bool:
 
 def is_telemetry_endpoint_allowed(raw: str) -> bool:
     """Whether a configured OTLP endpoint may be used for this build."""
-    return not _is_local_build() or _is_local_endpoint(raw)
+    return not _local_telemetry_only() or _is_local_endpoint(raw)
 
 
 def is_telemetry_disabled() -> bool:
-    if _is_local_build() and not _local_telemetry_opt_in_enabled():
+    if _local_telemetry_only() and not _local_telemetry_opt_in_enabled():
         return True
     return get_privacy_level() != PrivacyLevel.DEFAULT
 

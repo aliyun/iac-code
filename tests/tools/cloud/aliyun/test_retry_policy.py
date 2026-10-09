@@ -101,12 +101,14 @@ async def test_retry_budget_preserves_previous_reason_when_sleep_crosses_deadlin
     ],
 )
 async def test_retry_budget_deadline_cancels_attempt_and_waits_for_cleanup(
+    monkeypatch: pytest.MonkeyPatch,
     retryable_call: bool,
     expected_outcome: str,
     expected_reason: RetryReason | None,
 ) -> None:
     started = asyncio.Event()
     cleaned = asyncio.Event()
+    monkeypatch.setattr(retry_policy_module, "asyncio", ControlledTimeoutAsyncio(started))
 
     async def blocked_attempt() -> None:
         started.set()
@@ -115,7 +117,7 @@ async def test_retry_budget_deadline_cancels_attempt_and_waits_for_cleanup(
         finally:
             cleaned.set()
 
-    budget = RetryBudget(deadline=time.monotonic() + 0.05)
+    budget = RetryBudget(deadline=10.05, clock=FakeClock())
 
     with pytest.raises(RetryExhausted) as raised:
         await budget.run_attempt(blocked_attempt, retryable_call=retryable_call)
@@ -245,9 +247,10 @@ async def test_retry_budget_chains_late_operation_error_to_first_cancellation() 
 
 
 @pytest.mark.asyncio
-async def test_retry_budget_chains_late_operation_error_to_timeout() -> None:
+async def test_retry_budget_chains_late_operation_error_to_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     started = asyncio.Event()
     late_error = OSError("late operation failure")
+    monkeypatch.setattr(retry_policy_module, "asyncio", ControlledTimeoutAsyncio(started))
 
     async def blocked_attempt() -> None:
         started.set()
@@ -256,7 +259,7 @@ async def test_retry_budget_chains_late_operation_error_to_timeout() -> None:
         except asyncio.CancelledError:
             raise late_error
 
-    budget = RetryBudget(deadline=time.monotonic() + 0.01)
+    budget = RetryBudget(deadline=10.01, clock=FakeClock())
 
     with pytest.raises(RetryExhausted) as raised:
         await budget.run_attempt(blocked_attempt, retryable_call=True)
@@ -302,11 +305,12 @@ async def test_retry_budget_preserves_timeout_before_later_parent_cancellation(m
 
 
 @pytest.mark.asyncio
-async def test_retry_budget_chains_abandon_error_for_late_result_to_timeout() -> None:
+async def test_retry_budget_chains_abandon_error_for_late_result_to_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     started = asyncio.Event()
     resource = object()
     abandon_error = OSError("abandon failed")
     abandoned: list[object] = []
+    monkeypatch.setattr(retry_policy_module, "asyncio", ControlledTimeoutAsyncio(started))
 
     async def blocked_attempt() -> object:
         started.set()
@@ -319,7 +323,7 @@ async def test_retry_budget_chains_abandon_error_for_late_result_to_timeout() ->
         abandoned.append(value)
         raise abandon_error
 
-    budget = RetryBudget(deadline=time.monotonic() + 0.01)
+    budget = RetryBudget(deadline=10.01, clock=FakeClock())
 
     with pytest.raises(RetryExhausted) as raised:
         await budget.run_attempt(blocked_attempt, retryable_call=True, abandon_result=abandon)

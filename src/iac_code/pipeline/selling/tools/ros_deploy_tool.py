@@ -7,6 +7,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from iac_code.i18n import _
 from iac_code.pipeline.selling.hooks.deploying import contains_redaction_placeholder
@@ -108,6 +109,9 @@ class RosDeployTool(Tool):
 
     def __init__(self, completion_guard_state: dict[str, Any] | None = None) -> None:
         self._completion_guard_state = completion_guard_state if completion_guard_state is not None else {}
+        # Give the model real entropy for default names instead of asking it to
+        # invent a random suffix. Keep it stable for this deployment tool binding.
+        self._name_suffix = uuid4().hex[:12]
 
     @property
     def name(self) -> str:
@@ -122,7 +126,11 @@ class RosDeployTool(Tool):
         return (
             "Deploy a ROS template in the selling pipeline. Use create for the initial stack, continue_create for "
             "failed stacks created by this step, delete_and_create only after ContinueCreateStackValidationFailed, "
-            "and wait to resume polling an already-started stack creation."
+            "and wait to resume polling an already-started stack creation. "
+            "When the user has not required an exact StackName, append this runtime-generated uniqueness suffix "
+            f"to the default or user-provided base name: {self._name_suffix}. "
+            "Use this actual suffix instead of inventing randomness or copying documentation examples. "
+            "Preserve exact user-required names without appending a suffix or renaming them on conflict."
         )
 
     @property

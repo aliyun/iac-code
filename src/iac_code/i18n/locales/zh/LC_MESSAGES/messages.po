@@ -4197,11 +4197,12 @@ msgstr "- 恢复清理时，仍然只处理此提示中列出的资源；不要�
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
-"- Prefer available ROS stack tools for deletion; if using aliyun_api, "
-"call DeleteStack first, then repeatedly call GetStack to check status."
+"- Use the ros_stack tool for DeleteStack. Do not use aliyun_api for "
+"DeleteStack when ros_stack is available; use aliyun_api GetStack to check"
+" status until DELETE_COMPLETE."
 msgstr ""
-"- 删除时优先使用可用的 ROS 资源栈工具；如果使用 aliyun_api，请先调用 DeleteStack，然后反复调用 GetStack "
-"检查状态。"
+"- 使用 ros_stack 工具执行 DeleteStack。ros_stack 可用时不要通过 aliyun_api 调用 "
+"DeleteStack；使用 aliyun_api GetStack 检查状态，直到 DELETE_COMPLETE。"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
@@ -4371,10 +4372,11 @@ msgstr "当前步骤的结构化结论。必填且不能为空。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
-"Submit the full first conclusion. On a resumed user-interaction branch, "
-"submit only changed fields; the pipeline merges them with the saved "
-"conclusion before full validation."
-msgstr "首次提交完整结论。在恢复的用户交互分支中，只提交已更改的字段；pipeline 会先将其与已保存的结论合并，再进行完整校验。"
+"Submit the full first conclusion. Always include required fields, even "
+"when unchanged. On a resumed user-interaction branch, submit changed "
+"optional fields; the pipeline merges them with the saved conclusion "
+"before full validation."
+msgstr "首次提交完整结论。必填字段即使未更改也必须提交。在恢复的用户交互分支中，提交已更改的可选字段；pipeline 会先将其与已保存的结论合并，再进行完整校验。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4404,13 +4406,9 @@ msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
 "{schema_hint}\n"
-"Do not repeat unchanged saved fields on a resumed interaction; submit "
-"only the corrected fields."
-msgstr ""
-"{error}\n"
-"当前步骤：{step_id}\n"
-"{schema_hint}\n"
-"恢复交互时不要重复未更改的已保存字段；只提交修正后的字段。"
+"Always include required conclusion fields, even when unchanged. On a "
+"resumed interaction, omit only unchanged optional saved fields."
+msgstr "{error}\n当前步骤：{step_id}\n{schema_hint}\n结论的必填字段即使未更改也必须提交。在恢复的交互中，仅省略未更改的已保存可选字段。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4451,6 +4449,11 @@ msgstr "允许的状态值：{statuses}。"
 #, python-brace-format
 msgid "Allowed conclusion fields: {fields}."
 msgstr "允许的结论字段：{fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Required conclusion fields: {fields}."
+msgstr "结论的必填字段：{fields}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "conclusion must match this schema summary:\n"
@@ -13661,3 +13664,11 @@ msgstr "Responses API 要求使用有效的 HTTP 或 HTTPS 基础地址。"
 #: src/iac_code/providers/manager.py
 msgid "Responses API requires an OpenAI-style provider."
 msgstr "Responses API 要求提供商使用 OpenAI 风格协议。"
+
+#: src/iac_code/pipeline/selling/hooks/architecture_planning.py
+msgid "requested_candidate_count must be a positive integer or null"
+msgstr "requested_candidate_count 必须为正整数或 null"
+
+#: src/iac_code/pipeline/selling/hooks/architecture_planning.py
+msgid "The user requested {expected} candidate plans; {actual} were submitted. Correct the candidates or ask for clarification; do not silently change the requested count."
+msgstr "用户要求 {expected} 个候选方案，但提交了 {actual} 个。请修正候选方案或向用户澄清；不要擅自更改要求的数量。"

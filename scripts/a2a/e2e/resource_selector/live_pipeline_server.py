@@ -76,7 +76,9 @@ def main() -> int:
         artifact_dir=artifact_dir,
         auto_approve_permissions=False,
     )
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    # ManagedServer verifies the socket-bind receipt from this child's pipe
+    # before accepting its agent card. Warning hides Uvicorn's bind receipt.
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info", access_log=False)
     return 0
 
 

@@ -97,6 +97,8 @@ class QwenProvider(DashScopeProvider):
         return self._learned_mandatory_thinking or token_plan_mandatory
 
     def _build_thinking_kwargs_with_mandatory(self, mandatory: bool) -> dict[str, Any]:
+        if normalized_model_name(self._model) == "qwen3.8-omni-flash":
+            return super()._build_thinking_kwargs()
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.DASHSCOPE:
             return {}

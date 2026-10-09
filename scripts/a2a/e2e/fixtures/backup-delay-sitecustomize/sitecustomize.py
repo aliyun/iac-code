@@ -76,6 +76,17 @@ def _claim_delay(reason: Any) -> tuple[Path, float, float] | None:
     deadline = started_monotonic + delay_seconds
     while (remaining := deadline - time.monotonic()) > 0:
         time.sleep(remaining)
+    arm = json.loads(_marker_path(control, "arm").read_text(encoding="utf-8"))
+    if arm.get("awaitRequestDispatch") is True:
+        # The concurrency boundary must not depend on advisory-model latency.
+        # Keep the injected backup open until the runner has actually dispatched
+        # its response. An absent participant fails within a bounded budget.
+        wait_seconds = min(180.0, max(delay_seconds, float(arm.get("dispatchWaitSeconds", 180.0))))
+        deadline = started_monotonic + wait_seconds
+        while not _marker_path(control, "dispatched").is_file():
+            if time.monotonic() >= deadline:
+                raise TimeoutError("backup fixture request dispatch handshake exceeded deadline")
+            time.sleep(0.02)
     return control, started_at, started_monotonic
 
 

@@ -69,7 +69,10 @@ async def test_web_turn_runtime_creation_does_not_block_event_loop(tmp_path, mon
 
 
 @pytest.mark.asyncio
-async def test_web_turn_cancellation_closes_runtime_created_after_cancellation(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize('startup_delay', [0, 1.1])
+async def test_web_turn_cancellation_closes_runtime_created_after_cancellation(
+    tmp_path, monkeypatch, startup_delay,
+) -> None:
     from iac_code.types.stream_events import MessageEndEvent, Usage
     from iac_code.web import runtime as runtime_module
     from iac_code.web.runtime import WebSessionRuntime, WebTurnRequest
@@ -79,31 +82,46 @@ async def test_web_turn_cancellation_closes_runtime_created_after_cancellation(t
         async def run_streaming(self, _user_input):
             yield MessageEndEvent(stop_reason="stop", usage=Usage())
 
-    factory_started = threading.Event()
+    loop = asyncio.get_running_loop()
+    factory_started = asyncio.Event()
     release_factory = threading.Event()
+    runtime_closed = asyncio.Event()
     agent_runtime = _ClosableRuntime(FakeAgentLoop())
+    original_close = agent_runtime.aclose
+
+    async def close_runtime():
+        await original_close()
+        runtime_closed.set()
+
+    agent_runtime.aclose = close_runtime
 
     def create_runtime(_session, _manager, **_kwargs):
-        factory_started.set()
-        release_factory.wait(timeout=1)
+        loop.call_soon_threadsafe(factory_started.set)
+        release_factory.wait()
         return agent_runtime
 
     monkeypatch.setattr(runtime_module, "create_session_agent_runtime", create_runtime)
     monkeypatch.setattr(runtime_module, "flush_telemetry", lambda: None)
     manager = WebSessionManager(projects_dir=tmp_path / "projects")
     session = manager.create_session(session_id="session-cancel-runtime-creation")
-    turn_task = asyncio.create_task(
-        WebSessionRuntime(session, manager=manager).start_turn(WebTurnRequest(text="hello", image_ids=[], file_refs=[]))
-    )
+    async def delayed_start():
+        await asyncio.sleep(startup_delay)
+        return await WebSessionRuntime(session, manager=manager).start_turn(
+            WebTurnRequest(text="hello", image_ids=[], file_refs=[])
+        )
 
-    assert await asyncio.to_thread(factory_started.wait, 1)
-    turn_task.cancel()
-    release_factory.set()
-    result = await turn_task
-    for _attempt in range(50):
-        if agent_runtime.closed:
-            break
-        await asyncio.sleep(0.01)
+    turn_task = asyncio.create_task(delayed_start())
+
+    try:
+        # Cancel while the factory is actually blocked, independent of startup
+        # scheduling. The normal pytest deadline still bounds this handshake.
+        await factory_started.wait()
+        turn_task.cancel()
+        release_factory.set()
+        result = await turn_task
+        await runtime_closed.wait()
+    finally:
+        release_factory.set()
 
     assert result["reason"] == "turn canceled"
     assert agent_runtime.closed is True
