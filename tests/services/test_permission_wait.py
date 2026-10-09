@@ -910,6 +910,44 @@ async def test_unexpected_resident_timer_cancellation_rearms_from_absolute_deadl
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("grace_seconds", [0, 0.1])
+async def test_resident_timer_retries_when_sleep_wakes_before_absolute_deadline(
+    monkeypatch, tmp_path, grace_seconds
+) -> None:
+    store = _store(tmp_path)
+    policy = PermissionWaitPolicy(resident_timeout_seconds=1, timeout_grace_seconds=grace_seconds)
+    now = utc_now()
+    record = _record(store, policy, now=now)
+    future: asyncio.Future[bool | PermissionWaitOutcome] = asyncio.get_running_loop().create_future()
+    coordinator = PermissionWaitCoordinator(policy)
+    real_sleep = asyncio.sleep
+    delays = []
+
+    async def sleep_with_early_first_wakeup(delay):
+        nonlocal now
+        delays.append(delay)
+        # Model a timer waking before the persisted wall-clock deadline, as
+        # can happen with Windows clock resolution. Later waits reach it.
+        now += timedelta(seconds=delay - 0.01 if len(delays) == 1 else delay)
+        await real_sleep(0)
+
+    monkeypatch.setattr("iac_code.services.permission_wait.utc_now", lambda: now)
+    monkeypatch.setattr("iac_code.services.permission_wait.asyncio.sleep", sleep_with_early_first_wakeup)
+    coordinator.register_live(record=record, store=store, future=future)
+    owner = coordinator._owners[record["boundaryId"]]
+    assert owner.timer is not None
+    try:
+        await asyncio.wait_for(owner.timer, timeout=5)
+        assert future.done(), "an early timer wakeup must not strand the permission wait"
+        assert future.result() is PermissionWaitOutcome.SUSPEND
+        assert store.load(record["boundaryId"])["phase"] == "SUSPENDING"
+        assert delays == pytest.approx([1, 0.01] + ([grace_seconds] if grace_seconds else []))
+    finally:
+        coordinator.unregister_live(record["boundaryId"])
+    assert store.load(record["boundaryId"])["phase"] == "SUSPENDED"
+
+
+@pytest.mark.asyncio
 async def test_duplicate_live_registration_keeps_original_generation_fenced_timer(tmp_path) -> None:
     store = _store(tmp_path)
     policy = PermissionWaitPolicy(resident_timeout_seconds=0.01, timeout_grace_seconds=0.05)

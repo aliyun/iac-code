@@ -60,6 +60,42 @@ The runner reads `~/.iac-code` by default. Use `--source-config-dir` or
 scenario. The live tests are skipped unless explicitly enabled because they consume LLM quota and access the
 configured cloud account.
 
+### Real selector answer after an A2A restart
+
+`resource_selector/run_live_resource_selector_restart.py` covers Normal/Pipeline ×
+SIGTERM/SIGKILL/explicit execution release × selection/cancellation (12 cases).
+It waits for a real LLM-generated selector, queries real existing VPCs, restarts
+only its own A2A process using the same persistence/workspace, then submits the
+correlated answer. At the first resumed SSE frame, execution state must already
+exist and reference a new execution for the same task/context. Pipeline must
+finish and hand off to Normal; a subsequent real LLM turn must succeed without
+reopening the selector or reporting a lifecycle conflict.
+
+This runner uses the original configuration **in place**, never an isolated
+credential copy. OAuth refresh may update that original credential file normally;
+the test permission policy is written only inside its temporary workspace. All
+cloud queries are read-only. `released` explicitly invokes the execution-terminate
+API before an orderly process restart; it does not test ROS's automatic idle timer,
+the frontend, or an actual sandbox replacement.
+
+```bash
+uv run --all-extras python scripts/a2a/e2e/resource_selector/run_live_resource_selector_restart.py \
+  --allow-real-cloud --mode pipeline --restart-style released --answer selected \
+  --run-dir /tmp/iac-selector-pipeline-restart
+
+IAC_CODE_A2A_RESOURCE_SELECTOR_RESTART_LIVE_E2E=1 \
+uv run --all-extras pytest -q tests/a2a_e2e/test_live_resource_selector_restart.py
+```
+
+Use a fresh `--run-dir` each time. `--mode` accepts `normal`/`pipeline`,
+`--restart-style` accepts `sigterm`/`sigkill`/`released`, and `--answer` accepts
+`selected`/`canceled`. The default configuration follows `IAC_CODE_CONFIG_DIR`
+or `~/.iac-code`; `--source-config-dir` overrides it. The pytest entry point also
+accepts `IAC_CODE_A2A_RESOURCE_SELECTOR_LIVE_CONFIG_DIR` and skips all real-cloud
+cases without the explicit opt-in above. Evidence includes redacted SSE/logs,
+before/after/first-frame execution states, process lifecycle, and `summary.json`.
+The runner always stops its owned server; it does not launch browser tabs.
+
 ## Real StartChat permission-wait matrix
 
 `run_start_chat_permission_wait.py` is the credential-gated, repeatable chain

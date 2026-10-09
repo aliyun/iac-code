@@ -134,10 +134,15 @@ async def test_slow_mcp_runtime_does_not_block_slash_menu(tmp_path, monkeypatch)
     from iac_code.web.session_manager import WebSessionManager
 
     release = threading.Event()
+    started = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    runtime = _TrackedDynamicRuntime()
 
     def create_runtime(_options):
-        release.wait(timeout=2)
-        return _DynamicRuntime()
+        loop.call_soon_threadsafe(started.set)
+        if not release.wait(timeout=10):
+            raise TimeoutError("test did not release the MCP runtime")
+        return runtime
 
     monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", create_runtime)
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path)
@@ -145,18 +150,23 @@ async def test_slow_mcp_runtime_does_not_block_slash_menu(tmp_path, monkeypatch)
     app = create_app(session_manager=manager)
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-            started_at = time.monotonic()
-            response = await client.get(
-                "/api/suggestions",
-                params={"kind": "command", "q": "", "sessionId": session.session_id},
+            response = await asyncio.wait_for(
+                client.get(
+                    "/api/suggestions",
+                    params={"kind": "command", "q": "", "sessionId": session.session_id},
+                ),
+                timeout=5,
             )
-            elapsed = time.monotonic() - started_at
+            await asyncio.wait_for(started.wait(), timeout=5)
+            # The menu returns while the runtime is still blocked, independent
+            # of shared CI runner load or cold registry imports.
+            assert not release.is_set()
+            assert not runtime.closed
     finally:
         release.set()
+        await asyncio.wait_for(runtime.closed_event.wait(), timeout=5)
 
     assert response.status_code == 200
-    # Did NOT wait for the ~2s runtime build.
-    assert elapsed < 0.8
     # Static built-in commands are still served.
     suggestions = response.json()["suggestions"]
     assert suggestions
@@ -169,36 +179,38 @@ async def test_dynamic_suggestion_runtime_creation_does_not_block_other_requests
     from iac_code.web.session_manager import WebSessionManager
 
     release = threading.Event()
+    started = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    runtime = _TrackedDynamicRuntime()
 
     def create_runtime(_options):
-        release.wait(timeout=1)
-        return _DynamicRuntime()
+        loop.call_soon_threadsafe(started.set)
+        if not release.wait(timeout=10):
+            raise TimeoutError("test did not release the MCP runtime")
+        return runtime
 
     monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", create_runtime)
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path)
     session = manager.create_session(session_id="nonblocking-dynamic-suggestions")
     app = create_app(session_manager=manager)
-    timer = threading.Timer(0.3, release.set)
-    timer.start()
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-            started_at = time.monotonic()
             suggestion_task = asyncio.create_task(
                 client.get(
                     "/api/suggestions",
                     params={"kind": "command", "q": "mcp", "sessionId": session.session_id},
                 )
             )
-            health_task = asyncio.create_task(client.get("/health"))
-            health_response = await health_task
-            health_elapsed = time.monotonic() - started_at
-            suggestion_response = await suggestion_task
+            await asyncio.wait_for(started.wait(), timeout=5)
+            health_response = await asyncio.wait_for(client.get("/health"), timeout=5)
+            assert not release.is_set()
+            assert not runtime.closed
+            suggestion_response = await asyncio.wait_for(suggestion_task, timeout=5)
     finally:
         release.set()
-        timer.cancel()
+        await asyncio.wait_for(runtime.closed_event.wait(), timeout=5)
 
     assert health_response.status_code == 200
-    assert health_elapsed < 0.15
     assert suggestion_response.status_code == 200
 
 
@@ -251,10 +263,15 @@ async def test_dynamic_command_runtime_creation_does_not_block_other_requests(tm
     from iac_code.web.session_manager import WebSessionManager
 
     release = threading.Event()
+    runtime_started = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    runtime = _TrackedDynamicRuntime()
 
     def create_runtime(_options):
-        release.wait(timeout=1)
-        return _DynamicRuntime()
+        loop.call_soon_threadsafe(runtime_started.set)
+        if not release.wait(timeout=10):
+            raise TimeoutError("test did not release the MCP runtime")
+        return runtime
 
     monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", create_runtime)
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path)
@@ -267,28 +284,26 @@ async def test_dynamic_command_runtime_creation_does_not_block_other_requests(tm
             return {"accepted": True, "turnId": request.turn_id}
 
     app = create_app(session_manager=manager, runtime_factory=lambda _session: RecordingTurnRuntime())
-    timer = threading.Timer(0.3, release.set)
-    timer.start()
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-            started_at = time.monotonic()
             command_task = asyncio.create_task(
                 client.post(
                     f"/api/sessions/{session.session_id}/commands",
                     json={"command": "/mcp__remote__review details"},
                 )
             )
-            await asyncio.sleep(0)
-            health_response = await client.get("/health")
-            health_elapsed = time.monotonic() - started_at
-            command_response = await command_task
-            await asyncio.wait_for(started.wait(), timeout=1)
+            await asyncio.wait_for(runtime_started.wait(), timeout=5)
+            health_response = await asyncio.wait_for(client.get("/health"), timeout=5)
+            assert not release.is_set()
+            assert not runtime.closed
+            release.set()
+            command_response = await asyncio.wait_for(command_task, timeout=5)
+            await asyncio.wait_for(started.wait(), timeout=5)
     finally:
         release.set()
-        timer.cancel()
+        await asyncio.wait_for(runtime.closed_event.wait(), timeout=5)
 
     assert health_response.status_code == 200
-    assert health_elapsed < 0.15
     assert command_response.status_code == 202
 
 

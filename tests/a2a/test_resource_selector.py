@@ -2,17 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from a2a.types import Message, Part, Role
+from a2a.types import Message, Part, Role, Task, TaskState, TaskStatus
 from a2a.utils.errors import InvalidParamsError
 
+from iac_code.a2a.execution_control import (
+    ExecutionControlConflictError,
+    ExecutionControlService,
+    RecoverableInputAdmissionCarrier,
+    current_execution_control,
+)
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.metrics import NoOpA2AMetrics
+from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
 from iac_code.a2a.pipeline_stream import _unified_input_projection
+from iac_code.a2a.request_scoped_active_task import PipelineLifecycleEventQueueCarrier
 from iac_code.a2a.resource_selector import (
     RESOURCE_SELECTION_QUERY_PREFIX,
     PendingResourceSelection,
@@ -37,6 +46,7 @@ from iac_code.types.stream_events import (
     TextDeltaEvent,
     Usage,
 )
+from iac_code.utils.state_io import atomic_write_json
 
 from .fakes import FakeEventQueue, FakeRequestContext, FakeRuntime
 
@@ -733,11 +743,220 @@ async def test_persisted_pipeline_resource_selection_recomputes_server_gate(
 
 
 @pytest.mark.asyncio
-async def test_executor_rejects_cross_owner_resource_answer_before_claim_or_header_commit(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("mode", "lifecycle"),
+    [("normal", False), ("pipeline", False), ("pipeline", True)],
+    ids=["normal", "pipeline-direct", "pipeline-sdk"],
+)
+@pytest.mark.parametrize("status", ["selected", "canceled"])
+@pytest.mark.parametrize(
+    "recovery", ["released", "dead-owner", "live", "live-owner", "unsettled", "external-operation", "begin-failed"]
+)
+async def test_resource_selection_resume_binds_execution_before_first_event(
+    monkeypatch, tmp_path, mode, lifecycle, status, recovery
+):
+    from google.protobuf.json_format import MessageToDict
+
+    cold = recovery != "live"
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials.load", lambda: None)
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    store = A2ATaskStore(persistence=persistence, owner_resolver=lambda context: str(context or ""))
+    ctx = await store.get_or_create_context(
+        context_id="ctx-1",
+        cwd=str(tmp_path),
+        runtime_factory=lambda session_id: FakeRuntime(session_id=session_id),
+    )
+    await store.discard_context_runtime("ctx-1")
+    task = await store.get_or_create_task(task_id="task-1", context_id="ctx-1", owner="owner-1")
+    task.state = "input-required"
+    store.mirror_task(task)
+    event = selection_event()
+    assert event.continuation_frame is not None
+    if mode == "pipeline":
+        event.continuation_frame["assistantMessageRef"] = "pipeline/transcripts/step.jsonl:1"
+    checkpoints = ResourceSelectionCheckpointStore(str(tmp_path), ctx.session_id)
+    pending = PendingResourceSelection(
+        task_id=task.task_id,
+        context_id=ctx.context_id,
+        session_id=ctx.session_id,
+        cwd=str(tmp_path),
+        event=event,
+        store=checkpoints,
+        resume_from_checkpoint=True,
+    )
+    checkpoints.create(checkpoint_record(pending))
+    source = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=None)
+    original = await source.begin_execution(
+        context_id="ctx-1", task_id="task-1", owner="owner-1", cwd=str(tmp_path), execution_mode=mode
+    )
+    original.bind_session(ctx.session_id)
+    current_task = asyncio.current_task()
+    assert current_task is not None
+    await original.detach_task(current_task, execution_status="input-required")
+    if recovery == "released":
+        # Model the durable release of the old sandbox, not an active owner's takeover.
+        original.phase = "terminated"
+        original.release_ready = True
+        original.revision += 1
+        await original._persist_snapshot(original.snapshot())
+    elif recovery != "live":
+        # A persisted selector wait can outlive its publisher without a release marker.
+        snapshot = original.snapshot()
+        snapshot["ownerPid"] = os.getpid() + 1
+        if recovery == "unsettled":
+            snapshot["revision"] += 1
+        elif recovery == "external-operation":
+            snapshot["externalOperations"] = [{"operationId": "external-1"}]
+        atomic_write_json(tmp_path / "a2a" / "execution-control" / "ctx-1.json", snapshot)
+        monkeypatch.setattr("iac_code.a2a.execution_control._pid_alive", lambda _pid: recovery == "live-owner")
+    service = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=None) if cold else source
+    if recovery == "begin-failed":
+
+        async def fail_begin(**_kwargs):
+            raise ExecutionControlConflictError("test begin failure")
+
+        monkeypatch.setattr(service, "begin_execution", fail_begin)
+    # A new sandbox reloads only persisted task/context records and has no live registry.
+    if cold:
+        await store.stop_cleanup_loop()
+        store = A2ATaskStore(persistence=persistence, owner_resolver=lambda context: str(context or ""))
+    store.set_execution_control_provider(service.snapshot_for_context, service.has_active_work)
+    executor = IacCodeA2AExecutor(task_store=store, model="test", execution_control_service=service)
+
+    observations = []
+
+    async def assert_execution_bound():
+        control = current_execution_control()
+        assert control is not None
+        snapshot = await service.observe(context_id="ctx-1", owner="owner-1")
+        assert snapshot["taskId"] == "task-1"
+        assert snapshot["contextId"] == "ctx-1"
+        assert snapshot["phase"] == "running"
+        assert snapshot["executionStatus"] == "working"
+        assert control.execution_mode == mode
+        assert control.session_id == ctx.session_id
+        assert (control.execution_id != original.execution_id) is cold
+        observations.append(snapshot)
+
+    class BindingQueue(FakeEventQueue):
+        async def enqueue_event(self, output):
+            # ROS binds execution control as soon as it sees the first response frame.
+            await assert_execution_bound()
+            await super().enqueue_event(output)
+
+    queue = BindingQueue()
+
+    class RecoveryPipelineExecutor:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def execute(self, **kwargs):
+            await assert_execution_bound()
+            assert kwargs["resource_selection_checkpoint"]["response"] == reply.to_dict()
+            assert kwargs["resource_selection_checkpoint"]["state"] == "claimed"
+            if lifecycle:
+                assert queue.events  # Bind the SDK lifecycle before restoring Pipeline sidecars.
+                assert PipelineLifecycleEventQueueCarrier.is_bound(request)
+            else:
+                await executor._publish_status(
+                    kwargs["event_queue"], task_id="task-1", context_id="ctx-1", state=TaskState.TASK_STATE_WORKING
+                )
+            kwargs["task"].state = "input-required"
+            store.mirror_task(kwargs["task"])
+
+    class RecoveryLoop:
+        async def resume_resource_selection_boundary(self, *_args, **_kwargs):
+            await assert_execution_bound()
+            yield TextDeltaEvent(text="selection resumed")
+
+    class RecoveryRuntime(FakeRuntime):
+        def set_resource_selector_enabled(self, enabled):
+            pass
+
+    async def skip_backup(*_args, **_kwargs):
+        pass
+
+    async def live_continuation(_queue, resumed):
+        await assert_execution_bound()
+        await executor._resource_selection_registry.complete(resumed)
+
+    monkeypatch.setattr("iac_code.a2a.executor.IacCodeA2APipelineExecutor", RecoveryPipelineExecutor)
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.create_agent_runtime",
+        lambda options: RecoveryRuntime(session_id=options.session_id, agent_loop=RecoveryLoop()),
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.configure_runtime_model", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr("iac_code.a2a.executor.refresh_runtime_cloud_tools", lambda _runtime: None)
+    monkeypatch.setattr("iac_code.a2a.executor.backup_session_async", skip_backup)
+    reply = (
+        response()
+        if status == "selected"
+        else ResourceSelectionResponse(
+            task_id="task-1", context_id="ctx-1", input_id=event.input_id, tool_use_id="tool-1", status="canceled"
+        )
+    )
+    # A handoff-normal selector still arrives through the Pipeline transport metadata.
+    request = FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path), "run_mode": "pipeline"}})
+    request.call_context = "owner-1"
+    request.message = _text_selection_message(reply.to_dict(), task_id="task-1")
+    request.current_task = Task(
+        id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED)
+    )
+    if lifecycle:
+        PipelineLifecycleEventQueueCarrier.attach(request)
+    if recovery == "released":
+        admission = await service.reserve_recoverable_input_continuation(
+            context_id="ctx-1", task_id="task-1", owner="owner-1"
+        )
+        assert admission is not None
+        RecoverableInputAdmissionCarrier.attach(request, admission)
+    elif not cold:
+        pending.continuation = live_continuation
+        await executor._resource_selection_registry.register(pending)
+    try:
+        if recovery in {"live-owner", "unsettled", "external-operation", "begin-failed"}:
+            error = "test begin failure" if recovery == "begin-failed" else "active in another process"
+            with pytest.raises(ExecutionControlConflictError, match=error):
+                await executor.execute(request, queue)
+            assert not observations
+            assert not queue.events
+            assert service.get_for_context("ctx-1") is None
+            assert not service._recoverable_input_admissions.has_active("ctx-1")
+            return
+        await executor.execute(request, queue)
+        assert observations
+        assert checkpoints.load(event.input_id)["state"] == "resolved"
+        if cold and mode == "pipeline":
+            first = MessageToDict(queue.events[0])
+            assert first["taskId"] == "task-1"
+            assert first["contextId"] == "ctx-1"
+            assert first["status"]["state"] == "TASK_STATE_WORKING"
+        assert not service.get_for_context("ctx-1").has_managed_work()
+    finally:
+        await service.close()
+        if cold:
+            await source.close()
+        await store.stop_cleanup_loop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("caller", "answer", "error"),
+    [
+        ("owner-b", response(), "different owner"),
+        ("owner-a", response(value="invalid instance ID"), "selector value is invalid"),
+    ],
+    ids=["cross-owner", "invalid-selection"],
+)
+async def test_executor_rejects_invalid_resource_answer_before_execution_claim_or_header_commit(
+    tmp_path, caller, answer, error
+) -> None:
     task_store = A2ATaskStore(metrics=NoOpA2AMetrics(), owner_resolver=lambda context: str(context or ""))
     await task_store.get_or_create_task(task_id="task-1", context_id="ctx-1", owner="owner-a")
     await task_store.bind_context_llm_headers("ctx-1", {"Authorization": "Bearer victim"})
-    executor = IacCodeA2AExecutor(task_store=task_store, model="qwen3.6-plus")
+    service = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=None)
+    executor = IacCodeA2AExecutor(task_store=task_store, model="qwen3.6-plus", execution_control_service=service)
     event = selection_event(future=asyncio.get_running_loop().create_future())
     checkpoint_store = ResourceSelectionCheckpointStore(str(tmp_path), "session-1")
     pending = PendingResourceSelection(
@@ -757,11 +976,11 @@ async def test_executor_rejects_cross_owner_resource_answer_before_claim_or_head
         commit_called = True
         await task_store.bind_context_llm_headers("ctx-1", {"Authorization": "Bearer attacker"})
 
-    with pytest.raises(InvalidParamsError, match="different owner"):
+    with pytest.raises(InvalidParamsError, match=error):
         await executor._answer_resource_selection(
-            SimpleNamespace(call_context="owner-b"),
+            SimpleNamespace(call_context=caller),
             FakeEventQueue(),
-            response=response(),
+            response=answer,
             commit_llm_headers=commit_headers,
         )
 
@@ -769,6 +988,8 @@ async def test_executor_rejects_cross_owner_resource_answer_before_claim_or_head
     assert not event.response_future.done()
     assert checkpoint_store.load(event.input_id)["state"] == "pending"
     assert await task_store.resolve_context_llm_headers("ctx-1", None) == {"Authorization": "Bearer victim"}
+    assert service.get_for_context("ctx-1") is None
+    await service.close()
 
 
 @pytest.mark.asyncio

@@ -283,9 +283,11 @@ async def test_parallel_parent_cancellation_during_key_reader_shutdown_propagate
     monkeypatch.setattr(repl_module.asyncio, "create_task", create_task)
 
     render_task = original_create_task(repl._render_parallel_tabs(stream()))
-    await asyncio.wait_for(key_reader_started.wait(), timeout=1)
+    # These are setup/shutdown gates, not latency assertions. Coverage + xdist
+    # can delay scheduling on CI; cancellation semantics below stay unchanged.
+    await asyncio.wait_for(key_reader_started.wait(), timeout=10)
     permission_can_arrive.set()
-    await asyncio.wait_for(key_reader_cancelled.wait(), timeout=1)
+    await asyncio.wait_for(key_reader_cancelled.wait(), timeout=10)
 
     render_task.cancel()
     release_key_reader.set()
