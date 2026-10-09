@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -249,12 +250,16 @@ def _expect_input_ready(pty: ReplPty, description: str, timeout: float) -> None:
 
 def _expect_candidate_selection(pty: ReplPty, args: argparse.Namespace, description: str) -> None:
     pty.expect_any(CANDIDATE_SELECTION_PATTERNS, description=description, timeout=args.stream_timeout)
-    pty.expect_optional(
-        CANDIDATE_SELECTION_READY_PATTERNS,
-        description=f"{description} controls",
-        timeout=min(args.timeout, 3.0),
+    # The controls may have been printed before the progress line matched.
+    if any(re.search(pattern, pty.transcript) for pattern in CANDIDATE_SELECTION_READY_PATTERNS):
+        return
+    # macOS emits bracketed-paste readiness here; Linux CI may only show the
+    # candidate controls. The contract does not send another key at this point.
+    pty.expect_any(
+        CANDIDATE_SELECTION_READY_PATTERNS + REPL_INPUT_READY_PATTERNS,
+        description=f"{description} controls or input",
+        timeout=args.timeout,
     )
-    pty.expect_any(REPL_INPUT_READY_PATTERNS, description=f"{description} input", timeout=args.timeout)
 
 
 def _latest_pipeline_sidecar(config_dir: Path) -> tuple[Path, dict[str, Any]]:

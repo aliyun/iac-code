@@ -123,6 +123,9 @@ def _make_fake_agent_loop_class(events_to_yield):
             for event in events_to_yield:
                 yield event
 
+        def get_context_usage(self):
+            return {}
+
     return FakeAgentLoop
 
 
@@ -891,6 +894,35 @@ class TestStepExecutor:
         results = [e for e in collected if isinstance(e, StepResult)]
         assert len(results) == 1
         assert results[0].error == "No conclusion extracted"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("reason", ["stream_error", "max_turns", "length", "max_tokens"])
+    async def test_failed_completion_preserves_model_termination_cause(self, tmp_path, reason):
+        events = [MessageEndEvent(stop_reason=reason, usage=Usage())]
+        executor = _make_executor(tmp_path)
+        with patch("iac_code.agent.agent_loop.AgentLoop", _make_fake_agent_loop_class(events)):
+            collected = [event async for event in executor.execute(
+                _make_step(), PipelineContext(SIMPLE_DEPS), "test_session")]
+        results = [event for event in collected if isinstance(event, StepResult)]
+        assert len(results) == 1
+        assert results[0].status == StepStatus.FAILED
+        assert results[0].error == f"No conclusion extracted (agent stop reason: {reason})"
+
+    @pytest.mark.asyncio
+    async def test_successful_complete_step_is_not_overridden_by_later_model_limit(self, tmp_path):
+        events = [
+            ToolUseStartEvent(tool_use_id="c", name="complete_step"),
+            ToolUseEndEvent(tool_use_id="c", name="complete_step", input={"conclusion": {"business": "website"}}),
+            ToolResultEvent(tool_use_id="c", tool_name="complete_step", result="ok", is_error=False),
+            MessageEndEvent(stop_reason="max_turns", usage=Usage()),
+        ]
+        executor = _make_executor(tmp_path)
+        with patch("iac_code.agent.agent_loop.AgentLoop", _make_fake_agent_loop_class(events)):
+            collected = [event async for event in executor.execute(
+                _make_step(), PipelineContext(SIMPLE_DEPS), "test_session")]
+        results = [event for event in collected if isinstance(event, StepResult)]
+        assert results[0].status == StepStatus.COMPLETED
+        assert results[0].conclusion == {"business": "website"}
 
     @pytest.mark.asyncio
     async def test_nudge_retry_succeeds_on_second_attempt(self, tmp_path, caplog):
@@ -3731,3 +3763,17 @@ async def test_resumed_step_rebuilds_ask_user_question_guard_state(monkeypatch, 
 
     assert captured_guard_state["successful_tools"] == {"ask_user_question"}
     assert captured_guard_state["tool_results"]["ask_user_question"]["free_text"] == "budget 500"
+
+
+@pytest.mark.parametrize('resuming', [False, True])
+def test_candidate_resume_guard_is_native_execution_state_independent_of_conclusion(tmp_path, resuming):
+    executor = _make_executor(tmp_path)
+    context = PipelineContext(SIMPLE_DEPS)
+    # A stale prior value must not by itself turn an initial presentation into a resume.
+    context.set_conclusion('intent', {'options': [], 'user_input': 'old choice'})
+    context.mark_stale('intent')
+    agent_context = executor.build_agent_loop_context(
+        _make_step(), context, 'test_session', resume_candidate_selection=resuming,
+        completion_guard_state_seed={'successful_tools': {'read_file'}})
+    assert agent_context.completion_guard_state['resuming_candidate_selection'] is resuming
+    assert 'read_file' in agent_context.completion_guard_state['successful_tools']

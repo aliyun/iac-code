@@ -96,6 +96,36 @@ def test_constraint_satisfied_uses_generic_operators_and_units(constraint, actua
     assert constraint_satisfied(constraint, actual_value, actual_unit=actual_unit) is expected
 
 
+@pytest.mark.parametrize('actual,expected,contains', [
+    ('10.0.0.0/16', '10.0.1.0/24', True),
+    ('10.0.1.0/24', '10.0.0.0/16', False),
+    ('10.0.1.0/24', '10.0.1.0/24', True),
+    ('10.0.1.0/24', '10.0.2.0/24', False),
+    ('10.0.0.0/24', '10.0.0.0/2', False),
+    ('2001:db8::/32', '2001:db8:1::/48', True),
+    ('2001:db8::/32', '2001:db9::/32', False),
+    ('10.0.0.0/16', '2001:db8::/32', False),
+])
+@pytest.mark.parametrize('operator', ['contains', 'not_contains'])
+def test_cidr_containment_uses_network_membership_instead_of_text(actual, expected, contains, operator):
+    constraint = _constraint(target='Network', property='CidrBlock', operator=operator, value=expected, unit=None)
+    assert constraint_satisfied(constraint, actual) is (contains if operator == 'contains' else not contains)
+
+
+def test_real_subnet_evidence_satisfies_containment_when_model_leaves_check_unresolved():
+    constraint = _constraint(target='Network', property='CidrBlock', operator='contains',
+                             value='10.0.1.0/24', unit=None)
+    actual = '10.0.0.0/16'
+    check = _check(constraint, status='unresolved', actual_value=actual, actual_unit=None,
+                   parameter_values={'VpcCidr': actual})
+    assert validate_hard_constraint_checks([constraint], [check], {'VpcCidr': actual}) == []
+    check['actual_value'] = '10.1.0.0/16'
+    check['parameter_values']['VpcCidr'] = check['actual_value']
+    check['evidence'][0]['actual_value'] = check['actual_value']
+    issues = validate_hard_constraint_checks([constraint], [check], check['parameter_values'])
+    assert [issue.code for issue in issues] == ['constraint_not_satisfied', 'constraint_comparison_failed']
+
+
 @pytest.mark.parametrize("value", ["NaN", "Infinity", Decimal("sNaN")])
 def test_constraint_satisfied_rejects_non_finite_numbers_without_raising(value):
     assert constraint_satisfied(_constraint(operator="eq", value=value, unit=None), value) is False

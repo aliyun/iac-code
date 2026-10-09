@@ -16,6 +16,14 @@ SKILL_DIR = (
 PROMPT_FILE = SKILL_DIR.parents[1] / "prompts" / "architecture_planning.md"
 
 
+def test_explicit_candidate_count_precedes_default_complexity_rules_in_both_planning_instructions():
+    for path in (PROMPT_FILE, SKILL_DIR / "SKILL.md"):
+        body = path.read_text(encoding="utf-8")
+        assert body.index("用户明确指定候选方案数量时，优先遵守该数量") < body.index("用户未指定数量时")
+        assert "intent.additional_notes" in body
+        assert "先请求澄清，不要静默改变数量或虚构差异" in body
+
+
 def test_architecture_consumes_intent_resource_lifecycle_contract():
     body = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
 

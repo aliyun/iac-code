@@ -340,8 +340,9 @@ class CompleteStepTool(Tool):
         compact: dict[str, Any] = {
             "type": "object",
             "description": _(
-                "Submit the full first conclusion. On a resumed user-interaction branch, submit only changed "
-                "fields; the pipeline merges them with the saved conclusion before full validation."
+                "Submit the full first conclusion. Always include required fields, even when unchanged. "
+                "On a resumed user-interaction branch, submit changed optional fields; "
+                "the pipeline merges them with the saved conclusion before full validation."
             ),
             "properties": compact_properties,
             "additionalProperties": False,
@@ -438,6 +439,8 @@ class CompleteStepTool(Tool):
             "truncated": truncated,
             "step": display_step_name(self._step_config.step_id),
         }
+        if self._step_config.compact_completion_errors:
+            diagnostic["schemaHint"] = self._complete_step_schema_hint()
         if len(details) == 1:
             diagnostic.update(details[0])
         else:
@@ -608,7 +611,8 @@ class CompleteStepTool(Tool):
         if self._step_config.compact_completion_errors:
             return _(
                 "{error}\nCurrent step: {step_id}\n{schema_hint}\n"
-                "Do not repeat unchanged saved fields on a resumed interaction; submit only the corrected fields."
+                "Always include required conclusion fields, even when unchanged. "
+                "On a resumed interaction, omit only unchanged optional saved fields."
             ).format(
                 error=error,
                 step_id=display_step_name(self._step_config.step_id),
@@ -653,6 +657,9 @@ class CompleteStepTool(Tool):
                 parts.append(_("Allowed status values: {statuses}.").format(statuses=", ".join(map(str, statuses))))
             if field_names:
                 parts.append(_("Allowed conclusion fields: {fields}.").format(fields=", ".join(field_names)))
+            required = schema.get("required")
+            if isinstance(required, list) and required:
+                parts.append(_("Required conclusion fields: {fields}.").format(fields=", ".join(map(str, required))))
             return " ".join(parts)
         compact = self._compact_schema(schema)
         return _("conclusion must match this schema summary:\n") + json.dumps(compact, ensure_ascii=False)
@@ -730,9 +737,16 @@ class CompleteStepTool(Tool):
             sanitize_strict_text(self._step_config.step_id),
             sanitize_strict_text(",".join(str(error.validator) for error in errors)),
         )
-        if len(errors) == 1:
-            return self._public_validation_error(errors[0])
         details = [self._conclusion_schema_error_detail(error, schema) for error in errors]
+        if len(details) == 1 and self._step_config.compact_completion_errors:
+            # Keep the compact error small while identifying the field the model must repair.
+            detail = {key: details[0][key] for key in ("path", "validator", "message")}
+            if errors[0].validator == "type":
+                detail["expected"] = details[0]["expected"]
+            return json.dumps(
+                detail,
+                ensure_ascii=False,
+            )
         return json.dumps(
             {
                 "error": "conclusion_schema_validation_failed",

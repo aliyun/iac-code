@@ -502,8 +502,8 @@ class CleanupLedger:
                 "do not inspect or delete others."
             ),
             _(
-                "- Prefer available ROS stack tools for deletion; if using aliyun_api, call DeleteStack first, "
-                "then repeatedly call GetStack to check status."
+                "- Use the ros_stack tool for DeleteStack. Do not use aliyun_api for DeleteStack when "
+                "ros_stack is available; use aliyun_api GetStack to check status until DELETE_COMPLETE."
             ),
             _(
                 "- If a resource is already deleting, call GetStack first, "

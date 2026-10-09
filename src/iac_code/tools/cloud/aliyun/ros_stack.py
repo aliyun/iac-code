@@ -328,6 +328,8 @@ class RosStack(BaseCloudStack):
         return attach_ros_validation(result, context.ros_preflight_outcome)
 
     def is_action_terminal(self, action: str, status: StackStatus) -> bool:
+        if status.status == "DELETE_COMPLETE":
+            return True
         if action in {"CreateStack", "ContinueCreateStack"}:
             return status.status in _CREATE_TERMINAL_STATUSES
         if action == "UpdateStack":
@@ -337,8 +339,8 @@ class RosStack(BaseCloudStack):
         return super().is_action_terminal(action, status)
 
     def is_action_success(self, action: str, status: StackStatus) -> bool:
-        if action == "DeleteStack":
-            return status.status == "DELETE_COMPLETE"
+        if status.status == "DELETE_COMPLETE" or action == "DeleteStack":
+            return action == "DeleteStack" and status.status == "DELETE_COMPLETE"
         return super().is_action_success(action, status)
 
     def _log_event_best_effort(self, event_name: str, metadata: dict[str, Any]) -> None:

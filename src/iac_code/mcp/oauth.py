@@ -1695,13 +1695,14 @@ def get_oauth_access_token(
     now: Callable[[], float] | None = None,
     refresh_margin_seconds: float = 60.0,
 ) -> str | None:
-    access_token = get_oauth_storage_secret(config, storage, "access_token", scope=scope)
+    token_state = _read_oauth_blob(storage, oauth_storage_key(config, scope=scope))
+    access_token = token_state.get("access_token")
     if not access_token:
         return None
 
-    expires_at = _parse_expires_at(get_oauth_storage_secret(config, storage, "expires_at", scope=scope))
-    refresh_token = get_oauth_storage_secret(config, storage, "refresh_token", scope=scope)
-    refresh_marker = get_oauth_storage_secret(config, storage, "refresh_marker", scope=scope)
+    expires_at = _parse_expires_at(token_state.get("expires_at"))
+    refresh_token = token_state.get("refresh_token")
+    refresh_marker = token_state.get("refresh_marker")
     clock = now or time.time
     if refresh_token and expires_at is not None and expires_at <= clock() + refresh_margin_seconds:
         return _refresh_oauth_access_token_with_lock(
@@ -1713,7 +1714,7 @@ def get_oauth_access_token(
             now=clock,
             refresh_margin_seconds=refresh_margin_seconds,
         )
-    # Another storage instance may have refreshed between the blob reads above.
+    # Another storage instance may have refreshed since the snapshot above.
     return get_oauth_storage_secret(config, storage, "access_token", scope=scope)
 
 
@@ -1727,16 +1728,17 @@ async def get_oauth_access_token_async(
     refresh_coordinator: TokenRefreshCoordinator | None = None,
 ) -> str | None:
     access_key = oauth_storage_key(config, scope=scope)
-    access_token = get_oauth_storage_secret(config, storage, "access_token", scope=scope)
+    token_state = _read_oauth_blob(storage, access_key)
+    access_token = token_state.get("access_token")
     if not access_token:
         return None
 
-    expires_at = _parse_expires_at(get_oauth_storage_secret(config, storage, "expires_at", scope=scope))
-    refresh_token = get_oauth_storage_secret(config, storage, "refresh_token", scope=scope)
-    refresh_marker = get_oauth_storage_secret(config, storage, "refresh_marker", scope=scope)
+    expires_at = _parse_expires_at(token_state.get("expires_at"))
+    refresh_token = token_state.get("refresh_token")
+    refresh_marker = token_state.get("refresh_marker")
     clock = now or time.time
     if not refresh_token or expires_at is None or expires_at > clock() + refresh_margin_seconds:
-        # Another storage instance may have refreshed between the blob reads above.
+        # Another storage instance may have refreshed since the snapshot above.
         return get_oauth_storage_secret(config, storage, "access_token", scope=scope)
 
     coordinator = refresh_coordinator or _DEFAULT_REFRESH_COORDINATOR

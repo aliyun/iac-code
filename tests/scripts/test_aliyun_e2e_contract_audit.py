@@ -8,6 +8,7 @@ from scripts.aliyun.e2e_contract_audit import (
     audit_aliyun_result_contract,
     audit_public_payloads,
     find_latest_aliyun_tool_result,
+    find_persisted_tool_name,
 )
 
 
@@ -77,6 +78,29 @@ def test_find_latest_aliyun_tool_result_selects_internal_result(tmp_path) -> Non
 def test_find_latest_aliyun_tool_result_requires_internal_result(tmp_path) -> None:
     with pytest.raises(AssertionError, match="no persisted aliyun_api ToolResult"):
         find_latest_aliyun_tool_result(tmp_path)
+
+
+@pytest.mark.parametrize("tool_name", ["aliyun_api", "ros_preview_template", "ros_validate_template"])
+def test_find_persisted_tool_name_uses_matching_invocation(tmp_path, tool_name) -> None:
+    path = tmp_path / "session.jsonl"
+    path.write_text(json.dumps({"role": "assistant", "content": [
+        {"type": "tool_use", "id": "other-call", "name": "write_file"},
+        {"type": "tool_use", "id": "cloud-call", "name": tool_name},
+    ]}) + "\n", encoding="utf-8")
+
+    assert find_persisted_tool_name(path, "cloud-call") == tool_name
+    with pytest.raises(AssertionError, match="unambiguous invoking tool"):
+        find_persisted_tool_name(path, "missing-call")
+
+
+def test_find_persisted_tool_name_rejects_conflicting_invocations(tmp_path) -> None:
+    path = tmp_path / "session.jsonl"
+    path.write_text(json.dumps({"content": [
+        {"type": "tool_use", "id": "call", "name": "aliyun_api"},
+        {"type": "tool_use", "id": "call", "name": "write_file"},
+    ]}), encoding="utf-8")
+    with pytest.raises(AssertionError, match="unambiguous invoking tool"):
+        find_persisted_tool_name(path, "call")
 
 
 def test_audit_public_payloads_accepts_business_body_and_rejects_nested_metadata(tmp_path) -> None:

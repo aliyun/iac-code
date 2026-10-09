@@ -16,6 +16,8 @@
 {candidate.hard_constraints}
 ```
 
+选择最终参数前，先按技能的「用户硬约束」流程读取对应产品 reference 并核验实际属性，不能用参数可用或询价成功代替属性核验；具体查询和证据要求以技能为准。
+
 ## 模板信息
 - 文件路径：`{template.file_path}`
 - 地域：`{template.region}`

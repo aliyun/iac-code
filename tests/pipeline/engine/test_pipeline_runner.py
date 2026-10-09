@@ -2095,6 +2095,42 @@ async def test_rollback_from_resumed_waiting_step_starts_fresh_target_attempt(tm
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("checkpoint_kind", ["permission_checkpoint", "resource_selection_checkpoint"])
+async def test_consumed_tool_checkpoint_is_not_reused_by_fresh_rollback_attempt(tmp_path, checkpoint_kind):
+    runner = _build_two_step_runner(tmp_path, auto_advance_first=False, surface="a2a")
+    runner.session = RecordingPipelineSession()
+    runner._loaded.steps[0].ui_mode = "candidate_selection"
+    calls = []
+
+    async def execute(step, context, session_id, **kwargs):
+        calls.append((step.step_id, kwargs.get(checkpoint_kind)))
+        if step.step_id == "b":
+            result = StepResult(
+                step_id="b", status=StepStatus.COMPLETED,
+                conclusion={"status": "reselect_requested"}, rollback_request=("a", "Choose again"),
+            )
+        else:
+            result = StepResult(
+                step_id="a", status=StepStatus.COMPLETED,
+                conclusion={"status": "awaiting_selection", "options": [{"name": "Plan", "candidate_index": 0}]},
+            )
+        context.set_conclusion(step.conclusion_field, result.conclusion)
+        yield result
+
+    runner._step_executor.execute = execute
+    runner.state_machine.advance()
+    checkpoint = {"inputId": "offline-input", "continuationFrame": {"orderedToolUseIds": ["offline-call"]}}
+    events = [event async for event in runner._continue_from_current(**{checkpoint_kind: checkpoint})]
+
+    assert calls == [("b", checkpoint), ("a", None)]
+    waits = [event for event in events if isinstance(event, PipelineEvent)
+             and event.type == PipelineEventType.USER_INPUT_REQUIRED]
+    assert len(waits) == 1 and waits[0].step_id == "a"
+    assert waits[0].data["kind"] == "candidate_selection"
+    assert runner.state_machine.current_step.step_id == "a"
+
+
+@pytest.mark.asyncio
 async def test_real_sidecar_save_failure_logs_once_at_runner_boundary(tmp_path, caplog, monkeypatch):
     from iac_code.pipeline.engine.session import PipelineSession
 
@@ -5069,7 +5105,87 @@ def _build_candidate_runner(tmp_path, conclusions):
 
 
 class TestResumedCandidateSelectionNarrowing:
-    """恢复窄化：只有显式提交 ``status`` 的候选 Step 才改变既有推进/固化行为。"""
+    """Candidate recovery preserves both waiting boundaries and already received selections."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("selection_received", [False, True])
+    async def test_running_candidate_sidecar_preserves_selection_boundary(self, tmp_path, selection_received):
+        from iac_code.pipeline.engine.interrupt import InterruptVerdict
+
+        storage = DirectorySessionStorage(tmp_path / "projects")
+        _build_two_step_runner(tmp_path, auto_advance_first=False, storage=storage)
+        pipeline_path = tmp_path / "pipeline.yaml"
+        spec = yaml.safe_load(pipeline_path.read_text(encoding="utf-8"))
+        spec["steps"][0]["ui_mode"] = "candidate_selection"
+        pipeline_path.write_text(yaml.safe_dump(spec), encoding="utf-8")
+        initial = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=storage,
+            session_id="test",
+            cwd=str(tmp_path),
+        )
+        sidecar = PipelineSession(storage.session_dir(str(tmp_path), "test") / "pipeline")
+        transcript = [Message(role="user", content="Prepare candidate choices")]
+        snapshot = initial.state_machine.to_snapshot()
+        snapshot["step_attempts"] = {"a": 1}
+        if selection_received:
+            selection = encode_selected_candidate("方案B：高可用三层", 1)
+            snapshot["current_step_user_input"] = selection
+            transcript.append(Message(role="user", content=selection))
+        PipelineTranscriptStorage(sidecar.session_dir).save(str(tmp_path), "transcript_att_0001", transcript)
+        sidecar.save_running_sync(
+            "a",
+            snapshot,
+            initial.context.to_snapshot(),
+            initial._pipeline_identity,
+            execution={"kind": "step", "step_id": "a", "active_attempt_id": "att_0001"},
+            attempts={
+                "next_attempt_number": 2,
+                "items": {
+                    "att_0001": {
+                        "attempt_id": "att_0001",
+                        "scope": "parent",
+                        "step_id": "a",
+                        "status": "running",
+                        "transcript_id": "transcript_att_0001",
+                    }
+                },
+            },
+        )
+        runner = PipelineRunner(
+            pipeline_dir=tmp_path,
+            provider_manager=MagicMock(),
+            base_tool_registry=MagicMock(),
+            session_storage=storage,
+            session_id="test",
+            cwd=str(tmp_path),
+            resume_from_sidecar=True,
+        )
+        choices = {"user_prompt": "选择方案", "options": _NARROWING_OPTIONS, "candidates": _NARROWING_CANDIDATES}
+        executor = _ScriptedCandidateExecutor([choices, {"design": "done"}] if selection_received else [choices])
+        runner._step_executor.execute = executor.execute
+
+        async def continue_verdict(_input):
+            return InterruptVerdict(action="continue", reason="User continues the interrupted operation")
+
+        runner._interrupt_controller.judge = continue_verdict
+        events = await _drain(runner.continue_from_sidecar("继续"))
+
+        if selection_received:
+            assert executor.calls == ["a", "b"]
+            assert runner.state_machine.is_complete
+            assert not _waiting_events(events)
+        else:
+            assert executor.calls == ["a"]
+            assert runner.state_machine.current_step.step_id == "a"
+            assert _waiting_events(events)[-1].data["options"] == _NARROWING_OPTIONS
+            assert sidecar.restore_sync(initial._pipeline_identity).status == "waiting_input"
+            executor._conclusions.extend([choices, {"design": "done"}])
+            await _drain(runner.resume(encode_selected_candidate("方案B：高可用三层", 1)))
+            assert executor.calls == ["a", "a", "b"]
+            assert runner.state_machine.is_complete
 
     @pytest.mark.asyncio
     async def test_conclusion_without_status_still_advances_after_resume(self, tmp_path):

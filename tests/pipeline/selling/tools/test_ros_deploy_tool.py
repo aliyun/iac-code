@@ -1031,3 +1031,30 @@ def test_render_tool_result_message_keeps_verbose_json():
     message = RosDeployTool().render_tool_result_message(content, verbose=True)
 
     assert message == content
+
+
+def test_default_name_hint_uses_real_entropy_and_is_stable_per_tool_binding(monkeypatch):
+    from types import SimpleNamespace
+
+    from iac_code.pipeline.selling.tools import ros_deploy_tool
+
+    values = iter(["d194aec720fd" + "0" * 20, "89bc170eb2d4" + "0" * 20])
+    monkeypatch.setattr(ros_deploy_tool, "uuid4", lambda: SimpleNamespace(hex=next(values)))
+    first = ros_deploy_tool.RosDeployTool()
+    second = ros_deploy_tool.RosDeployTool()
+    assert "d194aec720fd" in first.description
+    assert first.description == first.description
+    assert "89bc170eb2d4" in second.description
+    assert "d194aec720fd" not in second.description
+    assert "Preserve exact user-required names" in first.description
+
+
+@pytest.mark.asyncio
+async def test_name_hint_does_not_rename_exact_input_or_hide_stack_exists(monkeypatch):
+    tool, stack = _deploy_tool(monkeypatch, results=[ToolResult.error("StackExists: exact requested name exists")])
+    context = ToolContext(cwd="/workspace", pipeline_mode=True)
+    result = await tool.execute(tool_input={"action":"create","stack_name":"user-required-exact-name",
+                                           "template_url":"templates/demo.yml"}, context=context)
+    assert result.is_error is True and "StackExists" in result.content
+    assert len(stack.calls) == 1
+    assert stack.calls[0][0]["params"]["StackName"] == "user-required-exact-name"

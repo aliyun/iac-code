@@ -34,6 +34,7 @@ HEADER_SENTINEL = "e2e-internal-header-value"
 TELEMETRY_MODEL = "other"
 SCENARIOS = {
     "e3a-recovery": "fault-after-snapshot",
+    "e3a-handoff-recovery": "scenario1",
     "e3b-success": "contract-graceful-success",
     "e3b-cancel": "contract-graceful-cancel",
 }
@@ -187,7 +188,7 @@ def _run_scenario(args: argparse.Namespace, scenario: str, run_dir: Path) -> dic
         json.dumps(attribution, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     checks["A2A task and context telemetry attribution"] = attribution["passed"]
-    if scenario == "e3a-recovery":
+    if scenario in {"e3a-recovery", "e3a-handoff-recovery"}:
         checks["recovery reused persisted task"] = bool(task_id and context_id)
     if scenario == "e3b-cancel":
         checks["cancel terminal observed"] = any(

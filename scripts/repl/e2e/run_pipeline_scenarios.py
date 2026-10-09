@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import ipaddress
 import json
 import os
 import re
 import shlex
+import shutil
 import signal
+import sys
 import tempfile
 import time
 import uuid
@@ -24,6 +27,25 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import yaml
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from scripts.e2e_question_driver import (  # noqa: E402
+    answer_question,
+    case_facts,
+    network_facts,
+    network_fixture_vpc_is_eligible,
+    pending_native_question,
+    question_conversation,
+    question_identity,
+    temporary_e2e_vpc_ids,
+    wait_native_question_ack,
+)
+from scripts.repl.e2e.wait_diagnosis import diagnose_wait  # noqa: E402
 
 try:
     import pexpect
@@ -39,6 +61,11 @@ except ImportError:  # pragma: no cover - PyYAML is part of the project runtime
 RUN_LOG_ROOT_NAME = "iac-code-repl-e2e-runs"
 PTY_SEND_CHUNK_SIZE = 512
 PTY_SEND_CHUNK_DELAY_SECONDS = 0.01
+WAIT_POLL_SECONDS = 10.0
+WAIT_PROGRESS_SECONDS = 60.0
+WAIT_IDLE_SECONDS = 600.0
+WAIT_CLOUD_IDLE_SECONDS = 1500.0
+MAX_WAIT_DIAGNOSES = 2
 TEXT_IMAGE_FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "a2a" / "e2e" / "fixtures" / "text-images"
 TEXT_IMAGE_FIXTURE_FILENAMES = {
     "initial": "initial.png",
@@ -53,7 +80,10 @@ DEFAULT_SELECTION_PROMPT = "1"
 DEFAULT_ASK_PROMPT = "我有个产品要上线"
 DEFAULT_ASK_ANSWER = "我要创建云网络资源；本次只选择已有 VPC 创建一个 VSwitch，不部署 ECS、EIP、SLB 或 Nginx。"
 DEFAULT_NORMAL_FOLLOWUP_PROMPT = "你刚才创建了什么"
-DEFAULT_ROLLBACK_PROMPT = "回退到 intent_parsing，选择一个已有vpc，创建一个安全组"
+DEFAULT_ROLLBACK_PROMPT = (
+    "回退到 intent_parsing，新目标完全替代之前的 VSwitch 需求：选择一个已有 VPC，仅创建一个安全组；"
+    "不创建 VPC 或 VSwitch。"
+)
 DEFAULT_INVALID_SELECTION_PROMPT = "9"
 DEFAULT_EVALUATE_RESUME_CONTINUE_PROMPT = "continue"
 DEFAULT_CLEANUP_CONTINUE_PROMPT = (
@@ -206,6 +236,9 @@ class ScenarioRunResult:
     elapsed_seconds: float
     abort_reason: str = ""
     notes: list[str] = field(default_factory=list)
+    watchdog: dict[str, Any] | None = None
+    progress: dict[str, int] = field(default_factory=dict)
+    diagnostics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -257,6 +290,19 @@ class ScenarioRuntimePaths:
         return isolated
 
 
+def _copy_runtime_config(source: Path, destination: Path) -> None:
+    source = source.expanduser().resolve()
+    required = (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
+    if any(not (source / name).is_file() or (source / name).is_symlink() for name in required):
+        raise ValueError("source config must contain three regular test configuration files")
+    destination.mkdir(parents=True, exist_ok=True, mode=0o700)
+    destination.chmod(0o700)
+    for name in required:
+        target = destination / name
+        shutil.copyfile(source / name, target)
+        target.chmod(0o600)
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run interactive REPL pipeline E2E scenarios.")
     parser.add_argument(
@@ -269,6 +315,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cwd", default="", help="Child process cwd. Defaults to <run-dir>/workspace.")
     parser.add_argument("--run-root", default=str(Path(tempfile.gettempdir()) / RUN_LOG_ROOT_NAME))
     parser.add_argument("--run-dir", default="", help="Explicit run dir. Only valid with one scenario.")
+    parser.add_argument("--source-config-dir", default="", help="Copy test configuration into each isolated REPL run.")
     parser.add_argument("--python", default="uv run python")
     parser.add_argument("--provider", default="")
     parser.add_argument(
@@ -282,6 +329,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--api-base", default="")
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--stream-timeout", type=float, default=1800.0)
+    parser.add_argument("--wait-diagnosis-after", type=float, default=120.0)
     parser.add_argument("--terminal-width", type=int, default=140)
     parser.add_argument("--terminal-height", type=int, default=40)
     parser.add_argument("--candidate-selection-ready-timeout", type=float, default=30.0)
@@ -467,12 +515,18 @@ class ReplPty:
         self.raw_chunks: list[str] = []
         self.child: Any | None = None
         self._live_transcript = False
+        self._wait_diagnoses: list[dict[str, Any]] = []
+        self._last_output_at = time.monotonic()
 
     @property
     def transcript(self) -> str:
         return "".join(self.raw_chunks)
 
     def spawn(self, *, extra_args: list[str] | None = None) -> None:
+        config_dir = self.env.get("IAC_CODE_CONFIG_DIR")
+        self._candidate_ready_before_spawn = (
+            _display_progress(Path(config_dir)).get("candidate_selection_ready", 0) if config_dir else 0
+        )
         command = [
             *_split_python_command(self.args.python),
             "-m",
@@ -496,8 +550,27 @@ class ReplPty:
         self._live_transcript = True
 
     def sendline(self, text: str) -> None:
+        if not getattr(self, "e2e_goal", "") or "我改需求" in text:
+            self.e2e_goal = text
         transcript_offset = len(self.transcript)
         _sendline_to_child(self._require_child(), text, capture=self._capture_child_output_force)
+        self.events.append(
+            {
+                "type": "sendline",
+                "text": _redact_sensitive_text(text, self.env),
+                "transcript_offset": transcript_offset,
+                "at": _utc_now(),
+            }
+        )
+
+    def sendline_reliable(self, text: str) -> None:
+        """Drain a bracketed paste before Enter reaches prompt_toolkit."""
+
+        transcript_offset = len(self.transcript)
+        self._require_child().send(f"\x1b[200~{text}\x1b[201~")
+        time.sleep(0.1)
+        self.drain_output()
+        self._require_child().send("\r")
         self.events.append(
             {
                 "type": "sendline",
@@ -519,11 +592,11 @@ class ReplPty:
             }
         )
 
-    def paste_image_fixture(self, image_key: str) -> Path:
+    def paste_image_fixture(self, image_key: str, *, line_input: bool = False) -> Path:
         path = _text_image_fixture_path(image_key)
         transcript_offset = len(self.transcript)
         child = self._require_child()
-        child.send(f"\x1b[200~{path}\x1b[201~")
+        child.send(str(path) if line_input else f"\x1b[200~{path}\x1b[201~")
         _drain_child_output(child, capture=self._capture_child_output_force)
         self.events.append(
             {
@@ -536,19 +609,84 @@ class ReplPty:
         )
         return path
 
-    def expect_any(self, patterns: tuple[str, ...], *, description: str, timeout: float) -> str:
+    def expect_any(
+        self, patterns: tuple[str, ...], *, description: str, timeout: float,
+        state_check: Callable[[], str | None] | None = None,
+        require_state_match: bool = False,
+    ) -> str:
+        if require_state_match and state_check is None:
+            raise ValueError("a required native boundary needs a state check")
         child = self._require_child()
-        deadline = time.monotonic() + timeout
+        started = time.monotonic()
+        deadline = started + timeout
+        transcript_offset = len(self.transcript)
+        diagnosed = False
+        last_progress = started
         all_patterns = list(patterns) + list(PERMISSION_PROMPT_PATTERNS)
         try:
             while True:
-                remaining = deadline - time.monotonic()
+                if state_check is not None:
+                    durable_match = state_check()
+                    if durable_match is not None:
+                        return durable_match
+                now = time.monotonic()
+                remaining = deadline - now
                 if remaining <= 0:
                     raise TimeoutError(f"timed out waiting for {description}")
-                index = child.expect(all_patterns, timeout=remaining)
+                recent_output = _normalize_transcript(self.transcript[-2000:])
+                cloud_wait = bool(re.search(
+                    r"(?i)Deploying\s*\(|CreateStack|ROS Deploy|CREATE_IN_PROGRESS|DELETE_IN_PROGRESS|回滚清理",
+                    recent_output,
+                ))
+                idle_limit = WAIT_CLOUD_IDLE_SECONDS if cloud_wait else WAIT_IDLE_SECONDS
+                if now - max(getattr(self, "_last_output_at", started), started) >= idle_limit:
+                    record = {
+                        "state": "no_output", "confidence": 1.0, "waitingFor": description,
+                        "elapsedSeconds": round(now - started, 1), "action": "early_abort", "cue": "none",
+                    }
+                    diagnoses = getattr(self, "_wait_diagnoses", [])
+                    diagnoses.append(record)
+                    self._wait_diagnoses = diagnoses
+                    self.events.append({"type": "wait_diagnosis", **record, "at": _utc_now()})
+                    raise TimeoutError(
+                        f"no terminal output for {round(idle_limit)}s while waiting for {description}"
+                    )
+                if now - last_progress >= WAIT_PROGRESS_SECONDS:
+                    print(f"REPL E2E waiting for {description}: {round(now - started)}s", flush=True)
+                    last_progress = now
+                try:
+                    index = child.expect(all_patterns, timeout=min(remaining, WAIT_POLL_SECONDS))
+                except pexpect.TIMEOUT:
+                    # Input can become durable during the pexpect poll. Route it
+                    # before the advisory watchdog diagnoses it as unhandled.
+                    if state_check is not None:
+                        durable_match = state_check()
+                        if durable_match is not None:
+                            return durable_match
+                    elapsed = time.monotonic() - started
+                    if description == "first stack create started" and elapsed >= WAIT_PROGRESS_SECONDS:
+                        config_path = self.env.get("IAC_CODE_CONFIG_DIR")
+                        if config_path and _display_progress(Path(config_path)).get("pipeline_completed", 0):
+                            raise RuntimeError("pipeline completed before first stack create started")
+                    if not diagnosed and elapsed >= self.args.wait_diagnosis_after:
+                        diagnosed = self._diagnose_wait(description, transcript_offset, elapsed)
+                    continue
                 self._capture_child_output(f"{child.before}{child.after}")
                 if index < len(patterns):
+                    if require_state_match:
+                        # A diagram/detail heading may mention candidates before
+                        # complete_step actually opens the selection key reader.
+                        durable_match = state_check() if state_check is not None else None
+                        if durable_match is None:
+                            continue
+                        return durable_match
                     matched = patterns[index]
+                    if (state_check is not None and matched in ASK_USER_QUESTION_HEADING_PATTERNS
+                        and pending_native_question(Path(self.env['IAC_CODE_CONFIG_DIR'])) is None):
+                        # Rich can replay an already answered question while the
+                        # next step is running. Only the native pending input can
+                        # authorize another answer, including an LLM-assisted one.
+                        continue
                     self.events.append(
                         {
                             "type": "expect",
@@ -587,6 +725,74 @@ class ReplPty:
                 }
             )
             raise
+
+    def _diagnose_wait(self, description: str, transcript_offset: int, elapsed: float) -> bool:
+        diagnoses = getattr(self, "_wait_diagnoses", [])
+        if len(diagnoses) >= MAX_WAIT_DIAGNOSES:
+            return True
+        config_path = self.env.get("IAC_CODE_CONFIG_DIR")
+        if not config_path:
+            return True
+        recent_raw = self.transcript[transcript_offset:]
+        recent_text = _normalize_transcript(recent_raw)[-1600:]
+        diagnosis = diagnose_wait(
+            Path(config_path), expected=description,
+            transcript=recent_text or _normalize_transcript(self.transcript[-1200:]),
+        )
+        if diagnosis is None:
+            return False
+        state = str(diagnosis["state"])
+        confidence = float(diagnosis["confidence"])
+        if re.search(r"●\s*Ask user question", recent_text):
+            cue = "ask_question"
+        elif re.search(r"Press number keys to select a candidate|Enter to confirm|按数字键.*候选", recent_text):
+            cue = "candidate_controls"
+        elif "❯" in recent_text and "\x1b[>4;2m" in recent_raw:
+            cue = "repl_prompt"
+        else:
+            cue = "none"
+        # The normal REPL prompt can be redrawn while a pipeline is still
+        # running. Only explicit question/selection controls prove that the
+        # scenario is waiting for an unhandled user action.
+        early_abort = state == "waiting_for_input" and confidence >= 0.85 and cue in {
+            "ask_question", "candidate_controls",
+        }
+        # A replayed question in terminal history is not a current input. Once
+        # checkpoints exist, the watchdog must corroborate it with actual state.
+        checkpoints = list(Path(config_path).glob('projects/*/*/pipeline/meta.yaml'))
+        pending_kind = _pending_repl_input_kind(Path(config_path))
+        if checkpoints:
+            early_abort = early_abort and pending_kind in {'ask_user_question', 'candidate_selection'}
+        record = {
+            "state": state,
+            "confidence": confidence,
+            "cue": cue,
+            "waitingFor": description,
+            "elapsedSeconds": round(elapsed, 1),
+            "action": "early_abort" if early_abort else "observe",
+        }
+        kind = diagnosis.get('input_kind')
+        handlers = {'clarification': 'question_driver', 'candidate_selection': 'scenario_selection',
+                    'deployment_confirmation': 'scenario_confirmation', 'permission': 'scenario_permission'}
+        native_kinds = {'ask_user_question': 'clarification', 'candidate_selection': 'candidate_selection',
+                        'deployment_confirmation': 'deployment_confirmation'}
+        if pending_kind in native_kinds:
+            kind = native_kinds[pending_kind]
+        if isinstance(kind, str) and kind in {*handlers, 'normal_chat', 'none', 'unknown'}:
+            record['inputKind'] = kind
+            record['suggestedHandler'] = handlers.get(kind, 'none')
+        hint = diagnosis.get('semantic_hint')
+        if isinstance(hint, str) and hint in {
+            'expected_target_mentioned', 'different_target_mentioned', 'insufficient_evidence', 'none',
+        }:
+            record['semanticHint'] = hint
+        diagnoses.append(record)
+        self._wait_diagnoses = diagnoses
+        self.events.append({"type": "wait_diagnosis", **record, "at": _utc_now()})
+        print(f"REPL E2E wait diagnosis: {state}; action={record['action']}", flush=True)
+        if early_abort:
+            raise RuntimeError(f"unexpected input while waiting for {description}; watchdog={state}")
+        return True
 
     def expect_optional(self, patterns: tuple[str, ...], *, description: str, timeout: float) -> bool:
         child = self._require_child()
@@ -665,10 +871,12 @@ class ReplPty:
     def _capture_child_output(self, text: str) -> None:
         if text and not self._live_transcript:
             self.raw_chunks.append(text)
+            self._last_output_at = time.monotonic()
 
     def _capture_child_output_force(self, text: str) -> None:
         if text:
             self.raw_chunks.append(text)
+            self._last_output_at = time.monotonic()
 
     def _require_child(self) -> Any:
         if self.child is None:
@@ -683,6 +891,7 @@ class _TranscriptCapture:
     def write(self, text: str) -> None:
         if text:
             self._pty.raw_chunks.append(text)
+            self._pty._last_output_at = time.monotonic()
 
     def flush(self) -> None:
         return None
@@ -751,23 +960,53 @@ def _run_with_pty(
     workspace_dir = Path(args.cwd).expanduser().resolve() if args.cwd else run_dir / "workspace"
     workspace_dir.mkdir(parents=True, exist_ok=True)
     shared_env = _build_child_env(args, scenario)
-    env = ScenarioRuntimePaths.for_run(
+    runtime_paths = ScenarioRuntimePaths.for_run(
         run_dir,
         environment=shared_env,
-    ).apply(shared_env)
+    )
+    env = runtime_paths.apply(shared_env)
     pty = ReplPty(args=args, run_dir=run_dir, cwd=workspace_dir, env=env)
+    pty.scenario = scenario
     checks: dict[str, bool] = {}
     notes: list[str] = []
     abort_reason = ""
     passed = False
     acceptance_applied = False
     teardown_applied = False
+    child_stopped = False
 
     try:
+        if args.source_config_dir:
+            _copy_runtime_config(Path(args.source_config_dir), runtime_paths.config_dir)
+        if scenario in STACK_CREATING_SCENARIOS:
+            # Always-on instructions survive phase transitions that summarize the
+            # initial prompt. Only this run's isolated configuration is written.
+            instruction_name = "IAC-CODE-E2E.md"
+            identity_instruction, owned_names = _resource_identity_instruction(run_dir, scenario)
+            fixture = network_facts(args.python, env, REPO_ROOT, "10.250.1.0/24")
+            pty.network_fixture_facts = fixture
+            runtime_paths.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            (runtime_paths.config_dir / instruction_name).write_text(
+                identity_instruction,
+                # Fixture identity is setup data, not an acceptance exception.
+                encoding="utf-8",
+            )
+            with (runtime_paths.config_dir / instruction_name).open("a", encoding="utf-8") as instruction:
+                instruction.write(
+                    "复用已有 VPC 时，只能使用独立测试夹具 VpcId=`" + fixture["vpc_id"]
+                    + "`、ZoneId=`" + fixture["zone_id"] + "`。不得使用其它 E2E Stack 创建的临时 VPC。\n"
+                    + "新建 VSwitch 且用户未指定网段时，使用本用例已检查空闲并预留的 CidrBlock=`"
+                    + fixture["cidr"] + "`。不要重新猜测网段；用户明确指定其他网段时，验证其合法和空闲后再使用。\n"
+                )
+            env["IAC_CODE_INSTRUCTION_MEMORY_FILE"] = instruction_name
+            _write_json(run_dir / "owned-stack-names.json", owned_names)
         pty.spawn()
         callback(pty, checks)
         _apply_acceptance_checks(scenario, args, pty, checks)
         acceptance_applied = True
+        if not args.leave_running:
+            pty.terminate()
+            child_stopped = True
         _teardown_real_cloud_scenario_resources(args=args, scenario=scenario, pty=pty, checks=checks, notes=notes)
         teardown_applied = True
         passed = all(checks.values()) if checks else True
@@ -784,6 +1023,9 @@ def _run_with_pty(
                 notes.append(f"acceptance check failed: {type(exc).__name__}: {exc}")
         if acceptance_applied and not teardown_applied:
             try:
+                if not args.leave_running and not child_stopped:
+                    pty.terminate()
+                    child_stopped = True
                 _teardown_real_cloud_scenario_resources(
                     args=args,
                     scenario=scenario,
@@ -798,13 +1040,60 @@ def _run_with_pty(
                 notes.append(f"final teardown failed: {type(exc).__name__}: {exc}")
                 if passed:
                     passed = False
-        if not args.leave_running:
+        if not args.leave_running and not child_stopped:
             try:
                 pty.terminate()
             except BaseException as exc:
                 notes.append(f"terminal child termination failed: {type(exc).__name__}: {exc}")
                 if passed:
                     passed = False
+        checks.update(getattr(pty, "question_checks", {}))
+        progress = _display_progress(runtime_paths.config_dir)
+        progress.update(_transcript_tool_progress(runtime_paths.config_dir))
+        ledger_path = _cleanup_ledger_path(pty)
+        progress["cleanup_ledger_found"] = int(ledger_path is not None and ledger_path.is_file())
+        progress["observed_stack_count"] = min(len(_observed_create_stack_ids(pty)), 10000)
+        progress["cloud_stack_without_ledger"] = int(bool(getattr(pty, "cloud_stack_without_ledger", False)))
+        progress["cloud_stack_not_created"] = int(bool(getattr(pty, "cloud_stack_not_created", False)))
+        progress["cloud_probe_failures"] = min(int(getattr(pty, "cloud_probe_failures", 0)), 10000)
+        if checks.get("acceptance: no ROS create failure in cleanup transcript") is False:
+            after_rollback = _suffix_after_sendline_text(pty.transcript, pty.events, args.rollback_prompt)
+            for name, pattern in zip(
+                ("create_failed", "route_conflict", "stack_exists", "invalid_cidr_block"),
+                CLEANUP_DEPLOYMENT_FAILURE_PATTERNS,
+            ):
+                progress[f"cleanup_failure_{name}"] = min(len(re.findall(pattern, pty.transcript)), 10000)
+                progress[f"cleanup_failure_{name}_after_rollback"] = min(
+                    len(re.findall(pattern, after_rollback)), 10000
+                )
+        if scenario.startswith("rollback-step") and "cleanup" not in scenario:
+            suffix = _suffix_after_rollback_progress(_suffix_after_sendline_text(
+                pty.transcript, pty.events, args.rollback_prompt
+            ))
+            for category, pattern in {
+                "type": r"ALIYUN::ECS::VSwitch",
+                "id": r"VSwitchId|vsw-[A-Za-z0-9]+",
+                "create_clause": r"(?:创建|新建|目标资源|资源类型|部署).*?(?:VSwitch|交换机)",
+            }.items():
+                progress["rollback_text_vswitch_" + category] = int(bool(re.search(pattern, suffix)))
+            for context_path in runtime_paths.config_dir.glob("projects/*/*/pipeline/context.yaml"):
+                try:
+                    context = yaml.safe_load(context_path.read_text(encoding="utf-8"))
+                except (OSError, yaml.YAMLError):
+                    continue
+                field = context.get("intent") if isinstance(context, dict) else None
+                if not isinstance(field, dict):
+                    continue
+                value = field.get("value")
+                intents = value.get("resource_intents") if isinstance(value, dict) else None
+                progress["rollback_intent_present"] = int(isinstance(intents, list))
+                progress["rollback_intent_stale"] = int(field.get("stale") is not False)
+                for product, category in (("securitygroup", "security_group"), ("vswitch", "vswitch")):
+                    progress["rollback_intent_" + category + "_create"] = int(any(
+                        isinstance(item, dict) and str(item.get("product") or "").casefold() == product
+                        and item.get("action") == "create"
+                        for item in (intents if isinstance(intents, list) else [])
+                    ))
         result = ScenarioRunResult(
             scenario=scenario,
             run_dir=str(run_dir),
@@ -813,11 +1102,121 @@ def _run_with_pty(
             elapsed_seconds=round(time.monotonic() - started, 3),
             abort_reason=abort_reason,
             notes=notes,
+            watchdog=(getattr(pty, "_wait_diagnoses", []) or [None])[-1],
+            progress=progress,
+            diagnostics=getattr(pty, "question_diagnostics", {}),
         )
         _write_run_artifacts(run_dir=run_dir, env=env, raw_transcript=pty.transcript, events=pty.events, result=result)
         _print_result(result)
 
     return 0 if passed else 1
+
+
+def _display_progress(config_dir: Path) -> dict[str, int]:
+    """Count fixed display events and deployment milestones without exposing payloads."""
+
+    allowed = {
+        "candidate_selection_ready", "candidate_selection_submitted", "user_input_required", "user_input_received",
+        "step_started", "step_completed", "pipeline_completed", "pipeline_failed", "stack_progress",
+    }
+    counts: dict[str, int] = {}
+    for path in config_dir.glob("projects/*/*/pipeline/display.jsonl"):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            event_type = event.get("type") if isinstance(event, dict) else None
+            if isinstance(event_type, str) and event_type in allowed:
+                counts[event_type] = min(counts.get(event_type, 0) + 1, 10000)
+            if not isinstance(event, dict):
+                continue
+            if (
+                isinstance(event_type, str)
+                and event_type in {"step_started", "step_completed"}
+                and event.get("step_id") == "deploying"
+            ):
+                key = f"{event_type}_deploying"
+                counts[key] = min(counts.get(key, 0) + 1, 10000)
+            if event_type == "tool_used":
+                payload = event.get("payload")
+                if isinstance(payload, dict):
+                    tool_name = payload.get("name")
+                    tool_counts = {
+                        "ros_deploy": "ros_deploy_used",
+                        "aliyun_api": "aliyun_api_used",
+                        "ros_stack": "ros_stack_used",
+                        "bash": "bash_used",
+                    }
+                    key = tool_counts.get(tool_name) if isinstance(tool_name, str) else None
+                    if key:
+                        counts[key] = min(counts.get(key, 0) + 1, 10000)
+            if event_type == "pipeline_completed":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and payload.get("early_exit") is True:
+                    counts["pipeline_completed_early_exit"] = min(
+                        counts.get("pipeline_completed_early_exit", 0) + 1, 10000
+                    )
+            if event_type == "stack_progress":
+                payload = event.get("payload")
+                if isinstance(payload, dict) and payload.get("status") in {"CREATE_COMPLETE", "CREATE_FAILED"}:
+                    key = "stack_progress_" + payload["status"].lower()
+                    counts[key] = min(counts.get(key, 0) + 1, 10000)
+    counts["cleanup_ledger_files"] = min(
+        sum(1 for _ in config_dir.glob("projects/*/*/pipeline/cleanup.yaml")), 10000
+    )
+    return counts
+
+
+def _transcript_tool_progress(config_dir: Path) -> dict[str, int]:
+    """Count completed ros_deploy calls without exposing transcript content or tool IDs."""
+
+    used: set[str] = set()
+    completed: set[str] = set()
+    failed: set[str] = set()
+    create_failed: set[str] = set()
+    for path in config_dir.glob("projects/*/*/pipeline/transcripts/*/session.jsonl"):
+        try:
+            if path.stat().st_size > 20_000_000:
+                continue
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            blocks = message.get("content") if isinstance(message, dict) else None
+            if not isinstance(blocks, list):
+                continue
+            for block in blocks:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "tool_use" and block.get("name") == "ros_deploy":
+                    tool_id = block.get("id")
+                    if isinstance(tool_id, str):
+                        used.add(tool_id)
+                elif block.get("type") == "tool_result":
+                    tool_id = block.get("tool_use_id")
+                    if isinstance(tool_id, str):
+                        completed.add(tool_id)
+                        if block.get("is_error") is True:
+                            failed.add(tool_id)
+                            if _has_any_pattern(
+                                json.dumps(block.get("content"), ensure_ascii=False),
+                                CLEANUP_DEPLOYMENT_FAILURE_PATTERNS,
+                            ):
+                                create_failed.add(tool_id)
+    return {
+        "ros_deploy_result": min(len(used & completed), 10000),
+        "ros_deploy_result_error": min(len(used & failed), 10000),
+        "ros_deploy_create_failure": min(len(used & create_failed), 10000),
+    }
 
 
 def _print_result(result: ScenarioRunResult) -> None:
@@ -970,6 +1369,14 @@ def _cleanup_stack_name(run_dir: Path, label: str) -> str:
     return f"iac-e2e-{suffix[:12]}-{safe_label}"[:128]
 
 
+def _resource_identity_instruction(run_dir: Path, scenario: str) -> tuple[str, list[str]]:
+    """Keep isolation instructions independent of model-chosen Stack names."""
+    return (
+        "# E2E resource isolation\n不得复用已有 Stack 或删除本次测试之外的资源。\n",
+        [],
+    )
+
+
 def _scenario_stack_name(run_dir: Path, scenario: str) -> str:
     suffix = Path(run_dir).name.rsplit("-", maxsplit=1)[-1] or "stack"
     safe_scenario = "".join(ch if ch.isalnum() else "-" for ch in scenario.lower()).strip("-") or "scenario"
@@ -982,12 +1389,17 @@ def _is_scenario_stack_name(run_dir: Path, scenario: str, stack_name: str) -> bo
 
 
 def _stack_name_constraint(run_dir: Path, scenario: str) -> str:
-    stack_name = _scenario_stack_name(run_dir, scenario)
-    return f"本次 ROS 资源栈名称基础名为 `{stack_name}`，最终 StackName 必须以该基础名开头。"
+    # Image and text input have identical business goals, without a cleanup name constraint.
+    return ""
 
 
 def _stack_creating_prompt(text: str, run_dir: Path, scenario: str) -> str:
-    return f"{text}。{_stack_name_constraint(run_dir, scenario)}"
+    # These cases require a real ROS deployment for their recovery/cleanup
+    # assertions. Removing the artificial StackName must retain this mechanism.
+    return (
+        f"{text}。使用 ROS 资源栈部署，并通过当前部署步骤的 ros_deploy 工具实际创建和等待完成；"
+        "不要绕过 ROS 直接创建云资源，也不要把已有资源当作本次部署结果。资源栈名称由你决定。"
+    )
 
 
 def _text_image_fixture_path(image_key: str) -> Path:
@@ -1006,6 +1418,21 @@ def _submit_image_fixture(pty: ReplPty, image_key: str, *, caption: str = "") ->
         pty.sendline(caption)
     else:
         pty.send("\r", label="submit-image")
+    if image_key in {'initial', 'rollback-interrupt', 'ask-first-answer', 'ask-second-answer'}:
+        # The simulated user has supplied these facts in the actual image.
+        # Subsequent clarification must include them instead of reverting to
+        # the vague opening request. This does not send a text substitute to
+        # the product: image parsing and all image acceptance checks remain.
+        manifest = json.loads((TEXT_IMAGE_FIXTURE_ROOT / 'manifest.json').read_text(encoding='utf-8'))
+        fixture = manifest[image_key]
+        if hashlib.sha256(_text_image_fixture_path(image_key).read_bytes()).hexdigest() != fixture['sha256']:
+            raise RuntimeError('image fixture differs from its supplied facts manifest')
+        image_fact = fixture['text']
+        previous = getattr(pty, 'e2e_goal', '')
+        if image_key in {'initial', 'rollback-interrupt'}:
+            pty.e2e_goal = image_fact
+        elif image_fact not in previous:
+            pty.e2e_goal = '；'.join(value for value in (previous, image_fact) if value)
 
 
 def _cleanup_network_target_from_args(args: argparse.Namespace) -> CleanupNetworkTarget | None:
@@ -1050,19 +1477,15 @@ def _cleanup_network_prompt_fragment(args: argparse.Namespace, *, rollback: bool
 
 
 def _cleanup_pipeline_prompt(args: argparse.Namespace, run_dir: Path) -> str:
-    first_stack_name = _cleanup_stack_name(run_dir, "first")
     return (
-        f"{args.initial_prompt}。第一次 CreateStack 的 params.StackName 必须精确等于 `{first_stack_name}`，"
-        "禁止使用模板名、候选方案名或 vswitch-in-existing-vpc，也不能复用已有资源栈。"
+        f"{args.initial_prompt}。本轮必须新建资源栈，不能复用已有资源栈。"
         f"{_cleanup_network_prompt_fragment(args, rollback=False)}"
     )
 
 
 def _cleanup_rollback_prompt(args: argparse.Namespace, run_dir: Path) -> str:
-    second_stack_name = _cleanup_stack_name(run_dir, "second")
     return (
-        f"{args.rollback_prompt}。重新部署时 CreateStack 的 params.StackName 必须精确等于 `{second_stack_name}`，"
-        "禁止使用模板名、候选方案名或 vswitch-in-existing-vpc，也不能复用已有资源栈。"
+        f"{args.rollback_prompt}。重新部署时必须新建资源栈，不能复用已有资源栈。"
         "本次回退后的新方案只创建安全组，不创建 VSwitch。"
         f"{_cleanup_network_prompt_fragment(args, rollback=True)}"
     )
@@ -1183,9 +1606,13 @@ def _find_available_vswitch_cidr(vpc_cidr: str, used_cidrs: Iterable[str]) -> st
 
 
 def _discover_cleanup_network_target(*, excluded_cidrs: Iterable[str] = ()) -> CleanupNetworkTarget:
+    cutoff = float(os.environ.get('IAC_CODE_E2E_NETWORK_FIXTURE_BEFORE', str(time.time())))
+    excluded_vpcs = temporary_e2e_vpc_ids()
     vpcs_data = _call_aliyun_api("vpc", "DescribeVpcs", {"PageSize": 50})
     for vpc in _nested_api_items(vpcs_data, "Vpcs", "Vpc"):
         vpc_id = str(vpc.get("VpcId") or "")
+        if vpc_id in excluded_vpcs or not network_fixture_vpc_is_eligible(vpc, cutoff):
+            continue
         vpc_cidr = str(vpc.get("CidrBlock") or "")
         if not vpc_id or not vpc_cidr or str(vpc.get("Status") or "") != "Available":
             continue
@@ -1344,7 +1771,7 @@ def _latest_observed_stack_id(pty: Any, *, exclude: set[str]) -> str | None:
 
 def _is_create_stack_observation(resource: dict[str, Any]) -> bool:
     action = str(resource.get("observed_action") or resource.get("observedAction") or resource.get("action") or "")
-    return not action or action == "CreateStack"
+    return action == "CreateStack"
 
 
 def _observed_create_stack_resources(pty: Any) -> list[dict[str, Any]]:
@@ -1376,11 +1803,27 @@ def _observed_create_stack_names(pty: Any) -> list[str]:
 
 
 def _wait_for_latest_observed_stack_id(pty: Any, *, exclude: set[str], timeout: float) -> str:
-    deadline = time.monotonic() + timeout
+    started = time.monotonic()
+    deadline = started + timeout
     while time.monotonic() < deadline:
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
         stack_id = _latest_observed_stack_id(pty, exclude=exclude)
+        config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+        progress = _display_progress(Path(config_path)) if config_path else {}
+        if progress.get("step_completed_deploying") or progress.get("pipeline_completed"):
+            raise RuntimeError("deploying finished before rollback observed a ROS stack")
         if stack_id:
             return stack_id
+        now = time.monotonic()
+        tool_progress = _transcript_tool_progress(Path(config_path)) if config_path else {}
+        if tool_progress.get("ros_deploy_result", 0) > tool_progress.get("ros_deploy_result_error", 0):
+            pty.cloud_stack_without_ledger = True
+            raise RuntimeError("ROS deployment returned but no accepted creation receipt reached the cleanup ledger")
+        if now - started >= 600.0:
+            pty.cloud_stack_not_created = True
+            raise RuntimeError("ROS deployment produced no accepted creation receipt within 10 minutes")
         time.sleep(0.5)
     raise TimeoutError("Timed out waiting for rollback cleanup ledger to observe a ROS stack")
 
@@ -1401,6 +1844,9 @@ def _cleanup_target_stack_ids(pty: Any, *, exclude: set[str]) -> list[str]:
 def _wait_for_cleanup_target_stack_ids(pty: Any, *, exclude: set[str], timeout: float) -> list[str]:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
+        drain_output = getattr(pty, "drain_output", None)
+        if callable(drain_output):
+            drain_output()
         stack_ids = _cleanup_target_stack_ids(pty, exclude=exclude)
         if stack_ids:
             return stack_ids
@@ -1491,6 +1937,120 @@ def _fresh_ros_stack_state(pty: Any, stack_id: str) -> dict[str, Any]:
     )
 
 
+def _stack_vpc_reference_diagnostics(
+    template_body: Any, stack_parameters: Any, region_id: str = "",
+) -> dict[str, Any]:
+    """Inspect the actual ROS template without exporting its contents or IDs."""
+    facts: dict[str, Any] = {"template_resources_inspected": False}
+    if not isinstance(template_body, str) or len(template_body) > 2_000_000:
+        return facts
+    try:
+        template = yaml.safe_load(template_body)
+    except yaml.YAMLError:
+        return facts
+    resources = template.get('Resources') if isinstance(template, dict) else None
+    if not isinstance(resources, dict):
+        return facts
+    facts['template_resources_inspected'] = True
+    parameters = {
+        item.get('ParameterKey'): item.get('ParameterValue')
+        for item in stack_parameters if isinstance(item, dict)
+    } if isinstance(stack_parameters, list) else {}
+    hashes: set[str] = set()
+    kinds: dict[str, int] = {}
+    zone_kinds: dict[str, int] = {}
+    zone_regions: dict[str, int] = {}
+    for resource in resources.values():
+        if not isinstance(resource, dict) or resource.get('Type') != 'ALIYUN::ECS::VSwitch':
+            continue
+        properties = resource.get('Properties')
+        value = properties.get('VpcId') if isinstance(properties, dict) else None
+        kind = 'literal' if isinstance(value, str) else 'unresolved'
+        if isinstance(value, dict) and set(value) == {'Ref'} and isinstance(value['Ref'], str):
+            value = parameters.get(value['Ref'])
+            kind = 'parameter' if isinstance(value, str) else 'unresolved'
+        kinds[kind] = kinds.get(kind, 0) + 1
+        if isinstance(value, str) and value:
+            hashes.add(hashlib.sha256(value.encode('utf-8')).hexdigest())
+        zone = properties.get('ZoneId') if isinstance(properties, dict) else None
+        zone_kind = 'literal' if isinstance(zone, str) else 'unresolved'
+        if isinstance(zone, dict) and set(zone) == {'Ref'} and isinstance(zone['Ref'], str):
+            zone = parameters.get(zone['Ref'])
+            zone_kind = 'parameter' if isinstance(zone, str) else 'unresolved'
+        zone_kinds[zone_kind] = zone_kinds.get(zone_kind, 0) + 1
+        category = 'unresolved'
+        if region_id and isinstance(zone, str):
+            category = 'stack_region' if zone.startswith(region_id + '-') else 'other_region'
+        zone_regions[category] = zone_regions.get(category, 0) + 1
+    facts['vswitch_vpc_reference_kinds'] = kinds
+    facts['vswitch_vpc_reference_hashes'] = sorted(hashes)
+    facts['vswitch_zone_reference_kinds'] = zone_kinds
+    facts['vswitch_zone_region_categories'] = zone_regions
+    return facts
+
+
+def _failed_stack_vpc_presence_diagnostics(
+    template_body: Any, stack_parameters: Any, credential: Any, region_id: str,
+) -> dict[str, int]:
+    """Read only the failed Stack's referenced VPC; never export API responses."""
+    from alibabacloud_tea_openapi import models as openapi_models
+    from alibabacloud_tea_openapi.client import Client as OpenApiClient
+    from alibabacloud_tea_util.models import RuntimeOptions
+
+    from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
+
+    try:
+        template = yaml.safe_load(template_body)
+    except (yaml.YAMLError, TypeError):
+        return {'unresolved': 1}
+    resources = template.get('Resources') if isinstance(template, dict) else None
+    if not isinstance(resources, dict):
+        return {'unresolved': 1}
+    parameters = {
+        item.get('ParameterKey'): item.get('ParameterValue')
+        for item in stack_parameters if isinstance(item, dict)
+    } if isinstance(stack_parameters, list) else {}
+    vpcs: set[str] = set()
+    for resource in resources.values():
+        if not isinstance(resource, dict) or resource.get('Type') != 'ALIYUN::ECS::VSwitch':
+            continue
+        props = resource.get('Properties')
+        value = props.get('VpcId') if isinstance(props, dict) else None
+        if isinstance(value, dict) and set(value) == {'Ref'}:
+            value = parameters.get(value['Ref']) if isinstance(value['Ref'], str) else None
+        if isinstance(value, str) and re.fullmatch(r'vpc-[a-z0-9]+', value):
+            vpcs.add(value)
+    if not vpcs or len(vpcs) > 2:
+        return {'unresolved': 1}
+    config = RosClientFactory._build_config(credential, region_id)
+    config.endpoint = 'vpc.' + region_id + '.aliyuncs.com'
+    client = OpenApiClient(config)
+    counts: dict[str, int] = {}
+    for vpc in sorted(vpcs):
+        try:
+            response = client.call_api(
+                openapi_models.Params(action='DescribeVpcs', version='2016-04-28', protocol='HTTPS',
+                    pathname='/', method='POST', auth_type='AK', style='RPC',
+                    req_body_type='formData', body_type='json'),
+                openapi_models.OpenApiRequest(query={'RegionId': region_id, 'VpcId': vpc, 'PageSize': 50}),
+                RuntimeOptions(connect_timeout=5000, read_timeout=10000, autoretry=False),
+            )
+            body = response.get('body') if isinstance(response, dict) else None
+            container = body.get('Vpcs') if isinstance(body, dict) else None
+            items = container.get('Vpc') if isinstance(container, dict) else None
+            if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+                category = 'query_unavailable'
+            else:
+                matches = [item for item in _nested_api_items(body, 'Vpcs', 'Vpc') if item.get('VpcId') == vpc]
+                category = 'absent' if not matches else (
+                    'available' if all(item.get('Status') == 'Available' for item in matches) else 'not_available'
+                )
+        except Exception:
+            category = 'query_unavailable'
+        counts[category] = counts.get(category, 0) + 1
+    return counts
+
+
 def _get_ros_stack_state(
     *,
     stack_id: str,
@@ -1509,7 +2069,7 @@ def _get_ros_stack_state(
         request = ros_models.GetStackRequest(stack_id=stack_id, region_id=effective_region)
         response = client.get_stack(request)
         body = response.body.to_map()
-        return {
+        state = {
             "stack_id": str(body.get("StackId") or stack_id),
             "stack_name": str(body.get("StackName") or ""),
             "region_id": effective_region,
@@ -1517,6 +2077,29 @@ def _get_ros_stack_state(
             "status_reason": str(body.get("StatusReason") or ""),
             "not_found": False,
         }
+        if state['status'] == 'CREATE_FAILED' and 'Forbidden.VpcNotFound' in state['status_reason']:
+            # Query only this observed Stack before teardown. Diagnosis is
+            # bounded and never changes CREATE_COMPLETE or cleanup acceptance.
+            state['vpc_reference_diagnostic'] = {'template_resources_inspected': False}
+            try:
+                from alibabacloud_tea_util.models import RuntimeOptions
+
+                template_request = ros_models.GetTemplateRequest(stack_id=stack_id, region_id=effective_region)
+                template_response = client.get_template_with_options(
+                    template_request, RuntimeOptions(connect_timeout=5000, read_timeout=10000, autoretry=False)
+                )
+                state['vpc_reference_diagnostic'] = _stack_vpc_reference_diagnostics(
+                    template_response.body.to_map().get('TemplateBody'), body.get('Parameters'), effective_region,
+                )
+                state['vpc_reference_diagnostic']['vpc_presence_after_failure'] = (
+                    _failed_stack_vpc_presence_diagnostics(
+                        template_response.body.to_map().get('TemplateBody'), body.get('Parameters'),
+                        credential, effective_region,
+                    )
+                )
+            except Exception:
+                pass
+        return state
     except Exception as exc:
         message = _redact_sensitive_text(str(exc), redaction_env)
         return {
@@ -1614,6 +2197,21 @@ def _ros_stack_states_for_acceptance(pty: Any, stack_ids: Iterable[str], name: s
     return _capture_ros_stack_states(pty, _unique_strings(stack_ids), name)
 
 
+def _cleanup_deployment_failed(pty: Any, transcript: str) -> bool:
+    # Preview/validation can recover before deployment. Error-code words in
+    # their output are not evidence that an actual ROS Stack creation failed.
+    if _has_any_pattern(transcript, (CLEANUP_DEPLOYMENT_FAILURE_PATTERNS[0],)):
+        return True
+    config_dir = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+    if not config_dir:
+        return False
+    path = Path(config_dir)
+    return bool(
+        _transcript_tool_progress(path).get("ros_deploy_create_failure", 0)
+        or _display_progress(path).get("stack_progress_create_failed", 0)
+    )
+
+
 def _apply_cleanup_acceptance_checks(
     *,
     scenario: str,
@@ -1634,9 +2232,6 @@ def _apply_cleanup_acceptance_checks(
         if stack_id
     }
     cleanup_stack_ids = _cleanup_target_stack_ids(pty, exclude={stack_id for stack_id in [second_stack_id] if stack_id})
-    run_dir = Path(getattr(pty, "run_dir", ""))
-    expected_first_stack_name = _cleanup_stack_name(run_dir, "first")
-    expected_second_stack_name = _cleanup_stack_name(run_dir, "second")
 
     _add_acceptance_check(
         checks,
@@ -1656,16 +2251,6 @@ def _apply_cleanup_acceptance_checks(
     )
     _add_acceptance_check(
         checks,
-        "first rollback stack name matches test stack",
-        bool(first_stack_id) and _observed_cleanup_stack_name(pty, first_stack_id) == expected_first_stack_name,
-    )
-    _add_acceptance_check(
-        checks,
-        "second stack name matches test stack",
-        bool(second_stack_id) and _observed_cleanup_stack_name(pty, second_stack_id) == expected_second_stack_name,
-    )
-    _add_acceptance_check(
-        checks,
         "cleanup snapshot does not target second stack",
         bool(second_stack_id) and _cleanup_resource_for_stack(pty, second_stack_id) is None,
     )
@@ -1677,16 +2262,16 @@ def _apply_cleanup_acceptance_checks(
             _cleanup_resource_completed(_cleanup_resource_for_stack(pty, stack_id)) for stack_id in cleanup_stack_ids
         ),
     )
-    _add_acceptance_check(
-        checks,
-        "no ROS create failure in cleanup transcript",
-        not _has_any_pattern(transcript, CLEANUP_DEPLOYMENT_FAILURE_PATTERNS),
-    )
-
     ros_states = _ros_stack_states_for_acceptance(
         pty,
         [*cleanup_stack_ids, second_stack_id],
         "acceptance-after-cleanup",
+    )
+    _add_acceptance_check(
+        checks,
+        "no ROS create failure in cleanup transcript",
+        not _cleanup_deployment_failed(pty, transcript)
+        and not any(state.get("status") == "CREATE_FAILED" for state in ros_states.values()),
     )
     _add_acceptance_check(
         checks,
@@ -1728,6 +2313,21 @@ def _owned_cleanup_stack_names(run_dir: Path) -> set[str]:
     return {_cleanup_stack_name(run_dir, "first"), _cleanup_stack_name(run_dir, "second")}
 
 
+def _discover_owned_cleanup_stack_ids(run_dir: Path) -> list[str]:
+    """Find exact run-owned names when an interrupted tool never wrote the local ledger."""
+
+    stack_ids: list[str] = []
+    for name in sorted(_owned_cleanup_stack_names(run_dir)):
+        response = _call_aliyun_api("ROS", "ListStacks", {"StackName": [name], "PageSize": 50})
+        for stack in _nested_api_items(response, "Stacks", "Stack"):
+            if stack.get("StackName") != name or stack.get("Status") == "DELETE_COMPLETE":
+                continue
+            stack_id = stack.get("StackId")
+            if isinstance(stack_id, str) and stack_id:
+                stack_ids.append(stack_id)
+    return _unique_strings(stack_ids)
+
+
 def _observed_cleanup_stack_ids(pty: Any) -> list[str]:
     stack_ids = [
         str(getattr(pty, "cleanup_first_stack_id", "") or ""),
@@ -1756,19 +2356,17 @@ def _apply_stack_creating_acceptance_checks(scenario: str, pty: Any, checks: dic
     if scenario not in STACK_CREATING_SCENARIOS:
         return
     stack_ids = _observed_create_stack_ids(pty)
-    run_dir = Path(getattr(pty, "run_dir", ""))
-    stack_names = _observed_create_stack_names(pty)
-    _add_acceptance_check(checks, "ROS stack observed in cleanup ledger", bool(stack_ids))
-    _add_acceptance_check(
-        checks,
-        "ROS stack name is test-owned",
-        bool(stack_ids) and any(_is_scenario_stack_name(run_dir, scenario, stack_name) for stack_name in stack_names),
-    )
     ros_states = _ros_stack_states_for_acceptance(pty, stack_ids, "acceptance-before-teardown") if stack_ids else {}
+    _add_acceptance_check(checks, "ROS stack observed in cleanup ledger", bool(stack_ids))
     _add_acceptance_check(
         checks,
         "ROS created stack retained before teardown",
         bool(stack_ids) and any(_ros_stack_retained(ros_states.get(stack_id, {})) for stack_id in stack_ids),
+    )
+    _add_acceptance_check(
+        checks, "ROS created Stack reached CREATE_COMPLETE",
+        bool(stack_ids) and any(ros_states.get(stack_id, {}).get("status") == "CREATE_COMPLETE"
+                                for stack_id in stack_ids),
     )
 
 
@@ -1786,11 +2384,14 @@ def _teardown_cleanup_scenario_resources(
         notes.append("final teardown skipped by --skip-final-teardown")
         return
 
-    run_dir = Path(getattr(pty, "run_dir", ""))
-    owned_stack_names = _owned_cleanup_stack_names(run_dir)
+    resources = _observed_create_stack_resources(pty)
     stack_ids = _observed_cleanup_stack_ids(pty)
+    receipts = {_string_from_mapping(item, "resource_id"): item for item in resources}
+    checks["teardown: owned ROS Stack discovery succeeded"] = all(stack_id in receipts for stack_id in stack_ids)
     if not stack_ids:
-        checks["teardown: no cleanup scenario stacks leaked"] = True
+        checks["teardown: no cleanup scenario stacks leaked"] = bool(
+            checks["teardown: owned ROS Stack discovery succeeded"]
+        )
         return
 
     deletion_failures: list[str] = []
@@ -1800,12 +2401,11 @@ def _teardown_cleanup_scenario_resources(
         if _ros_stack_deleted(state):
             continue
 
+        receipt = receipts.get(stack_id, {})
         stack_name = str(state.get("stack_name") or "")
-        if stack_name not in owned_stack_names:
-            deletion_failures.append(
-                f"{stack_id} has unexpected stack name {stack_name or '<unknown>'}; "
-                f"expected one of {sorted(owned_stack_names)}"
-            )
+        if (not receipt or not receipt.get("resource_name") or not receipt.get("region_id")
+                or stack_name != receipt["resource_name"]):
+            deletion_failures.append(f"{stack_id}: identity differs from accepted creation receipt")
             continue
 
         try:
@@ -1830,6 +2430,25 @@ def _teardown_cleanup_scenario_resources(
         notes.append(f"final teardown deleted ROS stacks: {', '.join(deleted_stack_ids)}")
 
 
+def _discover_scenario_stack_resources(run_dir: Path, scenario: str) -> list[dict[str, str]]:
+    """Find exact run-owned Stack names even if a tool never wrote its ledger."""
+    base = _scenario_stack_name(run_dir, scenario)
+    resources = []
+    for page in range(1, 21):
+        response = _call_aliyun_api("ROS", "ListStacks", {
+            "StackName": [base + "*"], "PageSize": 50, "PageNumber": page,
+        })
+        batch = _nested_api_items(response, "Stacks", "Stack")
+        for stack in batch:
+            name, stack_id = stack.get("StackName"), stack.get("StackId")
+            if (isinstance(name, str) and _is_scenario_stack_name(run_dir, scenario, name)
+                and isinstance(stack_id, str) and stack_id and stack.get("Status") != "DELETE_COMPLETE"):
+                resources.append({"resource_id": stack_id, "resource_name": name})
+        if len(batch) < 50:
+            return resources
+    raise RuntimeError("run-owned Stack discovery exceeded bounded pagination")
+
+
 def _teardown_real_cloud_scenario_resources(
     *,
     args: argparse.Namespace,
@@ -1852,23 +2471,17 @@ def _teardown_real_cloud_scenario_resources(
 
     deletion_failures: list[str] = []
     deleted_stack_ids: list[str] = []
-    run_dir = Path(getattr(pty, "run_dir", ""))
-    expected_scenario_stack_name = _scenario_stack_name(run_dir, scenario)
     for resource in resources:
         stack_id = _string_from_mapping(resource, "resource_id", "resourceId", "stack_id", "stackId")
         if not stack_id:
             continue
         expected_stack_name = _string_from_mapping(resource, "resource_name", "resourceName", "stack_name", "stackName")
-        if not _is_scenario_stack_name(run_dir, scenario, expected_stack_name):
-            deletion_failures.append(
-                f"{stack_id} has unexpected test-owned stack name {expected_stack_name or '<unknown>'}; "
-                f"expected {expected_scenario_stack_name} or a generated suffix"
-            )
-            continue
         state = _fresh_ros_stack_state(pty, stack_id)
         if _ros_stack_deleted(state):
             continue
-
+        if not resource.get("region_id"):
+            deletion_failures.append(f"{stack_id}: accepted creation receipt lacks region")
+            continue
         actual_stack_name = str(state.get("stack_name") or "")
         if not expected_stack_name:
             deletion_failures.append(f"{stack_id} has no observed stack name in cleanup ledger")
@@ -1900,6 +2513,19 @@ def _teardown_real_cloud_scenario_resources(
     checks["teardown: observed ROS stacks deleted"] = not deletion_failures
     if deleted_stack_ids:
         notes.append(f"final teardown deleted ROS stacks: {', '.join(deleted_stack_ids)}")
+
+
+def _has_verified_rollback_target(pty: Any, checks: dict[str, bool]) -> bool:
+    facts = getattr(pty, "question_diagnostics", {})
+    return isinstance(facts, dict) and (
+        checks.get("post-rollback fresh intent targets security group") is True
+        and facts.get("rollback_current_intent_present") is True
+        and facts.get("rollback_current_intent_stale") is False
+        and facts.get("rollback_current_intent_security_group_create") is True
+        and facts.get("rollback_current_intent_vswitch_create") is False
+        and facts.get("rollback_current_intent_revision_changed") is True
+        and facts.get("rollback_current_intent_new_planning_attempt") is True
+    )
 
 
 def _apply_acceptance_checks(
@@ -2029,12 +2655,15 @@ def _apply_acceptance_checks(
         _add_acceptance_check(
             checks,
             "post-rollback target is security group",
-            _has_security_group_target_evidence(effective_after_rollback),
+            (_has_verified_rollback_target(pty, checks)
+             and _has_security_group_target_evidence(effective_after_rollback)),
         )
         _add_acceptance_check(
             checks,
             "post-rollback target is not VSwitch",
-            not _has_positive_vswitch_target_evidence(effective_after_rollback),
+            # The current native intent is authoritative; buffered old candidate
+            # text and explanations of the discarded target are not new intent.
+            _has_verified_rollback_target(pty, checks),
         )
     elif scenario == "ask-waiting":
         after_answer = _normalize_transcript(
@@ -2085,12 +2714,15 @@ def _apply_acceptance_checks(
         _add_acceptance_check(
             checks,
             "post-rollback target is security group",
-            _has_security_group_target_evidence(effective_after_rollback),
+            (_has_verified_rollback_target(pty, checks)
+             and _has_security_group_target_evidence(effective_after_rollback)),
         )
         _add_acceptance_check(
             checks,
             "post-rollback target is not VSwitch",
-            not _has_positive_vswitch_target_evidence(effective_after_rollback),
+            # The current native intent is authoritative; buffered old candidate
+            # text and explanations of the discarded target are not new intent.
+            _has_verified_rollback_target(pty, checks),
         )
     elif scenario == "rollback-step2":
         after_rollback = _suffix_after_sendline_text(raw_transcript, events, args.rollback_prompt)
@@ -2108,12 +2740,15 @@ def _apply_acceptance_checks(
         _add_acceptance_check(
             checks,
             "post-rollback target is security group",
-            _has_security_group_target_evidence(effective_after_rollback),
+            (_has_verified_rollback_target(pty, checks)
+             and _has_security_group_target_evidence(effective_after_rollback)),
         )
         _add_acceptance_check(
             checks,
             "post-rollback target is not VSwitch",
-            not _has_positive_vswitch_target_evidence(effective_after_rollback),
+            # The current native intent is authoritative; buffered old candidate
+            # text and explanations of the discarded target are not new intent.
+            _has_verified_rollback_target(pty, checks),
         )
     elif scenario == "rollback-step4-selection":
         after_rollback = _suffix_after_sendline_text(raw_transcript, events, args.rollback_prompt)
@@ -2131,12 +2766,15 @@ def _apply_acceptance_checks(
         _add_acceptance_check(
             checks,
             "post-rollback target is security group",
-            _has_security_group_target_evidence(effective_after_rollback),
+            (_has_verified_rollback_target(pty, checks)
+             and _has_security_group_target_evidence(effective_after_rollback)),
         )
         _add_acceptance_check(
             checks,
             "post-rollback target is not VSwitch",
-            not _has_positive_vswitch_target_evidence(effective_after_rollback),
+            # The current native intent is authoritative; buffered old candidate
+            # text and explanations of the discarded target are not new intent.
+            _has_verified_rollback_target(pty, checks),
         )
     elif scenario == "evaluate-resume":
         after_continue = _normalize_transcript(
@@ -2228,15 +2866,85 @@ def _apply_acceptance_checks(
 
 
 def _select_default_candidate(pty: ReplPty, args: argparse.Namespace) -> None:
-    if args.selection_prompt:
-        pty.send(f"{args.selection_prompt}\r", label="select-default-candidate")
-    else:
-        pty.send("\r", label="select-default-candidate")
+    config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+    drain_output = getattr(pty, "drain_output", None)
+    baseline = (
+        _display_progress(Path(config_path))
+        if config_path and callable(drain_output) and (Path(config_path) / "projects").is_dir()
+        else None
+    )
+    for attempt in range(1, 4):
+        label = "select-default-candidate" if attempt == 1 else f"select-default-candidate-retry-{attempt}"
+        pty.send(f"{args.selection_prompt or ''}\r", label=label)
+        if baseline is None:
+            return
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            drain_output()
+            progress = _display_progress(Path(config_path))
+            if any(
+                progress.get(event, 0) > baseline.get(event, 0)
+                for event in ("candidate_selection_submitted", "user_input_received", "step_started")
+            ):
+                return
+            time.sleep(0.1)
+    raise TimeoutError("candidate selection input was not accepted after three attempts")
+
+
+def _expect_first_stack_create_started(pty: ReplPty, args: argparse.Namespace) -> None:
+    config_path = pty.env.get("IAC_CODE_CONFIG_DIR")
+    if not config_path:
+        pty.expect_any(
+            CREATE_STACK_STARTED_PATTERNS,
+            description="first stack create started",
+            timeout=args.stream_timeout,
+        )
+        return
+    started = time.monotonic()
+    transcript_offset = len(pty.transcript)
+    diagnosed = False
+    while True:
+        elapsed = time.monotonic() - started
+        remaining = args.stream_timeout - elapsed
+        if remaining <= 0:
+            raise TimeoutError("timed out waiting for first stack create started")
+        progress = _display_progress(Path(config_path))
+        if progress.get("ros_deploy_used"):
+            if progress.get("step_completed_deploying") or progress.get("pipeline_completed"):
+                raise RuntimeError("ROS deployment finished before rollback interrupt")
+            pty.events.append({
+                "type": "expect", "description": "first stack create started",
+                "pattern": "display:ros_deploy", "passed": True, "at": _utc_now(),
+            })
+            return
+        if progress.get("pipeline_completed"):
+            raise RuntimeError("pipeline completed before first stack create started")
+        try:
+            pty.expect_any(
+                CREATE_STACK_STARTED_PATTERNS,
+                description="first stack create started",
+                timeout=min(1.0, remaining),
+            )
+            return
+        except TimeoutError as exc:
+            if str(exc) != "timed out waiting for first stack create started":
+                raise
+        elapsed = time.monotonic() - started
+        if elapsed >= WAIT_IDLE_SECONDS and time.monotonic() - pty._last_output_at >= WAIT_IDLE_SECONDS:
+            raise TimeoutError("no terminal output while waiting for first stack create started")
+        if not diagnosed and elapsed >= args.wait_diagnosis_after:
+            diagnosed = pty._diagnose_wait("first stack create started", transcript_offset, elapsed)
 
 
 def _expect_initial_prompt(pty: ReplPty, args: argparse.Namespace) -> None:
     pty.expect_any(REPL_PROMPT_PATTERNS, description="initial prompt", timeout=args.timeout)
     pty.expect_any(REPL_INPUT_READY_PATTERNS, description="prompt input ready", timeout=args.timeout)
+
+
+def _send_case_goal(pty: ReplPty, text: str) -> None:
+    """Update the fixture goal at explicit scenario boundaries, including custom rollback text."""
+    pty.e2e_goal = text
+    pty.sendline(text)
 
 
 def _expect_candidate_selection(
@@ -2246,8 +2954,211 @@ def _expect_candidate_selection(
     description: str,
     require_live_refresh: bool = False,
 ) -> None:
-    pty.expect_any(CANDIDATE_SELECTION_PATTERNS, description=description, timeout=args.stream_timeout)
-    _expect_candidate_selection_ready(pty, args, require_live_refresh=require_live_refresh)
+    for _ in range(12):
+        matched = pty.expect_any(
+            CANDIDATE_SELECTION_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS,
+            description=description, timeout=args.stream_timeout,
+            state_check=lambda: _durable_candidate_boundary(pty),
+            require_state_match=bool(getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")),
+        )
+        if matched in CANDIDATE_SELECTION_PATTERNS:
+            _expect_candidate_selection_ready(pty, args, require_live_refresh=require_live_refresh)
+            return
+        _answer_legacy_repl_question(pty, args)
+    raise RuntimeError("candidate selection did not follow bounded clarification answers")
+
+
+def _answer_legacy_repl_question(pty: ReplPty, args: argparse.Namespace) -> None:
+    config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+    pending = pending_native_question(config_dir)
+    if pending is None:
+        raise RuntimeError("visible question has no durable pending-input checkpoint")
+    question, path = pending
+    counts = getattr(pty, "question_counts", None)
+    if not isinstance(counts, dict):
+        counts = pty.question_counts = {}
+    diagnostics = getattr(pty, "question_diagnostics", None)
+    if not isinstance(diagnostics, dict):
+        diagnostics = pty.question_diagnostics = {}
+    goal = getattr(pty, "e2e_goal", "") or args.initial_prompt
+    scenario = getattr(pty, 'scenario', '')
+    supplied = dict(getattr(pty, 'network_fixture_facts', {}))
+    if scenario in {"rollback-step5-cleanup", "rollback-step5-cleanup-recovery"}:
+        phase_names = [name for name in _owned_cleanup_stack_names(pty.run_dir) if name in goal]
+        if len(phase_names) == 1:
+            supplied['stack_name'] = phase_names[0]
+    elif scenario in STACK_CREATING_SCENARIOS:
+        supplied['stack_name'] = _scenario_stack_name(pty.run_dir, scenario)
+    facts = case_facts(goal, supplied)
+    context = question_conversation(pty)
+    answer, _ = answer_question(config_dir, question, facts, counts, diagnostics, conversation=context)
+    if question.get("allowFreeText", question.get("allow_free_text", True)) is False:
+        answer = str(1 + next(i for i, option in enumerate(question["options"]) if option.get("id") == answer))
+    pty.drain_output()
+    # Journal polling may already have drained the transient prompt; its tail plus
+    # this unacknowledged question checkpoint is sufficient input readiness evidence.
+    if not re.search(r"[ \t]+>[ \t]*$", _normalize_transcript(pty.transcript)):
+        _expect_ask_input_ready(pty, args, description="clarification input ready")
+    pty.sendline_reliable(answer)
+    wait_native_question_ack(path, question_identity(question), pty.drain_output)
+    context.acknowledge(question)
+
+
+def _expect_completed_after_optional_questions(pty: ReplPty, args: argparse.Namespace) -> None:
+    selections = 0
+    for _ in range(12):
+        matched = pty.expect_any(
+            PIPELINE_FULLY_COMPLETED_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS + CANDIDATE_SELECTION_PATTERNS,
+            description="pipeline fully completed", timeout=args.stream_timeout,
+            state_check=lambda: _durable_progress_boundary(pty, PIPELINE_FULLY_COMPLETED_PATTERNS),
+            require_state_match=True,
+        )
+        if matched in PIPELINE_FULLY_COMPLETED_PATTERNS:
+            return
+        if matched in CANDIDATE_SELECTION_PATTERNS:
+            selections += 1
+            if selections > 2:
+                raise RuntimeError("supplemental candidate selection budget exhausted")
+            _expect_candidate_selection_ready(pty, args)
+            _select_default_candidate(pty, args)
+        else:
+            _answer_legacy_repl_question(pty, args)
+    raise RuntimeError("pipeline did not complete after bounded supplemental questions")
+
+
+def _expect_progress_after_optional_questions(
+    pty: ReplPty, args: argparse.Namespace, patterns: tuple[str, ...], *, description: str, timeout: float,
+    state_check: Callable[[], Any] | None = None, require_state_match: bool = False,
+) -> str:
+    """Preserve the caller's milestone while handling extra native clarifications."""
+    deadline = time.monotonic() + timeout
+    completion_wait = any(pattern in patterns for pattern in PIPELINE_COMPLETED_PATTERNS
+                          + PIPELINE_FULLY_COMPLETED_PATTERNS)
+    selections = 0
+    for _ in range(12):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError(f'timed out waiting for {description}')
+        matched = pty.expect_any(
+            patterns + ASK_USER_QUESTION_HEADING_PATTERNS,
+            description=description, timeout=remaining,
+            state_check=state_check or (lambda: _durable_progress_boundary(pty, patterns)),
+            require_state_match=completion_wait or require_state_match,
+        )
+        if matched in patterns:
+            return matched
+        if completion_wait and matched in CANDIDATE_SELECTION_PATTERNS:
+            selections += 1
+            if selections > 2:
+                raise RuntimeError("supplemental candidate selection budget exhausted")
+            _expect_candidate_selection_ready(pty, args)
+            _select_default_candidate(pty, args)
+        else:
+            _answer_legacy_repl_question(pty, args)
+    raise RuntimeError('progress did not follow bounded supplemental questions')
+
+
+def _unsubmitted_candidate_boundary(config_dir: Path) -> bool:
+    for meta in config_dir.glob("projects/*/*/pipeline/meta.yaml"):
+        try:
+            state = yaml.safe_load(meta.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(state, dict) or state.get("status") != "waiting_input":
+            continue
+        last_boundary = ""
+        display = meta.with_name("display.jsonl")
+        if not display.is_file():
+            continue
+        try:
+            lines = display.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("type") in {
+                "candidate_selection_ready", "candidate_selection_submitted",
+            }:
+                last_boundary = row["type"]
+        if last_boundary == "candidate_selection_ready":
+            return True
+    return False
+
+
+def _durable_progress_boundary(pty: ReplPty, patterns: tuple[str, ...]) -> str | None:
+    boundary = _durable_completion_boundary(pty)
+    if boundary in ASK_USER_QUESTION_HEADING_PATTERNS:
+        return boundary
+    completion_wait = any(pattern in patterns for pattern in PIPELINE_COMPLETED_PATTERNS
+                          + PIPELINE_FULLY_COMPLETED_PATTERNS)
+    if boundary is None and completion_wait:
+        config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+        if _unsubmitted_candidate_boundary(config_dir):
+            return CANDIDATE_SELECTION_PATTERNS[0]
+    # A successful handoff can satisfy completion, never an earlier kill/input milestone.
+    if boundary in PIPELINE_FULLY_COMPLETED_PATTERNS:
+        for pattern in PIPELINE_FULLY_COMPLETED_PATTERNS + PIPELINE_COMPLETED_PATTERNS:
+            if pattern in patterns:
+                return pattern
+    return None
+
+
+def _durable_completion_boundary(pty: ReplPty) -> str | None:
+    """A terminal checkpoint must end a wait; native questions may outlive terminal redraws."""
+    config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+    for path in config_dir.glob("projects/*/*/pipeline/meta.yaml"):
+        try:
+            state = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        status = state.get("status")
+        handoff = state.get("normal_handoff")
+        if status in {"failed", "canceled", "discarded"}:
+            raise RuntimeError("pipeline reached a terminal checkpoint before successful handoff")
+        if isinstance(handoff, dict) and handoff.get("status") == "failed":
+            raise RuntimeError("normal handoff failed in durable checkpoint")
+        if status == "completed" and isinstance(handoff, dict) and handoff.get("status") == "succeeded":
+            return PIPELINE_FULLY_COMPLETED_PATTERNS[0]
+        execution = state.get("execution")
+        pending = execution.get("pending_ask_user_question_input") if isinstance(execution, dict) else None
+        if (isinstance(execution, dict) and execution.get("pending_input_kind") == "ask_user_question"
+            and isinstance(pending, dict) and not isinstance(pending.get("answer"), dict)):
+            return ASK_USER_QUESTION_HEADING_PATTERNS[0]
+    return None
+
+
+def _pending_repl_input_kind(config_dir: Path) -> str:
+    for path in config_dir.glob('projects/*/*/pipeline/meta.yaml'):
+        try:
+            state = yaml.safe_load(path.read_text(encoding='utf-8'))
+        except (OSError, yaml.YAMLError):
+            continue
+        execution = state.get('execution') if isinstance(state, dict) else None
+        if isinstance(execution, dict):
+            kind = execution.get('pending_input_kind')
+            if isinstance(kind, str) and kind in {
+                'ask_user_question', 'candidate_selection', 'deployment_confirmation',
+            }:
+                return str(kind)
+    return 'none'
+
+
+def _durable_candidate_boundary(pty: ReplPty) -> str | None:
+    boundary = _durable_completion_boundary(pty)
+    if boundary in PIPELINE_FULLY_COMPLETED_PATTERNS:
+        raise RuntimeError("pipeline completed before candidate selection")
+    if boundary is None:
+        config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+        progress = _display_progress(config_dir)
+        if (_pending_repl_input_kind(config_dir) == "candidate_selection"
+            or progress.get("candidate_selection_ready", 0) > progress.get("candidate_selection_submitted", 0)):
+            return CANDIDATE_SELECTION_PATTERNS[0]
+    return boundary
 
 
 def _expect_candidate_selection_ready(
@@ -2256,6 +3167,37 @@ def _expect_candidate_selection_ready(
     *,
     require_live_refresh: bool = False,
 ) -> None:
+    # expect_any may find the durable checkpoint only after drain_output has
+    # consumed the renderer hint. Re-reading pexpect would wait for a prompt
+    # that is already on screen. Require the current candidate boundary and
+    # its captured controls together; a stale heading alone is insufficient.
+    config_path = getattr(pty, "env", {}).get("IAC_CODE_CONFIG_DIR")
+    if config_path and hasattr(pty, "_candidate_ready_before_spawn"):
+        # The recorder emits ready only after this process's key reader starts.
+        # A heading can precede completion; startup can replay an old ready frame.
+        # Neither authorizes killing the process or sending a candidate key.
+        def current_reader_ready() -> str | None:
+            _durable_completion_boundary(pty)
+            ready = _display_progress(Path(config_path)).get("candidate_selection_ready", 0)
+            if (ready > pty._candidate_ready_before_spawn
+                and _unsubmitted_candidate_boundary(Path(config_path))):
+                return CANDIDATE_SELECTION_READY_PATTERNS[0]
+            return None
+
+        pty.expect_any(
+            CANDIDATE_SELECTION_READY_PATTERNS,
+            description="live candidate selection controls ready" if require_live_refresh
+            else "candidate selection controls ready",
+            timeout=args.candidate_selection_ready_timeout,
+            state_check=current_reader_ready,
+            require_state_match=True,
+        )
+        return
+    if config_path and not require_live_refresh and _durable_candidate_boundary(pty) in CANDIDATE_SELECTION_PATTERNS:
+        if any(re.search(pattern, _normalize_transcript(pty.transcript[-4000:]))
+               for pattern in CANDIDATE_SELECTION_READY_PATTERNS):
+            time.sleep(0.25)
+            return
     controls_ready = pty.expect_optional(
         CANDIDATE_SELECTION_READY_PATTERNS,
         description="candidate selection controls ready",
@@ -2287,12 +3229,13 @@ def _expect_candidate_selection_after_optional_asks(
             CANDIDATE_SELECTION_PATTERNS + ASK_USER_QUESTION_HEADING_PATTERNS,
             description=description,
             timeout=args.stream_timeout,
+            state_check=lambda: _durable_candidate_boundary(pty),
+            require_state_match=True,
         )
         if matched in CANDIDATE_SELECTION_PATTERNS:
             _expect_candidate_selection_ready(pty, args)
             return ask_count
-        _expect_ask_input_ready(pty, args, description="cleanup clarification input ready")
-        pty.sendline("1")
+        _answer_legacy_repl_question(pty, args)
     raise RuntimeError("too many cleanup clarification questions before candidate selection")
 
 
@@ -2430,14 +3373,60 @@ def _finish_vswitch_pipeline_after_possible_selection(
             _expect_raw_input_ready(pty, args, description="candidate selection input ready after ask")
         _select_default_candidate(pty, args)
         checks[selection_check] = True
-        pty.expect_any(PIPELINE_COMPLETED_PATTERNS, description=completion_description, timeout=args.stream_timeout)
+        _expect_progress_after_optional_questions(
+            pty, args, PIPELINE_COMPLETED_PATTERNS,
+            description=completion_description, timeout=args.stream_timeout,
+        )
     checks[completion_check] = True
+
+
+def _rollback_intent_facts(config_dir: Path) -> dict[str, Any]:
+    paths = list(config_dir.glob("projects/*/*/pipeline/context.yaml"))
+    if len(paths) > 1:
+        raise RuntimeError("ambiguous rollback pipeline context; refusing to read the first session")
+    for path in paths:
+        try:
+            context = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        field = context.get("intent") if isinstance(context, dict) else None
+        if not isinstance(field, dict):
+            continue
+        value = field.get("value")
+        raw = value.get("resource_intents") if isinstance(value, dict) else None
+        intents = raw if isinstance(raw, list) else []
+        metadata_path = path.with_name("meta.yaml")
+        metadata = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+        attempts = (metadata.get("attempts") or {}).get("items", {}) if isinstance(metadata, dict) else {}
+        return {
+            "planning_attempts": tuple(sorted(
+                key for key, item in attempts.items() if isinstance(item, dict)
+                and item.get("step_id") == "intent_parsing"
+            )) if isinstance(attempts, dict) else (),
+            "revision": hashlib.sha256(json.dumps({
+                "version": field.get("version"), "updated_at": field.get("updated_at"), "value": value,
+            }, sort_keys=True, ensure_ascii=False, default=str).encode()).hexdigest(),
+            "present": isinstance(raw, list),
+            "stale": field.get("stale") is not False,
+            "security_group_create": any(
+                isinstance(item, dict) and str(item.get("product") or "").casefold() == "securitygroup"
+                and item.get("action") == "create" for item in intents
+            ),
+            "vswitch_create": any(
+                isinstance(item, dict) and str(item.get("product") or "").casefold() == "vswitch"
+                and item.get("action") == "create" for item in intents
+            ),
+        }
+    return {"present": False, "stale": True, "security_group_create": False, "vswitch_create": False}
 
 
 def _expect_post_rollback_security_group_target(
     pty: ReplPty,
     args: argparse.Namespace,
     checks: dict[str, bool],
+    *,
+    previous_revision: str | None = None,
+    previous_attempts: tuple[str, ...] | None = None,
 ) -> None:
     pty.expect_any(
         SECURITY_GROUP_MENTION_PATTERNS,
@@ -2445,19 +3434,50 @@ def _expect_post_rollback_security_group_target(
         timeout=min(args.stream_timeout, 300.0),
     )
     checks["post-rollback security group target visible"] = True
+    checks["post-rollback fresh intent targets security group"] = False
+    config_dir = Path(pty.env["IAC_CODE_CONFIG_DIR"])
+    deadline = time.monotonic() + min(args.stream_timeout, 300.0)
+    while time.monotonic() < deadline:
+        facts = _rollback_intent_facts(config_dir)
+        revision_changed = previous_revision is None or facts.get("revision") != previous_revision
+        new_attempt = previous_attempts is None or bool(
+            set(facts.get("planning_attempts", ())) - set(previous_attempts)
+        )
+        diagnostics = getattr(pty, "question_diagnostics", None)
+        if not isinstance(diagnostics, dict):
+            diagnostics = pty.question_diagnostics = {}
+        diagnostics.update({
+            "rollback_current_intent_present": facts["present"],
+            "rollback_current_intent_stale": facts["stale"],
+            "rollback_current_intent_security_group_create": facts["security_group_create"],
+            "rollback_current_intent_vswitch_create": facts["vswitch_create"],
+            "rollback_current_intent_revision_changed": revision_changed,
+            "rollback_current_intent_new_planning_attempt": new_attempt,
+        })
+        changed = revision_changed and new_attempt
+        if changed and facts["present"] and not facts["stale"]:
+            if facts["security_group_create"] and not facts["vswitch_create"]:
+                checks["post-rollback fresh intent targets security group"] = True
+                return
+            raise RuntimeError("fresh rollback intent does not target only the requested security group creation")
+        if pending_native_question(config_dir) is not None:
+            _answer_legacy_repl_question(pty, args)
+        pty.drain_output()
+        time.sleep(0.2)
+    raise TimeoutError("timed out waiting for fresh post-rollback security group intent")
 
 
 def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(PIPELINE_STARTED_PATTERNS, description="pipeline started", timeout=args.stream_timeout)
         checks["pipeline started"] = True
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_FULLY_COMPLETED_PATTERNS,
             description="pipeline fully completed",
             timeout=args.stream_timeout,
@@ -2480,14 +3500,24 @@ def run_scenario1(args: argparse.Namespace, scenario: str) -> int:
 def run_ask_waiting(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible", timeout=args.stream_timeout)
         checks["ask question became visible"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready")
         checks["ask answer input ready"] = True
-        pty.sendline(_stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
+        pending = pending_native_question(Path(pty.env["IAC_CODE_CONFIG_DIR"]))
+        if pending is None:
+            raise RuntimeError("initial question has no durable pending-input checkpoint")
+        question, checkpoint = pending
+        answer = _stack_creating_prompt(args.ask_answer, pty.run_dir, scenario)
+        pty.e2e_goal = answer
+        pty.sendline_reliable(answer)
         checks["ask answer sent"] = True
-        matched = pty.expect_any(
+        checks["ask answer acknowledged"] = False
+        wait_native_question_ack(checkpoint, question_identity(question), pty.drain_output)
+        question_conversation(pty).acknowledge(question)
+        checks["ask answer acknowledged"] = True
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask",
             timeout=args.stream_timeout,
@@ -2518,7 +3548,7 @@ def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after image initial",
             timeout=args.stream_timeout,
@@ -2532,7 +3562,7 @@ def run_image_initial(args: argparse.Namespace, scenario: str) -> int:
 def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
         checks["ask question became visible before kill"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready before kill")
@@ -2554,7 +3584,7 @@ def run_image_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int
             _expect_ask_input_ready(pty, args, description="second ask image answer input ready")
             _submit_image_fixture(pty, "ask-second-answer", caption=_stack_name_constraint(pty.run_dir, scenario))
             checks["ask second answer image fixture pasted"] = True
-        matched = pty.expect_any(
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask image resume",
             timeout=args.stream_timeout,
@@ -2593,7 +3623,7 @@ def run_image_selection_waiting_resume(args: argparse.Namespace, scenario: str) 
         checks["candidate selection replayed after resume"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after image selection resume",
             timeout=args.stream_timeout,
@@ -2607,18 +3637,14 @@ def run_image_selection_waiting_resume(args: argparse.Namespace, scenario: str) 
 def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(PIPELINE_STARTED_PATTERNS, description="pipeline started", timeout=args.stream_timeout)
         checks["pipeline started"] = True
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent"] = True
-        pty.expect_any(
-            PIPELINE_FULLY_COMPLETED_PATTERNS,
-            description="pipeline fully completed",
-            timeout=args.stream_timeout,
-        )
+        _expect_completed_after_optional_questions(pty, args)
         checks["pipeline completed"] = True
         _expect_raw_input_ready(pty, args, description="normal prompt input ready")
         checks["normal prompt input ready"] = True
@@ -2635,14 +3661,42 @@ def run_image_normal_handoff(args: argparse.Namespace, scenario: str) -> int:
     return _run_with_pty(args, scenario, callback)
 
 
+
+def _image_interrupt_candidate_boundary(pty: ReplPty) -> str | None:
+    # A pipeline that already handed off cannot reach the required pre-image
+    # candidate checkpoint. Report that real failure without a ten-minute wait.
+    boundary = _durable_completion_boundary(pty)
+    if boundary in PIPELINE_FULLY_COMPLETED_PATTERNS:
+        raise RuntimeError("pipeline ended before candidate evaluation for image interrupt")
+    if boundary in ASK_USER_QUESTION_HEADING_PATTERNS:
+        return boundary
+    paths = list(Path(pty.env["IAC_CODE_CONFIG_DIR"]).glob("projects/*/*/pipeline/meta.yaml"))
+    if len(paths) > 1:
+        raise RuntimeError("ambiguous pipeline checkpoint before image interrupt")
+    for path in paths:
+        try:
+            state = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(state, dict):
+            continue
+        if state.get("current_step") in {"confirm_and_select", "deploying"}:
+            raise RuntimeError("candidate evaluation ended before image interrupt")
+        if (state.get("status") == "running" and state.get("current_step") == "evaluate_candidates"
+            and _has_any_pattern(_normalize_transcript(pty.transcript), EVALUATE_CANDIDATES_HEADING_PATTERNS)):
+            return CANDIDATE_EVALUATION_PATTERNS[0]
+    return None
+
 def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
-        pty.expect_any(
-            CANDIDATE_EVALUATION_PATTERNS,
+        _send_case_goal(pty, args.initial_prompt)
+        _expect_progress_after_optional_questions(
+            pty, args, CANDIDATE_EVALUATION_PATTERNS,
             description="candidate evaluation visible",
             timeout=args.stream_timeout,
+            state_check=lambda: _image_interrupt_candidate_boundary(pty),
+            require_state_match=True,
         )
         checks["candidate evaluation reached"] = True
         _expect_parallel_interrupt_ready(pty, args)
@@ -2653,6 +3707,7 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
             REPL_INPUT_READY_PATTERNS, description="parallel interrupt text input ready", timeout=args.timeout
         )
         checks["parallel interrupt text input ready"] = True
+        previous = _rollback_intent_facts(Path(pty.env["IAC_CODE_CONFIG_DIR"]))
         _submit_image_fixture(pty, "rollback-interrupt")
         checks["rollback interrupt image fixture pasted"] = True
         pty.expect_any(
@@ -2661,7 +3716,10 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
             timeout=args.stream_timeout,
         )
         checks["post-rollback pipeline progress visible"] = True
-        _expect_post_rollback_security_group_target(pty, args, checks)
+        _expect_post_rollback_security_group_target(
+            pty, args, checks, previous_revision=previous.get("revision"),
+            previous_attempts=previous.get("planning_attempts"),
+        )
         pty.sendline("/exit")
 
     return _run_with_pty(args, scenario, callback)
@@ -2670,7 +3728,7 @@ def run_image_interrupt(args: argparse.Namespace, scenario: str) -> int:
 def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible before kill"] = True
         pty.terminate(force=True)
@@ -2685,7 +3743,7 @@ def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int
         checks["candidate selection replayed"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS, description="pipeline completed after resume", timeout=args.stream_timeout
         )
         checks["pipeline completed after resume"] = True
@@ -2697,7 +3755,7 @@ def run_selection_waiting_resume(args: argparse.Namespace, scenario: str) -> int
 def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.ask_prompt)
+        _send_case_goal(pty, args.ask_prompt)
         pty.expect_any(ASK_PATTERNS, description="ask question visible before kill", timeout=args.stream_timeout)
         checks["ask question became visible before kill"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready before kill")
@@ -2709,9 +3767,18 @@ def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
         checks["ask question replayed"] = True
         _expect_ask_input_ready(pty, args, description="ask answer input ready after resume")
         checks["ask answer input ready after resume"] = True
-        pty.sendline(_stack_creating_prompt(args.ask_answer, pty.run_dir, scenario))
+        pending = pending_native_question(Path(pty.env["IAC_CODE_CONFIG_DIR"]))
+        if pending is None:
+            raise RuntimeError("restored question has no durable pending-input checkpoint")
+        question, checkpoint = pending
+        answer = _stack_creating_prompt(args.ask_answer, pty.run_dir, scenario)
+        pty.e2e_goal = answer
+        pty.sendline_reliable(answer)
         checks["ask answer sent after resume"] = True
-        matched = pty.expect_any(
+        wait_native_question_ack(checkpoint, question_identity(question), pty.drain_output)
+        question_conversation(pty).acknowledge(question)
+        checks["ask answer acknowledged after resume"] = True
+        matched = _expect_progress_after_optional_questions(pty, args,
             CANDIDATE_SELECTION_PATTERNS + PIPELINE_COMPLETED_PATTERNS,
             description="pipeline continued after ask resume",
             timeout=args.stream_timeout,
@@ -2734,7 +3801,7 @@ def run_ask_waiting_resume(args: argparse.Namespace, scenario: str) -> int:
 def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         pty.expect_any(
             CANDIDATE_EVALUATION_PATTERNS, description="candidate evaluation visible", timeout=args.stream_timeout
         )
@@ -2758,7 +3825,7 @@ def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
         checks["candidate selection became visible after resume continue"] = True
         _select_default_candidate(pty, args)
         checks["candidate selection input sent after resume"] = True
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_COMPLETED_PATTERNS,
             description="pipeline completed after evaluate resume",
             timeout=args.stream_timeout,
@@ -2772,14 +3839,17 @@ def run_evaluate_resume(args: argparse.Namespace, scenario: str) -> int:
 def run_selection_invalid_then_valid(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(_stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
+        _send_case_goal(pty, _stack_creating_prompt(args.initial_prompt, pty.run_dir, scenario))
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection became visible"] = True
         pty.send(args.invalid_selection_prompt, label="select-invalid-candidate")
         checks["invalid selection input sent"] = True
         _select_default_candidate(pty, args)
         checks["valid selection input sent after invalid input"] = True
-        pty.expect_any(PIPELINE_COMPLETED_PATTERNS, description="pipeline completed", timeout=args.stream_timeout)
+        _expect_progress_after_optional_questions(
+            pty, args, PIPELINE_COMPLETED_PATTERNS,
+            description="pipeline completed", timeout=args.stream_timeout,
+        )
         checks["pipeline completed"] = True
         pty.sendline("/exit")
 
@@ -2789,7 +3859,7 @@ def run_selection_invalid_then_valid(args: argparse.Namespace, scenario: str) ->
 def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         pty.expect_any(
             ARCHITECTURE_PLANNING_PATTERNS,
             description="architecture planning visible",
@@ -2802,7 +3872,8 @@ def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
         checks["interrupt input visible"] = True
         _expect_raw_input_ready(pty, args, description="interrupt prompt input ready")
         checks["interrupt prompt input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        previous = _rollback_intent_facts(Path(pty.env["IAC_CODE_CONFIG_DIR"]))
+        _send_case_goal(pty, args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
@@ -2810,7 +3881,10 @@ def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
             timeout=args.stream_timeout,
         )
         checks["post-rollback pipeline progress visible"] = True
-        _expect_post_rollback_security_group_target(pty, args, checks)
+        _expect_post_rollback_security_group_target(
+            pty, args, checks, previous_revision=previous.get("revision"),
+            previous_attempts=previous.get("planning_attempts"),
+        )
         pty.sendline("/exit")
 
     return _run_with_pty(args, scenario, callback)
@@ -2819,7 +3893,7 @@ def run_rollback_step2(args: argparse.Namespace, scenario: str) -> int:
 def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         pty.expect_any(
             CANDIDATE_EVALUATION_PATTERNS,
             description="candidate evaluation visible",
@@ -2834,7 +3908,8 @@ def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
             REPL_INPUT_READY_PATTERNS, description="parallel interrupt text input ready", timeout=args.timeout
         )
         checks["parallel interrupt text input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        previous = _rollback_intent_facts(Path(pty.env["IAC_CODE_CONFIG_DIR"]))
+        _send_case_goal(pty, args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
@@ -2842,7 +3917,10 @@ def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
             timeout=args.stream_timeout,
         )
         checks["post-rollback pipeline progress visible"] = True
-        _expect_post_rollback_security_group_target(pty, args, checks)
+        _expect_post_rollback_security_group_target(
+            pty, args, checks, previous_revision=previous.get("revision"),
+            previous_attempts=previous.get("planning_attempts"),
+        )
         pty.sendline("/exit")
 
     return _run_with_pty(args, scenario, callback)
@@ -2851,7 +3929,7 @@ def run_rollback_step3(args: argparse.Namespace, scenario: str) -> int:
 def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int:
     def callback(pty: ReplPty, checks: dict[str, bool]) -> None:
         _expect_initial_prompt(pty, args)
-        pty.sendline(args.initial_prompt)
+        _send_case_goal(pty, args.initial_prompt)
         _expect_candidate_selection(pty, args, description="candidate selection visible")
         checks["candidate selection reached"] = True
         checks["candidate selection input ready"] = True
@@ -2864,7 +3942,10 @@ def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int
             ready_description="candidate selection interrupt text input ready",
         )
         checks["candidate selection interrupt text input ready"] = True
-        pty.sendline(args.rollback_prompt)
+        reliable_sendline = getattr(pty, "sendline_reliable", pty.sendline)
+        previous = _rollback_intent_facts(Path(pty.env["IAC_CODE_CONFIG_DIR"]))
+        pty.e2e_goal = args.rollback_prompt
+        reliable_sendline(args.rollback_prompt)
         checks["rollback prompt sent"] = True
         pty.expect_any(
             POST_ROLLBACK_PROGRESS_PATTERNS,
@@ -2872,7 +3953,10 @@ def run_rollback_step4_selection(args: argparse.Namespace, scenario: str) -> int
             timeout=args.stream_timeout,
         )
         checks["post-rollback pipeline progress visible"] = True
-        _expect_post_rollback_security_group_target(pty, args, checks)
+        _expect_post_rollback_security_group_target(
+            pty, args, checks, previous_revision=previous.get("revision"),
+            previous_attempts=previous.get("planning_attempts"),
+        )
         pty.sendline("/exit")
 
     return _run_with_pty(args, scenario, callback)
@@ -2896,7 +3980,7 @@ def _run_rollback_step5_cleanup(
         _expect_initial_prompt(pty, args)
         _ensure_cleanup_network_target(args, pty.run_dir)
         checks["cleanup network target prepared"] = True
-        pty.sendline(_cleanup_pipeline_prompt(args, pty.run_dir))
+        _send_case_goal(pty, _cleanup_pipeline_prompt(args, pty.run_dir))
         _expect_candidate_selection_after_optional_asks(
             pty,
             args,
@@ -2906,11 +3990,12 @@ def _run_rollback_step5_cleanup(
 
         _select_default_candidate(pty, args)
         checks["initial candidate selected"] = True
-        pty.expect_any(
-            CREATE_STACK_STARTED_PATTERNS,
-            description="first stack create started",
-            timeout=args.stream_timeout,
-        )
+        _expect_first_stack_create_started(pty, args)
+
+        first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
+        pty.cleanup_first_stack_id = first_stack_id
+        checks["first rollback stack observed before rollback"] = bool(first_stack_id)
+
         pty.send("\x1b", label="send-esc")
         checks["esc sent during deploying"] = True
         _expect_interrupt_input_ready(
@@ -2921,11 +4006,7 @@ def _run_rollback_step5_cleanup(
         )
         checks["deploying interrupt input ready"] = True
 
-        first_stack_id = _wait_for_latest_observed_stack_id(pty, exclude=set(), timeout=args.stream_timeout)
-        pty.cleanup_first_stack_id = first_stack_id
-        checks["first rollback stack observed before rollback"] = bool(first_stack_id)
-
-        pty.sendline(_cleanup_rollback_prompt(args, pty.run_dir))
+        _send_case_goal(pty, _cleanup_rollback_prompt(args, pty.run_dir))
         checks["rollback prompt sent"] = True
         _expect_candidate_selection_after_optional_asks(
             pty,
@@ -2941,7 +4022,7 @@ def _run_rollback_step5_cleanup(
         _select_default_candidate(pty, args)
         checks["post-rollback candidate selected"] = True
         second_deployment_offset = len(pty.transcript)
-        pty.expect_any(
+        _expect_progress_after_optional_questions(pty, args,
             PIPELINE_FULLY_COMPLETED_PATTERNS,
             description="pipeline completed after second deployment",
             timeout=args.stream_timeout,

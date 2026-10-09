@@ -121,7 +121,7 @@ conclusion_schema:
 
 ## StackName
 
-新建 Stack 时，一开始就确定唯一 `StackName`，并作为 `stack_name` 传给 `ros_deploy` 的 `create`。用户指定名称时将其作为基础名，否则使用方案或服务简名；两者都追加时间或 6 位小写字母/数字随机串后缀（如 `ai-app-20260623-a1b2c3`），避免重名。
+新建 Stack 时，一开始就确定唯一 `StackName`，并作为 `stack_name` 传给 `ros_deploy` 的 `create`。用户明确要求精确名称、不可变名称或不得追加后缀时，必须原样使用该名称；不得追加时间或随机串，不得因重名自行改名，遇到名称冲突时报告冲突或请求用户授权新名称。用户仅指定基础名或前缀时，才追加 `ros_deploy` 工具描述提供的运行时随机串后缀；用户未指定名称时使用方案或服务简名并追加该后缀，避免重名。不要自行编造随机串、照抄文档中的示例后缀或仅用日期作唯一标识。该后缀只是默认命名建议，用户要求的精确名称仍须原样保留。
 
 - `ros_deploy` 的 `create` 必须传 `stack_name`，不要省略，不要使用容易重复的固定名称。
 - `ros_deploy` 的 `continue_create` 面向已有失败 Stack 时，使用 `create` 失败结果中的 Stack 标识，不要生成新的 StackName。

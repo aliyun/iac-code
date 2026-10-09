@@ -13,6 +13,7 @@ import subprocess
 import sys
 import textwrap
 import threading
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, cast
 from urllib.error import HTTPError
@@ -1321,6 +1322,94 @@ async def test_get_oauth_access_token_async_refreshes_once_across_storage_instan
     assert get_oauth_storage_secret(config, first_storage, "expires_at", scope="user") is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("asynchronous", [False, True])
+@pytest.mark.parametrize("refresh_boundary", ["expiry_field", "snapshot"])
+async def test_access_token_read_does_not_mix_old_expiry_with_new_refresh_marker(
+    monkeypatch, tmp_path, asynchronous, refresh_boundary
+) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("IAC_CODE_MCP_DISABLE_KEYRING", "1")
+    config = MCPServerConfig.from_mapping(
+        "remote", {"type": "http", "url": "https://example.com/mcp", "oauth": {"clientId": "client-id"}}
+    )
+    first_storage = MCPSecretStorage()
+    second_storage = MCPSecretStorage()
+    for kind, value in (("access_token", "old-token"), ("refresh_token", "refresh-token"), ("expires_at", "100")):
+        set_oauth_storage_secret(config, first_storage, kind, value, scope="user")
+    monkeypatch.setattr(
+        oauth_module,
+        "discover_oauth_metadata",
+        lambda _config: OAuthMetadata(
+            issuer="https://auth.example",
+            authorization_endpoint="https://auth.example/authorize",
+            token_endpoint="https://auth.example/token",
+            scopes_supported=[],
+        ),
+    )
+    calls = 0
+
+    def post_token(_url, _data):
+        nonlocal calls
+        calls += 1
+        return {"access_token": "new-token"}
+
+    monkeypatch.setattr(oauth_module, "_post_token", post_token)
+    read_secret = oauth_module.get_oauth_storage_secret
+    read_blob = oauth_module._read_oauth_blob
+    refreshed = False
+    lock_state = threading.local()
+    original_lock = second_storage.lock
+
+    @contextmanager
+    def track_refresh_lock(key):
+        with original_lock(key):
+            if key == oauth_storage_key(config, scope="user"):
+                lock_state.held = True
+                try:
+                    yield
+                finally:
+                    lock_state.held = False
+            else:
+                yield
+
+    monkeypatch.setattr(second_storage, "lock", track_refresh_lock)
+
+    def read_with_refresh_between_fields(config, storage, kind, *, scope=None):
+        nonlocal refreshed
+        value = read_secret(config, storage, kind, scope=scope)
+        if (
+            storage is second_storage
+            and kind == "expires_at"
+            and refresh_boundary == "expiry_field"
+            and not refreshed
+            and not getattr(lock_state, "held", False)
+        ):
+            refreshed = True
+            # The first caller finishes after the second captured the old expiry,
+            # but before the second reads the new refresh marker.
+            refresh_oauth_access_token(config, storage=first_storage, scope=scope)
+        return value
+
+    def read_snapshot_before_refresh(storage, key):
+        nonlocal refreshed
+        snapshot = read_blob(storage, key)
+        if storage is second_storage and refresh_boundary == "snapshot" and not refreshed:
+            refreshed = True
+            refresh_oauth_access_token(config, storage=first_storage, scope="user")
+        return snapshot
+
+    monkeypatch.setattr(oauth_module, "get_oauth_storage_secret", read_with_refresh_between_fields)
+    monkeypatch.setattr(oauth_module, "_read_oauth_blob", read_snapshot_before_refresh)
+    if asynchronous:
+        token = await get_oauth_access_token_async(config, storage=second_storage, scope="user", now=lambda: 200)
+    else:
+        token = oauth_module.get_oauth_access_token(config, storage=second_storage, scope="user", now=lambda: 200)
+    assert token == "new-token"
+    assert calls == 1
+    assert read_secret(config, first_storage, "expires_at", scope="user") is None
+
+
 @pytest.mark.timeout(60)
 def test_sync_expired_oauth_refresh_without_expires_in_deduplicates_across_processes(
     monkeypatch: pytest.MonkeyPatch,
@@ -1371,7 +1460,7 @@ def test_sync_expired_oauth_refresh_without_expires_in_deduplicates_across_proce
                     # 用一次性栅栏让它们同时进入刷新竞争,验证粗粒度 CAS 锁只放行一次网络刷新。
                     if key == oauth_module.oauth_storage_key(config, scope=MCPConfigScope.USER):
                         self._blob_reads += 1
-                        if self._blob_reads == 4:
+                        if self._blob_reads == 1:
                             wait_for_barrier("oauth-blob-read")
                     return value
 

@@ -243,6 +243,7 @@ class StepExecutor:
             resume_messages=resume_messages,
             precompleted_tools=precompleted_tools,
             compact_candidate_selection=compact_candidate_selection,
+            resume_candidate_selection=resume_candidate_selection,
             skip_completed_step_restore=skip_completed_step_restore,
             rollback_targets=rollback_targets,
             rollback_count=rollback_count,
@@ -286,6 +287,7 @@ class StepExecutor:
         max_nudges = 2
         last_complete_step_error: str | None = None
         last_complete_step_input: dict | None = None
+        last_agent_stop_reason: str | None = None
 
         # Permission resume continues an already-persisted assistant tool batch.
         # AgentLoop therefore emits ToolResultEvent directly instead of replaying
@@ -315,6 +317,7 @@ class StepExecutor:
             nonlocal last_complete_step_error
             nonlocal last_complete_step_input
             nonlocal terminal_failed_step_result
+            nonlocal last_agent_stop_reason
             try:
                 async for event in stream:
                     if isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
@@ -374,6 +377,9 @@ class StepExecutor:
                                 last_complete_step_input = pending_complete_input.get(event.tool_use_id)
                     yield event
                     if isinstance(event, MessageEndEvent) and self._current_agent_loop is not None:
+                        last_agent_stop_reason = event.stop_reason if event.stop_reason in {
+                            "stream_error", "max_turns", "length", "max_tokens",
+                        } else None
                         yield ContextUsageEvent(usage=self._current_agent_loop.get_context_usage())
             finally:
                 aclose = getattr(stream, "aclose", None)
@@ -424,9 +430,10 @@ class StepExecutor:
                 )
                 if first_stream is None:
                     first_stream = agent_loop.run_streaming(agent_context.initial_prompt)
-            async for event in consume_complete_step_events(first_stream):
-                first_stream_had_event = True
-                yield event
+            async with contextlib.aclosing(consume_complete_step_events(first_stream)) as events:
+                async for event in events:
+                    first_stream_had_event = True
+                    yield event
 
             nudge_count = 0
             skip_resume_nudge = (
@@ -460,8 +467,11 @@ class StepExecutor:
                     },
                 )
                 nudge_msg = self._build_complete_step_nudge(last_complete_step_error, last_complete_step_input, step)
-                async for event in consume_complete_step_events(agent_loop.run_streaming(nudge_msg)):
-                    yield event
+                async with contextlib.aclosing(
+                    consume_complete_step_events(agent_loop.run_streaming(nudge_msg))
+                ) as events:
+                    async for event in events:
+                        yield event
             if (
                 complete_step_input is None
                 and terminal_failed_step_result is None
@@ -482,6 +492,7 @@ class StepExecutor:
                     precompleted_tools=None,
                     completion_guard_state_seed=completion_guard_state,
                     compact_candidate_selection=compact_candidate_selection,
+                    resume_candidate_selection=resume_candidate_selection,
                     rollback_targets=rollback_targets,
                     rollback_count=rollback_count,
                     max_rollbacks=max_rollbacks,
@@ -494,8 +505,11 @@ class StepExecutor:
                     last_complete_step_input,
                     step,
                 )
-                async for event in consume_complete_step_events(recovery_loop.run_streaming(recovery_msg)):
-                    yield event
+                async with contextlib.aclosing(
+                    consume_complete_step_events(recovery_loop.run_streaming(recovery_msg))
+                ) as events:
+                    async for event in events:
+                        yield event
         finally:
             self._current_agent_loop = None
 
@@ -525,7 +539,8 @@ class StepExecutor:
             step_result = StepResult(
                 step_id=step.step_id,
                 status=StepStatus.FAILED,
-                error="No conclusion extracted",
+                error=(f"No conclusion extracted (agent stop reason: {last_agent_stop_reason})"
+                       if last_agent_stop_reason else "No conclusion extracted"),
             )
 
         yield step_result
@@ -543,6 +558,7 @@ class StepExecutor:
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         completion_guard_state_seed: dict[str, Any] | None = None,
         compact_candidate_selection: bool = False,
+        resume_candidate_selection: bool = False,
         skip_completed_step_restore: bool = False,
         rollback_targets: list[str] | None = None,
         rollback_count: int = 0,
@@ -559,6 +575,10 @@ class StepExecutor:
                 completion_record_contract=self._optional_config_string(step.config.get("completion_record_contract")),
             )
         )
+        # This is an execution fact, independent of model-generated conclusion
+        # fields and surface-specific compact schemas. Enrichers must distinguish
+        # initial presentation from a resumed user selection even after recovery.
+        completion_guard_state["resuming_candidate_selection"] = resume_candidate_selection
         saved_step_conclusion = context.snapshot().get(step.conclusion_field)
         fresh_agent_context = (
             step.config.get("fresh_agent_context_on_resume") is True

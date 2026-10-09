@@ -176,6 +176,13 @@ class DashScopeProvider(OpenAIProvider):
             return {}
         effort = normalize_effort(self._effort)
         allowed = set(spec.effort_values)
+        if self._model in {"glm-5.3-prime", "qwen3.8-omni-flash"}:
+            # These endpoints use the top-level effort field, not enable_thinking
+            # or thinking_budget. Omni permits none; GLM Prime always thinks.
+            if self._thinking_disabled() and spec.supports_disable:
+                return {"reasoning_effort": "none"}
+            selected = effort if effort in allowed else spec.default_effort_value
+            return {"reasoning_effort": selected} if selected is not None else {}
         if self._model in {"kimi/kimi-k3", "qwen3.8-max-preview"}:
             kwargs: dict[str, Any] = {"extra_body": {"preserve_thinking": True}}
             if self._thinking_disabled():

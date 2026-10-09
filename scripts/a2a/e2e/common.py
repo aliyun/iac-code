@@ -14,7 +14,8 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import Iterable
+from collections import OrderedDict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,6 +55,23 @@ RUN_LOG_ROOT_NAME = "iac-code-a2a-e2e-runs"
 NORMAL_TURN_TERMINAL_STATES = {"TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"}
 
 
+class JsonRpcResponseError(RuntimeError):
+    """A JSON-RPC error with only bounded, non-secret diagnostics for E2E reports."""
+
+    def __init__(self, name: str, error: Any) -> None:
+        super().__init__(f"{name} returned a JSON-RPC error")
+        self.name = name
+        self.code = error.get("code") if isinstance(error, dict) and isinstance(error.get("code"), int) else None
+        message = str(error.get("message") or "").casefold() if isinstance(error, dict) else ""
+        self.markers = [
+            marker for marker in (
+                "resource_selection_resume_invalid", "task is already working", "active session",
+                "execution", "context", "not found", "terminal state", "permission", "rate limit",
+                "unsupported", "duplicate",
+            ) if marker in message
+        ]
+
+
 @dataclass
 class StreamSummary:
     name: str
@@ -66,7 +84,10 @@ class StreamSummary:
     last_input_required_step_id: str = ""
     normal_handoff_ready: bool = False
     text: str = ""
+    terminal_status_text: str = ""
     event_count: int = 0
+    response_content_type: str = ""
+    raw_line_count: int = 0
 
     @property
     def last_status_state(self) -> str:
@@ -106,8 +127,10 @@ class ManagedServer:
         self._stdout_handle: Any | None = None
         self._stderr_handle: Any | None = None
         self._tee_threads: list[threading.Thread] = []
+        self._listening_url: str | None = None
 
     def start(self) -> None:
+        self._listening_url = None
         command = self._server_args or ["-m", "iac_code.cli.main", "a2a", "--config", str(self._config_path)]
         cmd = [*self._python_cmd, *command]
         self._stdout_handle = (self._log_prefix.with_suffix(".stdout.log")).open("w", encoding="utf-8")
@@ -124,9 +147,17 @@ class ManagedServer:
             start_new_session=True,
         )
         self._tee_threads = [
-            _tee_stream(self.process.stdout, self._stdout_handle, self._env),
-            _tee_stream(self.process.stderr, self._stderr_handle, self._env),
+            _tee_stream(self.process.stdout, self._stdout_handle, self._env, self._record_startup_line),
+            _tee_stream(self.process.stderr, self._stderr_handle, self._env, self._record_startup_line),
         ]
+
+    def _record_startup_line(self, line: str) -> None:
+        # Uvicorn emits this only after this child's socket has bound. An agent
+        # card from another process cannot prove ownership of the listening port.
+        plain = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", line)
+        match = re.search(r"Uvicorn running on (http://[^\s]+)", plain)
+        if match:
+            self._listening_url = match.group(1).rstrip("/")
 
     def kill9(self) -> None:
         if self.process is None or self.process.poll() is not None:
@@ -178,6 +209,7 @@ def stream_message(
     task_id: str = "",
     images: list[dict[str, Any]] | None = None,
     redaction_env: dict[str, str] | None = None,
+    on_event: Callable[[Any], None] | None = None,
 ) -> StreamSummary:
     payload = build_message_stream_payload(
         cwd=cwd,
@@ -196,15 +228,44 @@ def stream_message(
         method="POST",
     )
     summary = StreamSummary(name=name, prompt=prompt, request_task_id=task_id)
+    started = time.monotonic()
+    outcome = "error"
+    rpc_code = None
+    error_kind = None
+    http_status = None
     try:
         with urlopen(request, timeout=timeout) as response:
-            for line in response:
-                parsed = _parse_sse_data_line(line)
-                if parsed is None:
-                    continue
+            summary.response_content_type = response.headers.get_content_type()
+            if summary.response_content_type == "application/json":
+                raw = response.read()
+                summary.raw_line_count = len(raw.splitlines())
+                parsed = json.loads(raw)
+                if on_event is not None:
+                    on_event(parsed)
                 _append_jsonl(run_dir / f"{name}.events.jsonl", parsed, redaction_env)
+                if isinstance(parsed, dict) and parsed.get("error"):
+                    raise JsonRpcResponseError(name, parsed["error"])
                 _apply_event(summary, parsed)
+            else:
+                for line in response:
+                    summary.raw_line_count += 1
+                    parsed = _parse_sse_data_line(line)
+                    if parsed is None:
+                        continue
+                    if on_event is not None:
+                        on_event(parsed)
+                    _append_jsonl(run_dir / f"{name}.events.jsonl", parsed, redaction_env)
+                    if isinstance(parsed, dict) and parsed.get("error"):
+                        raise JsonRpcResponseError(name, parsed["error"])
+                    _apply_event(summary, parsed)
+        outcome = "eof"
+    except JsonRpcResponseError as exc:
+        rpc_code = exc.code
+        error_kind = "jsonrpc"
+        raise
     except HTTPError as exc:
+        error_kind = "http"
+        http_status = exc.code
         body = exc.read().decode("utf-8", errors="replace")
         redacted_body = _redact_sensitive_text(body, redaction_env)
         _append_jsonl(
@@ -214,8 +275,20 @@ def stream_message(
         )
         raise RuntimeError(f"{name} failed with HTTP {exc.code}: {redacted_body[:500]}") from exc
     except (TimeoutError, URLError, OSError) as exc:
+        cause = exc.reason if isinstance(exc, URLError) else exc
+        error_kind = ("timeout" if isinstance(cause, TimeoutError) else
+                      "connection" if isinstance(cause, ConnectionError) else
+                      "url" if isinstance(exc, URLError) else "os")
         _append_jsonl(run_dir / f"{name}.events.jsonl", {"error": str(exc)}, redaction_env)
         raise RuntimeError(f"{name} stream failed: {exc}") from exc
+    finally:
+        # Fixed, non-secret stream facts survive even a JSON-RPC stream error.
+        _append_jsonl(run_dir / "stream-diagnostics.jsonl", {
+            "outcome": outcome, "elapsed_seconds": round(time.monotonic() - started, 2),
+            "last_state": summary.last_status_state, "event_count": summary.event_count,
+            "response_content_type": summary.response_content_type, "jsonrpc_error_code": rpc_code,
+            "error_kind": error_kind, "http_status": http_status,
+        })
     return summary
 
 
@@ -251,6 +324,7 @@ def run_llm_preflight(
         summary = _compact_text(output) or f"exit code {result.returncode}"
         payload = {
             "ok": result.returncode == 0,
+            "timedOut": False,
             "returnCode": result.returncode,
             "elapsedSeconds": round(elapsed, 3),
             "summary": summary,
@@ -264,6 +338,7 @@ def run_llm_preflight(
         output = _redact_sensitive_text("\n".join(part for part in [stdout, stderr] if part), preflight_env)
         payload = {
             "ok": False,
+            "timedOut": True,
             "returnCode": None,
             "elapsedSeconds": round(elapsed, 3),
             "summary": f"timed out after {timeout:.0f}s" + (f": {_compact_text(output)}" if output else ""),
@@ -296,13 +371,26 @@ def fetch_pipeline_state(
     return redacted
 
 
-def wait_for_server(server_url: str, *, timeout: float) -> None:
+def wait_for_server(server_url: str, *, timeout: float, owned_server: ManagedServer | None = None) -> None:
     deadline = time.monotonic() + timeout
     last_error = ""
     while time.monotonic() < deadline:
+        if owned_server is not None:
+            process = owned_server.process
+            if process is None or process.poll() is not None:
+                raise RuntimeError("Owned A2A server exited before its endpoint became ready")
+            listening = owned_server._listening_url
+            if listening is None:
+                last_error = "owned server has not bound its endpoint"
+                time.sleep(0.1)
+                continue
+            if listening != server_url.rstrip("/"):
+                raise RuntimeError("Owned A2A server bound a different endpoint")
         try:
             with urlopen(server_url.rstrip("/") + "/.well-known/agent-card.json", timeout=5) as response:
                 if response.status == 200:
+                    if owned_server is not None and owned_server.process.poll() is not None:
+                        raise RuntimeError("Owned A2A server exited during readiness check")
                     return
                 last_error = f"HTTP {response.status}"
         except Exception as exc:
@@ -334,7 +422,10 @@ def _apply_event(summary: StreamSummary, payload: Any) -> None:
         if _is_normal_handoff(envelope):
             summary.normal_handoff_ready = True
 
-    for text in _status_message_texts(payload):
+    status_texts = _status_message_texts(payload)
+    if identity is not None and identity.get("state") in {"TASK_STATE_FAILED", "TASK_STATE_CANCELED"}:
+        summary.terminal_status_text = "".join(status_texts)
+    for text in status_texts:
         summary.text += text
 
 
@@ -350,7 +441,7 @@ def _is_normal_handoff(envelope: dict[str, Any]) -> bool:
 
 
 def _normal_turn_finished(summary: StreamSummary) -> bool:
-    return any(state in NORMAL_TURN_TERMINAL_STATES for state in summary.status_states)
+    return summary.last_status_state in NORMAL_TURN_TERMINAL_STATES
 
 
 def _add_completed_snapshot_checks(
@@ -398,9 +489,10 @@ def _status_message_texts(payload: Any) -> list[str]:
     result = payload.get("result")
     if isinstance(result, dict):
         _extend_unique(texts, _status_message_texts(result))
-        task = result.get("task")
-        if isinstance(task, dict):
-            _extend_unique(texts, _status_message_texts(task))
+
+    task = payload.get("task")
+    if isinstance(task, dict):
+        _extend_unique(texts, _status_message_texts(task))
 
     status = payload.get("status")
     if isinstance(status, dict):
@@ -467,8 +559,74 @@ def _subprocess_output_text(value: str | bytes | None) -> str:
     return value
 
 
+_CAPTURE_SECRET_LOCK = threading.Lock()
+_CAPTURE_SECRET_HISTORY: OrderedDict[str, OrderedDict[tuple, tuple[str, ...]]] = OrderedDict()
+
+
+def _capture_credential_values(env: dict[str, str] | None) -> tuple[str, ...]:
+    """Private capture hygiene, using only the explicit test configuration.
+
+    Keep four credential versions so a late result from a pre-refresh client
+    is also scrubbed. Never load the user's default configuration or settings.
+    This does not change product responses or native business assertions.
+    """
+    directory = (env or {}).get("IAC_CODE_CONFIG_DIR")
+    if not isinstance(directory, str) or not directory:
+        return ()
+    root = Path(directory)
+    signature = []
+    for name in (".credentials.yml", ".cloud-credentials.yml"):
+        path = root / name
+        try:
+            stat = path.stat()
+            if path.is_file() and not path.is_symlink() and 0 < stat.st_size <= 131072:
+                signature.append((str(path), stat.st_mtime_ns, stat.st_size))
+        except OSError:
+            continue
+    key = str(root)
+    with _CAPTURE_SECRET_LOCK:
+        history = _CAPTURE_SECRET_HISTORY.setdefault(key, OrderedDict())
+        _CAPTURE_SECRET_HISTORY.move_to_end(key)
+        version = tuple(signature)
+        if version not in history:
+            import yaml
+
+            values: set[str] = set()
+
+            def collect(item: Any, *, provider_map: bool = False) -> None:
+                if isinstance(item, dict):
+                    for field, value in item.items():
+                        sensitive = any(marker in str(field).upper()
+                                        for marker in ("KEY", "SECRET", "TOKEN", "PASSWORD"))
+                        if isinstance(value, str) and len(value) >= 6 and (sensitive or provider_map):
+                            values.add(value)
+                        elif isinstance(value, (dict, list)):
+                            collect(value)
+                elif isinstance(item, list):
+                    for value in item:
+                        collect(value)
+
+            for filename, _, _ in signature:
+                path = Path(filename)
+                try:
+                    with path.open("rb") as handle:
+                        raw = handle.read(131073)
+                    if len(raw) <= 131072:
+                        collect(yaml.safe_load(raw.decode("utf-8")), provider_map=path.name == ".credentials.yml")
+                except (OSError, ValueError, UnicodeError, yaml.YAMLError):
+                    continue
+            history[version] = tuple(values)
+            while len(history) > 4:
+                history.popitem(last=False)
+        while len(_CAPTURE_SECRET_HISTORY) > 64:
+            _CAPTURE_SECRET_HISTORY.popitem(last=False)
+        return tuple({value for values in history.values() for value in values})
+
+
 def _redact_sensitive_text(text: str, env: dict[str, str] | None) -> str:
     redacted = text
+    for value in sorted(_capture_credential_values(env), key=len, reverse=True):
+        redacted = redacted.replace(value, "<redacted>")
     for name, value in (env or {}).items():
         if not value or len(value) < 6:
             continue
@@ -517,13 +675,18 @@ def _free_port(host: str) -> int:
         return int(sock.getsockname()[1])
 
 
-def _tee_stream(stream: Any, handle: Any, redaction_env: dict[str, str] | None) -> threading.Thread:
+def _tee_stream(
+    stream: Any, handle: Any, redaction_env: dict[str, str] | None,
+    on_line: Callable[[str], None] | None = None,
+) -> threading.Thread:
     if stream is None:
         return threading.Thread(target=lambda: None)
 
     def run() -> None:
         for line in stream:
             try:
+                if on_line is not None:
+                    on_line(line)
                 handle.write(_redact_sensitive_text(line, redaction_env))
                 handle.flush()
             except ValueError:

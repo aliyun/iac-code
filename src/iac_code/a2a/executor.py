@@ -1639,7 +1639,31 @@ class IacCodeA2AExecutor(AgentExecutor):
                     and current_task is not None
                 ):
                     try:
-                        await existing.attach_task(current_task, mark_working=True)
+                        if (
+                            resource_selection_response is not None
+                            and existing.phase == "terminated"
+                            and existing.release_ready
+                            and not existing.has_managed_work()
+                            and (
+                                resolve_request_run_mode(getattr(context, "message", None)) is not RunMode.PIPELINE
+                                or await self._should_route_pipeline_handoff_to_normal(
+                                    context_id=context_id,
+                                    cwd=self._resolve_cwd(metadata),
+                                )
+                            )
+                        ):
+                            # A selector in normal chat, including one after a
+                            # proven Pipeline handoff, answers in a new execution
+                            # rather than attaching to a released controller.
+                            existing = await self._execution_control_service.begin_execution(
+                                context_id=context_id,
+                                task_id=resource_selection_response.task_id,
+                                owner=owner,
+                                cwd=self._resolve_cwd(metadata),
+                                execution_mode="normal",
+                            )
+                        else:
+                            await existing.attach_task(current_task, mark_working=True)
                     except ExecutionControlConflictError as exc:
                         raise InputResponseExecutionControlConflictError(str(exc)) from exc
                     await existing.mark_execution_started()

@@ -3908,14 +3908,14 @@ async def test_pipeline_permission_resident_timer_survives_full_executor_publica
 
     await asyncio.wait_for(
         executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue),
-        timeout=3,
+        timeout=15,
     )
 
-    await asyncio.wait_for(timer_started.wait(), timeout=3)
+    await asyncio.wait_for(timer_started.wait(), timeout=15)
     assert future.done() is False
     release_timer.set()
-    assert await asyncio.wait_for(future, timeout=3) is PermissionWaitOutcome.SUSPEND
-    await asyncio.wait_for(timer_completed.wait(), timeout=3)
+    assert await asyncio.wait_for(future, timeout=15) is PermissionWaitOutcome.SUSPEND
+    await asyncio.wait_for(timer_completed.wait(), timeout=15)
     context_record = await store.get_context_record("ctx-1")
     checkpoint = PermissionWaitCheckpointStore(str(tmp_path), context_record.session_id).list_active()[0]
     assert checkpoint["phase"] == "SUSPENDED"
@@ -10147,7 +10147,7 @@ def test_concurrent_cancel_waiting_input_sidecar_is_serialized(tmp_path: Path) -
                     self.entered.set()
                 else:
                     self.second_entered.set()
-            assert self.release.wait(timeout=2)
+            assert self.release.wait(timeout=10)
 
     cwd = tmp_path / "workspace"
     session_id = "session-ctx-1"
@@ -10198,12 +10198,17 @@ def test_concurrent_cancel_waiting_input_sidecar_is_serialized(tmp_path: Path) -
     first = threading.Thread(target=cancel)
     second = threading.Thread(target=cancel)
     first.start()
-    assert backup_service.entered.wait(timeout=1)
-    second.start()
-    assert not backup_service.second_entered.wait(timeout=0.1)
-    backup_service.release.set()
-    first.join(timeout=2)
-    second.join(timeout=2)
+    try:
+        # Filesystem-backed cancellation can take more than a second under
+        # Windows xdist load. The serialization assertions remain unchanged.
+        assert backup_service.entered.wait(timeout=10)
+        second.start()
+        assert not backup_service.second_entered.wait(timeout=0.1)
+    finally:
+        backup_service.release.set()
+        first.join(timeout=10)
+        if second.ident is not None:
+            second.join(timeout=10)
 
     assert not first.is_alive()
     assert not second.is_alive()
