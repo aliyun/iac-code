@@ -20,6 +20,7 @@ from iac_code.providers.base import (
     Provider,
     ToolDefinition,
 )
+from iac_code.providers.output_limits import OutputTokenPolicy
 from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.providers.request_headers import get_provider_request_headers, merge_provider_request_headers
 from iac_code.providers.request_logging import log_provider_request_policy
@@ -163,19 +164,24 @@ class OpenAIProvider(Provider):
             return None
         return self._thinking_budget if self._thinking_budget is not None else spec.default_thinking_budget
 
+    def _output_token_limit(self, max_tokens: int) -> int | None:
+        """Honor explicit limits; GLM uses its server default instead of the shared 8192 cap."""
+        return OutputTokenPolicy(self._model).resolve(max_tokens, self._max_completion_tokens)
+
     def _token_limit_kwargs(self, max_tokens: int) -> dict[str, int]:
-        # 用户配置的「最大输出 tokens」是硬上限,覆盖调用方传入的默认值;留空时沿用默认。
-        configured = self._max_completion_tokens
+        limit = self._output_token_limit(max_tokens)
+        if limit is None:
+            return {}
         if self._thinking_disabled():
-            return {"max_tokens": configured or max_tokens}
+            return {"max_tokens": limit}
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if not spec.use_max_completion_tokens:
-            return {"max_tokens": configured or max_tokens}
+            return {"max_tokens": limit}
         # use_max_completion_tokens 家族:该参数限制「含推理」的总生成量,思考预算另经
         # extra_body 单独下发。故最终额度 = 可见输出上限 + 思考预算,否则推理会挤占用户要的输出。
-        # configured 与 budget 均可覆盖默认,configured 分支同样要叠加预算(与留空分支一致)。
+        # 显式配置的上限与调用方额度均沿用该模型的思考预算规则。
         thinking_budget = self._effective_thinking_budget()
-        return {"max_completion_tokens": (configured or max_tokens) + (thinking_budget or 0)}
+        return {"max_completion_tokens": limit + (thinking_budget or 0)}
 
     def _thinking_disabled(self) -> bool:
         return bool_or_none(getattr(self, "_thinking_enabled", None)) is False

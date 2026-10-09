@@ -331,17 +331,17 @@ class TestOpenAIMaxOutputTokens:
         )
         assert p._token_limit_kwargs(8192) == {"max_completion_tokens": 50000}
 
-    def test_blank_cap_uses_request_default_for_max_completion_model(self):
+    def test_blank_glm_cap_uses_server_default(self):
         from iac_code.providers.openai_provider import OpenAIProvider
 
-        # Without a configured cap or supported budget, preserve the caller's default.
+        # An unconfigured GLM request must not inherit the shared 8192 cap.
         p = OpenAIProvider(
             model="glm-5.2",
             api_key="k",
             provider_key="dashscope",
             thinking_enabled=True,
         )
-        assert p._token_limit_kwargs(8192) == {"max_completion_tokens": 8192}
+        assert p._token_limit_kwargs(8192) == {}
 
 
 @pytest.mark.asyncio

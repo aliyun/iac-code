@@ -1,0 +1,230 @@
+{
+  "summary": "获取资源类型信息。",
+  "path": "/resourceType/{resourceType}",
+  "methods": [
+    "get"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "security": [
+    {
+      "Anonymous": []
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "operationType": "read",
+  "deprecated": false,
+  "systemTags": {
+    "operationType": "none",
+    "riskType": "none",
+    "chargeType": "free",
+    "abilityTreeNodes": [
+      "FEATUREopenapiexplorerY5UU1D"
+    ],
+    "tenantRelevance": "publicInformation"
+  },
+  "parameters": [
+    {
+      "name": "resourceType",
+      "in": "path",
+      "schema": {
+        "description": "资源Code，用于获取指定资源类型的详细信息",
+        "type": "string",
+        "required": false,
+        "example": "alicloud_vpc"
+      }
+    },
+    {
+      "name": "terraformProviderVersion",
+      "in": "query",
+      "schema": {
+        "description": "TerraformProvider版本，为空时默认为最新版本",
+        "type": "string",
+        "required": false,
+        "example": "1.227.0"
+      }
+    },
+    {
+      "name": "filterReadOnly",
+      "in": "query",
+      "schema": {
+        "description": "是否支持过滤只读属性",
+        "type": "boolean",
+        "required": false,
+        "example": "false"
+      }
+    },
+    {
+      "name": "acceptLanguage",
+      "in": "query",
+      "schema": {
+        "description": "根据汉语、英语返回结果。取值范围：\n- zh-CN：中文。\n- en-US：英文。\n\n默认值：zh-CN。",
+        "type": "string",
+        "required": false,
+        "example": "zh-CN"
+      }
+    }
+  ],
+  "responses": {
+    "200": {
+      "schema": {
+        "title": "Schema of Response",
+        "description": "成功响应的数据结构",
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "title": "Id of the request",
+            "description": "请求ID",
+            "type": "string",
+            "example": "9bcaac3c-420d-4303-87ab-7638c07b0a0b"
+          },
+          "resourceType": {
+            "description": "资源类型详细信息",
+            "type": "object",
+            "properties": {
+              "operations": {
+                "description": "资源关联的API集合",
+                "type": "array",
+                "items": {
+                  "description": "资源关联的API集合",
+                  "type": "object",
+                  "properties": {
+                    "apiName": {
+                      "description": "API名称",
+                      "type": "string",
+                      "example": "CreateVSwitch"
+                    },
+                    "apiVersion": {
+                      "description": "API的版本",
+                      "type": "string",
+                      "example": "2016-04-28"
+                    },
+                    "operationType": {
+                      "description": "操作类型，枚举：Write、Read",
+                      "type": "string",
+                      "enumValueTitles": {
+                        "Read": "Read",
+                        "Write": "Write"
+                      },
+                      "example": "Write"
+                    },
+                    "serviceCode": {
+                      "description": "serviceCode",
+                      "type": "string",
+                      "example": "Vpc"
+                    }
+                  }
+                }
+              },
+              "product": {
+                "description": "产品Code",
+                "type": "string",
+                "example": "ECS"
+              },
+              "properties": {
+                "description": "资源属性",
+                "type": "object",
+                "example": "{}"
+              },
+              "status": {
+                "description": "资源状态",
+                "type": "string",
+                "example": "Available"
+              },
+              "statusStartVersion": {
+                "description": "状态生效版本",
+                "type": "string",
+                "example": "1.227.0"
+              },
+              "subcategory": {
+                "description": "Terraform中产品分类",
+                "type": "string",
+                "example": "network"
+              },
+              "terraformProviderVersion": {
+                "description": "terraform provider版本",
+                "type": "string",
+                "example": "1.227.0"
+              },
+              "terraformResourceType": {
+                "description": "Terraform中资源Code",
+                "type": "string",
+                "example": "alicloud_vpc"
+              },
+              "productName": {
+                "description": "产品名称。",
+                "type": "string",
+                "example": "专有网络VPC\n"
+              },
+              "title": {
+                "description": "标题",
+                "type": "string",
+                "example": "路由表\n"
+              },
+              "description": {
+                "description": "描述。",
+                "type": "string",
+                "example": "test"
+              },
+              "resourceListPageUrl": {
+                "description": "资源列表页链接",
+                "type": "string",
+                "example": "https://vpc.console.aliyun.com/vpc/${RegionId}/route-tables\n"
+              },
+              "resourceDetailPageUrl": {
+                "description": "资源详情页链接",
+                "type": "string",
+                "example": "https://vpc.console.aliyun.com/vpc/${RegionId}/route-tables/${RouteTableId}\n"
+              },
+              "productNameEn": {
+                "description": "产品英文名称",
+                "type": "string",
+                "example": "vpc"
+              },
+              "supportExported": {
+                "description": "支持导出",
+                "type": "boolean",
+                "example": "true"
+              },
+              "resourceType": {
+                "description": "阿里云资源类型，格式为 ALIYUN::<云产品>::<资源类型>",
+                "type": "string",
+                "example": "ALIYUN::VPC::VPC"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "staticInfo": {
+    "returnType": "synchronous"
+  },
+  "responseDemo": "[{\"errorExample\":\"\",\"example\":\"{\\n  \\\"requestId\\\": \\\"9bcaac3c-420d-4303-87ab-7638c07b0a0b\\\",\\n  \\\"resourceType\\\": {\\n    \\\"operations\\\": [\\n      {\\n        \\\"apiName\\\": \\\"CreateVSwitch\\\",\\n        \\\"apiVersion\\\": \\\"2016-04-28\\\",\\n        \\\"operationType\\\": \\\"Write\\\",\\n        \\\"serviceCode\\\": \\\"Vpc\\\"\\n      }\\n    ],\\n    \\\"product\\\": \\\"ECS\\\",\\n    \\\"properties\\\": {},\\n    \\\"status\\\": \\\"Available\\\",\\n    \\\"statusStartVersion\\\": \\\"1.227.0\\\",\\n    \\\"subcategory\\\": \\\"network\\\",\\n    \\\"terraformProviderVersion\\\": \\\"1.227.0\\\",\\n    \\\"terraformResourceType\\\": \\\"alicloud_vpc\\\",\\n    \\\"productName\\\": \\\"专有网络VPC\\\\n\\\",\\n    \\\"title\\\": \\\"路由表\\\\n\\\",\\n    \\\"description\\\": \\\"test\\\",\\n    \\\"resourceListPageUrl\\\": \\\"https://vpc.console.aliyun.com/vpc/${RegionId}/route-tables\\\\n\\\",\\n    \\\"resourceDetailPageUrl\\\": \\\"https://vpc.console.aliyun.com/vpc/${RegionId}/route-tables/${RouteTableId}\\\\n\\\",\\n    \\\"productNameEn\\\": \\\"vpc\\\",\\n    \\\"supportExported\\\": true,\\n    \\\"resourceType\\\": \\\"ALIYUN::VPC::VPC\\\"\\n  }\\n}\",\"type\":\"json\"}]",
+  "gatewayOptions": {
+    "fileTransfer": false
+  },
+  "title": "获取资源类型详情",
+  "description": "## 请求说明",
+  "changeSet": [],
+  "flowControl": {
+    "flowControlList": [
+      {
+        "threshold": "300",
+        "countWindow": 1,
+        "regionId": "*",
+        "api": "GetResourceType"
+      }
+    ]
+  },
+  "ramActions": [],
+  "components": {
+    "schemas": {}
+  }
+}
