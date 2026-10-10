@@ -21,7 +21,7 @@ import subprocess
 import sys
 import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from io import StringIO
@@ -1965,15 +1965,20 @@ class InlineREPL:
         first = user_input.split(None, 1)[0] if user_input else ""
         return first in _PIPELINE_SAFE_COMMANDS
 
-    def _pipeline_memory_content_getter(self) -> None:
+    def _pipeline_memory_content_getter(self) -> Callable[[], str]:
         """Return pipeline prompt memory provider.
 
+        Explicit user/project instruction files apply across pipeline steps.
         Pipeline steps should not receive all auto-memory topic bodies in the
         system prompt. They also intentionally do not receive MemoryRecallService,
         so no side recall is triggered. Relevant topic memories are available
         through the explicit read_memory tool when a step's tool policy allows it.
         """
-        return None
+        def instruction_content() -> str:
+            context = self._refresh_memory_context()
+            return str(getattr(context, "instruction_memory_content", "") or "")
+
+        return instruction_content
 
     def _maybe_block_user_escape(self, user_input: str) -> bool:
         """Return True if the input is a gated escape and we should NOT process it.
@@ -5008,6 +5013,7 @@ class InlineREPL:
 
         stop_keys = asyncio.Event()
         interrupt_requested = asyncio.Event()
+        key_capture_ready = asyncio.Event()
         parent_task = asyncio.current_task()
 
         def _request_pipeline_cancel() -> None:
@@ -5020,6 +5026,7 @@ class InlineREPL:
             loop = asyncio.get_running_loop()
             try:
                 with RawInputCapture(use_cbreak=True) as cap:
+                    key_capture_ready.set()
                     while not stop_keys.is_set():
                         key_event = await loop.run_in_executor(None, cap.read_key, 0.1)
                         if key_event is None:
@@ -5038,6 +5045,16 @@ class InlineREPL:
                             nonlocal selected
                             candidate_selection = tabs.confirm_selection()
                             if candidate_selection.selected_candidate_name:
+                                recorder = getattr(self, "_pipeline_display_recorder", None)
+                                if recorder is not None:
+                                    try:
+                                        recorder.record(
+                                            "candidate_selection_submitted",
+                                            step_id=getattr(self, "_pipeline_display_current_step_id", None),
+                                            payload={"selected_index": candidate_selection.selected_candidate_index},
+                                        )
+                                    except Exception as exc:
+                                        logger.warning("Failed to record candidate selection submission: {}", exc)
                                 selected = candidate_selection
                                 stop_keys.set()
                             continue
@@ -5045,6 +5062,10 @@ class InlineREPL:
                             _live_update(_render_current_content())
             except (OSError, ValueError):
                 pass
+
+        def start_key_reader() -> asyncio.Task[None]:
+            key_capture_ready.clear()
+            return asyncio.create_task(key_reader())
 
         async def _handle_esc_interrupt() -> bool:
             """Handle ESC interrupt prompt. Returns True if pipeline restarted."""
@@ -5109,7 +5130,7 @@ class InlineREPL:
             live.start()
             if show_agent_prelude:
                 _live_update(_render_current_content())
-            key_task = asyncio.create_task(key_reader())
+            key_task = start_key_reader()
 
             async for event in event_stream:
                 if interrupt_requested.is_set():
@@ -5120,7 +5141,7 @@ class InlineREPL:
                     if self._pipeline_waiting_input and getattr(self, "_last_interrupt_paused", False):
                         await _stop_key_reader()
                         return None
-                    key_task = asyncio.create_task(key_reader())
+                    key_task = start_key_reader()
 
                 if isinstance(event, PipelineEvent):
                     if event.type != PipelineEventType.USER_INPUT_REQUIRED:
@@ -5142,6 +5163,15 @@ class InlineREPL:
                         # must mean the cbreak key reader can already accept an
                         # Enter; recording it before ``waiting_input`` was set
                         # created a race where fast drivers lost the key press.
+                        # A timed wait_for can consume a simultaneous task
+                        # cancellation and event completion on Python 3.10/3.11.
+                        # Poll with cancellable sleeps so Ctrl+C and SIGINT
+                        # still abort while the key reader is starting.
+                        key_capture_deadline = asyncio.get_running_loop().time() + 5.0
+                        while not key_capture_ready.is_set():
+                            if key_task.done() or asyncio.get_running_loop().time() >= key_capture_deadline:
+                                raise RuntimeError("candidate selection key reader did not start")
+                            await asyncio.sleep(0.01)
                         recorder = getattr(self, "_pipeline_display_recorder", None)
                         if recorder is not None:
                             try:
@@ -5169,7 +5199,7 @@ class InlineREPL:
                                 if self._pipeline_waiting_input and getattr(self, "_last_interrupt_paused", False):
                                     await _stop_key_reader()
                                     return None
-                                key_task = asyncio.create_task(key_reader())
+                                key_task = start_key_reader()
                                 continue
                             break
                         break
@@ -5293,7 +5323,7 @@ class InlineREPL:
                             event.response_future.set_result(answer)
                     finally:
                         live.start()
-                    key_task = asyncio.create_task(key_reader())
+                    key_task = start_key_reader()
 
                 elif isinstance(event, StepResult):
                     continue

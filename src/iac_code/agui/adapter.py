@@ -420,7 +420,12 @@ class AguiA2AAdapter:
                         terminal_state = state
                     if state in _FAILED_STATES or state in {"canceled", "completed"}:
                         break
-                    if state == "input-required" and not pending_values:
+                    # A resumed pipeline can publish its previous task status
+                    # after clearing the consumed input. Keep observing until
+                    # the next actual input projection or terminal state.
+                    if state == "input-required" and not pending_values and not (
+                        resume_accepted and props.iac_code.run_mode == "pipeline"
+                    ):
                         break
             finally:
                 close_stream = getattr(stream, "aclose", None)
@@ -633,7 +638,9 @@ class AguiA2AAdapter:
                 **_a2a_request_options(props, preferred_language=ticket.preferred_language),
             )
             return ResumeApplication(
-                stream=self._stream_prompt_response(binding, stream, prompt_responses, acceptance),
+                stream=self._stream_prompt_response(
+                    binding, stream, prompt_responses, acceptance, pipeline=props.run_mode == "pipeline"
+                ),
                 acceptance=acceptance,
                 resolved_tools=resolved_tools,
                 sideband_recovery_after=None,
@@ -670,8 +677,11 @@ class AguiA2AAdapter:
         stream: Any,
         responses: list[tuple[PendingInput, str]],
         acceptance: ResumeAcceptance,
+        *,
+        pipeline: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
         accepted = False
+        last_state = ""
         try:
             async for event in stream:
                 self._validate_resume_acceptance_event(binding, event)
@@ -679,6 +689,7 @@ class AguiA2AAdapter:
                     await self._commit_accepted_inputs(binding, responses)
                     acceptance.accepted = True
                     accepted = True
+                last_state = a2a_state(event) or last_state
                 yield event
         except BaseException:
             raise
@@ -688,6 +699,12 @@ class AguiA2AAdapter:
                 await close_stream()
         if not accepted:
             raise AguiError("A2A_UNAVAILABLE", "The A2A interrupt response was not accepted.")
+        if pipeline and last_state in {"", "submitted", "working", "input-required"}:
+            # An accepted pipeline response can be consumed by its existing
+            # execution stream. Observe that same task until its next actual
+            # wait/terminal boundary; do not submit the response a second time.
+            async for event in self._stream_after_sideband(binding, require_input_projection=True):
+                yield event
 
     async def _commit_accepted_inputs(
         self,
@@ -812,28 +829,43 @@ class AguiA2AAdapter:
         except BaseException:
             raise
 
-    async def _stream_after_sideband(self, binding: ThreadBinding) -> AsyncIterator[dict[str, Any]]:
+    async def _stream_after_sideband(
+        self, binding: ThreadBinding, *, require_input_projection: bool = False
+    ) -> AsyncIterator[dict[str, Any]]:
         """Close the send/subscribe race with one authoritative task snapshot."""
 
         assert binding.task_id is not None
+        def at_boundary(task: Any) -> bool:
+            state = a2a_state(task)
+            if state in _FAILED_STATES | {"completed", "canceled"}:
+                return True
+            return state == "input-required" and (
+                not require_input_projection or any(
+                    (binding.execution_id, str(value.get("inputId") or "")) not in binding.applied_resume_digests
+                    for value in a2a_inputs(task)
+                )
+            )
+
         task = await self.client.get_task(self.a2a_url, binding.task_id, history_length=100)
-        yield task
-        if a2a_state(task) in _FAILED_STATES | _SUCCESS_STATES | {"canceled"}:
+        if not require_input_projection or a2a_state(task) != "input-required" or at_boundary(task):
+            yield task
+        if at_boundary(task):
             return
         stream = self.client.subscribe_task(self.a2a_url, binding.task_id)
         try:
             async for event in stream:
                 if isinstance(event, Mapping) and isinstance(event.get("error"), Mapping):
                     refreshed = await self.client.get_task(self.a2a_url, binding.task_id, history_length=100)
-                    if a2a_state(refreshed) not in _FAILED_STATES | _SUCCESS_STATES | {"canceled"}:
+                    if not at_boundary(refreshed):
                         raise RuntimeError("A2A task subscription returned an error before terminal state")
                     yield refreshed
                     return
-                yield event
-                if a2a_state(event) in _FAILED_STATES | _SUCCESS_STATES | {"canceled"}:
+                if not require_input_projection or a2a_state(event) != "input-required" or at_boundary(event):
+                    yield event
+                if at_boundary(event):
                     return
             refreshed = await self.client.get_task(self.a2a_url, binding.task_id, history_length=100)
-            if a2a_state(refreshed) not in _FAILED_STATES | _SUCCESS_STATES | {"canceled"}:
+            if not at_boundary(refreshed):
                 raise RuntimeError("A2A task subscription ended before terminal state")
             yield refreshed
         except Exception:
@@ -841,7 +873,7 @@ class AguiA2AAdapter:
             # Only suppress the subscribe failure when a second authoritative
             # snapshot proves that this exact task completed normally.
             refreshed = await self.client.get_task(self.a2a_url, binding.task_id, history_length=100)
-            if a2a_state(refreshed) not in _FAILED_STATES | _SUCCESS_STATES | {"canceled"}:
+            if not at_boundary(refreshed):
                 raise
             yield refreshed
         finally:

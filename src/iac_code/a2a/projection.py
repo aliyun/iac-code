@@ -54,7 +54,12 @@ def build_a2a_public_path_roots(
 
     from iac_code.tools.path_safety import get_iac_code_application_root
 
-    additional = [tempfile.gettempdir(), str(get_iac_code_application_root()), *(additional_directories or [])]
+    additional = [
+        tempfile.gettempdir(),
+        str(get_iac_code_application_root()),
+        os.getcwd(),
+        *(additional_directories or []),
+    ]
     trusted = list(trusted_read_directories or [])
     if session_id:
         session_dir = SessionStorage().session_dir(cwd, session_id)

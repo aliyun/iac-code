@@ -45,6 +45,44 @@ class TestInterruptVerdict:
 
 
 class TestInterruptController:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('malformed', ['not JSON', '{"action":"rollback"}', '[]'])
+    async def test_judge_retries_invalid_verdict_without_resending_user_execution(self, malformed):
+        from iac_code.pipeline.engine.interrupt import InterruptController
+
+        pm = MagicMock()
+        valid = json.dumps({
+            'action': 'hard_interrupt', 'reason': 'new goal',
+            'rollback_target': 'architecture_planning', 'rollback_context': 'create a different resource',
+        })
+        pm.complete = AsyncMock(side_effect=[MagicMock(text=malformed), MagicMock(text=valid)])
+        controller = InterruptController(pm, lambda: {'steps': [], 'conclusions': {}})
+
+        verdict = await controller.judge('Replace the current deployment goal')
+
+        assert verdict.action == 'hard_interrupt'
+        assert verdict.rollback_target == 'architecture_planning'
+        assert verdict.rollback_context == 'create a different resource'
+        assert pm.complete.call_count == 2
+        # Only classification is retried, with the same original user input.
+        assert pm.complete.call_args_list[0] == pm.complete.call_args_list[1]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('malformed', ['not JSON', '{"action":"rollback"}', '[]'])
+    async def test_judge_invalid_verdict_retry_exhaustion_never_invents_rollback(self, malformed):
+        from iac_code.pipeline.engine.interrupt import InterruptController
+
+        pm = MagicMock()
+        pm.complete = AsyncMock(return_value=MagicMock(text=malformed))
+        controller = InterruptController(pm, lambda: {})
+
+        verdict = await controller.judge('Replace the current deployment goal')
+
+        assert verdict.action == 'continue'
+        assert verdict.reason.startswith('parse failed:')
+        assert verdict.rollback_target is None
+        assert pm.complete.call_count == 2
+
     def test_init(self):
         from iac_code.pipeline.engine.interrupt import InterruptController
 
@@ -640,3 +678,33 @@ class TestAmbiguousVerdictPrompt:
         prompt = pathlib.Path("src/iac_code/pipeline/engine/prompts/interrupt_judge.md").read_text(encoding="utf-8")
         assert "[ambiguous]" in prompt, "prompt must instruct LLM to use [ambiguous] prefix in reason"
         assert "continue" in prompt.lower()
+
+
+@pytest.mark.asyncio
+async def test_image_interrupt_judge_receives_actual_conclusion_producers():
+    """Routing must distinguish changed upstream requirements from a downstream replan."""
+    from iac_code.pipeline.engine.interrupt import InterruptController
+
+    provider = MagicMock()
+    provider.complete = AsyncMock(return_value=MagicMock(text=json.dumps({
+        "action": "hard_interrupt", "rollback_target": "requirements",
+        "rollback_context": "Replace the old requested resource with the new target in the image.",
+        "reason": "upstream requirements changed", "candidate_scope": None,
+    })))
+    state = {
+        "steps": [
+            {"step_id": "requirements", "description": "Parse requirements", "conclusion_field": "request"},
+            {"step_id": "plan", "description": "Plan", "conclusion_field": "design", "is_current": True},
+        ],
+        "conclusions": {"request": {"resource": "original"}, "design": {"resource": "original"}},
+    }
+    controller = InterruptController(provider, lambda: state)
+    image = ImageBlock(media_type="image/png", data="ZmFrZS1pbWFnZQ==")
+    await controller.judge(PipelineUserInput(content=[image], display_text="", has_images=True))
+    call = provider.complete.call_args.kwargs
+    content = call["messages"][0].content
+    assert any(block.type == "image" and block.data == image.data for block in content)
+    text = next(block.text for block in content if block.type == "text")
+    assert "requirements: Parse requirements [输出结论: request]" in text
+    assert "plan: Plan [输出结论: design]" in text
+    assert "最早的产生步骤" in call["system"]

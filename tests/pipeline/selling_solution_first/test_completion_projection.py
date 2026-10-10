@@ -1739,7 +1739,16 @@ def test_old_selling_steps_do_not_enable_completion_finalization():
     selling = load_pipeline_dir(PIPELINE_DIR.parent / "selling")
 
     assert all(step.completion_input_schema is None for step in selling.steps)
-    assert all(step.completion_enricher is None for step in selling.steps)
+    # Legacy guards validate explicit candidate counts and the native resolver;
+    # it does not opt into the solution-first projection/finalization contract.
+    for step in selling.steps:
+        if step.step_id in {"confirm_and_select", "architecture_planning"}:
+            assert step.completion_enricher is not None
+            assert Path(step.completion_enricher.__code__.co_filename).resolve() == (
+                PIPELINE_DIR.parent / f"selling/hooks/{step.step_id}.py"
+            ).resolve()
+        else:
+            assert step.completion_enricher is None
     assert all(step.config.get("completion_record_contract") != "v2" for step in selling.steps)
     assert all(step.config.get("hard_constraint_evidence_contract") != "v2" for step in selling.steps)
     assert all(step.config.get("completion_validation_error_limit", 1) == 1 for step in selling.steps)

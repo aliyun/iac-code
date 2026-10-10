@@ -1,5 +1,6 @@
 """Tests for PipelineRunner interrupt coordination."""
 
+import asyncio
 from textwrap import dedent
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1067,6 +1068,9 @@ class TestGetStateForJudge:
     def test_basic_state(self, pipeline_runner):
         """_get_state_for_judge returns expected dict keys."""
         state = pipeline_runner._get_state_for_judge()
+        assert [(step["step_id"], step["conclusion_field"]) for step in state["steps"]] == [
+            (step.step_id, step.conclusion_field) for step in pipeline_runner._loaded.steps
+        ]
         assert state["pipeline_name"] == "test"
         assert state["current_step_id"] == "a"
         assert len(state["steps"]) == 2
@@ -3084,3 +3088,93 @@ class TestParallelSupplementBroadcast:
 async def _empty_stream():
     return
     yield  # noqa: B901
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", ["intent", "parallel"])
+async def test_cancelled_parallel_stream_cannot_advance_or_clear_new_rollback_attempt(tmp_path, monkeypatch, target):
+    from iac_code.pipeline.engine.events import PipelineEvent
+    from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
+
+    (tmp_path / "prompt.md").write_text("offline fixture", encoding="utf-8")
+    (tmp_path / "pipeline.yaml").write_text(dedent("""\
+        name: interrupt-ownership
+        context_dependencies:
+          architecture: []
+          candidates_done: [architecture]
+          result: [candidates_done]
+        max_rollbacks: 3
+        sub_pipelines:
+          candidate:
+            iterate_over: architecture.candidates
+            context_fields_from_parent: []
+            steps:
+              - id: sub
+                conclusion_field: output
+                forward: null
+                prompt: prompt.md
+                description: Candidate
+        steps:
+          - id: intent
+            conclusion_field: architecture
+            forward: parallel
+            prompt: prompt.md
+            description: Intent
+          - id: parallel
+            conclusion_field: candidates_done
+            type: parallel_sub_pipeline
+            sub_pipeline: candidate
+            forward: final
+            description: Parallel
+          - id: final
+            conclusion_field: result
+            forward: null
+            prompt: prompt.md
+            description: Final
+        """), encoding="utf-8")
+    provider = MagicMock()
+    provider.get_model_name.return_value = "offline-model"
+    runner = PipelineRunner(pipeline_dir=tmp_path, provider_manager=provider,
+                            base_tool_registry=MagicMock(), session_storage=FakeSessionStorage(),
+                            session_id="offline", cwd=str(tmp_path))
+    runner.context.set_conclusion("architecture", {"candidates": [{"name": "offline"}]})
+    runner.state_machine.advance()
+    blocked = asyncio.Event()
+
+    async def candidate_work(self, **kwargs):
+        yield PipelineEvent(type=PipelineEventType.SUB_PIPELINE_STARTED, step_id=None, timestamp=0,
+                            data={"sub_pipeline_id": "offline", "candidate_index": 0, "total_steps": 1})
+        await blocked.wait()
+
+    monkeypatch.setattr(SubPipelineExecutor, "execute_streaming", candidate_work)
+    stream = runner._continue_from_current()
+    try:
+        assert (await anext(stream)).type == PipelineEventType.STEP_STARTED
+        assert (await asyncio.wait_for(anext(stream), 2)).type == PipelineEventType.SUB_PIPELINE_STARTED
+        old_attempt = runner._execution["active_attempt_id"]
+        assert runner.apply_hard_interrupt(InterruptVerdict(
+            action="hard_interrupt", reason="new direction", rollback_target=target,
+            rollback_context="user changed direction",
+        ))
+        new_attempt = runner._execution["active_attempt_id"]
+        assert new_attempt != old_attempt
+        try:
+            stale_event = await asyncio.wait_for(anext(stream), 2)
+        except StopAsyncIteration:
+            stale_event = None
+        assert runner.state_machine.current_step.step_id == target
+        assert runner._execution["active_attempt_id"] == new_attempt
+        assert runner._attempts["items"][old_attempt]["status"] == "discarded"
+        assert runner._attempts["items"][new_attempt]["status"] == "running"
+        assert stale_event is None
+        assert runner.context.get_conclusion("candidates_done") is None
+        restarted = runner.continue_after_interrupt()
+        try:
+            first = await anext(restarted)
+            assert first.type == PipelineEventType.STEP_STARTED
+            assert first.step_id == target
+            assert first.data["active_attempt_id"] == new_attempt
+        finally:
+            await restarted.aclose()
+    finally:
+        await stream.aclose()

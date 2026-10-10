@@ -205,8 +205,10 @@ credential-source-audit.json
 退出码：全部通过为 `0`；case、cleanup、凭证完整性任一失败为 `1`；参数错误为 `2`；Ctrl+C/SIGTERM 为
 `130`。中断时仍会停止子进程、尝试清理 ledger 内测试自有 Stack，并写出已有产物。
 
-删除 ROS Stack 前 runner 必须同时满足：存在 Stack ID、记录的 StackName 与本 case 的完整 test-owned
-StackName 精确相等、云端 GetStack 返回的 StackName 也精确相等。任何一项不满足都会拒绝删除并使 case 失败。
+删除 ROS Stack 前 runner 必须确认：隔离用例 session 的持久化 ledger 记录了已接受的 CreateStack，
+其来源 attempt 属于该 pipeline，且具有真实 Stack ID、地域和名称。按该 ID 查询云端后，名称必须与
+创建记录相同，且不能是子 Stack 或服务托管 Stack。证据不足拒绝删除并使清理失败。
+Stack 名称由实际部署决定，不要求等于 runner 预生成的名称；查询、等待、继续已有 Stack 和名称前缀均不能授权删除。
 
 ### Desktop driver 契约
 

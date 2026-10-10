@@ -113,7 +113,7 @@ user_invocable: false
 - `scale_hint`：根据上下文推断的业务规模，影响后续规格选择
 - `budget_constraint`：如用户提到预算则填写（如 "月预算500以内"），否则为 null
 - `region_preference`（在 `non_functional` 中）：如用户有地域偏好则填写，否则默认 "cn-hangzhou"
-- `stack_name`（在 `non_functional` 中）：如用户指定"资源栈名称""StackName"或 ROS 资源栈名称，把用户给出的名称作为基础名写入该字段
+- `stack_name`（在 `non_functional` 中）：如用户指定"资源栈名称""StackName"或 ROS 资源栈名称，原样记录用户给出的名称；仅用户指定基础名或前缀时才将其视为基础名。精确使用、不可变或不得加后缀的要求同时记入 `hard_constraints`
 - `network_constraints`（在 `non_functional` 中）：如用户指定 VPC ID、ZoneId、CidrBlock、已有网络资源或多个网段关系，必须原样保留
 
 ### 情况 C — 非阿里云平台需求
@@ -210,7 +210,10 @@ user_invocable: false
 
 ### 资源生命周期约束
 
-`intent.resource_intents` 是架构设计的硬约束：
+`intent.resource_intents` 区分明确生命周期约束与可选推断资源：
+
+- 用户明确要求的生命周期标为 `source: user`，预定义方案要求标为 `source: predefined_solution`；为业务目标推断的可选新建资源必须标为 `source: inferred`，不得把推断的 ECS、数据库、负载均衡等可选设计伪装为用户明确要求。
+- 每个候选必须保留用户明确要求的生命周期及所有禁止、复用、引用限制；`source: inferred/predefined_solution` 的可选 `create` 资源可按候选架构收窄。推断来源不允许删掉非 `create` 限制。
 
 - 只有 `action=create` 的资源可以作为本方案要新建的资源。不要把 `action=use_existing` 或 `action=reference` 的资源设计成新建资源。
 - `action=use_existing/reference` 必须作为参数引用且不得新建；具体资源由下一步只读查询解析，不要求用户输入 ID。

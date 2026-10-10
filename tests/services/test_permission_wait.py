@@ -948,25 +948,57 @@ async def test_resident_timer_retries_when_sleep_wakes_before_absolute_deadline(
 
 
 @pytest.mark.asyncio
-async def test_duplicate_live_registration_keeps_original_generation_fenced_timer(tmp_path) -> None:
+@pytest.mark.parametrize("registration_delay", [0, 0.08])
+async def test_duplicate_live_registration_keeps_original_generation_fenced_timer(
+    tmp_path, monkeypatch, registration_delay,
+) -> None:
+    import iac_code.services.permission_wait as permission_wait
+
     store = _store(tmp_path)
     policy = PermissionWaitPolicy(resident_timeout_seconds=0.01, timeout_grace_seconds=0.05)
     record = _record(store, policy)
+    clock = permission_wait.parse_utc(record["residentDeadlineAt"])
+    assert clock is not None
+    monkeypatch.setattr(permission_wait, "utc_now", lambda: clock)
+    grace_started = asyncio.Event()
+    release_grace = asyncio.Event()
+    real_sleep = asyncio.sleep
+
+    async def timer_sleep(delay):
+        if asyncio.current_task() is owner.timer and store.load(record["boundaryId"])["phase"] == "TIMEOUT_GRACE":
+            # Keep the real timer at its persisted grace boundary until the
+            # duplicate registration has been exercised, independent of CPU/I/O scheduling.
+            grace_started.set()
+            await release_grace.wait()
+        else:
+            await real_sleep(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", timer_sleep)
     future: asyncio.Future[bool | PermissionWaitOutcome] = asyncio.get_running_loop().create_future()
     coordinator = PermissionWaitCoordinator(policy)
     coordinator.register_live(record=record, store=store, future=future)
+    owner = coordinator._owners[record["boundaryId"]]
+    timer = owner.timer
+    assert timer is not None
 
-    for _ in range(100):
-        if store.load(record["boundaryId"])["phase"] == "TIMEOUT_GRACE":
-            break
-        await asyncio.sleep(0.005)
-    else:
-        pytest.fail("resident timer did not enter TIMEOUT_GRACE")
-
-    coordinator.register_live(record=record, store=store, future=future)
-
-    assert await asyncio.wait_for(future, timeout=1) is PermissionWaitOutcome.SUSPEND
-    assert store.load(record["boundaryId"])["phase"] == "SUSPENDING"
+    try:
+        await grace_started.wait()
+        await real_sleep(registration_delay)
+        grace_record = store.load(record["boundaryId"])
+        assert grace_record["phase"] == "TIMEOUT_GRACE"
+        assert owner.generation == grace_record["generation"] > record["generation"]
+        coordinator.register_live(record=record, store=store, future=future)
+        assert coordinator._owners[record["boundaryId"]] is owner
+        assert owner.timer is timer and not timer.cancelled()
+        assert owner.generation == grace_record["generation"]
+        clock = permission_wait.parse_utc(grace_record["graceDeadlineAt"])
+        assert clock is not None
+        release_grace.set()
+        assert await asyncio.wait_for(future, timeout=1) is PermissionWaitOutcome.SUSPEND
+        assert store.load(record["boundaryId"])["phase"] == "SUSPENDING"
+    finally:
+        release_grace.set()
+        coordinator.unregister_live(record["boundaryId"])
 
 
 @pytest.mark.asyncio

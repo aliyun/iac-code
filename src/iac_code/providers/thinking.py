@@ -468,6 +468,14 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "deepseek-v4-flash-vision-exp": _DEEPSEEK_SPEC,
     },
     "dashscope": {
+        "glm-5.3-prime": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE, _ZHIPU_GLM53_EFFORTS, EffortLevel.LOW,
+            uses_reasoning_effort_param=True, supports_disable=False, thinking_enabled_by_default=True,
+        ),
+        "qwen3.8-omni-flash": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE, _GLM_EFFORTS, EffortLevel.XHIGH,
+            uses_reasoning_effort_param=True, thinking_enabled_by_default=True,
+        ),
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.8-max-0902": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.8-max-prime": _DASHSCOPE_QWEN38_SPEC,

@@ -36,6 +36,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UV_CONCURRENT_DOWNLOADS: "8"
+  UV_HTTP_TIMEOUT: "60"
+  UV_HTTP_RETRIES: "5"
+
 jobs:
   skill-bridge-compatibility:
     name: Skill bridge (Python ${{ matrix.python-version }})

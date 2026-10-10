@@ -180,8 +180,13 @@ class ShowCandidateDetailTool(Tool):
                 _("show_candidate_detail is not allowed before a successful show_architecture_plan outline batch.")
             )
 
-        expected_index = first_missing_candidate_detail_index(records, batch)
-        if expected_index is None:
+        first_missing = first_missing_candidate_detail_index(records, batch)
+        actual_index = tool_input.get("candidate_index")
+        actual_name = str(tool_input.get("candidate_name") or "").strip()
+        valid_index = isinstance(actual_index, int) and not isinstance(actual_index, bool) and (
+            0 <= actual_index < len(batch.candidates)
+        )
+        if first_missing is None and not valid_index:
             return ToolResult(
                 content=_("All candidates in candidateSetId={candidate_set_id} already have rich details.").format(
                     candidate_set_id=batch.candidate_set_id
@@ -189,10 +194,13 @@ class ShowCandidateDetailTool(Tool):
                 is_error=True,
                 metadata={"candidate_set_id": batch.candidate_set_id},
             )
+        # Initial details still progress in outline order. Previously displayed
+        # details may be corrected after complete_step rejects their semantics;
+        # requiring a different outline would change the user's candidate batch.
+        can_correct = valid_index and (first_missing is None or actual_index <= first_missing)
+        expected_index = actual_index if can_correct else (first_missing if first_missing is not None else 0)
         expected_name = batch.candidates[expected_index]["candidate_name"]
-        actual_index = tool_input.get("candidate_index")
-        actual_name = str(tool_input.get("candidate_name") or "").strip()
-        if actual_index != expected_index or actual_name != expected_name:
+        if not valid_index or actual_index != expected_index or actual_name != expected_name:
             return ToolResult(
                 content=_(
                     "show_candidate_detail candidate_index={actual_index} is not allowed yet; expected "

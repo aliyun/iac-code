@@ -685,19 +685,30 @@ async def test_agent_loop_cancels_snapshot_on_audit_or_pre_execution_failure(mon
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_cancels_unconsumed_snapshot_on_batch_cancellation() -> None:
+@pytest.mark.parametrize("startup_delay", [0, 1.1])
+async def test_agent_loop_cancels_unconsumed_snapshot_on_batch_cancellation(startup_delay: float, monkeypatch) -> None:
     tool = _SnapshotTool(behavior="allow", block=True)
     loop = _snapshot_loop(tool, {"value": "business"}, ToolPermissionContext(cwd="/tmp"))
+    original_execute = tool.execute
+
+    async def execute(*, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        assert PROCESS_RESOLVED_CONTRACT_STORE.size == 1
+        # Cancel at the actual blocked-tool boundary, independent of setup
+        # latency. The repository's global test timeout still catches hangs.
+        asyncio.get_running_loop().call_soon(task.cancel)
+        return await original_execute(tool_input=tool_input, context=context)
+
+    monkeypatch.setattr(tool, "execute", execute)
 
     async def consume() -> None:
+        await asyncio.sleep(startup_delay)
         async for _event in loop.run_streaming("run"):
             pass
 
     task = asyncio.create_task(consume())
-    await asyncio.wait_for(tool.execute_started.wait(), timeout=1)
-    task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert tool.execute_started.is_set()
     assert PROCESS_RESOLVED_CONTRACT_STORE.size == 0
 
 

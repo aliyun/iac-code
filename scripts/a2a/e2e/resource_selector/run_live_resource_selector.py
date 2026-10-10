@@ -8,6 +8,7 @@ import asyncio
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import time
@@ -23,11 +24,14 @@ if str(E2E_ROOT) not in sys.path:
     sys.path.insert(0, str(E2E_ROOT))
 
 from common import (  # noqa: E402
+    JsonRpcResponseError,
     ManagedServer,
     StreamSummary,
+    _a2a_task_identity,
     _free_port,
     _server_env,
     _split_python_command,
+    _status_message_texts,
     _write_json,
     _write_server_config,
     run_llm_preflight,
@@ -406,13 +410,107 @@ async def _vpc_with_vswitch(pending: Mapping[str, Any]) -> tuple[str, str, int]:
     raise AssertionError("none of the queried VPCs contains a selectable VSwitch")
 
 
+class _SelectorAssociationMismatchError(AssertionError):
+    def __init__(self, metadata: object, *, expected_vpc_id: str | None = None) -> None:
+        super().__init__("the VSwitch selector did not preserve the selected VPC as VpcId metadata")
+        value = metadata.get('VpcId') if isinstance(metadata, Mapping) else None
+        self.diagnostics = {
+            'selector_vpc_present': isinstance(value, str) and bool(value),
+            'selector_vpc_matches_selected': False,
+            'selector_vpc_has_resource_id_shape': isinstance(value, str) and bool(
+                re.fullmatch(r'vpc-[a-zA-Z0-9]+', value)
+            ),
+        }
+        alias = metadata.get("VPCId") if isinstance(metadata, Mapping) else None
+        self.diagnostics.update({
+            "selector_vpc_legacy_alias_present": isinstance(alias, str) and bool(alias),
+            "selector_vpc_legacy_alias_matches_selected": isinstance(alias, str) and bool(expected_vpc_id)
+            and alias == expected_vpc_id,
+        })
+
+
+def _selected_result_evidence(
+    run_dir: Path, config_dir: Path, *, tool_use_id: str, selected_value: str,
+    second_tool_use_id: str = "",
+) -> dict[str, bool]:
+    """Correlate selected results locally; export booleans only, never transcripts."""
+    evidence = {
+        'selector_selected_tool_result_public_seen': False,
+        'selector_selected_tool_result_public_matches': False,
+        'selector_selected_tool_result_native_seen': False,
+        'selector_selected_tool_result_native_matches': False,
+        'selector_selected_tool_result_native_is_error': False,
+        'selector_selected_tool_result_scan_complete': True,
+        'selector_second_native_input_seen': False,
+        'selector_second_native_vpc_present': False,
+        'selector_second_native_vpc_matches_selected': False,
+    }
+    paths = [(run_dir / 'answer.events.jsonl', 'public')]
+    projects = config_dir / 'projects'
+    native_paths = sorted(projects.rglob('session.jsonl'))
+    if not native_paths or len(native_paths) > 20:
+        evidence['selector_selected_tool_result_scan_complete'] = False
+    paths.extend((p, 'native') for p in native_paths[:20])
+    for path, kind in paths:
+        if path.is_symlink() or not path.resolve().is_relative_to(run_dir.resolve()):
+            evidence['selector_selected_tool_result_scan_complete'] = False
+            continue
+        try:
+            with path.open('rb') as handle:
+                raw = handle.read(2_000_001)
+            if len(raw) > 2_000_000:
+                evidence['selector_selected_tool_result_scan_complete'] = False
+                continue
+            lines = raw.decode('utf-8').splitlines()
+        except (OSError, UnicodeError):
+            evidence['selector_selected_tool_result_scan_complete'] = False
+            continue
+        for line in lines:
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            for item in _walk(record):
+                if not isinstance(item, Mapping):
+                    continue
+                if (kind == 'native' and second_tool_use_id and item.get('type') == 'tool_use'
+                    and item.get('id') == second_tool_use_id and item.get('name') == 'select_cloud_resource'):
+                    evidence['selector_second_native_input_seen'] = True
+                    params = item.get('input')
+                    metadata = params.get('association_property_metadata') if isinstance(params, Mapping) else None
+                    value = metadata.get('VpcId') if isinstance(metadata, Mapping) else None
+                    evidence['selector_second_native_vpc_present'] = isinstance(value, str) and bool(value)
+                    evidence['selector_second_native_vpc_matches_selected'] = value == selected_value
+                if kind == 'native':
+                    correlated = item.get('type') == 'tool_result' and item.get('tool_use_id') == tool_use_id
+                    content = item.get('content')
+                else:
+                    correlated = item.get('toolUseId') == tool_use_id and (
+                        item.get('name') == 'select_cloud_resource' or item.get('toolName') == 'select_cloud_resource')
+                    content = item.get('result')
+                if not correlated:
+                    continue
+                evidence['selector_selected_tool_result_' + kind + '_seen'] = True
+                if kind == 'native' and item.get('is_error') is True:
+                    evidence['selector_selected_tool_result_native_is_error'] = True
+                if isinstance(content, str):
+                    try:
+                        content = json.loads(content)
+                    except ValueError:
+                        continue
+                if isinstance(content, Mapping) and content.get('selector_id') == EXPECTED_SELECTOR_ID:
+                    if content.get('value') == selected_value:
+                        evidence['selector_selected_tool_result_' + kind + '_matches'] = True
+    return evidence
+
+
 async def _query_real_vswitch(pending: Mapping[str, Any], *, expected_vpc_id: str) -> tuple[str, str, int]:
     selector = pending.get("selector")
     if not isinstance(selector, Mapping) or selector.get("id") != VSWITCH_SELECTOR_ID:
         raise AssertionError("LLM did not request the expected vpc.vswitch selector")
     metadata = selector.get("associationPropertyMetadata")
     if not isinstance(metadata, Mapping) or metadata.get("VpcId") != expected_vpc_id:
-        raise AssertionError("the VSwitch selector did not preserve the selected VPC as VpcId metadata")
+        raise _SelectorAssociationMismatchError(metadata, expected_vpc_id=expected_vpc_id)
     service, values, projected = await _query_candidates(
         pending,
         operation_key=VSWITCH_QUERY_OPERATION_KEY,
@@ -430,13 +528,74 @@ def _assert_input_required(summary: StreamSummary) -> None:
         raise AssertionError("A2A task did not enter input-required state: {}".format(summary.status_states))
 
 
+class _TurnNotReadyError(AssertionError):
+    def __init__(self, summary: StreamSummary, name: str) -> None:
+        super().__init__("{} did not become ready for the next turn".format(name))
+        self.name = name
+        self.states = [state for state in summary.status_states if state.startswith("TASK_STATE_")]
+        self.event_count = summary.event_count
+        self.text_present = bool(summary.text.strip())
+        self.raw_line_count = summary.raw_line_count
+        self.response_content_type = summary.response_content_type
+        terminal = summary.terminal_status_text.casefold()
+        self.terminal_markers = [
+            marker for marker in (
+                "resource_selection_resume_invalid", "active session", "execution", "permission",
+                "credential", "timeout", "model", "context", "task", "selector",
+            ) if marker in terminal
+        ]
+        self.terminal_message_present = bool(terminal)
+
+
 def _assert_turn_ready(summary: StreamSummary, *, name: str) -> None:
     # Normal A2A turns intentionally settle in INPUT_REQUIRED so the context is
     # ready for the next user message.  COMPLETED is also valid for providers
     # or transports that publish an explicit terminal completion.
     ready_states = {"TASK_STATE_INPUT_REQUIRED", "TASK_STATE_COMPLETED"}
     if not ready_states.intersection(summary.status_states):
-        raise AssertionError("{} did not become ready for the next turn: {}".format(name, summary.status_states))
+        raise _TurnNotReadyError(summary, name)
+
+
+class _DurableReleaseTimeoutError(AssertionError):
+    def __init__(self, state: dict[str, Any]) -> None:
+        super().__init__("A2A input-required execution did not reach a durable release")
+        self.state = state
+
+
+def _wait_for_released_execution(persistence_dir: Path, summary: StreamSummary, *, timeout: float) -> None:
+    """Crash only after the input-required Task has a durable, safe handoff."""
+    context_id = summary.context_id
+    if not context_id or not all(char.isalnum() or char in "-_" for char in context_id):
+        raise AssertionError("A2A context ID is invalid")
+    control_path = persistence_dir / "execution-control" / "{}.json".format(context_id)
+    deadline = time.monotonic() + timeout
+    last_state: dict[str, Any] = {"present": False}
+    while time.monotonic() < deadline:
+        try:
+            control = json.loads(control_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            control = None
+        last_state = {
+            "present": isinstance(control, dict),
+            "task_matches": isinstance(control, dict) and control.get("taskId") == summary.task_id,
+            "phase": control.get("phase") if isinstance(control, dict) else None,
+            "release_ready": control.get("releaseReady") if isinstance(control, dict) else None,
+            "input_handoff_ready": control.get("inputHandoffReady") if isinstance(control, dict) else None,
+            "execution_status": control.get("executionStatus") if isinstance(control, dict) else None,
+            "stream_available": control.get("streamAvailable") if isinstance(control, dict) else None,
+            "blocker_count": len(control.get("blockers", []))
+            if isinstance(control, dict) and isinstance(control.get("blockers"), list) else None,
+        }
+        if (
+            isinstance(control, dict)
+            and control.get("taskId") == summary.task_id
+            and control.get("phase") == "terminated"
+            and control.get("releaseReady") is True
+            and control.get("inputHandoffReady") is False
+        ):
+            return
+        time.sleep(0.1)
+    raise _DurableReleaseTimeoutError(last_state)
 
 
 class _Harness:
@@ -517,7 +676,7 @@ class _Harness:
             server_args=server_args,
         )
         self.server.start()
-        wait_for_server(self.server_url, timeout=self.args.server_timeout)
+        wait_for_server(self.server_url, timeout=self.args.server_timeout, owned_server=self.server)
         self.lifecycle.append({"event": "started", "index": self.server_index, "at": time.time()})
 
     def restart_after_crash(self) -> None:
@@ -660,7 +819,9 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             initial_prompt = (
                 "请先使用云资源选择器让我选择一个 {region} 地域的已有 VPC；选择完成后，再让我从该 VPC "
                 "中选择一个已有 VSwitch。每次只选择一个资源，不创建、修改或删除资源，不要使用 aliyun_api "
-                "预先列举。解析时只用简短英文关键词 VPC 和 VSwitch。"
+                "预先列举。解析时只用简短英文关键词 VPC 和 VSwitch。第二个选择器必须把第一次选择工具结果的 "
+                "value（VPC ID）原样放入 association_property_metadata.VpcId，以限定到我已选择的 VPC；"
+                "不能省略这个关联、使用默认 VPC 或另选 VPC。"
             ).format(region=args.region)
         else:
             initial_prompt = (
@@ -675,6 +836,10 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             summary=initial,
             region=args.region,
         )
+        # INPUT_REQUIRED can be published before the old execution has durably
+        # released its context. Answering in that window is rejected as an
+        # active execution, even though the stream has already returned.
+        _wait_for_released_execution(harness.run_dir / "a2a-persistence", initial, timeout=args.server_timeout)
 
         candidate_count = 0
         selected_value = ""
@@ -702,6 +867,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             )
         answer = _answer_selection(harness, name="answer", pending=pending, response=response)
 
+        provenance: dict[str, bool] = {}
         secondary_selector_id = ""
         secondary_candidate_count = 0
         duplicate_acknowledged = False
@@ -716,6 +882,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             if len(second_inputs) != 1:
                 raise AssertionError("expected exactly one VSwitch selection after the VPC answer")
             second_pending = second_inputs[0]
+            _wait_for_released_execution(harness.run_dir / "a2a-persistence", answer, timeout=args.server_timeout)
             selector = second_pending.get("selector")
             metadata = selector.get("associationPropertyMetadata") if isinstance(selector, Mapping) else None
             if (
@@ -725,9 +892,20 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
                 or metadata.get("RegionId") != args.region
             ):
                 raise AssertionError("the second selector is not the expected regional VSwitch contract")
-            vswitch_value, vswitch_label, secondary_candidate_count = asyncio.run(
-                _query_real_vswitch(second_pending, expected_vpc_id=selected_value)
+            provenance = _selected_result_evidence(
+                run_dir, config_dir, tool_use_id=str(pending['toolUseId']), selected_value=selected_value,
+                second_tool_use_id=str(second_pending.get('toolUseId') or ''),
             )
+            provenance['selector_second_metadata_has_other_vpc_key'] = isinstance(metadata, Mapping) and any(
+                key in metadata for key in ('vpc_id', 'vpcId', 'VpcID', 'vpc')
+            )
+            try:
+                vswitch_value, vswitch_label, secondary_candidate_count = asyncio.run(
+                    _query_real_vswitch(second_pending, expected_vpc_id=selected_value)
+                )
+            except _SelectorAssociationMismatchError as exc:
+                exc.diagnostics.update(provenance)
+                raise
             second_response = _selection_response(
                 second_pending,
                 status="selected",
@@ -829,6 +1007,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             "pipelineHandoffVerified": pipeline_handoff_verified,
             "usedRealLlm": True,
             "usedRealCloudQuery": True,
+            "diagnostics": provenance,
         }
         _write_json(run_dir / "summary.json", result)
         return result
@@ -845,7 +1024,74 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
 
 def main() -> None:
     args = _parse_args()
-    result = _run(args)
+    try:
+        result = _run(args)
+    except Exception as exc:
+        # Only the exception class and source location are safe to publish in
+        # live CI reports; exception messages may contain cloud resource data.
+        frame = exc.__traceback__
+        error_site = ""
+        while frame is not None:
+            path = Path(frame.tb_frame.f_code.co_filename)
+            try:
+                relative = path.resolve().relative_to(Path(__file__).resolve().parents[4])
+            except ValueError:
+                pass
+            else:
+                if relative.parts and relative.parts[0] in {"scripts", "src"}:
+                    error_site = "{}:{}".format(relative.as_posix(), frame.tb_lineno)
+            frame = frame.tb_next
+        failure = {
+            "passed": False, "scenario": args.scenario,
+            "error_type": type(exc).__name__, "error_site": error_site,
+        }
+        if isinstance(exc, _SelectorAssociationMismatchError):
+            failure['diagnostics'] = exc.diagnostics
+        if isinstance(exc, _TurnNotReadyError):
+            failure["a2a_states"] = exc.states
+            failure["a2a_phase"] = "next-turn" if exc.name == "next turn" else "answer"
+            failure["a2a_event_count"] = exc.event_count
+            failure["a2a_text_present"] = exc.text_present
+            failure["a2a_raw_line_count"] = exc.raw_line_count
+            failure["a2a_response_content_type"] = exc.response_content_type
+            failure["terminal_markers"] = exc.terminal_markers
+            failure["terminal_message_present"] = exc.terminal_message_present
+        if isinstance(exc, JsonRpcResponseError):
+            failure["a2a_phase"] = "next-turn" if exc.name == "next-turn" else "answer"
+            failure["jsonrpc_error_code"] = exc.code
+            failure["terminal_markers"] = exc.markers
+        if isinstance(exc, _DurableReleaseTimeoutError):
+            failure["control_state"] = exc.state
+        event_name = next(
+            (
+                name for name in ("next-turn", "answer")
+                if (args.run_dir.expanduser().resolve() / "{}.events.jsonl".format(name)).is_file()
+            ),
+            "",
+        )
+        if event_name:
+            answer_events = args.run_dir.expanduser().resolve() / "{}.events.jsonl".format(event_name)
+            failure["a2a_phase"] = event_name
+            states: list[str] = []
+            terminal_text = ""
+            for line in answer_events.read_text(encoding="utf-8", errors="replace").splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                identity = _a2a_task_identity(event)
+                if identity is None:
+                    continue
+                state = identity.get("state")
+                if isinstance(state, str) and state not in states:
+                    states.append(state)
+                if state == "TASK_STATE_FAILED":
+                    terminal_text = "".join(_status_message_texts(event))
+            failure["a2a_states"] = states
+            if terminal_text:
+                failure["error"] = "A2A task entered unexpected terminal state TASK_STATE_FAILED " + terminal_text
+        _write_json(args.run_dir.expanduser().resolve() / "summary.json", failure)
+        raise
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
 
 

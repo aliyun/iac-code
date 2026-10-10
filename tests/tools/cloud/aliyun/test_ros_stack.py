@@ -16,6 +16,7 @@ from iac_code.services.providers.aliyun_credentials_runtime import (
 from iac_code.services.telemetry.names import Events, Metrics
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
+from iac_code.tools.cloud.types import StackStatus
 from iac_code.tools.path_safety import get_iac_code_application_root
 from iac_code.types.permissions import ToolPermissionContext
 from iac_code.types.stream_events import StackProgressEvent
@@ -48,6 +49,19 @@ def context() -> ToolContext:
 
 
 class TestRosStackProperties:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('action', ['CreateStack', 'ContinueCreateStack', 'UpdateStack', 'DeleteStack'])
+    async def test_deleted_stack_stops_polling_and_only_delete_succeeds(self, tool: RosStack, action: str) -> None:
+        deleted = StackStatus('stack-deleted', 'deleted', 'DELETE_COMPLETE', '', 100)
+        tool.get_stack_status = AsyncMock(side_effect=[deleted, AssertionError('polled a deleted stack twice')])
+        tool.get_stack_resources = AsyncMock(return_value=[])
+        result = await tool.wait_for_stack_operation(action, {}, 'cn-hangzhou', 'stack-deleted', ToolContext())
+        tool.get_stack_status.assert_awaited_once_with('stack-deleted', 'cn-hangzhou')
+        terminal = json.loads(result.content)
+        assert terminal['status'] == 'DELETE_COMPLETE'
+        assert terminal['is_success'] is (action == 'DeleteStack')
+        assert result.is_error is (action != 'DeleteStack')
+
     def test_name(self, tool: RosStack) -> None:
         assert tool.name == "ros_stack"
 

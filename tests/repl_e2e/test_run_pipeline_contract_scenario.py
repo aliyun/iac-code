@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from scripts.repl.e2e.run_pipeline_contract_scenario import (
     _audit_pipeline_attribution,
+    _expect_candidate_selection,
     _latest_pipeline_sidecar,
+    parse_args,
 )
 
 
@@ -18,6 +20,36 @@ def test_latest_pipeline_sidecar_reads_nested_session_layout(tmp_path) -> None:
 
     assert path == newer
     assert payload == {"status": "waiting_input"}
+
+
+def test_candidate_selection_accepts_controls_or_terminal_readiness() -> None:
+    seen = []
+
+    class FakePty:
+        transcript = ""
+
+        def expect_any(self, patterns, *, description, timeout):
+            seen.append((description, timeout, patterns))
+
+    args = parse_args(["--timeout", "80"])
+    _expect_candidate_selection(FakePty(), args, "selection")
+    assert [item[0] for item in seen] == ["selection", "selection controls or input"]
+    assert seen[1][1] == 80
+    assert any("Press number keys" in pattern for pattern in seen[1][2])
+    assert any("\\x1b" in pattern for pattern in seen[1][2])
+
+
+def test_candidate_selection_accepts_controls_already_in_transcript() -> None:
+    seen = []
+
+    class FakePty:
+        transcript = "Press number keys to select a candidate"
+
+        def expect_any(self, patterns, *, description, timeout):
+            seen.append(description)
+
+    _expect_candidate_selection(FakePty(), parse_args([]), "selection")
+    assert seen == ["selection"]
 
 
 def test_pipeline_attribution_requires_steps_candidate_and_nudge() -> None:

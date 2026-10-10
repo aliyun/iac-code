@@ -23,6 +23,25 @@ def tool(step_config):
     return CompleteStepTool(step_config)
 
 
+@pytest.mark.parametrize('compact', [False, True])
+def test_single_conclusion_schema_failure_retains_actionable_coordinate(compact):
+    schema = {'type': 'object', 'properties': {'hard_constraint_checks': {'type': 'array', 'items': {
+        'type': 'object', 'properties': {'actual_unit': {'type': 'string'}}}}}}
+    tool = CompleteStepTool(StepConfig(step_id='materialize_selected_candidate',
+                                     conclusion_field='selected_plan', forward='deploying', conclusion_schema=schema,
+                                     compact_completion_errors=compact))
+    invalid = {'hard_constraint_checks': [{'actual_unit': None}]}
+    diagnostic = json.loads(tool._validate_conclusion(invalid))
+    if not compact:
+        assert diagnostic['error'] == 'conclusion_schema_validation_failed'
+        assert diagnostic['returnedErrorCount'] == 1 and diagnostic['truncated'] is False
+    detail = diagnostic if compact else diagnostic['errors'][0]
+    assert detail['path'] == '/hard_constraint_checks/0/actual_unit'
+    assert detail['validator'] == 'type'
+    assert detail['expected'] == 'string'
+    assert tool._validate_conclusion({'hard_constraint_checks': [{}]}) is None
+
+
 class TestCompleteStepToolMeta:
     def test_name(self, tool):
         assert tool.name == "complete_step"
@@ -1958,3 +1977,23 @@ class TestNullNormalization:
         valid, error = tool.validate_input(tool_input)
         assert not valid
         assert "name" in error
+
+
+def test_compact_validation_feedback_requires_status_even_for_delta():
+    tool = CompleteStepTool(StepConfig(
+        step_id='delta', conclusion_field='result', forward=None,
+        completion_input_schema={
+            'type': 'object', 'required': ['status'],
+            'properties': {'status': {'type': 'string', 'enum': ['waiting', 'done']},
+                           'clarification_text': {'type': 'string'}},
+            'additionalProperties': False,
+        }, compact_completion_errors=True,
+    ))
+    valid, error = tool.validate_input({'conclusion': {'clarification_text': 'changed'}})
+    assert valid is False
+    assert 'Required conclusion fields: status.' in json.loads(error)['schemaHint']
+    feedback = tool._format_input_validation_error('missing status', {})
+    assert 'Always include required conclusion fields, even when unchanged.' in feedback
+    assert 'submit only the corrected fields' not in feedback
+    valid, error = tool.validate_input({'conclusion': {'status': 'waiting', 'clarification_text': 'changed'}})
+    assert valid is True, error

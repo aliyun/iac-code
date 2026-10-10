@@ -65,6 +65,7 @@ from iac_code.types.stream_events import (
     TOOL_RENDER_RESULT_COMPACT_KEY,
     TOOL_RENDER_RESULT_VERBOSE_KEY,
     TOOL_RENDER_VERBOSE_RESULT_IN_TRANSCRIPT_KEY,
+    AskUserQuestionEvent,
     CloudResourceSelectionEvent,
     CompactionEvent,
     ErrorEvent,
@@ -2717,9 +2718,15 @@ class AgentLoop:
                                 )
 
                 pending_cancellation: asyncio.CancelledError | None = None
+                detached_resource_selection = False
+                detached_question = False
                 try:
                     async with execution_non_advancing_wait():
                         async for sub_event in poll_event_queues():
+                            if isinstance(sub_event, CloudResourceSelectionEvent):
+                                detached_resource_selection = True
+                            if isinstance(sub_event, AskUserQuestionEvent):
+                                detached_question = True
                             yield sub_event
 
                         results = await exec_task
@@ -2739,6 +2746,15 @@ class AgentLoop:
                     except BaseException:
                         raise cancellation
                     pending_cancellation = cancellation
+                except GeneratorExit:
+                    # Closing an input-boundary stream abandons its live waiter.
+                    # Durable Pipeline/selector checkpoints resume in a fresh
+                    # AgentLoop; the old tool cannot retain execution ownership.
+                    if detached_resource_selection or detached_question:
+                        if not exec_task.done():
+                            exec_task.cancel()
+                        await asyncio.gather(exec_task, return_exceptions=True)
+                    raise
 
                 # Process results and yield ToolResultEvents.
                 terminal_step_result = False

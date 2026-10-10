@@ -4233,11 +4233,13 @@ msgstr "- クリーンアップを再開するときも、このプロンプト�
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
-"- Prefer available ROS stack tools for deletion; if using aliyun_api, "
-"call DeleteStack first, then repeatedly call GetStack to check status."
+"- Use the ros_stack tool for DeleteStack. Do not use aliyun_api for "
+"DeleteStack when ros_stack is available; use aliyun_api GetStack to check"
+" status until DELETE_COMPLETE."
 msgstr ""
-"- 削除には利用可能な ROS スタックツールを優先してください。aliyun_api を使う場合は、最初に DeleteStack "
-"を呼び出し、その後 GetStack を繰り返し呼び出して状態を確認してください。"
+"- DeleteStack には ros_stack ツールを使用してください。ros_stack が利用可能な場合、aliyun_api で "
+"DeleteStack を呼び出さないでください。aliyun_api GetStack で DELETE_COMPLETE "
+"になるまで状態を確認してください。"
 
 #: src/iac_code/pipeline/engine/cleanup.py
 msgid ""
@@ -4417,10 +4419,11 @@ msgstr "現在のステップの構造化された結論。必須で、空には
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid ""
-"Submit the full first conclusion. On a resumed user-interaction branch, "
-"submit only changed fields; the pipeline merges them with the saved "
-"conclusion before full validation."
-msgstr "初回は完全な結論を送信してください。再開されたユーザー操作の分岐では、変更したフィールドのみを送信してください。パイプラインは完全な検証の前に、それらを保存済みの結論とマージします。"
+"Submit the full first conclusion. Always include required fields, even "
+"when unchanged. On a resumed user-interaction branch, submit changed "
+"optional fields; the pipeline merges them with the saved conclusion "
+"before full validation."
+msgstr "最初の結論は完全な形で送信してください。必須フィールドは変更がなくても必ず含めてください。やり取りを再開する場合は変更した任意フィールドを送信してください。パイプラインは保存済みの結論とマージしてから全体を検証します。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4450,13 +4453,9 @@ msgid ""
 "{error}\n"
 "Current step: {step_id}\n"
 "{schema_hint}\n"
-"Do not repeat unchanged saved fields on a resumed interaction; submit "
-"only the corrected fields."
-msgstr ""
-"{error}\n"
-"現在のステップ: {step_id}\n"
-"{schema_hint}\n"
-"再開された操作では、変更されていない保存済みフィールドを繰り返さず、修正したフィールドのみを送信してください。"
+"Always include required conclusion fields, even when unchanged. On a "
+"resumed interaction, omit only unchanged optional saved fields."
+msgstr "{error}\n現在のステップ: {step_id}\n{schema_hint}\n結論の必須フィールドは変更がなくても必ず含めてください。やり取りを再開する場合に省略できるのは、保存済みで変更のない任意フィールドだけです。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 #, python-brace-format
@@ -4497,6 +4496,11 @@ msgstr "使用可能なステータス値: {statuses}。"
 #, python-brace-format
 msgid "Allowed conclusion fields: {fields}."
 msgstr "使用可能な結論フィールド: {fields}。"
+
+#: src/iac_code/pipeline/engine/complete_step_tool.py
+#, python-brace-format
+msgid "Required conclusion fields: {fields}."
+msgstr "結論の必須フィールド: {fields}。"
 
 #: src/iac_code/pipeline/engine/complete_step_tool.py
 msgid "conclusion must match this schema summary:\n"
@@ -13917,3 +13921,11 @@ msgstr "Responses API には有効な HTTP または HTTPS のベース URL が�
 #: src/iac_code/providers/manager.py
 msgid "Responses API requires an OpenAI-style provider."
 msgstr "Responses API には OpenAI 形式のプロトコルを使用するプロバイダーが必要です。"
+
+#: src/iac_code/pipeline/selling/hooks/architecture_planning.py
+msgid "requested_candidate_count must be a positive integer or null"
+msgstr "requested_candidate_count は正の整数または null である必要があります"
+
+#: src/iac_code/pipeline/selling/hooks/architecture_planning.py
+msgid "The user requested {expected} candidate plans; {actual} were submitted. Correct the candidates or ask for clarification; do not silently change the requested count."
+msgstr "ユーザーは候補プランを {expected} 件要求しましたが、{actual} 件が提出されました。候補を修正するか、ユーザーに確認してください。要求された件数を無断で変更しないでください。"

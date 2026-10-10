@@ -97,7 +97,7 @@ conclusion_schema:
           description: 用户指定或默认的阿里云地域，如 cn-hangzhou
         stack_name:
           type: string
-          description: 用户指定的 ROS 资源栈名称基础名
+          description: 用户指定的 ROS 资源栈名称或基础名；精确且不可变的名称另记入 hard_constraints
         naming_constraints:
           type: array
           items:
@@ -112,6 +112,10 @@ conclusion_schema:
       type: string
     additional_notes:
       type: string
+    requested_candidate_count:
+      type: [integer, "null"]
+      minimum: 1
+      description: 用户明确要求的候选方案数量；未明确指定时为 null，不得根据资源数量、示例或推荐推断
     platform_note:
       type: string
     clarification_choice:
@@ -230,8 +234,10 @@ conclusion_schema:
 - `scale_hint`：根据上下文推断的业务规模，影响后续规格选择
 - `budget_constraint`：如用户提到预算则填写（如 "月预算500以内"），否则为 null
 - `region_preference`（在 `non_functional` 中）：如用户有地域偏好则填写，否则默认 "cn-hangzhou"
-- `stack_name`（在 `non_functional` 中）：如用户指定“资源栈名称”“StackName”或 ROS 资源栈名称，把用户给出的名称作为基础名写入该字段
+- `stack_name`（在 `non_functional` 中）：如用户指定“资源栈名称”“StackName”或 ROS 资源栈名称，原样记录用户给出的名称；仅用户指定基础名或前缀时才将其视为基础名。精确使用、不可变或不得加后缀的要求同时记入 `hard_constraints`
 - `network_constraints`（在 `non_functional` 中）：如用户指定 VPC ID、ZoneId、CidrBlock、已有网络资源或多个网段关系，必须原样保留
+- `additional_notes`：保留用户明确指定的候选方案数量及其它规划要求，供架构规划步骤使用；方案数量不是单个方案内的云资源数量，不要将其转换成资源数量硬约束。
+- `requested_candidate_count`：用户明确指定方案数量时必须填入该正整数，并保留原文到 `additional_notes`；未指定时填 null，不得自行推荐或从资源数量推断。用户修改数量时以最新要求为准。
 
 ### 硬约束提取规则
 

@@ -12,6 +12,7 @@ import stat
 import time
 from collections import deque
 from collections.abc import AsyncGenerator, Awaitable, Callable, Mapping
+from contextlib import aclosing
 from copy import deepcopy
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -1323,8 +1324,9 @@ class PipelineRunner:
         mcp_status_event = self._mcp_status_event(force=True)
         if mcp_status_event is not None:
             yield mcp_status_event
-        async for event in events:
-            yield event
+        async with aclosing(events) as pipeline_events:
+            async for event in pipeline_events:
+                yield event
 
     async def _continue_from_backup_blocked(
         self,
@@ -1339,11 +1341,13 @@ class PipelineRunner:
         if self._sidecar_status == "backup_blocked":
             self._sidecar_status = "running"
         if not user_input:
-            async for event in self._continue_from_current(resume_running_step=True):
-                yield event
+            async with aclosing(self._continue_from_current(resume_running_step=True)) as pipeline_events:
+                async for event in pipeline_events:
+                    yield event
             return
-        async for event in self._continue_from_sidecar_with_input(user_input):
-            yield event
+        async with aclosing(self._continue_from_sidecar_with_input(user_input)) as pipeline_events:
+            async for event in pipeline_events:
+                yield event
 
     def _backup_blocked_restore_reason(self) -> BackupReason:
         result = self._sidecar_restore_result
@@ -1377,8 +1381,11 @@ class PipelineRunner:
             )
             if user_text.strip().lower() == "continue":
                 self.resume_agent_loops()
-                async for event in self._continue_from_current(user_input=None, resume_running_step=True):
-                    yield event
+                async with aclosing(
+                    self._continue_from_current(user_input=None, resume_running_step=True)
+                ) as pipeline_events:
+                    async for event in pipeline_events:
+                        yield event
                 return
         try:
             judge_input: str | PipelineUserInput = pipeline_input if pipeline_input.has_images else user_text
@@ -1405,16 +1412,22 @@ class PipelineRunner:
                     "target": verdict.supplement_target,
                 }
                 try:
-                    async for event in self._continue_from_current(user_input=None, resume_running_step=True):
-                        yield event
+                    async with aclosing(
+                        self._continue_from_current(user_input=None, resume_running_step=True)
+                    ) as pipeline_events:
+                        async for event in pipeline_events:
+                            yield event
                 finally:
                     self._restored_supplement = None
                 return
-            async for event in self._continue_from_current(
-                **self._continue_input_kwargs(pipeline_input),
-                resume_running_step=True,
-            ):
-                yield event
+            async with aclosing(
+                self._continue_from_current(
+                    **self._continue_input_kwargs(pipeline_input),
+                    resume_running_step=True,
+                )
+            ) as pipeline_events:
+                async for event in pipeline_events:
+                    yield event
             return
         if verdict.action == "hard_interrupt":
             async for event in self._continue_after_sidecar_hard_interrupt(verdict, source_input=pipeline_input):
@@ -1422,8 +1435,9 @@ class PipelineRunner:
             return
 
         self.resume_agent_loops()
-        async for event in self._continue_from_current(resume_running_step=True):
-            yield event
+        async with aclosing(self._continue_from_current(resume_running_step=True)) as pipeline_events:
+            async for event in pipeline_events:
+                yield event
 
     async def _continue_after_sidecar_judgment_failure(
         self, verdict: InterruptVerdict, *, user_input: PipelineUserInput
@@ -1439,11 +1453,14 @@ class PipelineRunner:
                 yield event
             return
         self.resume_agent_loops()
-        async for event in self._continue_from_current(
-            **self._continue_input_kwargs(user_input),
-            resume_running_step=True,
-        ):
-            yield event
+        async with aclosing(
+            self._continue_from_current(
+                **self._continue_input_kwargs(user_input),
+                resume_running_step=True,
+            )
+        ) as pipeline_events:
+            async for event in pipeline_events:
+                yield event
 
     async def _continue_after_sidecar_hard_interrupt(
         self, verdict: InterruptVerdict, *, source_input: PipelineUserInput | None = None
@@ -1477,8 +1494,9 @@ class PipelineRunner:
             async for event in self.continue_after_interrupt():
                 yield event
             return
-        async for event in self._continue_from_current(resume_running_step=True):
-            yield event
+        async with aclosing(self._continue_from_current(resume_running_step=True)) as pipeline_events:
+            async for event in pipeline_events:
+                yield event
 
     def _mcp_status_event(self, *, force: bool = False) -> PipelineEvent | None:
         from iac_code.mcp.manager import mcp_status_metadata
@@ -1965,12 +1983,15 @@ class PipelineRunner:
         messages = self._load_unrepaired_resume_messages(transcript_id)
         if not messages:
             raise ValueError("permission_resume_invalid: pipeline transcript is unavailable")
-        async for event in self._continue_from_current(
-            resume_messages=messages,
-            resume_running_step=True,
-            permission_checkpoint=checkpoint,
-        ):
-            yield event
+        async with aclosing(
+            self._continue_from_current(
+                resume_messages=messages,
+                resume_running_step=True,
+                permission_checkpoint=checkpoint,
+            )
+        ) as pipeline_events:
+            async for event in pipeline_events:
+                yield event
 
     async def resume_resource_selection_boundary(
         self,
@@ -1991,8 +2012,9 @@ class PipelineRunner:
                 "checkpoint": checkpoint,
             }
             try:
-                async for event in self._continue_from_current(resume_running_step=True):
-                    yield event
+                async with aclosing(self._continue_from_current(resume_running_step=True)) as pipeline_events:
+                    async for event in pipeline_events:
+                        yield event
             finally:
                 if previous is None:
                     if hasattr(self, "_restored_candidate_resource_selection"):
@@ -2006,12 +2028,15 @@ class PipelineRunner:
         messages = self._load_unrepaired_resume_messages(transcript_id)
         if not messages:
             raise ValueError("resource_selection_resume_invalid: pipeline transcript is unavailable")
-        async for event in self._continue_from_current(
-            resume_messages=messages,
-            resume_running_step=True,
-            resource_selection_checkpoint=checkpoint,
-        ):
-            yield event
+        async with aclosing(
+            self._continue_from_current(
+                resume_messages=messages,
+                resume_running_step=True,
+                resource_selection_checkpoint=checkpoint,
+            )
+        ) as pipeline_events:
+            async for event in pipeline_events:
+                yield event
 
     async def rebuild_permission_audit_event(
         self,
@@ -2907,6 +2932,36 @@ class PipelineRunner:
         self._step_attempts[step_id] = attempt
         return attempt
 
+    def _resolve_restored_candidate_selection(
+        self, step: StepSpec, user_text: str, resume_messages: list[Message] | None,
+    ) -> StepResult | None:
+        """Revalidate an accepted choice saved before its deterministic result was consumed."""
+        conclusion = self.context.get_conclusion(step.conclusion_field)
+        if (
+            step.ui_mode != "candidate_selection"
+            or step.config.get("deterministic_structured_candidate_selection") is not True
+            or not isinstance(conclusion, dict)
+            or conclusion.get("status") != "awaiting_selection"
+            or conclusion.get("user_input") != user_text
+        ):
+            return None
+        options = conclusion.get("options")
+        selected_index = self._infer_selected_index(user_text, options if isinstance(options, list) else [])
+        if selected_index is None:
+            return None
+        self._retain_resumed_candidate_selection(step, conclusion, user_text)
+        result = self._step_executor.finalize_completion_input_from_transcript(
+            step,
+            self.context,
+            user_message=user_text,
+            tool_input={"conclusion": {"status": "selected", "selected_candidate_index": selected_index}},
+            resume_messages=resume_messages or [],
+            rollback_targets=self.state_machine.completed_non_future_rollback_targets(),
+            rollback_count=self.state_machine.rollback_count,
+            max_rollbacks=self.state_machine.max_rollbacks,
+        )
+        return None if isinstance(result, CompletionValidationError) else result
+
     def _current_step_attempt(self, step_id: str) -> int:
         return self._step_attempts.get(step_id, 1)
 
@@ -2994,11 +3049,14 @@ class PipelineRunner:
             yield mcp_status_event
         with self._observability.pipeline_run_span(total_steps=self.state_machine.total_steps) as pipeline_span:
             first_output_received = False
-            async for event in self._continue_from_current(**self._continue_input_kwargs(pipeline_input)):
-                if not first_output_received and _is_first_output_delta(event):
-                    first_output_received = True
-                    self._observability.record_user_time_to_first_token(pipeline_span, pipeline_started_at)
-                yield event
+            async with aclosing(
+                self._continue_from_current(**self._continue_input_kwargs(pipeline_input))
+            ) as pipeline_events:
+                async for event in pipeline_events:
+                    if not first_output_received and _is_first_output_delta(event):
+                        first_output_received = True
+                        self._observability.record_user_time_to_first_token(pipeline_span, pipeline_started_at)
+                    yield event
 
     async def resume(
         self, user_input: str | list[ContentBlock] | PipelineUserInput
@@ -3009,8 +3067,9 @@ class PipelineRunner:
         if mcp_status_event is not None:
             yield mcp_status_event
         if self.has_pending_pipeline_pause_confirmation():
-            async for event in self._continue_from_sidecar_with_input(user_input):
-                yield event
+            async with aclosing(self._continue_from_sidecar_with_input(user_input)) as pipeline_events:
+                async for event in pipeline_events:
+                    yield event
             return
 
         pipeline_input = normalize_pipeline_user_input(user_input)
@@ -3167,43 +3226,44 @@ class PipelineRunner:
                 **self._continue_input_kwargs(pipeline_input),
                 resume_waiting_step=True,
             )
-        async for event in continued:
-            if (
-                not selection_observed
-                and step.ui_mode == "candidate_selection"
-                and isinstance(event, PipelineEvent)
-                and event.type == PipelineEventType.STEP_COMPLETED
-                and event.step_id == step.step_id
-                and isinstance(event.data, dict)
-            ):
-                conclusion = event.data.get("conclusion")
-                if isinstance(conclusion, dict):
-                    resolved_index = conclusion.get("selected_candidate_index")
-                    resolved_name = conclusion.get("selected_candidate_name")
-                    if (
-                        isinstance(resolved_index, int)
-                        and not isinstance(resolved_index, bool)
-                        and 0 <= resolved_index < len(waiting_options)
-                    ):
-                        selected_index = resolved_index
-                    elif resolved_index is None and isinstance(resolved_name, str):
-                        selected_index = self._infer_selected_index(resolved_name, waiting_options)
-                    elif resolved_index is None and len(waiting_options) == 1:
-                        selected_index = 0
-                        resolved_name = self._option_display_value(waiting_options[0])
-                    if selected_index is not None:
-                        selected_value = self._option_display_value(waiting_options[selected_index])
-                        self._observability.selection_made(
-                            step_id=step.step_id,
-                            step_attempt=step_attempt,
-                            ui_mode=step.ui_mode,
-                            option_count=len(waiting_options),
-                            selected_index=selected_index,
-                            selected_value=selected_value
-                            or (resolved_name if isinstance(resolved_name, str) else user_text),
-                        )
-                        selection_observed = True
-            yield event
+        async with aclosing(continued) as pipeline_events:
+            async for event in pipeline_events:
+                if (
+                    not selection_observed
+                    and step.ui_mode == "candidate_selection"
+                    and isinstance(event, PipelineEvent)
+                    and event.type == PipelineEventType.STEP_COMPLETED
+                    and event.step_id == step.step_id
+                    and isinstance(event.data, dict)
+                ):
+                    conclusion = event.data.get("conclusion")
+                    if isinstance(conclusion, dict):
+                        resolved_index = conclusion.get("selected_candidate_index")
+                        resolved_name = conclusion.get("selected_candidate_name")
+                        if (
+                            isinstance(resolved_index, int)
+                            and not isinstance(resolved_index, bool)
+                            and 0 <= resolved_index < len(waiting_options)
+                        ):
+                            selected_index = resolved_index
+                        elif resolved_index is None and isinstance(resolved_name, str):
+                            selected_index = self._infer_selected_index(resolved_name, waiting_options)
+                        elif resolved_index is None and len(waiting_options) == 1:
+                            selected_index = 0
+                            resolved_name = self._option_display_value(waiting_options[0])
+                        if selected_index is not None:
+                            selected_value = self._option_display_value(waiting_options[selected_index])
+                            self._observability.selection_made(
+                                step_id=step.step_id,
+                                step_attempt=step_attempt,
+                                ui_mode=step.ui_mode,
+                                option_count=len(waiting_options),
+                                selected_index=selected_index,
+                                selected_value=selected_value
+                                or (resolved_name if isinstance(resolved_name, str) else user_text),
+                            )
+                            selection_observed = True
+                yield event
 
     def _structured_confirmation_validation_message(
         self,
@@ -3382,8 +3442,9 @@ class PipelineRunner:
                     precompleted_tools=candidate_precompleted_tools,
                 )
                 try:
-                    async for event in self._continue_from_current(resume_running_step=True):
-                        yield event
+                    async with aclosing(self._continue_from_current(resume_running_step=True)) as pipeline_events:
+                        async for event in pipeline_events:
+                            yield event
                 finally:
                     if previous is None:
                         if hasattr(self, "_restored_ask_user_question"):
@@ -3393,25 +3454,31 @@ class PipelineRunner:
                 return
 
         if supplemental is not None:
-            async for event in self._continue_from_current(
-                **self._continue_input_kwargs(supplemental),
-                resume_messages=[*resume_messages, tool_result_message],
-                precompleted_tools={"ask_user_question": payload},
-                resume_waiting_step=True,
-            ):
-                yield event
+            async with aclosing(
+                self._continue_from_current(
+                    **self._continue_input_kwargs(supplemental),
+                    resume_messages=[*resume_messages, tool_result_message],
+                    precompleted_tools={"ask_user_question": payload},
+                    resume_waiting_step=True,
+                )
+            ) as pipeline_events:
+                async for event in pipeline_events:
+                    yield event
             return
 
         # 把刚生成的 tool result 追加到包含原 ToolUse 的 resume_messages，而不是仅通过
         # precompleted_tools 注入：这样恢复时能重建带原始 question/options 的 guard record，
         # 用于把最终 conclusion 绑定到真实回答，同时不重复把 tool result 当作新 prompt。
-        async for event in self._continue_from_current(
-            user_input=None,
-            resume_messages=[*resume_messages, tool_result_message],
-            precompleted_tools={"ask_user_question": payload},
-            resume_waiting_step=True,
-        ):
-            yield event
+        async with aclosing(
+            self._continue_from_current(
+                user_input=None,
+                resume_messages=[*resume_messages, tool_result_message],
+                precompleted_tools={"ask_user_question": payload},
+                resume_waiting_step=True,
+            )
+        ) as pipeline_events:
+            async for event in pipeline_events:
+                yield event
 
     def _resume_messages_for_current_parent_step(self, step_id: str) -> list[Message]:
         attempt = self._current_parent_attempt(step_id)
@@ -3432,6 +3499,7 @@ class PipelineRunner:
                 {
                     "step_id": step.step_id,
                     "description": step.description,
+                    "conclusion_field": step.conclusion_field,
                     "is_current": i == self.state_machine.current_step_index,
                 }
             )
@@ -4508,6 +4576,10 @@ class PipelineRunner:
                     )
                     break
 
+                # A hard interrupt replaces this attempt while cancelled
+                # candidates unwind. The old stream cannot advance the new target.
+                if attempt.get("status") == "discarded":
+                    return
                 duration_ms = self._observability.duration_ms(step_started_at)
                 self._mark_attempt_status(attempt.get("attempt_id"), "completed")
                 completed_step_id = step.step_id
@@ -4599,11 +4671,18 @@ class PipelineRunner:
                 if (
                     first_step
                     and first_step_user_input_is_restored
-                    and step_resume_messages
-                    and (
-                        isinstance(step_user_message, str)
-                        or user_message_already_in_resume(step_user_message, step_resume_messages)
+                    and resume_running_step
+                    and resolved_step_result is None
+                    and isinstance(first_step_user_input_display_text, str)
+                ):
+                    resolved_step_result = self._resolve_restored_candidate_selection(
+                        step, first_step_user_input_display_text, step_resume_messages,
                     )
+                if (
+                    first_step
+                    and first_step_user_input_is_restored
+                    and step_resume_messages
+                    and user_message_already_in_resume(step_user_message, step_resume_messages)
                 ):
                     step_user_message = None
                 execute_kwargs: dict[str, Any] = {
@@ -4645,42 +4724,45 @@ class PipelineRunner:
                 if not any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()):
                     execute_kwargs = {key: value for key, value in execute_kwargs.items() if key in parameters}
 
-                async for event in self._step_executor.execute(
-                    step,
-                    self.context,
-                    self._session_id,
-                    **execute_kwargs,
-                ):
-                    mcp_status_event = self._mcp_status_event()
-                    if mcp_status_event is not None:
-                        yield mcp_status_event
-                    if isinstance(event, StepResult):
-                        step_result = event
-                    else:
-                        if isinstance(event, AskUserQuestionEvent):
-                            self._observability.user_input_required(
-                                step_id=step.step_id,
-                                step_index=step_index,
-                                step_attempt=step_attempt,
-                                total_steps=self.state_machine.total_steps,
-                                step_type=step.step_type,
-                                ui_mode=step.ui_mode,
-                                input_kind="ask_user_question",
-                                option_count=len(event.options),
-                                prompt=event.question,
-                            )
-                        if isinstance(event, ResourceObservedEvent):
-                            try:
-                                for warning_event in self._handle_resource_observed(
-                                    step,
-                                    event,
-                                    attempt_id=attempt.get("attempt_id"),
-                                ):
-                                    yield warning_event
-                            except PipelineStatePersistenceError as exc:
-                                yield self._persistence_failure_event(exc)
-                                return
-                        yield event
+                async with aclosing(
+                    self._step_executor.execute(
+                        step,
+                        self.context,
+                        self._session_id,
+                        **execute_kwargs,
+                    )
+                ) as step_events:
+                    async for event in step_events:
+                        mcp_status_event = self._mcp_status_event()
+                        if mcp_status_event is not None:
+                            yield mcp_status_event
+                        if isinstance(event, StepResult):
+                            step_result = event
+                        else:
+                            if isinstance(event, AskUserQuestionEvent):
+                                self._observability.user_input_required(
+                                    step_id=step.step_id,
+                                    step_index=step_index,
+                                    step_attempt=step_attempt,
+                                    total_steps=self.state_machine.total_steps,
+                                    step_type=step.step_type,
+                                    ui_mode=step.ui_mode,
+                                    input_kind="ask_user_question",
+                                    option_count=len(event.options),
+                                    prompt=event.question,
+                                )
+                            if isinstance(event, ResourceObservedEvent):
+                                try:
+                                    for warning_event in self._handle_resource_observed(
+                                        step,
+                                        event,
+                                        attempt_id=attempt.get("attempt_id"),
+                                    ):
+                                        yield warning_event
+                                except PipelineStatePersistenceError as exc:
+                                    yield self._persistence_failure_event(exc)
+                                    return
+                            yield event
 
             if step_result is not None and step_result.status == StepStatus.COMPLETED:
                 # 在保存最终 conclusion 前固化权威候选选择和参数覆盖。
@@ -4918,6 +5000,8 @@ class PipelineRunner:
                 # makes surfaces keep rendering with the previous step's UI.
                 resume_waiting_step = False
                 resume_running_step = False
+                permission_checkpoint = None
+                resource_selection_checkpoint = None
                 try:
                     for warning_event in self._mark_rollback_cleanup_required(
                         step,
@@ -4961,9 +5045,9 @@ class PipelineRunner:
                 )
                 continue
 
-            # 恢复中的候选 Step 若再次输出 awaiting_selection（例如用户要求改架构，或从
-            # ask_user_question 恢复后重新规划），必须重新等待选择而不是直接前进。没有
-            # status 字段的既有候选 Step 保持原有「恢复后前进」行为。
+            # Resuming a running candidate presentation does not constitute a selection.
+            # Legacy conclusions without status advance only after selection input was received;
+            # explicit waiting conclusions still require another user response.
             awaiting_selection_again = (
                 resume_current_step
                 and not step.auto_advance
@@ -4971,7 +5055,13 @@ class PipelineRunner:
                 and (
                     (
                         step.ui_mode == "candidate_selection"
-                        and step_result.conclusion.get("status") == "awaiting_selection"
+                        and (
+                            step_result.conclusion.get("status") == "awaiting_selection"
+                            or (
+                                "status" not in step_result.conclusion
+                                and first_step_user_input is None
+                            )
+                        )
                     )
                     or (
                         step.ui_mode == "deployment_confirmation"
@@ -5577,6 +5667,8 @@ class PipelineRunner:
             while done_count < total:
                 async with execution_non_advancing_wait():
                     event = await get_candidate_event()
+                if parent_attempt_id and self._execution.get("active_attempt_id") != parent_attempt_id:
+                    return
                 if isinstance(event, PipelineStatePersistenceError):
                     yield self._persistence_failure_event(event)
                     return
@@ -5629,6 +5721,10 @@ class PipelineRunner:
             self._parallel_candidates_total = 0
             self._current_sub_executor_list = None
 
+        # Cancellation cleanup awaits child tasks; ownership may have changed
+        # during that await. Preserve the rollback's context and execution record.
+        if parent_attempt_id and self._execution.get("active_attempt_id") != parent_attempt_id:
+            return
         aggregated: Any = []
         for i, candidate in enumerate(candidates):
             if i in conclusions_by_index:

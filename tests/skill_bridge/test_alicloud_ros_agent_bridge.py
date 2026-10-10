@@ -2520,11 +2520,18 @@ def _wait_for_pid_exit(pid: int, timeout: float = 4.0) -> None:
         time.sleep(0.05)
 
 
-def test_manager_is_loopback_authenticated_reused_and_recovers_after_idle_shutdown(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize('client_delay', [0.0, 0.7])
+def test_manager_is_loopback_authenticated_reused_and_recovers_after_idle_shutdown(
+    monkeypatch, tmp_path: Path, client_delay: float,
+) -> None:
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
-    monkeypatch.setattr(bridge, "MANAGER_IDLE_SECONDS", 0.3)
+    # Validate reuse before enabling rapid idle expiry. A loaded Windows caller
+    # can take longer than 0.3s between requests; recycling then is correct.
+    # The unchanged 0.1s reconfiguration below still tests real idle shutdown.
+    monkeypatch.setattr(bridge, "MANAGER_IDLE_SECONDS", 60)
 
     first = bridge.ensure_manager()
+    time.sleep(client_delay)
     second = bridge.ensure_manager()
 
     assert second == first

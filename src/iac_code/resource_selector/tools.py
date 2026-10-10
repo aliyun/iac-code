@@ -209,7 +209,10 @@ class ResolveCloudResourceSelectorTool(Tool):
             "VPC, ECS Instance, OSS Bucket, KMS Key, or OOS Template, not a sentence. "
             "Do not pre-list candidates with Alibaba Cloud APIs; fall back to them only when this resolver reports "
             "that the selector is unavailable, or when the user asked to list, inspect, or analyze resources. "
-            "The default response is compact; request detail_level=full only when optional metadata fields are needed."
+            "Include all known user-required scope filters in association_property_metadata, including exact values "
+            "from resources the user selected earlier. Schema-optional fields are still required when the user "
+            "constrains that relationship. The default response is compact; request detail_level=full when the "
+            "needed scope-filter schema is not shown, rather than dropping the user's scope."
         )
 
     @property
@@ -400,6 +403,9 @@ class SelectCloudResourceTool(Tool):
         return (
             "Ask the user to choose one supported cloud resource or one derived value. "
             "Pass the stable selector_id and normalized metadata returned by the resolver. "
+            "Preserve every user-required scope filter, including exact values from previously selected resources. "
+            "If a needed filter is absent from the compact contract, resolve with detail_level=full and those known "
+            "values before selecting; do not broaden the requested scope by omitting schema-optional metadata. "
             "Pass source only when the resolver interaction.source_policy is required. "
             "A canceled result is the user's final decision; do not retry unless the user explicitly asks."
         )
