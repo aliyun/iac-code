@@ -1,0 +1,225 @@
+{
+  "summary": "所有产品列表。",
+  "path": "/products",
+  "methods": [
+    "get"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "security": [
+    {
+      "Anonymous": []
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "operationType": "read",
+  "deprecated": false,
+  "systemTags": {
+    "operationType": "none",
+    "riskType": "none",
+    "chargeType": "free",
+    "tenantRelevance": "publicInformation"
+  },
+  "parameters": [
+    {
+      "name": "nextToken",
+      "in": "query",
+      "schema": {
+        "description": "分页nextToken",
+        "type": "string",
+        "required": false,
+        "example": "eyJ0b2tlbiI6IjEwMjM0NTY3ODkwIn0="
+      }
+    },
+    {
+      "name": "terraformProviderVersion",
+      "in": "query",
+      "schema": {
+        "description": "TerraformProvider版本，为空时默认为最新版本",
+        "type": "string",
+        "required": false,
+        "example": "1.227.0"
+      }
+    },
+    {
+      "name": "maxResults",
+      "in": "query",
+      "schema": {
+        "description": "每页的最大数量，取值范围（0-200），默认100",
+        "type": "integer",
+        "format": "int32",
+        "required": false,
+        "maximum": "200",
+        "minimum": "0",
+        "example": "100"
+      }
+    },
+    {
+      "name": "keyword",
+      "in": "query",
+      "schema": {
+        "description": "搜索产品关键词支持模糊查询",
+        "type": "string",
+        "required": false,
+        "example": "ECS"
+      }
+    },
+    {
+      "name": "supportTerraformer",
+      "in": "query",
+      "schema": {
+        "description": "是否支持Terraformer",
+        "type": "boolean",
+        "required": false,
+        "example": "true"
+      }
+    },
+    {
+      "name": "status",
+      "in": "query",
+      "schema": {
+        "description": "状态，Available，Deprecated",
+        "type": "string",
+        "required": false,
+        "example": "Available"
+      }
+    },
+    {
+      "name": "sort",
+      "in": "query",
+      "schema": {
+        "description": "排序方式\n- Normal：默认排序（默认值）\n- Top：热门访问排序",
+        "type": "string",
+        "required": false,
+        "example": "Normal"
+      }
+    }
+  ],
+  "responses": {
+    "200": {
+      "schema": {
+        "title": "Schema of Response",
+        "description": "成功响应的数据结构",
+        "type": "object",
+        "properties": {
+          "maxResults": {
+            "description": "分页nextToken",
+            "type": "integer",
+            "format": "int32",
+            "example": "20"
+          },
+          "nextToken": {
+            "description": "每页的最大数量，取值范围（0-200），默认100",
+            "type": "string",
+            "example": "30BaZ9ekYWXJdqshYecA++coNg7qT1Zbm3RfLyFIZeY="
+          },
+          "products": {
+            "description": "产品列表",
+            "type": "array",
+            "items": {
+              "description": "产品列表",
+              "type": "object",
+              "properties": {
+                "product": {
+                  "description": "产品名称",
+                  "type": "string",
+                  "example": "MSE"
+                },
+                "subcategory": {
+                  "description": "Terraform中对于产品的分类",
+                  "type": "string",
+                  "example": "Microservice_Engine(MSE)"
+                },
+                "supportTerraformer": {
+                  "description": "是否支持Terraformer",
+                  "type": "boolean",
+                  "example": "true"
+                },
+                "terraformProviderVersion": {
+                  "description": "TerraformProvider的版本",
+                  "type": "string",
+                  "example": "1.229.0"
+                },
+                "status": {
+                  "description": "状态",
+                  "type": "string",
+                  "example": "Available"
+                },
+                "productName": {
+                  "description": "产品名称。",
+                  "type": "string",
+                  "example": "微服务引擎"
+                },
+                "productNameEn": {
+                  "description": "产品英文名称",
+                  "type": "string",
+                  "example": "Microservices Engine"
+                },
+                "firstCategoryName": {
+                  "description": "一级分类名称",
+                  "type": "string",
+                  "example": "企业应用"
+                },
+                "firstCategoryNameEn": {
+                  "description": "一级分类英文名称",
+                  "type": "string",
+                  "example": "Enterprise application"
+                },
+                "secondCategoryName": {
+                  "description": "二级分类名称",
+                  "type": "string",
+                  "example": "应用服务"
+                },
+                "secondCategoryNameEn": {
+                  "description": "二级分类英文名称",
+                  "type": "string",
+                  "example": "Application service"
+                }
+              }
+            }
+          },
+          "requestId": {
+            "title": "Id of the request",
+            "description": "请求ID",
+            "type": "string",
+            "example": "9bcaac3c-420d-4303-87ab-7638c07b0a0b"
+          },
+          "totalCount": {
+            "description": "数据总量",
+            "type": "integer",
+            "format": "int32",
+            "example": "134"
+          }
+        }
+      }
+    }
+  },
+  "errorCodes": {},
+  "staticInfo": {
+    "returnType": "synchronous"
+  },
+  "responseDemo": "[{\"errorExample\":\"\",\"example\":\"{\\n  \\\"maxResults\\\": 20,\\n  \\\"nextToken\\\": \\\"30BaZ9ekYWXJdqshYecA++coNg7qT1Zbm3RfLyFIZeY=\\\",\\n  \\\"products\\\": [\\n    {\\n      \\\"product\\\": \\\"MSE\\\",\\n      \\\"subcategory\\\": \\\"Microservice_Engine(MSE)\\\",\\n      \\\"supportTerraformer\\\": true,\\n      \\\"terraformProviderVersion\\\": \\\"1.229.0\\\",\\n      \\\"status\\\": \\\"Available\\\",\\n      \\\"productName\\\": \\\"微服务引擎\\\",\\n      \\\"productNameEn\\\": \\\"Microservices Engine\\\",\\n      \\\"firstCategoryName\\\": \\\"企业应用\\\",\\n      \\\"firstCategoryNameEn\\\": \\\"Enterprise application\\\",\\n      \\\"secondCategoryName\\\": \\\"应用服务\\\",\\n      \\\"secondCategoryNameEn\\\": \\\"Application service\\\"\\n    }\\n  ],\\n  \\\"requestId\\\": \\\"9bcaac3c-420d-4303-87ab-7638c07b0a0b\\\",\\n  \\\"totalCount\\\": 134\\n}\",\"type\":\"json\"}]",
+  "title": "列举产品列表",
+  "description": "## 请求说明\n\n- **关键词搜索**：通过`keyword`参数进行模糊匹配。\n- **分页查询**：使用`nextToken`进行翻页，通过`maxResults`指定每页返回的最大结果数（默认100，最大200）。\n- **Terraform Provider版本**：可选参数`terraformProviderVersion`用于筛选特定版本的Provider相关产品。\n- **响应结构**包含请求ID、总条目数、当前页数据及分页信息，便于处理查询结果。",
+  "changeSet": [],
+  "flowControl": {
+    "flowControlList": [
+      {
+        "threshold": "800",
+        "countWindow": 1,
+        "regionId": "*",
+        "api": "ListProducts"
+      }
+    ]
+  },
+  "ramActions": [],
+  "components": {
+    "schemas": {}
+  }
+}
