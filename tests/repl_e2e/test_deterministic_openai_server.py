@@ -176,6 +176,40 @@ async def _completion(client: AsyncOpenAI, messages: list[dict]) -> list:
     return [chunk async for chunk in response]
 
 
+@pytest.mark.asyncio
+async def test_confirmation_fixture_distinguishes_presentation_from_final_user_selection(tmp_path):
+    from iac_code.pipeline.selling.hooks.confirm_and_select import enrich_completion_input
+
+    candidate = "Contract VPC"
+    evaluated = [{"candidate": {"name": candidate}, "failed": False}]
+    with DeterministicOpenAIServer(tmp_path / "requests.jsonl") as server:
+        async with AsyncOpenAI(api_key="test", base_url=server.base_url) as client:
+            for text, choosing in [
+                (PIPELINE_PROMPT_MARKER, False),
+                ("选择方案0", True),
+                (json.dumps({"selected_candidate_index": 0,
+                             "parameter_overrides": {"CidrBlock": "10.0.0.0/16"}}), True),
+                (json.dumps({"selected_candidate_name": "missing"}), False),
+                (json.dumps({"selected_candidate_index": 1}), False),
+            ]:
+                chunks = await _completion(client, [
+                    {"role": "system", "content": "# 步骤：方案确认与选择"},
+                    {"role": "user", "content": text},
+                ])
+                arguments = json.loads(chunks[0].choices[0].delta.tool_calls[0].function.arguments)
+                conclusion = arguments["conclusion"]
+                assert bool(conclusion.get("selected_candidate_name")) is choosing
+                assert conclusion["options"][0]["candidate_index"] == 0
+                if choosing:
+                    assert conclusion["user_input"] == text
+                    assert enrich_completion_input(
+                        tool_input=arguments, context_snapshot={"evaluated_candidates": evaluated},
+                        completion_guard_state={"resuming_candidate_selection": True},
+                    ) == arguments
+                    if text.startswith("{"):
+                        assert conclusion["parameter_overrides"] == {"CidrBlock": "10.0.0.0/16"}
+
+
 def _tool_call_message(name: str) -> dict:
     return {
         "role": "assistant",
