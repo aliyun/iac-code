@@ -20,7 +20,7 @@ from typing import Any, cast
 from unittest.mock import Mock
 
 from iac_code.a2a.backup import run_sync_fenced
-from iac_code.a2a.execution_control import execution_checkpoint, execution_non_advancing_wait
+from iac_code.a2a.execution_control import current_execution_control, execution_checkpoint, execution_non_advancing_wait
 from iac_code.agent.message import ContentBlock, Message, ToolResultBlock
 from iac_code.i18n import _
 from iac_code.pipeline.engine.cleanup import (
@@ -44,6 +44,7 @@ from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import AllowUserEscapes, LoadedPipeline, OnCompletePolicy, StepSpec
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
+from iac_code.pipeline.engine.transcript_storage import FirstModelRequestTranscript
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.pipeline.engine.ui_contract import (
     PipelineStepType,
@@ -53,6 +54,7 @@ from iac_code.pipeline.engine.ui_contract import (
     parse_selected_candidate,
 )
 from iac_code.pipeline.engine.user_input import (
+    PipelineInputAcceptance,
     PipelineInputContent,
     PipelineUserInput,
     normalize_pipeline_user_input,
@@ -60,6 +62,7 @@ from iac_code.pipeline.engine.user_input import (
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
+from iac_code.services.session_storage import PIPELINE_USER_HISTORY_KEY
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CloudResourceSelectionEvent,
@@ -609,6 +612,22 @@ class RestartInfo:
     rollback_input: PipelineInputContent | None = None
 
 
+@dataclass(frozen=True)
+class CanceledModelResumeSeed:
+    attempt_id: str
+    transcript_id: str
+    step_id: str
+    transcript: FirstModelRequestTranscript
+
+    def matches(self, execution: dict[str, Any], step_id: str) -> bool:
+        return (
+            execution.get("kind") == "step"
+            and execution.get("active_attempt_id") == self.attempt_id
+            and execution.get("transcript_id") == self.transcript_id
+            and execution.get("step_id") == self.step_id == step_id
+        )
+
+
 @dataclass
 class PromptContext:
     """Resolved AgentLoop context that would be used by the next model call."""
@@ -717,6 +736,7 @@ class PipelineRunner:
         self.state_machine = StateMachine(self._loaded.steps, self._loaded.max_rollbacks)
         self._sidecar_status: str | None = None
         self._sidecar_restore_result: RestoreResult | None = None
+        self._canceled_model_resume_seed: CanceledModelResumeSeed | None = None
         self._current_step_user_input: str | None = None
         self._restored_current_step_user_input: PipelineUserInput | None = None
         self._restored_current_step_resume_messages: list[Message] | None = None
@@ -1201,7 +1221,97 @@ class PipelineRunner:
             return CanceledCheckpointSafety(safe=False, reason="active_attempt_outcome_unverified")
         return CanceledCheckpointSafety(safe=True, reason="step_boundary")
 
+    def canceled_model_checkpoint_safety(self, intent: Any, proof: Any) -> CanceledCheckpointSafety:
+        """Admit only an old first logical model operation with an exact released writer."""
+        from iac_code.a2a.pipeline_continuation import PipelineModelReleaseProof
+        from iac_code.providers.manager import ProviderManager
+
+        self._canceled_model_resume_seed = None
+        unsafe = CanceledCheckpointSafety(safe=False, reason="active_attempt_outcome_unverified")
+        try:
+            PipelineModelReleaseProof.from_dict(proof)
+        except (ValueError, TypeError):
+            return unsafe
+        boundary = proof.get("modelBoundary")
+        active_id = self._execution.get("active_attempt_id")
+        items = self._attempts.get("items")
+        if not isinstance(active_id, str) or not isinstance(items, dict):
+            return unsafe
+        if any(not isinstance(item, dict) or item.get("scope") != "parent" for item in items.values()):
+            return unsafe
+        attempt = items.get(active_id)
+        if not isinstance(attempt, dict) or self._execution.get("kind") != "step" or attempt.get("scope") != "parent":
+            return unsafe
+        evidence = attempt.get("model_only_interruption")
+        if not isinstance(evidence, dict) or not isinstance(boundary, dict) or self._transcript_storage is None:
+            return unsafe
+        step = self.state_machine.current_step
+        generation = proof.get("backupGeneration")
+        commit_id = proof.get("backupCommitId")
+        if (
+            boundary.get("contextId") != intent.context_id
+            or boundary.get("taskId") != intent.predecessor_task_id
+            or boundary.get("externalOperations") != []
+            or boundary.get("backupStatus") not in ("staged_committed", "shared_committed")
+            or isinstance(generation, bool)
+            or not isinstance(generation, int)
+            or generation <= 0
+            or not isinstance(commit_id, str)
+            or not commit_id
+            or proof.get("executionId") != intent.cancellation_execution_id
+            or proof.get("revision") != intent.cancellation_revision
+            or generation != intent.cancellation_backup_generation
+            or commit_id != intent.cancellation_backup_commit_id
+            or evidence.get("contextId") != intent.context_id
+            or evidence.get("taskId") != intent.predecessor_task_id
+            or evidence.get("executionId") != intent.cancellation_execution_id
+            or evidence.get("attemptId") != active_id
+            or evidence.get("kind") != "first_model_request"
+            or not ProviderManager.model_only_adapter_identity(evidence.get("adapter"))
+            or attempt.get("status") != "failed"
+            or attempt.get("step_id") != step.step_id
+            or evidence.get("stepId") != step.step_id
+            or self._execution.get("step_id") != step.step_id
+            or step.step_type != "normal"
+            or step.on_enter is not None
+            or step.on_exit is not None
+            or evidence.get("transcriptId") != attempt.get("transcript_id")
+            or evidence.get("transcriptId") != self._execution.get("transcript_id")
+        ):
+            return unsafe
+        transcript = self._transcript_storage.first_model_request_snapshot(self._cwd, evidence["transcriptId"])
+        if transcript is None or transcript.sha256 != evidence.get("transcriptSha256"):
+            return unsafe
+        try:
+            marker = self._backup_service.read_local_state(self._cwd, self._session_id)
+        except Exception:
+            return unsafe
+        if (
+            marker is None or marker.status != "succeeded"
+            or marker.generation != generation or marker.commit_id != commit_id
+        ):
+            return unsafe
+        self._canceled_model_resume_seed = CanceledModelResumeSeed(
+            attempt_id=active_id,
+            transcript_id=evidence["transcriptId"],
+            step_id=step.step_id,
+            transcript=transcript,
+        )
+        return CanceledCheckpointSafety(safe=True, reason="released_first_model_request")
+
+    def _model_resume_seed(self, *, consume: bool = False) -> CanceledModelResumeSeed | None:
+        seed = getattr(self, "_canceled_model_resume_seed", None)
+        if seed is None:
+            return None
+        if not seed.matches(self._execution, self.state_machine.current_step.step_id):
+            self._canceled_model_resume_seed = None
+            raise ValueError("Canceled model resume checkpoint changed")
+        if consume:
+            self._canceled_model_resume_seed = None
+        return seed
+
     def _apply_restored_checkpoint(self, result: RestoreResult) -> RestoreResult:
+        self._canceled_model_resume_seed = None
         assert result.state_machine_snapshot is not None
         assert result.context_snapshot is not None
         self.state_machine = StateMachine.from_snapshot(
@@ -1364,6 +1474,8 @@ class PipelineRunner:
         user_text = pipeline_input.display_text
         was_pause_confirmation = self.has_pending_pipeline_pause_confirmation()
         if was_pause_confirmation:
+            if pipeline_input.acceptance is not None:
+                pipeline_input.acceptance.accept()
             self._set_pending_input_kind(None)
             current_step = getattr(self.state_machine, "current_step", None)
             step_id = getattr(current_step, "step_id", None)
@@ -1435,7 +1547,12 @@ class PipelineRunner:
             return
 
         self.resume_agent_loops()
-        async with aclosing(self._continue_from_current(resume_running_step=True)) as pipeline_events:
+        resume_input = (
+            self._continue_input_kwargs(pipeline_input)
+            if verdict.action == "continue" and self._model_resume_seed() is not None
+            else {}
+        )
+        async with aclosing(self._continue_from_current(**resume_input, resume_running_step=True)) as pipeline_events:
             async for event in pipeline_events:
                 yield event
 
@@ -2503,6 +2620,7 @@ class PipelineRunner:
         """Persist infrastructure cancellation without classifying it as a user abort."""
 
         self._mark_active_attempt_failed_preserve_execution()
+        self._record_canceled_model_interruption(reason)
         current_step = ""
         if not self.state_machine.is_complete:
             try:
@@ -2527,6 +2645,42 @@ class PipelineRunner:
             )
 
         self._try_save_sidecar_sync("canceled", "save_canceled_sync", save, step_id=current_step or None)
+
+    def _record_canceled_model_interruption(self, reason: str) -> None:
+        active_id = self._execution.get("active_attempt_id")
+        items = self._attempts.get("items")
+        if not isinstance(active_id, str) or not isinstance(items, dict):
+            return
+        attempt = items.get(active_id)
+        if not isinstance(attempt, dict):
+            return
+        attempt.pop("model_only_interruption", None)
+        if type(self._step_executor) is not StepExecutor or self._transcript_storage is None:
+            return
+        request = self._step_executor.canceled_first_model_request
+        control = current_execution_control()
+        if (
+            not isinstance(request, dict)
+            or control is None
+            or control.phase != "terminating"
+            or reason not in {"explicit_terminate", "stream_terminal_cleanup"}
+            or request.get("attemptId") != active_id
+            or self._execution.get("kind") != "step"
+            or request.get("transcriptId") != self._execution.get("transcript_id")
+            or attempt.get("scope") != "parent"
+        ):
+            return
+        digest = self._transcript_storage.first_model_request_digest(self._cwd, request["transcriptId"])
+        if digest is None:
+            return
+        attempt["model_only_interruption"] = {
+            **request,
+            "kind": "first_model_request",
+            "contextId": control.context_id,
+            "taskId": control.task_id,
+            "executionId": control.execution_id,
+            "transcriptSha256": digest,
+        }
 
     async def _save_rollback(self, from_step: str, to_step: str, reason: str) -> None:
         if not self.session:
@@ -3038,9 +3192,8 @@ class PipelineRunner:
                 "pipeline_type": self._loaded.name,
                 "total_steps": self.state_machine.total_steps,
                 "step_names": list(self.state_machine._order),
-                # 首句用户 prompt 只存在于本次调用的入参：流水线会话的 JSONL 只记录
-                # pipeline_init / step_complete 元信息,快照也没有它。会话恢复要还原
-                # 「我发的第一句话」就必须让它随本事件一起持久化(仅文本,不含图片)。
+                # 公开根 history 是导出记录，不能替代私有 attempt 的恢复证明。
+                # 首句仍随权威事件持久化，供原有恢复链还原（仅文本，不含图片）。
                 "user_request": pipeline_input.display_text,
             },
         )
@@ -3139,6 +3292,8 @@ class PipelineRunner:
                     },
                 )
                 return
+        if pipeline_input.acceptance is not None:
+            pipeline_input.acceptance.accept()
         wait_started_at = self._waiting_input_started_at.pop(step.step_id, None)
         wait_duration_ms = self._observability.duration_ms(wait_started_at) if wait_started_at is not None else None
         self._waiting_input_options_by_step.pop(step.step_id, None)
@@ -3358,6 +3513,7 @@ class PipelineRunner:
         tool_use_id: str,
         pending_input: dict[str, Any] | None = None,
         supplemental_input: str | list[ContentBlock] | PipelineUserInput | None = None,
+        input_acceptance: PipelineInputAcceptance | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Resume an in-step ask_user_question after process restart."""
         payload = {
@@ -3377,6 +3533,8 @@ class PipelineRunner:
         # makes providers treat the ask as interrupted even though the answer
         # was durably accepted.
         resume_messages = _without_tool_result(resume_messages, tool_use_id)
+        if input_acceptance is not None:
+            input_acceptance.accept()
         self.acknowledge_pending_ask_user_question(tool_use_id)
         answer_text = payload["free_text"] or payload["selected_label"] or payload["selected_id"]
         if payload["selected_id"] and payload["free_text"]:
@@ -3489,7 +3647,7 @@ class PipelineRunner:
         if self._session_storage is None or not hasattr(self._session_storage, "load"):
             return []
         loaded = self._session_storage.load(self._cwd, self._session_id)
-        return list(loaded or [])
+        return [message for message in loaded or [] if PIPELINE_USER_HISTORY_KEY not in message.metadata]
 
     def _get_state_for_judge(self) -> dict:
         """Build pipeline state summary for the interrupt judge."""
@@ -3534,6 +3692,15 @@ class PipelineRunner:
             "conclusions": conclusions,
             "partial_output": partial_output,
         }
+
+        seed = self._model_resume_seed()
+        if seed is not None:
+            from iac_code.agent.agent_loop import AgentLoop
+
+            state["resume_messages"] = [
+                AgentLoop._provider_message_from_api(message.to_api_format())
+                for message in seed.transcript.messages()
+            ]
 
         candidate_states_by_index: dict[int, dict[str, Any]] = {}
         execution = getattr(self, "_execution", {}) or {}
@@ -3610,8 +3777,11 @@ class PipelineRunner:
         if self._is_judgment_error_verdict(verdict):
             return self._apply_interrupt_judge_failure_policy(verdict)
 
+        acceptance = pipeline_input.acceptance
+        if acceptance is not None:
+            acceptance.qualify_interrupt()
         if verdict.action == "supplement":
-            injected = self._inject_supplement(verdict, pipeline_input.content)
+            injected = self._inject_supplement(verdict, pipeline_input.content, acceptance=acceptance)
             if not injected:
                 current_step = getattr(self.state_machine, "current_step", None)
                 step_config = getattr(current_step, "config", {})
@@ -3772,6 +3942,9 @@ class PipelineRunner:
                 target = self.state_machine.current_step.step_id
 
         if is_candidate_restart:
+            source = normalize_pipeline_user_input(source_input)
+            if source.acceptance is not None and source.acceptance.interrupt_qualified:
+                source.acceptance.accept()
             if source_input is None:
                 self._schedule_candidate_restart(verdict)
             else:
@@ -3785,6 +3958,16 @@ class PipelineRunner:
             )
             self._last_applied_interrupt_verdict = verdict
             return False
+
+        source = normalize_pipeline_user_input(source_input)
+        if source.acceptance is not None and source.acceptance.interrupt_qualified:
+            accepted_target, _ = self._can_interrupt_rollback_to(target)
+            if not accepted_target:
+                accepted_target, _ = self._can_interrupt_rollback_to(self.state_machine.current_step.step_id)
+            if accepted_target:
+                # No cancellation, restart clearing, or rollback may consume
+                # this accepted request until its public history is durable.
+                source.acceptance.accept()
 
         # Cancelled tasks are cleaned up by _execute_parallel_sub_pipeline's
         # try/finally when the generator is aclose()'d; no need to await here.
@@ -3819,7 +4002,12 @@ class PipelineRunner:
             verdict = replace(verdict, rollback_target=target, reason=fallback_reason)
 
         cleanup_from_step = self.state_machine.current_step
+        source = normalize_pipeline_user_input(source_input)
+        if source.acceptance is not None and source.acceptance.interrupt_qualified:
+            source.acceptance.accept()
         self.state_machine.interrupt_rollback(target, verdict.reason)
+        # A committed parent rollback replaces the attempt that owns this seed.
+        self._canceled_model_resume_seed = None
         current_attempt_id = self._execution.get("active_attempt_id")
         self._mark_attempt_status(current_attempt_id, "discarded")
         self._create_parent_attempt(target)
@@ -3939,9 +4127,21 @@ class PipelineRunner:
         return self._continue_from_current(user_input=context)
 
     @staticmethod
-    def _try_inject_into_agent_loop(agent_loop: object | None, message: PipelineInputContent) -> bool:
+    def _try_inject_into_agent_loop(
+        agent_loop: object | None, message: PipelineInputContent, acceptance: PipelineInputAcceptance | None = None
+    ) -> bool:
         if agent_loop is None:
             return False
+
+        if acceptance is not None:
+            if not acceptance.can_accept:
+                return False
+            from iac_code.agent.agent_loop import AgentLoop
+
+            if type(agent_loop) is AgentLoop:
+                if not agent_loop.can_accept_injected_user_message:
+                    return False
+                acceptance.accept()
 
         if inspect.getattr_static(agent_loop, "try_inject_user_message", None) is not None:
             try_inject = getattr(agent_loop, "try_inject_user_message", None)
@@ -3958,7 +4158,13 @@ class PipelineRunner:
         inject(message)
         return True
 
-    def _inject_supplement(self, verdict: InterruptVerdict, message: PipelineInputContent) -> bool:
+    def _inject_supplement(
+        self,
+        verdict: InterruptVerdict,
+        message: PipelineInputContent,
+        *,
+        acceptance: PipelineInputAcceptance | None = None,
+    ) -> bool:
         """Inject supplement message into the correct AgentLoop.
 
         Returns True if the message was injected into at least one AgentLoop,
@@ -3978,16 +4184,16 @@ class PipelineRunner:
                 injected = False
                 for state in list(self._active_candidates.values()):
                     al = state.get("agent_loop")
-                    if self._try_inject_into_agent_loop(al, message):
+                    if self._try_inject_into_agent_loop(al, message, acceptance):
                         injected = True
                 return injected
             agent_loop = self._step_executor.current_agent_loop
-            return self._try_inject_into_agent_loop(agent_loop, message)
+            return self._try_inject_into_agent_loop(agent_loop, message, acceptance)
         if verdict.supplement_target == "all":
             injected = False
             for state in list(self._active_candidates.values()):
                 al = state.get("agent_loop")
-                if self._try_inject_into_agent_loop(al, message):
+                if self._try_inject_into_agent_loop(al, message, acceptance):
                     injected = True
             return injected
         target = verdict.supplement_target
@@ -3996,7 +4202,7 @@ class PipelineRunner:
             state = self._active_candidates.get(idx)
             if state:
                 al = state.get("agent_loop")
-                return self._try_inject_into_agent_loop(al, message)
+                return self._try_inject_into_agent_loop(al, message, acceptance)
         return False
 
     @staticmethod
@@ -4022,6 +4228,7 @@ class PipelineRunner:
         message: PipelineInputContent,
         *,
         envelope: dict[str, Any] | None = None,
+        input_acceptance: PipelineInputAcceptance | None = None,
     ) -> bool:
         """Inject image/text supplied alongside an active ask_user_question answer."""
         target = self._candidate_target_from_pending_question_envelope(envelope)
@@ -4030,7 +4237,7 @@ class PipelineRunner:
             reason="ask_user_question supplemental input",
             supplement_target=target,
         )
-        return self._inject_supplement(verdict, message)
+        return self._inject_supplement(verdict, message, acceptance=input_acceptance)
 
     @staticmethod
     def _candidate_index_from_target(target: str | None) -> int | None:
@@ -4393,6 +4600,7 @@ class PipelineRunner:
         permission_checkpoint: dict[str, Any] | None = None,
         resource_selection_checkpoint: dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
+        model_resume_seed = self._model_resume_seed(consume=True)
         is_first_step = True
         terminal_pipeline_telemetry_emitted = False
         terminal_backup_completed = False
@@ -4416,7 +4624,11 @@ class PipelineRunner:
             else None
         )
         first_step_user_input_is_restored = user_input is None and restored_step_user_input is not None
-        first_step_resume_messages = resume_messages if resume_messages is not None else restored_resume_messages
+        first_step_resume_messages = (
+            model_resume_seed.transcript.messages()
+            if model_resume_seed is not None
+            else resume_messages if resume_messages is not None else restored_resume_messages
+        )
         first_step_precompleted_tools = (
             precompleted_tools if precompleted_tools is not None else restored_precompleted_tools
         )
@@ -4450,6 +4662,11 @@ class PipelineRunner:
             step_index = self.state_machine.current_step_index + 1
             existing_attempt = self._current_parent_attempt(step.step_id)
             attempt = self._ensure_parent_attempt(step.step_id)
+            if model_resume_seed is not None and is_first_step:
+                assert self._transcript_storage is not None
+                self._transcript_storage.save(
+                    self._cwd, attempt["transcript_id"], model_resume_seed.transcript.messages()
+                )
             resume_current_step = (
                 resume_waiting_step or (resume_running_step and self._attempt_has_resume_transcript(existing_attempt))
             ) and is_first_step

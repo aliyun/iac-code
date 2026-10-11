@@ -2489,16 +2489,16 @@ async def test_pipeline_input_received_is_not_enqueued_when_metadata_persistence
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("failed", "expected_state"),
+    ("failed", "expected_status"),
     [
-        (False, "TASK_STATE_COMPLETED"),
-        (True, "TASK_STATE_FAILED"),
+        (False, "completed"),
+        (True, "failed"),
     ],
 )
-async def test_publish_pipeline_completed_maps_terminal_states(
+async def test_publish_pipeline_completed_preserves_terminal_metadata_as_business(
     tmp_path: Path,
     failed: bool,
-    expected_state: str,
+    expected_status: str,
 ) -> None:
     publisher, queue = _publisher(tmp_path)
 
@@ -2511,11 +2511,16 @@ async def test_publish_pipeline_completed_maps_terminal_states(
         )
     )
 
-    assert dump(queue.events[0])["status"]["state"] == expected_state
+    delivered = dump(queue.events[0])
+    assert delivered["status"]["state"] == "TASK_STATE_WORKING"
+    assert delivered["metadata"]["iac_code"]["pipeline"]["status"] == expected_status
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    assert snapshot["status"] == expected_status
 
 
 @pytest.mark.asyncio
-async def test_publish_pipeline_canceled_envelope_maps_to_canceled_state(tmp_path: Path) -> None:
+async def test_publish_pipeline_canceled_envelope_preserves_terminal_metadata_as_business(tmp_path: Path) -> None:
     class StaticTranslator:
         def translate(self, _event: Any) -> list[dict[str, Any]]:
             return [_envelope("pipeline_canceled", status="canceled")]
@@ -2531,7 +2536,12 @@ async def test_publish_pipeline_canceled_envelope_maps_to_canceled_state(tmp_pat
 
     await publisher.publish(object())
 
-    assert dump(queue.events[0])["status"]["state"] == "TASK_STATE_CANCELED"
+    delivered = dump(queue.events[0])
+    assert delivered["status"]["state"] == "TASK_STATE_WORKING"
+    assert delivered["metadata"]["iac_code"]["pipeline"]["status"] == "canceled"
+    snapshot = publisher.snapshot_store.load()
+    assert snapshot is not None
+    assert snapshot["status"] == "canceled"
 
 
 @pytest.mark.asyncio
@@ -2601,3 +2611,115 @@ async def test_publish_hard_interrupt_false_parent_without_candidate_does_not_em
 
     event_types = [event["eventType"] for event in publisher.journal.read_all()]
     assert event_types == ["interrupt_received", "interrupt_classified"]
+
+
+@pytest.mark.asyncio
+async def test_deployment_confirmation_publication_has_a_new_durable_input_identity(tmp_path: Path) -> None:
+    publisher, queue = _publisher(tmp_path)
+    data = {
+        "kind": "deployment_confirmation",
+        "prompt": "Confirm the prepared plan",
+        "options": [
+            {"name": "Confirm deployment", "action": "confirm"},
+            {"name": "Choose another solution", "action": "reselect"},
+            {"name": "Cancel", "action": "cancel"},
+        ],
+    }
+    identities = []
+    for index in range(2):
+        await publisher.publish(
+            PipelineEvent(
+                type=PipelineEventType.USER_INPUT_REQUIRED,
+                step_id="confirm_and_select",
+                timestamp=1717821600.0 + index,
+                data=data,
+            )
+        )
+        status = dump(queue.events[-1])
+        envelope = status["metadata"]["iac_code"]["pipeline"]
+        projection = status["metadata"]["iac_code"]["input"]
+        assert status["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
+        assert projection["kind"] == "deployment_confirmation"
+        assert projection["required"] is True
+        assert projection["requestTaskId"] == "task-1"
+        assert projection["contextId"] == "ctx-1"
+        assert projection["inputId"] == "input-" + envelope["eventId"]
+        assert [option["action"] for option in projection["options"]] == ["confirm", "reselect", "cancel"]
+        assert pipeline_stream._unified_input_projection(envelope) == projection
+        identities.append(projection["inputId"])
+        snapshot = publisher.snapshot_store.load()
+        assert snapshot is not None
+        assert snapshot["status"] == "waiting_input"
+        assert snapshot["pendingInput"]["kind"] == "deployment_confirmation"
+    assert identities[0] != identities[1]
+
+
+@pytest.mark.parametrize("action", [[], {}, "unknown", None])
+def test_deployment_confirmation_projection_does_not_offer_unknown_actions(action) -> None:
+    envelope = _envelope("input_required", "input_required")
+    envelope["data"] = {
+        "kind": "deployment_confirmation",
+        "options": [{"name": "not eligible", "action": action}],
+    }
+    projection = pipeline_stream._unified_input_projection(envelope)
+    assert projection is None
+
+
+@pytest.mark.parametrize(
+    "ids",
+    [
+        ["", "valid"],
+        ["same", "same"],
+        [" "],
+        ["x" * 200 + "a", "x" * 200 + "b"],
+    ],
+)
+def test_deployment_confirmation_projection_rejects_empty_duplicate_and_truncated_collision_ids(ids) -> None:
+    envelope = _envelope("input_required", "input_required")
+    envelope["data"] = {
+        "kind": "deployment_confirmation",
+        "options": [{"id": value, "label": "Action", "action": "cancel"} for value in ids],
+    }
+    assert pipeline_stream._unified_input_projection(envelope) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("batch", [False, True])
+@pytest.mark.parametrize(
+    ("status", "expected_state"),
+    [
+        ("completed", "TASK_STATE_WORKING"),
+        ("failed", "TASK_STATE_WORKING"),
+        ("canceled", "TASK_STATE_WORKING"),
+        ("waiting_input", "TASK_STATE_INPUT_REQUIRED"),
+        ("input_required", "TASK_STATE_INPUT_REQUIRED"),
+    ],
+)
+async def test_pipeline_metadata_transport_keeps_input_boundary_without_protocol_terminal(
+    tmp_path: Path,
+    batch: bool,
+    status: str,
+    expected_state: str,
+) -> None:
+    publisher, queue = _publisher(tmp_path)
+    envelopes = [
+        publisher.translator.manual_event("pipeline_warning", "pipeline", status=status, data={"reason": "test"})
+        for _ in range(2 if batch else 1)
+    ]
+    persisted = [await publisher.persist_envelope(event) for event in envelopes]
+    assert all(event is not None for event in persisted)
+    if batch:
+        await publisher.enqueue_persisted_batch(persisted)
+    else:
+        await publisher.enqueue_persisted(persisted[0])
+    assert len(queue.events) == 1
+    wire = dump(queue.events[0])
+    assert wire["status"]["state"] == expected_state
+    assert wire["taskId"] == "task-1"
+    assert wire["contextId"] == "ctx-1"
+    metadata = wire["metadata"]["iac_code"]
+    delivered = metadata["pipelineBatch"]["events"] if batch else [metadata["pipeline"]]
+    assert [event["eventId"] for event in delivered] == [event["eventId"] for event in persisted]
+    assert [event["sequence"] for event in delivered] == [event["sequence"] for event in persisted]
+    assert all(event["status"] == status for event in delivered)
+    assert publisher.journal.read_all() == persisted

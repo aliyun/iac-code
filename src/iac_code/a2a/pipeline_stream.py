@@ -1796,12 +1796,9 @@ def _a2a_task_state_name(envelope: dict[str, Any]) -> str:
     status = envelope.get("status")
     if status in {"waiting_input", "input_required"}:
         return TaskState.Name(TaskState.TASK_STATE_INPUT_REQUIRED)
-    if status == "failed":
-        return TaskState.Name(TaskState.TASK_STATE_FAILED)
-    if status == "canceled":
-        return TaskState.Name(TaskState.TASK_STATE_CANCELED)
-    if status == "completed":
-        return TaskState.Name(TaskState.TASK_STATE_COMPLETED)
+    # A committed Pipeline transition is still business metadata: its ACK,
+    # handoff and outbound drain can follow. The execution owner publishes the
+    # single protocol terminal only after those deliveries have finished.
     return TaskState.Name(TaskState.TASK_STATE_WORKING)
 
 
@@ -1894,7 +1891,7 @@ def _unified_input_projection(
     if not isinstance(raw_input, dict):
         return None
     kind = raw_input.get("kind") or kind_hint
-    if kind not in {"ask_user_question", "candidate_selection", "cloud_resource_selection"}:
+    if kind not in {"ask_user_question", "candidate_selection", "cloud_resource_selection", "deployment_confirmation"}:
         return None
     projected: dict[str, Any] = {
         "schemaVersion": 1,
@@ -1934,9 +1931,12 @@ def _unified_input_projection(
                 projected[key] = to_json_safe(value)
     raw_options = raw_input.get("options")
     options: list[dict[str, Any]] = []
+    confirmation_option_ids: set[str] = set()
     if isinstance(raw_options, list):
         for index, option in enumerate(raw_options[:50]):
             if isinstance(option, str):
+                if kind == "deployment_confirmation":
+                    continue
                 options.append({"id": option[:200], "label": option[:300]})
                 continue
             if not isinstance(option, dict):
@@ -1946,6 +1946,15 @@ def _unified_input_projection(
                 option_id = option.get("candidate_index", option.get("index", index))
             label = option.get("label") or option.get("name") or option.get("candidate_name") or option_id
             projected_option: dict[str, Any] = {"id": str(option_id)[:200], "label": str(label)[:300]}
+            if kind == "deployment_confirmation":
+                action = option.get("action")
+                if not isinstance(action, str) or action not in {"confirm", "adjust", "reselect", "cancel"}:
+                    continue
+                projected_id = projected_option["id"]
+                if not projected_id.strip() or projected_id in confirmation_option_ids:
+                    return None
+                confirmation_option_ids.add(projected_id)
+                projected_option["action"] = action
             if kind == "candidate_selection":
                 summary = option.get("summary")
                 architecture_diagram = option.get("architecture_diagram") or option.get("architectureDiagram")
@@ -1977,6 +1986,8 @@ def _unified_input_projection(
                 if cost_items:
                     projected_option["costItems"] = cost_items
             options.append(projected_option)
+    if kind == "deployment_confirmation" and not options:
+        return None
     projected["options"] = options
     return projected
 

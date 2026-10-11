@@ -385,6 +385,15 @@ class AgentLoop:
         self._system_prompt_refresher = system_prompt_refresher
         self._active_streaming_runs = 0
         self._provider_requests_in_flight = 0
+        self._model_request_count = 0
+        self._model_only_preflight = (
+            not auto_trigger_skills
+            and not resume_messages
+            and memory_recall_service is None
+            and background_task_starter is None
+            and system_prompt_refresher is None
+        )
+        self.canceled_first_model_request: str | None = None
         self._pending_provider_context_sync = False
 
         model_name = ""
@@ -1877,6 +1886,17 @@ class AgentLoop:
     ) -> AsyncGenerator[StreamEvent, None]:
         request_manager = request_manager or self._provider_manager
         self._provider_requests_in_flight += 1
+        self._model_request_count += 1
+        self.canceled_first_model_request = None
+        from iac_code.providers.manager import ProviderManager
+
+        adapter = (
+            ProviderManager.model_only_request_adapter(request_manager, lease)
+            if type(request_manager) is ProviderManager
+            and self._model_request_count == 1
+            and self._model_only_preflight
+            else None
+        )
         try:
             with use_span_attributes(self._telemetry_attributes):
                 stream_method = request_manager.stream
@@ -1901,7 +1921,16 @@ class AgentLoop:
                         event = await anext(provider_stream)
                     except StopAsyncIteration:
                         return
+                if isinstance(event, (ToolUseStartEvent, ToolUseEndEvent)):
+                    adapter = None
                 yield event
+        except asyncio.CancelledError:
+            if (
+                adapter
+                and ProviderManager.model_only_request_adapter(request_manager, lease, interrupted=True) == adapter
+            ):
+                self.canceled_first_model_request = adapter
+            raise
         finally:
             try:
                 if "provider_stream" in locals():
@@ -2070,6 +2099,7 @@ class AgentLoop:
                 self._release_request_lease(request_manager, lease)
                 raise
             if needs_compaction:
+                self._model_only_preflight = False
                 # Emit a "started" marker first so the web UI can render the
                 # "正在自动压缩上下文" running indicator while the (blocking)
                 # summarization LLM call is in flight, then always emit a

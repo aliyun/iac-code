@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from ag_ui.core import EventType
 
 from iac_code.agui.events import (
@@ -850,3 +851,54 @@ def test_authoritative_recovery_can_fill_unseen_event_below_live_cursor() -> Non
 
     assert sum(event.type == EventType.STEP_FINISHED for event in mapped) == 1
     assert mapper.last_pipeline_sequence == 12
+
+
+@pytest.mark.parametrize("action", ["adjust"])
+@pytest.mark.parametrize("response_kind", ["selectedId", "action"])
+def test_confirmation_reply_keeps_structured_action_and_parameter_overrides(action, response_kind) -> None:
+    from jsonschema import validate
+
+    from iac_code.agui.events import resume_value
+    from iac_code.pipeline.engine.ui_contract import parse_deployment_confirmation
+
+    value = {
+        "kind": "deployment_confirmation",
+        "inputId": "confirm-1",
+        "options": [{"id": "choice-1", "label": "Localized label is not an action", "action": action}],
+    }
+    payload = {
+        response_kind: "choice-1" if response_kind == "selectedId" else action,
+        "parameter_overrides": {"Name": "retained"},
+    }
+    interrupt = interrupt_from_a2a(value)
+    validate(payload, interrupt.response_schema)
+    reply = parse_deployment_confirmation(resume_value(value, payload))
+    assert reply is not None
+    assert reply.action == action
+    assert reply.parameter_overrides == {"Name": "retained"}
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        None,
+        {},
+        [],
+        ["cancel"],
+        [{"id": "", "action": "cancel"}],
+        [{"id": " ", "action": "cancel"}],
+        [{"id": "x" * 201, "action": "cancel"}],
+        [{"id": 1, "action": "cancel"}],
+        [{"id": "same", "action": "confirm"}, {"id": "same", "action": "cancel"}],
+        [{"id": "valid", "action": "unknown"}],
+        [{"id": "valid", "action": []}],
+    ],
+)
+def test_confirmation_corrupt_options_fail_closed_without_raw_values(options) -> None:
+    from iac_code.agui.events import resume_value
+
+    value = {"kind": "deployment_confirmation", "inputId": "confirm-1", "options": options}
+    with pytest.raises(ValueError, match=r"^Invalid deployment confirmation options\.$"):
+        interrupt_from_a2a(value)
+    assert resume_value(value, {"action": "confirm"}) == ""
+    assert resume_value(value, {"selectedId": "same"}) == ""

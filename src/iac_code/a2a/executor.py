@@ -1601,6 +1601,56 @@ class IacCodeA2AExecutor(AgentExecutor):
         )
         return permission_ack_message(response, approved=approved)
 
+    async def _begin_proven_normal_handoff_input(
+        self,
+        *,
+        existing: ExecutionController,
+        context_id: str,
+        task_id: str,
+        owner: str,
+        cwd: str,
+    ) -> ExecutionController | None:
+        """Replace only the exact naturally released, ACK-backed Pipeline owner."""
+
+        service = self._execution_control_service
+        if (
+            service is None
+            or service.get_for_context(context_id) is not existing
+            or existing.context_id != context_id
+            or existing.task_id != task_id
+            or existing.owner != owner
+            or existing.cwd != cwd
+            or existing.phase not in {"terminating", "terminated"}
+            or existing.termination_reason != "natural_completion"
+            or not await self._should_route_pipeline_handoff_to_normal(context_id=context_id, cwd=cwd)
+        ):
+            return None
+        await existing.await_natural_handoff_settlement(
+            timeout=ExecutionController.NATURAL_HANDOFF_SETTLE_TIMEOUT_SECONDS
+        )
+        handoff_proven = await self._should_route_pipeline_handoff_to_normal(context_id=context_id, cwd=cwd)
+        # This await may overlap another process/owner, explicit termination or
+        # a newer sidecar boundary. The normal begin below still performs the
+        # original persisted execution-slot CAS; no SDK request is replayed.
+        if (
+            service.get_for_context(context_id) is not existing
+            or existing.context_id != context_id
+            or existing.task_id != task_id
+            or existing.owner != owner
+            or existing.cwd != cwd
+            or not existing.natural_handoff_admits_replacement()
+            or not handoff_proven
+        ):
+            raise ExecutionControlConflictError("Current execution must finish recovery before a new task starts")
+        return await service.begin_execution(
+            context_id=context_id,
+            task_id=task_id,
+            owner=owner,
+            cwd=cwd,
+            execution_mode="normal",
+            expected_natural_handoff_control=existing,
+        )
+
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         execution_scope = bind_execution_control(None)
         participant_scope = clear_execution_participants()
@@ -1608,6 +1658,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         permission_response = parse_permission_response(getattr(context, "message", None))
         resource_selection_response = parse_resource_selection_response(getattr(context, "message", None))
         current_sdk_task = getattr(context, "current_task", None)
+        input_task_id = current_sdk_task.id if isinstance(current_sdk_task, Task) else ""
         pipeline_input_response = bool(
             resolve_request_run_mode(getattr(context, "message", None)) is RunMode.PIPELINE
             and isinstance(current_sdk_task, Task)
@@ -1638,8 +1689,27 @@ class IacCodeA2AExecutor(AgentExecutor):
                     and existing.owner == owner
                     and current_task is not None
                 ):
+                    ordinary_pipeline_input = bool(
+                        pipeline_input_response
+                        and permission_response is None
+                        and resource_selection_response is None
+                        and existing.task_id == context.task_id == input_task_id
+                    )
                     try:
-                        if (
+                        replacement = (
+                            await self._begin_proven_normal_handoff_input(
+                                existing=existing,
+                                context_id=context_id,
+                                task_id=input_task_id,
+                                owner=owner,
+                                cwd=self._resolve_cwd(metadata),
+                            )
+                            if ordinary_pipeline_input
+                            else None
+                        )
+                        if replacement is not None:
+                            existing = replacement
+                        elif (
                             resource_selection_response is not None
                             and existing.phase == "terminated"
                             and existing.release_ready
@@ -1663,7 +1733,27 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 execution_mode="normal",
                             )
                         else:
-                            await existing.attach_task(current_task, mark_working=True)
+                            try:
+                                await existing.attach_task(current_task, mark_working=True)
+                            except ExecutionControlConflictError:
+                                # A natural claim/ACK can win after the first
+                                # proof read. Absorb only this pre-business
+                                # conflict before the SDK marks its consumer
+                                # failed; retain the same accepted request UUID.
+                                replacement = (
+                                    await self._begin_proven_normal_handoff_input(
+                                        existing=existing,
+                                        context_id=context_id,
+                                        task_id=input_task_id,
+                                        owner=owner,
+                                        cwd=self._resolve_cwd(metadata),
+                                    )
+                                    if ordinary_pipeline_input
+                                    else None
+                                )
+                                if replacement is None:
+                                    raise
+                                existing = replacement
                     except ExecutionControlConflictError as exc:
                         raise InputResponseExecutionControlConflictError(str(exc)) from exc
                     await existing.mark_execution_started()
@@ -4856,6 +4946,7 @@ class IacCodeA2AExecutor(AgentExecutor):
             cancellation_proof = await self._task_store.canceled_task_release_proof(
                 context_id=context_id,
                 task_id=owner_task_id,
+                include_model_boundary=True,
             )
             if cancellation_proof is None:
                 if await self._task_store.canceled_owner_release_pending(

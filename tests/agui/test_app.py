@@ -1053,12 +1053,15 @@ async def test_resource_selector_resume_uses_structured_a2a_contract(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('continuation', ['input', 'completed', 'failed', 'eof'])
-@pytest.mark.parametrize('send_boundary', ['working', 'empty-input', 'consumed-input'])
+@pytest.mark.parametrize("continuation", ["input", "completed", "failed", "eof"])
+@pytest.mark.parametrize("send_boundary", ["working", "empty-input", "consumed-input"])
 async def test_pipeline_selector_resume_observes_native_continuation_after_send_stream_eof(
-    tmp_path, monkeypatch, continuation, send_boundary,
+    tmp_path,
+    monkeypatch,
+    continuation,
+    send_boundary,
 ):
-    monkeypatch.setenv('IAC_CODE_AGUI_ALLOWED_CWDS', str(tmp_path))
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
 
     class ContinuingClient(FakeA2AClient):
         accepted = False
@@ -1069,11 +1072,11 @@ async def test_pipeline_selector_resume_observes_native_continuation_after_send_
 
             async def events():
                 self.accepted = True
-                yield _text_event(context_id=context_id, text='Returning to candidate selection')
-                if send_boundary == 'consumed-input':
+                yield _text_event(context_id=context_id, text="Returning to candidate selection")
+                if send_boundary == "consumed-input":
                     yield _input_event(context_id=context_id, value=_resource_selector_input())
                 else:
-                    state = 'TASK_STATE_WORKING' if send_boundary == 'working' else 'TASK_STATE_INPUT_REQUIRED'
+                    state = "TASK_STATE_WORKING" if send_boundary == "working" else "TASK_STATE_INPUT_REQUIRED"
                     yield _event(context_id=context_id, state=state)
 
             return events()
@@ -1083,54 +1086,75 @@ async def test_pipeline_selector_resume_observes_native_continuation_after_send_
                 return await super().get_task(_url, _task_id, history_length=history_length)
             # The task store still has the prior wait state, but the consumed
             # selector is gone and the pipeline is publishing its next wait.
-            return _event(context_id=self.context_id, state='TASK_STATE_INPUT_REQUIRED')
+            return _event(context_id=self.context_id, state="TASK_STATE_INPUT_REQUIRED")
 
         def subscribe_task(self, _url, _task_id):
             self.subscribe_calls += 1
 
             async def events():
-                if continuation == 'eof':
+                if continuation == "eof":
                     return
-                if continuation in {'completed', 'failed'}:
-                    yield _event(context_id=self.context_id, state='TASK_STATE_' + continuation.upper())
+                if continuation in {"completed", "failed"}:
+                    yield _event(context_id=self.context_id, state="TASK_STATE_" + continuation.upper())
                     return
-                yield _event(context_id=self.context_id, state='TASK_STATE_WORKING')
-                yield _input_event(context_id=self.context_id, value={
-                    'schemaVersion': 1, 'kind': 'candidate_selection', 'required': True,
-                    'requestTaskId': 'task-1', 'contextId': self.context_id, 'inputId': 'next-selection',
-                    'prompt': 'Choose the replanned candidate', 'options': [{'id': '0', 'label': 'Candidate A'}],
-                })
+                yield _event(context_id=self.context_id, state="TASK_STATE_WORKING")
+                yield _input_event(
+                    context_id=self.context_id,
+                    value={
+                        "schemaVersion": 1,
+                        "kind": "candidate_selection",
+                        "required": True,
+                        "requestTaskId": "task-1",
+                        "contextId": self.context_id,
+                        "inputId": "next-selection",
+                        "prompt": "Choose the replanned candidate",
+                        "options": [{"id": "0", "label": "Candidate A"}],
+                    },
+                )
 
             return events()
 
     fake = ContinuingClient(input_value=_resource_selector_input())
-    adapter = AguiA2AAdapter(a2a_url='http://a2a/', client=fake, state_dir=tmp_path / 'state')
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake, state_dir=tmp_path / "state")
 
     def payload(run_id, resume=None):
         value = _payload(tmp_path, run_id=run_id, resume=resume)
-        value['forwardedProps']['iacCode'].update(runMode='pipeline', pipelineName='selling_solution_first')
+        value["forwardedProps"]["iacCode"].update(runMode="pipeline", pipelineName="selling_solution_first")
         return value
 
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(adapter=adapter)),
-                                 base_url='http://test') as client:
-        initial = _events(await client.post('/', json=payload('initial')))
-        interrupt = initial[-1]['outcome']['interrupts'][0]
-        fake.context_id = adapter._threads['thread-1'].context_id
-        resumed = _events(await client.post('/', json=payload('resumed', [{
-            'interruptId': interrupt['id'], 'status': 'cancelled', 'payload': {'optionsEmpty': False},
-        }])))
-    if continuation == 'input':
-        assert resumed[-1]['type'] == 'RUN_FINISHED'
-        assert resumed[-1]['outcome']['type'] == 'interrupt'
-        assert resumed[-1]['outcome']['interrupts'][0]['id'] == 'next-selection'
-        assert set(adapter._threads['thread-1'].pending) == {'next-selection'}
-    elif continuation == 'completed':
-        assert resumed[-1]['type'] == 'RUN_FINISHED' and resumed[-1]['outcome']['type'] == 'success'
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        initial = _events(await client.post("/", json=payload("initial")))
+        interrupt = initial[-1]["outcome"]["interrupts"][0]
+        fake.context_id = adapter._threads["thread-1"].context_id
+        resumed = _events(
+            await client.post(
+                "/",
+                json=payload(
+                    "resumed",
+                    [
+                        {
+                            "interruptId": interrupt["id"],
+                            "status": "cancelled",
+                            "payload": {"optionsEmpty": False},
+                        }
+                    ],
+                ),
+            )
+        )
+    if continuation == "input":
+        assert resumed[-1]["type"] == "RUN_FINISHED"
+        assert resumed[-1]["outcome"]["type"] == "interrupt"
+        assert resumed[-1]["outcome"]["interrupts"][0]["id"] == "next-selection"
+        assert set(adapter._threads["thread-1"].pending) == {"next-selection"}
+    elif continuation == "completed":
+        assert resumed[-1]["type"] == "RUN_FINISHED" and resumed[-1]["outcome"]["type"] == "success"
     else:
-        assert resumed[-1]['type'] == 'RUN_ERROR'
-        assert resumed[-1]['code'] == ('A2A_EXECUTION_FAILED' if continuation == 'failed' else 'A2A_UNAVAILABLE')
+        assert resumed[-1]["type"] == "RUN_ERROR"
+        assert resumed[-1]["code"] == ("A2A_EXECUTION_FAILED" if continuation == "failed" else "A2A_UNAVAILABLE")
     assert fake.subscribe_calls == 1 and len(fake.resumed_prompts) == 1
-    assert fake.cancelled == (['task-1'] if continuation == 'eof' else [])
+    assert fake.cancelled == (["task-1"] if continuation == "eof" else [])
 
 
 @pytest.mark.asyncio
@@ -1597,3 +1621,588 @@ async def test_idle_monitor_requests_server_shutdown_without_killing_process() -
     await _monitor_idle(adapter, 0.01, lambda: shutdown_requested.append(True))
 
     assert shutdown_requested == [True]
+
+
+class ConfirmationPublicationClient(FakeA2AClient):
+    """Deliver real publisher frames through the public AG-UI resume boundary."""
+
+    def __init__(self, tmp_path, *, stale_after_resume=False, confirm_only_cancel=False, confirmation_options=None):
+        super().__init__()
+        self.tmp_path = tmp_path
+        self.stale_after_resume = stale_after_resume
+        self.confirm_only_cancel = confirm_only_cancel
+        self.confirmation_options = confirmation_options
+        self.current = None
+        self.publisher = None
+        self.queue = None
+        self.phase = "candidate"
+        self.old_input_id = None
+        self.confirmation_input_id = None
+        self.subscribe_calls = 0
+        self.permission_registry = None
+        self.permission_future = None
+        self.pending_permission = None
+
+    async def _publish_wait(self, kind):
+        from google.protobuf.json_format import MessageToDict
+
+        from iac_code.a2a.input_required import PermissionInputRegistry
+        from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+        from iac_code.a2a.pipeline_journal import A2APipelineJournal
+        from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+        from iac_code.a2a.pipeline_stream import PipelineA2AEventPublisher
+        from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+        from tests.a2a.fakes import FakeEventQueue
+
+        if self.publisher is None:
+            self.queue = FakeEventQueue()
+            self.permission_registry = PermissionInputRegistry()
+            context = PipelineA2AContext(
+                pipeline_run_id="pipeline-1",
+                task_id="task-1",
+                context_id=self.context_id,
+                pipeline_name="selling_solution_first",
+                iac_code_session_id="session-1",
+                parent_step_order=["solution_planning_and_selection", "materialize_selected_candidate"],
+            )
+            directory = self.tmp_path / "publisher"
+            self.publisher = PipelineA2AEventPublisher(
+                event_queue=self.queue,
+                translator=PipelineEventTranslator(context),
+                journal=A2APipelineJournal(directory),
+                snapshot_store=A2APipelineSnapshotStore(directory),
+                permission_input_registry=self.permission_registry,
+            )
+        options = [{"id": "plan-a", "label": "Plan A"}]
+        step_id = "solution_planning_and_selection"
+        if kind == "deployment_confirmation":
+            options = [{"name": "Cancel the prepared plan", "action": "cancel"}]
+            if not self.confirm_only_cancel:
+                options = [
+                    {"name": "Confirm the prepared plan", "action": "confirm"},
+                    {"name": "Choose again", "action": "reselect"},
+                    *options,
+                ]
+            if self.confirmation_options is not None:
+                options = self.confirmation_options
+            step_id = "materialize_selected_candidate"
+        await self.publisher.publish(
+            PipelineEvent(
+                type=PipelineEventType.USER_INPUT_REQUIRED,
+                step_id=step_id,
+                timestamp=1717821600.0 + len(self.queue.events),
+                data={"kind": kind, "prompt": "Choose the next action", "options": options},
+            )
+        )
+        self.current = {"result": MessageToDict(self.queue.events[-1], preserving_proto_field_name=False)}
+        projection = self.current["result"]["metadata"]["iac_code"].get("input")
+        if kind == "candidate_selection":
+            self.old_input_id = projection["inputId"]
+        elif projection is not None:
+            self.confirmation_input_id = projection["inputId"]
+        return self.current
+
+    def _prepare_permission(self, pending):
+        assert pending.task_id == "task-1"
+        assert pending.context_id == self.context_id
+        self.pending_permission = pending
+
+    def stream_message_parts(self, url, parts, *, context_id, **kwargs):
+        if kwargs.get("task_id") is not None:
+            self.sent_parts.extend(parts)
+            assert parts[0]["data"]["kind"] == "permission"
+            assert parts[0]["data"]["decision"] == "deny"
+
+            async def permission_answer():
+                from iac_code.a2a.input_required import PermissionResponse
+
+                value = parts[0]["data"]
+                approved = await self.permission_registry.answer(
+                    PermissionResponse(
+                        task_id="task-1",
+                        context_id=context_id,
+                        request_task_id=value["requestTaskId"],
+                        input_id=value["inputId"],
+                        tool_use_id=value["toolUseId"],
+                        decision=value["decision"],
+                    )
+                )
+                assert approved is False
+                assert self.permission_future.result() is False
+                await self.permission_registry.complete(self.pending_permission)
+                self.phase = "completed"
+                self.current = _event(context_id=context_id, state="TASK_STATE_COMPLETED")
+                yield self.current
+
+            return permission_answer()
+        self.context_id = context_id
+
+        async def initial():
+            yield await self._publish_wait("candidate_selection")
+
+        return initial()
+
+    def stream_message(self, url, prompt, *, context_id, task_id=None, **kwargs):
+        self.resumed_prompts.append((prompt, task_id))
+
+        async def answer():
+            if self.phase == "candidate":
+                assert prompt == "Plan A"
+                self.phase = "selecting"
+                yield _event(context_id=context_id)
+                # The accepted response stream can end at the old wait snapshot.
+                yield self.current
+                return
+            from iac_code.pipeline.engine.ui_contract import parse_deployment_confirmation
+
+            response = parse_deployment_confirmation(prompt)
+            assert response is not None
+            yield _event(context_id=context_id)
+            if response.action == "confirm":
+                self.phase = "permission"
+                from google.protobuf.json_format import MessageToDict
+
+                from iac_code.types.stream_events import PermissionRequestEvent
+
+                self.permission_future = asyncio.get_running_loop().create_future()
+                published = await self.publisher.publish(
+                    PermissionRequestEvent(
+                        tool_name="aliyun_api",
+                        tool_input={"product": "ros", "action": "CreateStack"},
+                        tool_use_id="deploy-1",
+                        response_future=self.permission_future,
+                    ),
+                    prepare_detached_permission=self._prepare_permission,
+                )
+                assert published is self.pending_permission
+                assert not self.permission_future.done()
+                self.current = {"result": MessageToDict(self.queue.events[-1], preserving_proto_field_name=False)}
+                yield self.current
+            else:
+                self.phase = "completed"
+                self.current = _event(context_id=context_id, state="TASK_STATE_COMPLETED")
+                yield self.current
+
+        return answer()
+
+    async def get_task(self, url, task_id, *, history_length=None):
+        assert task_id == "task-1"
+        return self.current
+
+    def subscribe_task(self, url, task_id):
+        assert task_id == "task-1"
+        self.subscribe_calls += 1
+
+        async def subscription():
+            if self.phase == "selecting" and not self.stale_after_resume:
+                await self._publish_wait("deployment_confirmation")
+                self.phase = "confirmation"
+            # Exercise the actual EOF/GetTask repair, not a fabricated terminal.
+            yield _event(context_id=self.context_id)
+
+        return subscription()
+
+
+@pytest.mark.asyncio
+async def test_candidate_resume_ends_at_new_confirmation_and_confirm_still_requires_permission(tmp_path, monkeypatch):
+    from iac_code.agui.inputs import canonical_digest
+    from iac_code.pipeline.engine.ui_contract import parse_deployment_confirmation
+
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = ConfirmationPublicationClient(tmp_path)
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    payload = _payload(tmp_path)
+    payload["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=payload))
+        old_id = first[-1]["outcome"]["interrupts"][0]["id"]
+        binding = adapter._threads["thread-1"]
+        execution_id = binding.execution_id
+        select = _payload(
+            tmp_path,
+            run_id="select",
+            resume=[
+                {
+                    "interruptId": old_id,
+                    "status": "resolved",
+                    "payload": {"selectedId": "plan-a"},
+                }
+            ],
+        )
+        select["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        selected = _events(await client.post("/", json=select))
+        assert selected[-1]["type"] == "RUN_FINISHED"
+        assert selected[-1]["outcome"]["type"] == "interrupt"
+        new_input = selected[-1]["outcome"]["interrupts"][0]
+        assert new_input["metadata"]["kind"] == "deployment_confirmation"
+        assert new_input["id"] == fake.confirmation_input_id
+        assert new_input["id"] != old_id
+        assert set(binding.pending) == {new_input["id"]}
+        assert binding.execution_id == execution_id
+        assert binding.task_id == "task-1"
+        assert binding.applied_resume_digests[(execution_id, old_id)] == canonical_digest(
+            {"status": "resolved", "payload": {"selectedId": "plan-a"}}
+        )
+        assert fake.resumed_prompts == [("Plan A", "task-1")]
+        assert fake.subscribe_calls == 1
+        confirm = _payload(
+            tmp_path,
+            run_id="confirm",
+            resume=[
+                {
+                    "interruptId": new_input["id"],
+                    "status": "resolved",
+                    "payload": {"action": "confirm", "parameter_overrides": {"Name": "retained"}},
+                }
+            ],
+        )
+        confirm["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        confirmation = _events(await client.post("/", json=confirm))
+        assert parse_deployment_confirmation(fake.resumed_prompts[-1][0]).parameter_overrides == {"Name": "retained"}
+        permission = confirmation[-1]["outcome"]["interrupts"][0]
+        assert permission["metadata"]["kind"] == "permission"
+        assert fake.sent_parts == []
+        assert not fake.permission_future.done()
+        deny = _payload(
+            tmp_path,
+            run_id="deny",
+            resume=[
+                {
+                    "interruptId": permission["id"],
+                    "status": "resolved",
+                    "payload": {"decision": "deny"},
+                }
+            ],
+        )
+        deny["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        denied = _events(await client.post("/", json=deny))
+    assert denied[-1]["outcome"] == {"type": "success"}
+    assert fake.sent_parts[0]["data"]["decision"] == "deny"
+    assert fake.permission_future.result() is False
+    assert fake.pending_permission.state == "completed"
+    assert fake.cancelled == []
+
+
+@pytest.mark.asyncio
+async def test_candidate_resume_cannot_treat_only_old_applied_input_as_new_boundary(tmp_path, monkeypatch):
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = ConfirmationPublicationClient(tmp_path, stale_after_resume=True)
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    initial = _payload(tmp_path)
+    initial["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=initial))
+        old_id = first[-1]["outcome"]["interrupts"][0]["id"]
+        reply = _payload(
+            tmp_path,
+            run_id="select",
+            resume=[
+                {
+                    "interruptId": old_id,
+                    "status": "resolved",
+                    "payload": {"selectedId": "plan-a"},
+                }
+            ],
+        )
+        reply["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        events = _events(await client.post("/", json=reply))
+    assert events[-1]["type"] == "RUN_ERROR"
+    assert events[-1]["code"] == "A2A_UNAVAILABLE"
+    assert not any(event["type"] == "RUN_FINISHED" for event in events)
+    assert fake.resumed_prompts == [("Plan A", "task-1")]
+    assert adapter._threads["thread-1"].pending == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_payload",
+    [
+        {"action": "confirm"},
+        {"action": "unknown"},
+        {"action": "cancel", "extra": "ignored by parser but rejected by wire schema"},
+        {"action": "cancel", "parameter_overrides": []},
+        {"selectedId": "missing"},
+        {"freeText": "confirm"},
+    ],
+)
+async def test_confirmation_invalid_wire_payload_keeps_pending_and_sends_nothing(tmp_path, monkeypatch, bad_payload):
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = ConfirmationPublicationClient(tmp_path, confirm_only_cancel=True)
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    initial = _payload(tmp_path)
+    initial["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=initial))
+        old_id = first[-1]["outcome"]["interrupts"][0]["id"]
+        select = _payload(
+            tmp_path,
+            run_id="select",
+            resume=[
+                {
+                    "interruptId": old_id,
+                    "status": "resolved",
+                    "payload": {"selectedId": "plan-a"},
+                }
+            ],
+        )
+        select["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        selected = _events(await client.post("/", json=select))
+        new_id = selected[-1]["outcome"]["interrupts"][0]["id"]
+        invalid = _payload(
+            tmp_path,
+            run_id="invalid",
+            resume=[
+                {
+                    "interruptId": new_id,
+                    "status": "resolved",
+                    "payload": bad_payload,
+                }
+            ],
+        )
+        invalid["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        events = _events(await client.post("/", json=invalid))
+    assert events[-1]["code"] == "RESUME_PAYLOAD_INVALID"
+    assert fake.resumed_prompts == [("Plan A", "task-1")]
+    assert set(adapter._threads["thread-1"].pending) == {new_id}
+    assert fake.sent_parts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["confirm", "cancel", "reselect"])
+@pytest.mark.parametrize("response_kind", ["selectedId", "action"])
+async def test_public_confirmation_resume_sends_action_not_localized_label(
+    tmp_path, monkeypatch, action, response_kind
+):
+    from iac_code.pipeline.engine.ui_contract import parse_deployment_confirmation
+
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = ConfirmationPublicationClient(tmp_path)
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    initial = _payload(tmp_path)
+    initial["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=initial))
+        old_id = first[-1]["outcome"]["interrupts"][0]["id"]
+        select = _payload(
+            tmp_path,
+            run_id="select",
+            resume=[
+                {
+                    "interruptId": old_id,
+                    "status": "resolved",
+                    "payload": {"selectedId": "plan-a"},
+                }
+            ],
+        )
+        select["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        selected = _events(await client.post("/", json=select))
+        interrupt = selected[-1]["outcome"]["interrupts"][0]
+        selected_id = next(option["id"] for option in interrupt["metadata"]["options"] if option["action"] == action)
+        answer = {
+            response_kind: selected_id if response_kind == "selectedId" else action,
+            "parameter_overrides": {"Name": "retained"},
+        }
+        resume = _payload(
+            tmp_path,
+            run_id="confirmation",
+            resume=[
+                {
+                    "interruptId": interrupt["id"],
+                    "status": "resolved",
+                    "payload": answer,
+                }
+            ],
+        )
+        resume["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        events = _events(await client.post("/", json=resume))
+    reply = parse_deployment_confirmation(fake.resumed_prompts[-1][0])
+    assert reply is not None
+    assert reply.action == action
+    assert reply.parameter_overrides == {"Name": "retained"}
+    assert len(fake.resumed_prompts) == 2
+    assert fake.sent_parts == []
+    assert fake.cancelled == []
+    if action == "confirm":
+        assert events[-1]["outcome"]["type"] == "interrupt"
+        assert events[-1]["outcome"]["interrupts"][0]["metadata"]["kind"] == "permission"
+    else:
+        assert events[-1]["outcome"] == {"type": "success"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", [False, True])
+async def test_old_candidate_response_replay_cannot_consume_confirmation(tmp_path, monkeypatch, changed):
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = ConfirmationPublicationClient(tmp_path)
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    initial = _payload(tmp_path)
+    initial["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=initial))
+        old_id = first[-1]["outcome"]["interrupts"][0]["id"]
+        select = _payload(
+            tmp_path,
+            run_id="select",
+            resume=[
+                {
+                    "interruptId": old_id,
+                    "status": "resolved",
+                    "payload": {"selectedId": "plan-a"},
+                }
+            ],
+        )
+        select["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        selected = _events(await client.post("/", json=select))
+        new_id = selected[-1]["outcome"]["interrupts"][0]["id"]
+        binding = adapter._threads["thread-1"]
+        expected_execution = binding.execution_id
+        old_proofs = dict(binding.applied_resume_digests)
+        replay = _payload(
+            tmp_path,
+            run_id="replay",
+            resume=[
+                {
+                    "interruptId": old_id,
+                    "status": "resolved",
+                    "payload": {"selectedId": "plan-b" if changed else "plan-a"},
+                }
+            ],
+        )
+        replay["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        events = _events(await client.post("/", json=replay))
+    assert fake.resumed_prompts == [("Plan A", "task-1")]
+    binding = adapter._threads["thread-1"]
+    assert set(binding.pending) == {new_id}
+    assert binding.execution_id == expected_execution
+    assert binding.task_id == "task-1"
+    assert binding.applied_resume_digests == old_proofs
+    restored = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)._load_thread("thread-1")
+    assert restored is not None
+    assert set(restored.pending) == {new_id}
+    assert restored.execution_id == expected_execution
+    assert restored.task_id == "task-1"
+    assert restored.applied_resume_digests == old_proofs
+    assert events[-1]["type"] == "RUN_ERROR"
+    if changed:
+        assert events[-1]["code"] == "RESUME_ALREADY_APPLIED"
+    else:
+        # The request omits the still-known confirmation, even though its old
+        # candidate response is an exact idempotent replay.
+        assert events[-1]["code"] == "INCOMPLETE_RESUME"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ids", [[""], ["same", "same"], ["x" * 200 + "a", "x" * 200 + "b"]])
+async def test_public_confirmation_corrupt_option_identity_never_becomes_a_wait_boundary(tmp_path, monkeypatch, ids):
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = ConfirmationPublicationClient(
+        tmp_path, confirmation_options=[{"id": value, "name": "Cancel", "action": "cancel"} for value in ids]
+    )
+    adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    initial = _payload(tmp_path)
+    initial["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=initial))
+        old_id = first[-1]["outcome"]["interrupts"][0]["id"]
+        select = _payload(
+            tmp_path,
+            run_id="select",
+            resume=[
+                {
+                    "interruptId": old_id,
+                    "status": "resolved",
+                    "payload": {"selectedId": "plan-a"},
+                }
+            ],
+        )
+        select["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        events = _events(await client.post("/", json=select))
+    assert events[-1]["type"] == "RUN_ERROR"
+    assert events[-1]["code"] == "A2A_UNAVAILABLE"
+    assert fake.resumed_prompts == [("Plan A", "task-1")]
+    assert fake.confirmation_input_id is None
+    assert fake.sent_parts == []
+
+
+@pytest.mark.asyncio
+async def test_confirmation_restart_preserves_action_binding_and_resumes_exact_task_once(tmp_path, monkeypatch):
+    from iac_code.pipeline.engine.ui_contract import parse_deployment_confirmation
+
+    monkeypatch.setenv("IAC_CODE_AGUI_ALLOWED_CWDS", str(tmp_path))
+    fake = ConfirmationPublicationClient(tmp_path)
+    first_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    initial = _payload(tmp_path)
+    initial["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=first_adapter)), base_url="http://test"
+    ) as client:
+        first = _events(await client.post("/", json=initial))
+        old_id = first[-1]["outcome"]["interrupts"][0]["id"]
+        select = _payload(
+            tmp_path,
+            run_id="select",
+            resume=[
+                {
+                    "interruptId": old_id,
+                    "status": "resolved",
+                    "payload": {"selectedId": "plan-a"},
+                }
+            ],
+        )
+        select["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+        selected = _events(await client.post("/", json=select))
+        interrupt = selected[-1]["outcome"]["interrupts"][0]
+    expected_execution = first_adapter._threads["thread-1"].execution_id
+    cancel_id = next(o["id"] for o in interrupt["metadata"]["options"] if o["action"] == "cancel")
+    second_adapter = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)
+    resume = _payload(
+        tmp_path,
+        run_id="after-restart",
+        resume=[
+            {
+                "interruptId": interrupt["id"],
+                "status": "resolved",
+                "payload": {"selectedId": cancel_id},
+            }
+        ],
+    )
+    resume["forwardedProps"]["iacCode"]["runMode"] = "pipeline"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=create_app(adapter=second_adapter)), base_url="http://test"
+    ) as client:
+        events = _events(await client.post("/", json=resume))
+    assert events[-1]["outcome"] == {"type": "success"}
+    assert second_adapter._threads["thread-1"].execution_id == expected_execution
+    assert fake.resumed_prompts[-1][1] == "task-1"
+    session = [
+        event["value"] for event in events if event["type"] == "CUSTOM" and event["name"] == "iac-code.session.v1"
+    ]
+    assert len(session) == 1
+    assert session[0]["taskId"] == "task-1"
+    assert session[0]["executionId"] == expected_execution
+    binding = second_adapter._threads["thread-1"]
+    assert binding.task_id is None
+    assert binding.pending == {}
+    assert expected_execution in binding.terminal_execution_ids
+    restored = AguiA2AAdapter(a2a_url="http://a2a/", client=fake)._load_thread("thread-1")
+    assert restored is not None
+    assert restored.execution_id == expected_execution
+    assert restored.task_id is None
+    assert restored.pending == {}
+    assert expected_execution in restored.terminal_execution_ids
+    assert restored.applied_resume_digests == binding.applied_resume_digests
+    assert parse_deployment_confirmation(fake.resumed_prompts[-1][0]).action == "cancel"
+    assert len(fake.resumed_prompts) == 2
+    assert fake.sent_parts == []

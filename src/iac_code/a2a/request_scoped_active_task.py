@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import uuid
 from collections.abc import Awaitable, Callable
 from enum import Enum
 from typing import TYPE_CHECKING, Any, cast
@@ -11,6 +13,7 @@ from typing import TYPE_CHECKING, Any, cast
 from a2a.server.agent_execution.active_task import (
     TERMINAL_TASK_STATES,
     ActiveTask,
+    EventConsumer,
     _RequestCompleted,
     _RequestStarted,
 )
@@ -35,6 +38,41 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class _AcceptedRequestEventConsumer(EventConsumer):
+    """Record completion only after the SDK projection and fan-out succeed."""
+
+    def __init__(self, active_task: RequestScopedActiveTask) -> None:
+        super().__init__(active_task)
+        self._scoped = active_task
+
+    async def run(self) -> None:
+        try:
+            await super().run()
+        except BaseException:
+            self._scoped._accepted_consumer_failed = True
+            raise
+
+    async def _process_event(self, event: Event) -> None:
+        try:
+            await super()._process_event(event)
+        except BaseException:
+            self._scoped._accepted_consumer_failed = True
+            raise
+        if isinstance(event, _RequestCompleted):
+            self._scoped._pending_accepted_requests.discard(event.request_id)
+
+    async def _enqueue_to_subscribers(self, event: Event, updated_task: Task | None) -> None:
+        # SDK run() catches failures (including dequeue errors) and fans out the
+        # exception. A normally returning run() therefore is not health proof.
+        if isinstance(event, BaseException):
+            self._scoped._accepted_consumer_failed = True
+        try:
+            await super()._enqueue_to_subscribers(event, updated_task)
+        except BaseException:
+            self._scoped._accepted_consumer_failed = True
+            raise
+
+
 class RequestScopedActiveTask(ActiveTask):
     """Hide events from earlier requests until this request actually starts."""
 
@@ -48,6 +86,8 @@ class RequestScopedActiveTask(ActiveTask):
         self._direct_message_lock = asyncio.Lock()
         self._recovery_admission = recovery_admission
         self._recovery_replacement_pending = False
+        self._pending_accepted_requests: set[uuid.UUID] = set()
+        self._accepted_consumer_failed = False
 
     @property
     def direct_message_lock(self) -> asyncio.Lock:
@@ -96,7 +136,13 @@ class RequestScopedActiveTask(ActiveTask):
                 raise InvalidParamsError(f"Task {self._task_id} recovery replacement is pending.")
             if self._recovery_admission is not None and admission != self._recovery_admission:
                 raise InvalidParamsError(f"Task {self._task_id} recovery continuation is reserved.")
-            request_id = await super().enqueue_request(request_context)
+            request_id = uuid.uuid4()
+            self._pending_accepted_requests.add(request_id)
+            try:
+                await self._request_queue.put((request_context, request_id))
+            except BaseException:
+                self._pending_accepted_requests.discard(request_id)
+                raise
             if self._recovery_admission is not None:
                 self._recovery_admission = None
         RecoverableInputAdmissionCarrier.acknowledge_enqueued(request_context, self._producer_task)
@@ -111,7 +157,9 @@ class RequestScopedActiveTask(ActiveTask):
         """Report accepted requests whose SDK projection or fan-out is not settled."""
 
         return bool(
-            self.has_unfinished_requests()
+            self._pending_accepted_requests
+            or self._accepted_consumer_failed
+            or self.has_unfinished_requests()
             or self._request_lock.locked()
             or self._queue_has_unfinished_tasks(getattr(self._event_queue_agent, "_incoming_queue", None))
             or self._queue_has_unfinished_tasks(getattr(self._event_queue_agent, "queue", None))
@@ -126,43 +174,144 @@ class RequestScopedActiveTask(ActiveTask):
             return unfinished > 0
         return bool(getattr(queue, "_unfinished_tasks", 0))
 
-    async def wait_for_accepted_requests(self) -> None:
-        """Wait through executor completion and the SDK consumer's durable projection."""
+    async def _run_consumer(self) -> None:
+        # Preserve the SDK lifecycle cleanup while selecting the receipt-aware
+        # consumer. Producer and request completion events remain SDK-owned.
+        try:
+            try:
+                await _AcceptedRequestEventConsumer(self).run()
+            finally:
+                self._is_finished.set()
+                self._request_queue.shutdown(immediate=True)
+                await self._event_queue_agent.close(immediate=True)
+                async with self._lock:
+                    self._reference_count -= 1
+                await self._maybe_cleanup()
+        except BaseException:
+            self._accepted_consumer_failed = True
+            raise
 
-        await self._request_queue.join()
+    def _require_accepted_requests_settled(self) -> None:
+        if self.has_unsettled_requests():
+            raise self._accepted_lifecycle_error()
+
+    def accepted_settlement_diagnostic(self) -> dict[str, Any]:
+        """Project rejection state without request IDs, exception text or payloads."""
+
+        consumer_state, consumer_error_type = self._accepted_settlement_task_state(self._consumer_task)
+        producer_state, producer_error_type = self._accepted_settlement_task_state(self._producer_task)
+        return {
+            "task_id": self._accepted_settlement_protocol_id(self._task_id),
+            "pending_request_count": len(self._pending_accepted_requests),
+            "consumer_failed": self._accepted_consumer_failed is True,
+            "request_lock_locked": self._request_lock.locked(),
+            "request_queue_unfinished": self._accepted_settlement_queue_count(self._request_queue),
+            "incoming_unfinished": self._accepted_settlement_queue_count(
+                getattr(self._event_queue_agent, "_incoming_queue", None)
+            ),
+            "default_sink_unfinished": self._accepted_settlement_queue_count(
+                getattr(self._event_queue_agent, "queue", None)
+            ),
+            "consumer_state": consumer_state,
+            "consumer_error_type": consumer_error_type,
+            "producer_state": producer_state,
+            "producer_error_type": producer_error_type,
+            "is_finished": self._is_finished.is_set(),
+            "recovery_pending": self._recovery_replacement_pending is True,
+        }
+
+    @staticmethod
+    def _accepted_settlement_protocol_id(value: Any) -> str:
+        if type(value) is str and re.fullmatch(
+            r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|task-[0-9a-f]{12,32})",
+            value,
+        ):
+            return value
+        return "UNKNOWN"
+
+    @staticmethod
+    def _accepted_settlement_queue_count(queue: Any) -> int | str:
+        count = getattr(queue, "unfinished_tasks", None)
+        if count is None:
+            count = getattr(queue, "_unfinished_tasks", None)
+        return count if type(count) is int and 0 <= count <= 2147483647 else "UNKNOWN"
+
+    @staticmethod
+    def _accepted_settlement_task_state(task: asyncio.Task[Any] | None) -> tuple[str, str]:
+        if task is None:
+            return "ABSENT", "NONE"
+        if not task.done():
+            return "RUNNING", "NONE"
+        if task.cancelled():
+            return "CANCELLED", "CancelledError"
+        error = task.exception()
+        if error is None:
+            return "FINISHED", "NONE"
+        error_types: dict[type[BaseException], str] = {
+            RuntimeError: "RuntimeError",
+            ValueError: "ValueError",
+            TypeError: "TypeError",
+            OSError: "OSError",
+            InvalidParamsError: "InvalidParamsError",
+            QueueShutDown: "QueueShutDown",
+        }
+        return "FAILED", error_types.get(type(error), "UNKNOWN")
+
+    def _accepted_lifecycle_error(self) -> InvalidParamsError:
+        try:
+            diagnostic = self.accepted_settlement_diagnostic()
+            logger.warning(
+                "A2AAcceptedRequestSettlementRejected task_id=%s pending_request_count=%s consumer_failed=%s "
+                "request_lock_locked=%s request_queue_unfinished=%s incoming_unfinished=%s "
+                "default_sink_unfinished=%s consumer_state=%s consumer_error_type=%s "
+                "producer_state=%s producer_error_type=%s is_finished=%s recovery_pending=%s",
+                diagnostic["task_id"],
+                diagnostic["pending_request_count"],
+                diagnostic["consumer_failed"],
+                diagnostic["request_lock_locked"],
+                diagnostic["request_queue_unfinished"],
+                diagnostic["incoming_unfinished"],
+                diagnostic["default_sink_unfinished"],
+                diagnostic["consumer_state"],
+                diagnostic["consumer_error_type"],
+                diagnostic["producer_state"],
+                diagnostic["producer_error_type"],
+                diagnostic["is_finished"],
+                diagnostic["recovery_pending"],
+            )
+        except Exception:
+            # Observation must never replace the original admission failure.
+            pass
+        return InvalidParamsError(f"Task {self._task_id} lifecycle ended before the accepted request settled.")
+
+    async def wait_for_accepted_requests(self) -> None:
+        """Require exact SDK completions and wait for their real projection."""
+
         projection = asyncio.create_task(
-            self._wait_for_accepted_request_projection(),
+            self._wait_for_accepted_request_settlement(),
             name=f"accepted-request-projection:{self._task_id}",
         )
         consumer = self._consumer_task
-        if consumer is None:
-            projection.cancel()
-            await asyncio.gather(projection, return_exceptions=True)
-            raise InvalidParamsError(f"Task {self._task_id} lifecycle ended before the accepted request settled.")
         try:
+            if consumer is None:
+                raise self._accepted_lifecycle_error()
             done, _ = await asyncio.wait((projection, consumer), return_when=asyncio.FIRST_COMPLETED)
-            if consumer in done and self._request_lock.locked():
-                raise InvalidParamsError(f"Task {self._task_id} lifecycle ended before the accepted request settled.")
-            if projection in done:
-                await projection
-                if self._request_lock.locked():
-                    raise InvalidParamsError(
-                        f"Task {self._task_id} lifecycle ended before the accepted request settled."
-                    )
-                return
-            await asyncio.sleep(0)
-            if projection.done():
-                await projection
-                if self._request_lock.locked():
-                    raise InvalidParamsError(
-                        f"Task {self._task_id} lifecycle ended before the accepted request settled."
-                    )
-                return
-            raise InvalidParamsError(f"Task {self._task_id} lifecycle ended before the accepted request settled.")
+            if consumer in done:
+                if consumer.cancelled() or consumer.exception() is not None:
+                    raise self._accepted_lifecycle_error()
+                self._require_accepted_requests_settled()
+            # Normal consumer completion can precede the projection's remaining
+            # join awaits. Exact receipts allow waiting, never queue emptiness.
+            await projection
+            self._require_accepted_requests_settled()
         finally:
             if not projection.done():
                 projection.cancel()
             await asyncio.gather(projection, return_exceptions=True)
+
+    async def _wait_for_accepted_request_settlement(self) -> None:
+        await self._request_queue.join()
+        await self._wait_for_accepted_request_projection()
 
     async def _wait_for_accepted_request_projection(self) -> None:
         join_incoming = getattr(self._event_queue_agent, "test_only_join_incoming_queue", None)
@@ -457,7 +606,9 @@ class RequestScopedActiveTaskRegistry(ActiveTaskRegistry):
         async with self._lock:
             if scoped is not None:
                 scoped._recovery_replacement_pending = False
-                if self._active_tasks.get(task_id) is scoped and (remove_finished or scoped._is_finished.is_set()):
+                if self._active_tasks.get(task_id) is scoped and (
+                    remove_finished or (scoped._is_finished.is_set() and not scoped.has_unsettled_requests())
+                ):
                     self._active_tasks.pop(task_id, None)
             self._recoveries_in_progress.discard(task_id)
 
@@ -471,10 +622,21 @@ class RequestScopedActiveTaskRegistry(ActiveTaskRegistry):
 
         if not scoped.has_unsettled_requests():
             return
+        if scoped._accepted_consumer_failed:
+            raise scoped._accepted_lifecycle_error()
+        consumer = scoped._consumer_task
+        if consumer is None or consumer.done():
+            await scoped.wait_for_accepted_requests()
+            return
         task = await self._task_store.get(task_id, call_context)
+        if scoped._accepted_consumer_failed:
+            raise scoped._accepted_lifecycle_error()
         if task is None or (
             task.status.state not in TERMINAL_TASK_STATES and task.status.state != TaskState.TASK_STATE_INPUT_REQUIRED
         ):
+            consumer = scoped._consumer_task
+            if consumer is None or consumer.done():
+                await scoped.wait_for_accepted_requests()
             return
         await scoped.wait_for_accepted_requests()
 
@@ -511,6 +673,9 @@ class RequestScopedActiveTaskRegistry(ActiveTaskRegistry):
             if existing is not None and not existing._is_finished.is_set():
                 return cast("RequestScopedActiveTask", existing)
             if existing is not None:
+                scoped = cast("RequestScopedActiveTask", existing)
+                if scoped.has_unsettled_requests():
+                    raise scoped._accepted_lifecycle_error()
                 self._active_tasks.pop(task_id, None)
 
             active_task = self._create_active_task(
@@ -563,4 +728,6 @@ class RequestScopedActiveTaskRegistry(ActiveTaskRegistry):
             if active_task.task_id in self._recoveries_in_progress:
                 return
             if self._active_tasks.get(active_task.task_id) is active_task:
+                if cast("RequestScopedActiveTask", active_task).has_unsettled_requests():
+                    return
                 self._active_tasks.pop(active_task.task_id, None)

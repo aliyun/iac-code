@@ -68,6 +68,7 @@ from iac_code.a2a.transports.dispatcher import (
     create_runtime_components,
 )
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.user_input import normalize_pipeline_user_input
 from iac_code.services.session_backup import BackupReason, SessionBackupService
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
@@ -4520,7 +4521,7 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
             )
 
         async def handle_user_interrupt(self, message: str):
-            self.interrupts.append(message)
+            self.interrupts.append(normalize_pipeline_user_input(message).display_text)
             return SimpleNamespace(
                 action="supplement",
                 reason="added context",
@@ -4649,7 +4650,7 @@ async def test_dispatcher_resumes_candidate_selection_submitted_during_input_bac
             )
 
         async def resume(self, prompt: str):
-            self.resume_prompts.append(prompt)
+            self.resume_prompts.append(normalize_pipeline_user_input(prompt).display_text)
             yield PipelineEvent(
                 type=PipelineEventType.USER_INPUT_RECEIVED,
                 step_id="selection",
@@ -5125,3 +5126,1776 @@ def _active_task_identity(components: A2ARuntimeComponents) -> SimpleNamespace:
     assert len(tasks) == 1
     task = tasks[0]
     return SimpleNamespace(task_id=task.task_id, context_id=task.context_id)
+
+
+class _AcceptedCleanupBarrierRegistry(RequestScopedActiveTaskRegistry):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.release_cleanup = asyncio.Event()
+        self.replacement_reserved = asyncio.Event()
+
+    async def _reserve_recovery_replacement(self, task_id):
+        active_task = await super()._reserve_recovery_replacement(task_id)
+        self.replacement_reserved.set()
+        return active_task
+
+    async def _remove_task_if_same(self, active_task) -> None:
+        await self.release_cleanup.wait()
+        await super()._remove_task_if_same(active_task)
+
+
+class _AcceptedTerminalSettlementExecutor:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release_terminal = asyncio.Event()
+        self.terminal_enqueued = asyncio.Event()
+        self.release_execute = asyncio.Event()
+        self.executed_message_ids: list[str] = []
+
+    async def execute(self, request_context, event_queue) -> None:
+        self.executed_message_ids.append(request_context.message.message_id)
+        self.started.set()
+        await self.release_terminal.wait()
+        await event_queue.enqueue_event(
+            TaskStatusUpdateEvent(
+                task_id="task-1",
+                context_id="ctx-1",
+                status=TaskStatus(state=TaskState.TASK_STATE_COMPLETED),
+            )
+        )
+        self.terminal_enqueued.set()
+        await self.release_execute.wait()
+
+    async def cancel(self, _request_context, _event_queue) -> None:
+        return None
+
+
+class _AcceptedProjectionJoinBarrier:
+    def __init__(self, source) -> None:
+        self._join = source.test_only_join_incoming_queue
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def join(self) -> None:
+        self.entered.set()
+        await self.release.wait()
+        await self._join()
+
+
+@pytest.mark.asyncio
+async def test_recovery_drain_waits_for_real_projection_after_normal_consumer_completion(monkeypatch) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED)),
+        call_context,
+    )
+    executor = _AcceptedTerminalSettlementExecutor()
+    registry = _AcceptedCleanupBarrierRegistry(agent_executor=executor, task_store=store)
+    old = await registry.get_or_create(
+        "task-1", call_context=call_context, context_id="ctx-1", create_task_if_missing=True
+    )
+    request = RequestContext(
+        call_context=call_context,
+        task_id="task-1",
+        context_id="ctx-1",
+        request=SendMessageRequest(
+            message=Message(message_id="old-accepted-1", role=Role.ROLE_USER, parts=[Part(text="first")])
+        ),
+    )
+    accepted_id = await old.enqueue_request(request)
+    await asyncio.wait_for(executor.started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    executor.release_terminal.set()
+    await asyncio.wait_for(old._is_finished.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    assert old._request_lock.locked()
+    barrier = _AcceptedProjectionJoinBarrier(old._event_queue_agent)
+    monkeypatch.setattr(old._event_queue_agent, "test_only_join_incoming_queue", barrier.join)
+    admissions: list[str] = []
+
+    async def acquire_admission() -> str | None:
+        admissions.append("checked")
+        assert old._consumer_task is not None and old._consumer_task.done()
+        assert not old._request_lock.locked()
+        return None
+
+    recovery = asyncio.create_task(
+        registry.reconcile_and_replace_for_recovery(
+            "task-1", call_context=call_context, context_id="ctx-1", acquire_admission=acquire_admission
+        )
+    )
+    try:
+        # The old executor return causes the real SDK producer to enqueue its
+        # exact _RequestCompleted before task_done; no receipt is synthesized.
+        await asyncio.wait_for(registry.replacement_reserved.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        assert old._recovery_replacement_pending
+        executor.release_execute.set()
+        await asyncio.wait_for(barrier.entered.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        assert old._consumer_task is not None
+        await asyncio.wait_for(asyncio.shield(old._consumer_task), timeout=_STREAM_TEST_TIMEOUT)
+        assert not old._request_lock.locked()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert not recovery.done()
+        assert admissions == []
+        barrier.release.set()
+        assert await asyncio.wait_for(recovery, timeout=_STREAM_TEST_TIMEOUT) is None
+        assert admissions == ["checked"]
+        assert accepted_id is not None
+        assert executor.executed_message_ids == ["old-accepted-1"]
+    finally:
+        barrier.release.set()
+        executor.release_terminal.set()
+        executor.release_execute.set()
+        if not recovery.done():
+            recovery.cancel()
+        await asyncio.gather(recovery, return_exceptions=True)
+        registry.release_cleanup.set()
+        await registry.retire_for_recovery("task-1")
+        await asyncio.gather(*tuple(registry._cleanup_tasks), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("hold_cleanup", [True, False])
+@pytest.mark.parametrize("task_projection", ["terminal", "missing", "working"])
+async def test_recovery_drain_rejects_a_second_accepted_request_dropped_by_terminal_shutdown(
+    hold_cleanup, task_projection
+) -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED)),
+        call_context,
+    )
+    executor = _AcceptedTerminalSettlementExecutor()
+    registry = _AcceptedCleanupBarrierRegistry(agent_executor=executor, task_store=store)
+    if not hold_cleanup:
+        registry.release_cleanup.set()
+    old = await registry.get_or_create(
+        "task-1", call_context=call_context, context_id="ctx-1", create_task_if_missing=True
+    )
+    first = await old.enqueue_request(
+        RequestContext(
+            call_context=call_context,
+            task_id="task-1",
+            context_id="ctx-1",
+            request=SendMessageRequest(
+                message=Message(message_id="old-accepted-1", role=Role.ROLE_USER, parts=[Part(text="first")])
+            ),
+        )
+    )
+    await asyncio.wait_for(executor.started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    second = await old.enqueue_request(
+        RequestContext(
+            call_context=call_context,
+            task_id="task-1",
+            context_id="ctx-1",
+            request=SendMessageRequest(
+                message=Message(message_id="old-accepted-2", role=Role.ROLE_USER, parts=[Part(text="second")])
+            ),
+        )
+    )
+    admissions: list[str] = []
+
+    async def acquire_admission() -> str | None:
+        admissions.append("checked")
+        return None
+
+    try:
+        assert first != second
+        assert old._request_queue.qsize() == 1
+        executor.release_terminal.set()
+        await asyncio.wait_for(old._is_finished.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        assert old._request_queue.qsize() == 0
+        executor.release_execute.set()
+        assert old._consumer_task is not None and old._producer_task is not None
+        await asyncio.wait_for(asyncio.shield(old._consumer_task), timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.wait_for(asyncio.shield(old._producer_task), timeout=_STREAM_TEST_TIMEOUT)
+        assert not old._request_lock.locked()
+        assert not old.has_unfinished_requests()
+        if not hold_cleanup:
+            await asyncio.gather(*tuple(registry._cleanup_tasks), return_exceptions=True)
+        assert registry._active_tasks["task-1"] is old
+        assert old._pending_accepted_requests == {second}
+        assert executor.executed_message_ids == ["old-accepted-1"]
+        if task_projection != "terminal":
+            await store.delete("task-1", call_context)
+            if task_projection == "working":
+                await store.save(
+                    Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_WORKING)),
+                    call_context,
+                )
+        with pytest.raises(InvalidParamsError, match="ended before the accepted request settled"):
+            await registry.reconcile_and_replace_for_recovery(
+                "task-1", call_context=call_context, context_id="ctx-1", acquire_admission=acquire_admission
+            )
+        assert admissions == []
+        assert registry._active_tasks["task-1"] is old
+        with pytest.raises(InvalidParamsError, match="ended before the accepted request settled"):
+            await registry.get_or_create("task-1", call_context=call_context, context_id="ctx-1")
+        assert executor.executed_message_ids == ["old-accepted-1"]
+    finally:
+        executor.release_terminal.set()
+        executor.release_execute.set()
+        registry.release_cleanup.set()
+        await registry.retire_for_recovery("task-1")
+        await asyncio.gather(*tuple(registry._cleanup_tasks), return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_recovery_drain_fails_closed_when_real_consumer_is_cancelled_before_completion() -> None:
+    save_started = asyncio.Event()
+    release_save = asyncio.Event()
+
+    class WaitingTaskStore(A2ATaskStore):
+        async def save(self, task, context=None) -> None:
+            if task.status.state == TaskState.TASK_STATE_WORKING:
+                save_started.set()
+                await release_save.wait()
+            await super().save(task, context)
+
+    class WorkingExecutor:
+        async def execute(self, _request_context, event_queue) -> None:
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_WORKING)
+                )
+            )
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = WaitingTaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED)),
+        call_context,
+    )
+    registry = _AcceptedCleanupBarrierRegistry(agent_executor=WorkingExecutor(), task_store=store)
+    old = await registry.get_or_create(
+        "task-1", call_context=call_context, context_id="ctx-1", create_task_if_missing=True
+    )
+    await old.enqueue_request(RequestContext(call_context=call_context, task_id="task-1", context_id="ctx-1"))
+    await asyncio.wait_for(save_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    assert old._consumer_task is not None
+    old._consumer_task.cancel()
+    await asyncio.gather(old._consumer_task, return_exceptions=True)
+    release_save.set()
+    admissions: list[str] = []
+
+    async def acquire_admission() -> str | None:
+        admissions.append("checked")
+        return None
+
+    try:
+        assert old._request_lock.locked()
+        with pytest.raises(InvalidParamsError, match="ended before the accepted request settled"):
+            await asyncio.wait_for(
+                registry.reconcile_and_replace_for_recovery(
+                    "task-1", call_context=call_context, context_id="ctx-1", acquire_admission=acquire_admission
+                ),
+                timeout=_STREAM_TEST_TIMEOUT,
+            )
+        assert admissions == []
+    finally:
+        release_save.set()
+        registry.release_cleanup.set()
+        await registry.retire_for_recovery("task-1")
+        await asyncio.gather(*tuple(registry._cleanup_tasks), return_exceptions=True)
+
+
+class _AcceptedInputRequiredExecutor:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release_first = asyncio.Event()
+        self.executed_message_ids: list[str] = []
+
+    async def execute(self, request_context, event_queue) -> None:
+        self.executed_message_ids.append(request_context.message.message_id)
+        if len(self.executed_message_ids) == 1:
+            self.started.set()
+            await self.release_first.wait()
+        await event_queue.enqueue_event(
+            TaskStatusUpdateEvent(
+                task_id="task-1",
+                context_id="ctx-1",
+                status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+            )
+        )
+
+    async def cancel(self, _request_context, _event_queue) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_recovery_drain_settles_two_real_input_required_request_ids() -> None:
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED)),
+        call_context,
+    )
+    executor = _AcceptedInputRequiredExecutor()
+    registry = RequestScopedActiveTaskRegistry(agent_executor=executor, task_store=store)
+    old = await registry.get_or_create(
+        "task-1", call_context=call_context, context_id="ctx-1", create_task_if_missing=True
+    )
+    accepted_ids = []
+    for message_id in ("accepted-first", "accepted-second"):
+        accepted_ids.append(
+            await old.enqueue_request(
+                RequestContext(
+                    call_context=call_context,
+                    task_id="task-1",
+                    context_id="ctx-1",
+                    request=SendMessageRequest(
+                        message=Message(message_id=message_id, role=Role.ROLE_USER, parts=[Part(text="input")])
+                    ),
+                )
+            )
+        )
+        if message_id == "accepted-first":
+            await asyncio.wait_for(executor.started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    try:
+        assert accepted_ids[0] != accepted_ids[1]
+        assert old._pending_accepted_requests == set(accepted_ids)
+        executor.release_first.set()
+        await asyncio.wait_for(old.wait_for_accepted_requests(), timeout=_STREAM_TEST_TIMEOUT)
+        assert executor.executed_message_ids == ["accepted-first", "accepted-second"]
+        assert old._pending_accepted_requests == set()
+        assert not old.has_unsettled_requests()
+        assert not old._consumer_task.done()
+        assert (await store.get("task-1", call_context)).status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+    finally:
+        executor.release_first.set()
+        await registry.retire_for_recovery("task-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_drain_preserves_sdk_swallowed_consumer_failure_after_cleanup() -> None:
+    class FailingExecutor:
+        async def execute(self, _request_context, _event_queue) -> None:
+            raise RuntimeError("accepted request failed")
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = A2ATaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED)),
+        call_context,
+    )
+    registry = RequestScopedActiveTaskRegistry(agent_executor=FailingExecutor(), task_store=store)
+    old = await registry.get_or_create(
+        "task-1", call_context=call_context, context_id="ctx-1", create_task_if_missing=True
+    )
+    accepted_id = await old.enqueue_request(
+        RequestContext(call_context=call_context, task_id="task-1", context_id="ctx-1")
+    )
+    admissions: list[str] = []
+
+    async def acquire_admission() -> str | None:
+        admissions.append("checked")
+        return None
+
+    try:
+        await asyncio.wait_for(asyncio.shield(old._consumer_task), timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.wait_for(asyncio.shield(old._producer_task), timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.gather(*tuple(registry._cleanup_tasks), return_exceptions=True)
+        assert old._consumer_task.exception() is None
+        assert old._accepted_consumer_failed
+        assert old._pending_accepted_requests == {accepted_id}
+        assert registry._active_tasks["task-1"] is old
+        assert (await store.get("task-1", call_context)).status.state == TaskState.TASK_STATE_FAILED
+        with pytest.raises(InvalidParamsError, match="ended before the accepted request settled"):
+            await registry.reconcile_and_replace_for_recovery(
+                "task-1", call_context=call_context, context_id="ctx-1", acquire_admission=acquire_admission
+            )
+        assert admissions == []
+        assert registry._active_tasks["task-1"] is old
+        with pytest.raises(InvalidParamsError, match="ended before the accepted request settled"):
+            await registry.get_or_create("task-1", call_context=call_context, context_id="ctx-1")
+    finally:
+        await registry.retire_for_recovery("task-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_enqueue_shutdown_rolls_back_unaccepted_uuid() -> None:
+    active_task = RequestScopedActiveTask(
+        agent_executor=SimpleNamespace(), task_id="task-1", task_manager=SimpleNamespace(), recovery_admission="r-1"
+    )
+    request = RequestContext(call_context=ServerCallContext(), task_id="task-1", context_id="ctx-1")
+    RecoverableInputAdmissionCarrier.attach(request, "r-1")
+    active_task._request_queue.shutdown(immediate=True)
+    try:
+        with pytest.raises(QueueShutDown):
+            await active_task.enqueue_request(request)
+        assert active_task._pending_accepted_requests == set()
+        assert active_task._recovery_admission == "r-1"
+        assert not active_task.has_unsettled_requests()
+    finally:
+        await active_task.retire_for_recovery()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_projection", ["missing", "working"])
+async def test_recovery_drain_rechecks_consumer_after_async_task_lookup(task_projection) -> None:
+    class LookupBarrierTaskStore(A2ATaskStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pause_next_get = False
+            self.lookup_entered = asyncio.Event()
+            self.release_lookup = asyncio.Event()
+
+        async def get(self, task_id, context=None):
+            if self.pause_next_get:
+                self.pause_next_get = False
+                self.lookup_entered.set()
+                await self.release_lookup.wait()
+            return await super().get(task_id, context)
+
+    call_context = ServerCallContext()
+    store = LookupBarrierTaskStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED)),
+        call_context,
+    )
+    executor = _AcceptedTerminalSettlementExecutor()
+    registry = RequestScopedActiveTaskRegistry(agent_executor=executor, task_store=store)
+    old = await registry.get_or_create(
+        "task-1", call_context=call_context, context_id="ctx-1", create_task_if_missing=True
+    )
+    for message_id in ("accepted-first", "accepted-second"):
+        await old.enqueue_request(
+            RequestContext(
+                call_context=call_context,
+                task_id="task-1",
+                context_id="ctx-1",
+                request=SendMessageRequest(
+                    message=Message(message_id=message_id, role=Role.ROLE_USER, parts=[Part(text="input")])
+                ),
+            )
+        )
+        if message_id == "accepted-first":
+            await asyncio.wait_for(executor.started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    admissions: list[str] = []
+
+    async def acquire_admission() -> str | None:
+        admissions.append("checked")
+        return None
+
+    store.pause_next_get = True
+    recovery = asyncio.create_task(
+        registry.reconcile_and_replace_for_recovery(
+            "task-1", call_context=call_context, context_id="ctx-1", acquire_admission=acquire_admission
+        )
+    )
+    try:
+        await asyncio.wait_for(store.lookup_entered.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        assert old._recovery_replacement_pending
+        assert not old._consumer_task.done()
+        executor.release_terminal.set()
+        await asyncio.wait_for(old._is_finished.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        executor.release_execute.set()
+        await asyncio.wait_for(asyncio.shield(old._consumer_task), timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.wait_for(asyncio.shield(old._producer_task), timeout=_STREAM_TEST_TIMEOUT)
+        assert len(old._pending_accepted_requests) == 1
+        assert executor.executed_message_ids == ["accepted-first"]
+        await store.delete("task-1", call_context)
+        if task_projection == "working":
+            await store.save(
+                Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_WORKING)),
+                call_context,
+            )
+        store.release_lookup.set()
+        with pytest.raises(InvalidParamsError, match="ended before the accepted request settled"):
+            await asyncio.wait_for(recovery, timeout=_STREAM_TEST_TIMEOUT)
+        assert admissions == []
+        assert registry._active_tasks["task-1"] is old
+    finally:
+        store.release_lookup.set()
+        executor.release_terminal.set()
+        executor.release_execute.set()
+        if not recovery.done():
+            recovery.cancel()
+        await asyncio.gather(recovery, return_exceptions=True)
+        await registry.retire_for_recovery("task-1")
+
+
+@pytest.mark.asyncio
+async def test_recovery_drain_rechecks_failure_during_async_lookup_before_consumer_exit() -> None:
+    class FailedProjectionBarrierStore(A2ATaskStore):
+        def __init__(self) -> None:
+            super().__init__()
+            self.pause_next_get = False
+            self.lookup_entered = asyncio.Event()
+            self.release_lookup = asyncio.Event()
+            self.failed_projection_entered = asyncio.Event()
+            self.release_failed_projection = asyncio.Event()
+
+        async def get(self, task_id, context=None):
+            if self.pause_next_get:
+                self.pause_next_get = False
+                self.lookup_entered.set()
+                await self.release_lookup.wait()
+            return await super().get(task_id, context)
+
+        async def save(self, task, context=None) -> None:
+            if task.status.state == TaskState.TASK_STATE_FAILED:
+                self.failed_projection_entered.set()
+                await self.release_failed_projection.wait()
+            await super().save(task, context)
+
+    class FailingExecutor:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release_failure = asyncio.Event()
+
+        async def execute(self, _request_context, _event_queue) -> None:
+            self.started.set()
+            await self.release_failure.wait()
+            raise RuntimeError("accepted request failed")
+
+        async def cancel(self, _request_context, _event_queue) -> None:
+            return None
+
+    call_context = ServerCallContext()
+    store = FailedProjectionBarrierStore()
+    await store.save(
+        Task(id="task-1", context_id="ctx-1", status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED)),
+        call_context,
+    )
+    executor = FailingExecutor()
+    registry = RequestScopedActiveTaskRegistry(agent_executor=executor, task_store=store)
+    old = await registry.get_or_create(
+        "task-1", call_context=call_context, context_id="ctx-1", create_task_if_missing=True
+    )
+    await old.enqueue_request(RequestContext(call_context=call_context, task_id="task-1", context_id="ctx-1"))
+    await asyncio.wait_for(executor.started.wait(), timeout=_STREAM_TEST_TIMEOUT)
+    admissions: list[str] = []
+
+    async def acquire_admission() -> str | None:
+        admissions.append("checked")
+        return None
+
+    store.pause_next_get = True
+    recovery = asyncio.create_task(
+        registry.reconcile_and_replace_for_recovery(
+            "task-1", call_context=call_context, context_id="ctx-1", acquire_admission=acquire_admission
+        )
+    )
+    try:
+        await asyncio.wait_for(store.lookup_entered.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        executor.release_failure.set()
+        await asyncio.wait_for(store.failed_projection_entered.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        assert old._accepted_consumer_failed
+        assert not old._consumer_task.done()
+        store.release_lookup.set()
+        with pytest.raises(InvalidParamsError, match="ended before the accepted request settled"):
+            await asyncio.wait_for(recovery, timeout=_STREAM_TEST_TIMEOUT)
+        assert not old._consumer_task.done()
+        assert admissions == []
+        assert registry._active_tasks["task-1"] is old
+    finally:
+        executor.release_failure.set()
+        store.release_lookup.set()
+        store.release_failed_projection.set()
+        if not recovery.done():
+            recovery.cancel()
+        await asyncio.gather(recovery, return_exceptions=True)
+        await registry.retire_for_recovery("task-1")
+
+
+class _OrdinaryNormalHandoffSdkFixture:
+    """Keep the actual SDK INPUT_REQUIRED task after a durable natural release."""
+
+    task_id = "task-normal-handoff"
+    context_id = "ctx-normal-handoff"
+
+    def __init__(self, tmp_path, *, backup_service=None) -> None:
+        self.cwd = tmp_path / "workspace"
+        self.cwd.mkdir()
+        self.call_context = ServerCallContext()
+        self.store = A2ATaskStore(persistence=A2APersistenceStore(tmp_path / "a2a"))
+        self.service = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=backup_service)
+        self.loop = FakeAgentLoop([TextDeltaEvent(text="normal followup accepted")])
+        self.factory_session_ids: list[str] = []
+
+    def create_runtime(self, options):
+        self.factory_session_ids.append(options.session_id)
+        return FakeRuntime(agent_loop=self.loop, session_id=options.session_id)
+
+    async def prepare(self, *, finalize=True, with_ack=True) -> None:
+        ctx = await self.store.get_or_create_context(
+            context_id=self.context_id,
+            cwd=str(self.cwd),
+            runtime_factory=lambda session_id: FakeRuntime(agent_loop=self.loop, session_id=session_id),
+        )
+        self.session_id = ctx.session_id
+        SessionStorage().ensure_v2_session_dir_for_new_session(str(self.cwd), self.session_id)
+        owner = self.store.owner_for_context(self.call_context)
+        await self.store.get_or_create_task(task_id=self.task_id, context_id=self.context_id, owner=owner)
+        await self.store.save(
+            Task(
+                id=self.task_id,
+                context_id=self.context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+            ),
+            self.call_context,
+        )
+        self.control = await self.service.begin_execution(
+            context_id=self.context_id,
+            task_id=self.task_id,
+            owner=owner,
+            cwd=str(self.cwd),
+            execution_mode="pipeline",
+        )
+        self.control.bind_session(self.session_id)
+        await self.control.checkpoint()
+        current = asyncio.current_task()
+        assert current is not None
+        self.completion_generation = await self.control.detach_task(
+            current, execution_status="input-required", natural_completion=True
+        )
+        assert self.completion_generation is not None
+        if finalize:
+            await self.finish_natural_handoff()
+            assert self.control.phase == "terminated"
+            assert self.control.natural_handoff_admits_replacement()
+        else:
+            # Pipeline business has completed while its SDK wait projection
+            # still remains INPUT_REQUIRED. The real executor's natural cleanup
+            # therefore closes a completed business, not an absent ask checkpoint.
+            record = await self.store.get_or_create_task(task_id=self.task_id, context_id=self.context_id, owner=owner)
+            record.state = "completed"
+            self.store.mirror_task(record)
+            assert (await self.store.get_task_record(self.task_id)).state == "completed"
+            assert (
+                await self.store.get(self.task_id, self.call_context)
+            ).status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+        self.write_handoff(with_ack=with_ack)
+        self.executor = IacCodeA2AExecutor(
+            task_store=self.store, model="qwen3.6-plus", execution_control_service=self.service
+        )
+        self.store.set_execution_control_provider(
+            self.service.snapshot_for_context,
+            self.service.has_active_work,
+            self.service.reserve_recoverable_input_continuation,
+            self.service.release_recoverable_input_continuation,
+        )
+        self.handler = IacCodeRequestHandler(
+            agent_executor=self.executor,
+            task_store=self.store,
+            agent_card=SimpleNamespace(capabilities=SimpleNamespace(streaming=True, extensions=[])),
+        )
+
+    async def finish_natural_handoff(self) -> None:
+        await self.control.finalize_natural_completion(
+            task_id=self.task_id, completion_generation=self.completion_generation
+        )
+
+    async def restore_sdk_wait_projection(self) -> None:
+        """Model the SDK wait projection lagging the completed business record."""
+
+        record = await self.store.get_or_create_task(
+            task_id=self.task_id,
+            context_id=self.context_id,
+            owner=self.store.owner_for_context(self.call_context),
+        )
+        record.state = "input-required"
+        await self.store.save(
+            Task(
+                id=self.task_id,
+                context_id=self.context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+            ),
+            self.call_context,
+        )
+        record.state = "completed"
+        self.store.mirror_task(record)
+        assert (await self.store.get_task_record(self.task_id)).state == "completed"
+        assert (
+            await self.store.get(self.task_id, self.call_context)
+        ).status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+
+    def write_handoff(self, *, with_ack=True) -> None:
+        handoff = {
+            "schemaVersion": "1.0",
+            "eventId": "handoff-business-1",
+            "sequence": 1,
+            "createdAt": "2026-10-10T07:00:00Z",
+            "eventType": "pipeline_handoff_ready",
+            "scope": "pipeline",
+            "pipelineRunId": self.context_id,
+            "taskId": self.task_id,
+            "contextId": self.context_id,
+            "pipelineName": "selling",
+            "status": "completed",
+            "visibility": "committed",
+            "data": {"action": "switch_to_normal", "targetMode": "normal", "summary": "[Pipeline Handoff Context]"},
+        }
+        ack = {
+            **handoff,
+            "eventId": "handoff-backup-ack-2",
+            "sequence": 2,
+            "eventType": "backup_committed",
+            "data": {
+                "committedEventId": handoff["eventId"],
+                "committedSequence": handoff["sequence"],
+                "committedEventType": handoff["eventType"],
+            },
+        }
+        pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(self.cwd), session_id=self.session_id)
+        self.handoff_events = (handoff, ack)
+        events = self.handoff_events if with_ack else (handoff,)
+        A2APipelineJournal(pipeline_dir).append_many(events, durable=True)
+        A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(events))
+
+    def commit_handoff_ack(self) -> None:
+        pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(self.cwd), session_id=self.session_id)
+        A2APipelineJournal(pipeline_dir).append(self.handoff_events[1], durable=True)
+        A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(self.handoff_events))
+
+    async def send(self):
+        message = Message(
+            message_id="ordinary-followup-1",
+            task_id=self.task_id,
+            context_id=self.context_id,
+            role=Role.ROLE_USER,
+            parts=[Part(text="Explain cleanup of the existing resources.")],
+        )
+        ParseDict({"iac_code": {"cwd": str(self.cwd), "run_mode": "pipeline"}}, message.metadata)
+        return await _collect_async(
+            self.handler.on_message_send_stream(SendMessageRequest(message=message), self.call_context)
+        )
+
+    async def close(self) -> None:
+        if hasattr(self, "handler"):
+            await self.handler._active_task_registry.retire_for_recovery(self.task_id)
+        await self.service.close()
+
+
+@pytest.mark.asyncio
+async def test_public_sdk_ordinary_followup_replaces_a_proven_closed_pipeline_handoff(monkeypatch, tmp_path) -> None:
+    fixture = _OrdinaryNormalHandoffSdkFixture(tmp_path)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fixture.create_runtime)
+    try:
+        await fixture.prepare()
+        assert await fixture.executor._should_route_pipeline_handoff_to_normal(
+            context_id=fixture.context_id, cwd=str(fixture.cwd)
+        )
+        events = await asyncio.wait_for(fixture.send(), timeout=_STREAM_TEST_TIMEOUT)
+        active = await fixture.handler._active_task_registry.get(fixture.task_id)
+        assert active is not None
+        await asyncio.wait_for(active.wait_for_accepted_requests(), timeout=_STREAM_TEST_TIMEOUT)
+        assert not active._accepted_consumer_failed
+        assert active._pending_accepted_requests == set()
+        assert fixture.loop.prompts == ["Explain cleanup of the existing resources."]
+        assert fixture.factory_session_ids == []  # the original session runtime is reused
+        replacement = fixture.service.get_for_context(fixture.context_id)
+        assert replacement is not None and replacement is not fixture.control
+        assert replacement.execution_mode == "normal"
+        assert replacement.task_id == fixture.task_id
+        assert (await fixture.store.get_context_record(fixture.context_id)).session_id == fixture.session_id
+        assert events and all(
+            event.task_id == fixture.task_id and event.context_id == fixture.context_id
+            for event in events
+            if isinstance(event, TaskStatusUpdateEvent)
+        )
+        assert any(
+            isinstance(event, TaskStatusUpdateEvent) and event.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+            for event in events
+        )
+    finally:
+        await fixture.close()
+
+
+class _OrdinaryAttachBarrier:
+    def __init__(self, control) -> None:
+        self._attach = control.attach_task
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+        self.conflicts = 0
+
+    async def attach(self, task, *, mark_working=True):
+        from iac_code.a2a.execution_control import ExecutionControlConflictError
+
+        self.entered.set()
+        await self.release.wait()
+        try:
+            return await self._attach(task, mark_working=mark_working)
+        except ExecutionControlConflictError:
+            self.conflicts += 1
+            raise
+
+
+@pytest.mark.asyncio
+async def test_public_sdk_ordinary_followup_rechecks_ack_after_real_attach_conflict(monkeypatch, tmp_path) -> None:
+    fixture = _OrdinaryNormalHandoffSdkFixture(tmp_path)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fixture.create_runtime)
+    sending = None
+    barrier = None
+    try:
+        await fixture.prepare(finalize=False, with_ack=False)
+        assert not await fixture.executor._should_route_pipeline_handoff_to_normal(
+            context_id=fixture.context_id, cwd=str(fixture.cwd)
+        )
+        assert fixture.control.phase == "running"
+        barrier = _OrdinaryAttachBarrier(fixture.control)
+        monkeypatch.setattr(fixture.control, "attach_task", barrier.attach)
+        sending = asyncio.create_task(fixture.send())
+        await asyncio.wait_for(barrier.entered.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        # The SDK accepted the request while the original controller was live.
+        # The gate delays only entry to the real attach; its guard is not mocked.
+        active = await fixture.handler._active_task_registry.get(fixture.task_id)
+        assert active is not None and len(active._pending_accepted_requests) == 1
+        original_uuid = next(iter(active._pending_accepted_requests))
+        await fixture.finish_natural_handoff()
+        fixture.commit_handoff_ack()
+        assert fixture.control.phase == "terminated"
+        assert fixture.control.snapshot()["commitError"] is None
+        assert fixture.control.natural_handoff_admits_replacement()
+        barrier.release.set()
+        await asyncio.wait_for(sending, timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.wait_for(active.wait_for_accepted_requests(), timeout=_STREAM_TEST_TIMEOUT)
+        assert barrier.conflicts == 1
+        assert original_uuid not in active._pending_accepted_requests
+        assert not active._accepted_consumer_failed
+        assert fixture.loop.prompts == ["Explain cleanup of the existing resources."]
+        assert await fixture.handler._active_task_registry.get(fixture.task_id) is active
+        replacement = fixture.service.get_for_context(fixture.context_id)
+        assert replacement is not None and replacement is not fixture.control
+        assert replacement.execution_mode == "normal"
+    finally:
+        if barrier is not None:
+            barrier.release.set()
+        if sending is not None:
+            if not sending.done():
+                sending.cancel()
+            await asyncio.gather(sending, return_exceptions=True)
+        await fixture.close()
+
+
+class _OrdinaryNaturalBackupBarrier(SessionBackupService):
+    def __init__(self) -> None:
+        super().__init__(retry_delays=())
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def backup_session(self, *args, **kwargs):
+        self.entered.set()
+        if not self.release.wait(timeout=_STREAM_TEST_TIMEOUT):
+            raise TimeoutError("test backup barrier was not released")
+        return super().backup_session(*args, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_public_sdk_ordinary_followup_waits_for_same_task_natural_backup(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "shared-backup"))
+    backup = _OrdinaryNaturalBackupBarrier()
+    fixture = _OrdinaryNormalHandoffSdkFixture(tmp_path, backup_service=backup)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fixture.create_runtime)
+    finalizing = None
+    sending = None
+    try:
+        await fixture.prepare(finalize=False)
+        backup.initialize_session(str(fixture.cwd), fixture.session_id)
+        finalizing = asyncio.create_task(fixture.finish_natural_handoff())
+        assert await asyncio.to_thread(backup.entered.wait, _STREAM_TEST_TIMEOUT)
+        assert fixture.control.phase == "terminated"
+        assert not fixture.control.natural_handoff_admits_replacement()
+        await fixture.restore_sdk_wait_projection()
+        sending = asyncio.create_task(fixture.send())
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.shield(sending), timeout=0.05)
+        assert fixture.loop.prompts == []
+        active = await fixture.handler._active_task_registry.get(fixture.task_id)
+        assert active is not None and len(active._pending_accepted_requests) == 1
+        original_uuid = next(iter(active._pending_accepted_requests))
+        backup.release.set()
+        await asyncio.wait_for(finalizing, timeout=_STREAM_TEST_TIMEOUT)
+        assert fixture.control.snapshot()["commitError"] is None
+        assert fixture.control.natural_handoff_admits_replacement()
+        await asyncio.wait_for(sending, timeout=_STREAM_TEST_TIMEOUT)
+        await asyncio.wait_for(active.wait_for_accepted_requests(), timeout=_STREAM_TEST_TIMEOUT)
+        assert original_uuid not in active._pending_accepted_requests
+        assert not active._accepted_consumer_failed
+        assert fixture.loop.prompts == ["Explain cleanup of the existing resources."]
+        assert fixture.control.natural_handoff_receipt() is not None
+        replacement = fixture.service.get_for_context(fixture.context_id)
+        assert replacement is not None and replacement is not fixture.control
+        assert replacement.execution_mode == "normal"
+    finally:
+        backup.release.set()
+        for task in (sending, finalizing):
+            if task is not None:
+                if not task.done():
+                    task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+        await fixture.close()
+
+
+class _OrdinaryRejectedHandoffBarrier:
+    """Pause only after the real helper rejects, before SDK error publication."""
+
+    def __init__(self, executor) -> None:
+        self._begin = executor._begin_proven_normal_handoff_input
+        self.rejected = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def begin(self, **kwargs):
+        from iac_code.a2a.execution_control import ExecutionControlConflictError
+
+        try:
+            return await self._begin(**kwargs)
+        except ExecutionControlConflictError:
+            self.rejected.set()
+            await self.release.wait()
+            raise
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("proof_failure", ["missing-ack", "wrong-ack", "commit-error", "blocked", "wrong-task"])
+async def test_public_sdk_ordinary_followup_does_not_bypass_invalid_handoff(
+    monkeypatch, tmp_path, proof_failure
+) -> None:
+    from iac_code.a2a import execution_control as execution_control_module
+    from iac_code.a2a.execution_control import ExecutionControlConflictError
+
+    fixture = _OrdinaryNormalHandoffSdkFixture(tmp_path)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fixture.create_runtime)
+    sending = None
+    rejection = None
+    original_write = None
+    try:
+        await fixture.prepare(with_ack=proof_failure not in {"missing-ack", "wrong-ack"})
+        if proof_failure == "wrong-ack":
+            fixture.handoff_events[1]["data"] = {"committedEventId": "different-event", "committedSequence": 99}
+            fixture.commit_handoff_ack()
+        elif proof_failure == "commit-error":
+            original_write = execution_control_module.atomic_write_json
+
+            def fail_old_control_commit(path, document):
+                if document.get("executionId") == fixture.control.execution_id:
+                    raise OSError("injected persistent control write failure")
+                return original_write(path, document)
+
+            monkeypatch.setattr(execution_control_module, "atomic_write_json", fail_old_control_commit)
+            fixture.control.revision += 1
+            await fixture.control._persist_natural_completion_claim(fixture.control.snapshot())
+            assert fixture.control._commit_error == "state_commit_failed"
+            rejection = _OrdinaryRejectedHandoffBarrier(fixture.executor)
+            monkeypatch.setattr(fixture.executor, "_begin_proven_normal_handoff_input", rejection.begin)
+        elif proof_failure == "blocked":
+            fixture.control.backup = {"status": "blocked"}
+            fixture.control._backup_state_committed = False
+        elif proof_failure == "wrong-task":
+            fixture.control.task_id = "task-another-owner"
+        expected_error = (
+            ExecutionControlConflictError
+            if proof_failure == "wrong-task"
+            else (InputResponseExecutionControlConflictError, InvalidParamsError)
+        )
+        sending = asyncio.create_task(fixture.send())
+        if rejection is not None:
+            await asyncio.wait_for(rejection.rejected.wait(), timeout=_STREAM_TEST_TIMEOUT)
+            assert fixture.control._commit_error == "state_commit_failed"
+            assert fixture.loop.prompts == []
+            active = await fixture.handler._active_task_registry.get(fixture.task_id)
+            assert active is not None and len(active._pending_accepted_requests) == 1
+            # The actual admission already rejected. Restore storage only so
+            # SDK failure projection/cleanup can finish without a permanent
+            # unrelated TaskStore write outage masking that rejection.
+            monkeypatch.setattr(execution_control_module, "atomic_write_json", original_write)
+            await fixture.control.observe_state()
+            await fixture.control.await_natural_handoff_settlement(timeout=_STREAM_TEST_TIMEOUT)
+            await fixture.control.wait_until_recoverable_input_continuation(
+                fixture.task_id, timeout=_STREAM_TEST_TIMEOUT
+            )
+            assert fixture.control._commit_error is None
+            rejection.release.set()
+        with pytest.raises(expected_error):
+            await asyncio.wait_for(sending, timeout=_STREAM_TEST_TIMEOUT)
+        assert fixture.loop.prompts == []
+        assert fixture.service.get_for_context(fixture.context_id) is fixture.control
+        active = await fixture.handler._active_task_registry.get(fixture.task_id)
+        assert active is not None and active._accepted_consumer_failed
+        assert len(active._pending_accepted_requests) == 1
+    finally:
+        if original_write is not None:
+            monkeypatch.setattr(execution_control_module, "atomic_write_json", original_write)
+        if rejection is not None:
+            rejection.release.set()
+        if sending is not None:
+            if not sending.done():
+                sending.cancel()
+            await asyncio.gather(sending, return_exceptions=True)
+        if proof_failure == "wrong-task":
+            fixture.control.task_id = fixture.task_id
+        await fixture.close()
+
+
+class _OrdinaryBeginLockBarrier:
+    """Delay the real context-start lock after the helper's final proof read."""
+
+    def __init__(self) -> None:
+        self.lock = asyncio.Lock()
+        self.entered = asyncio.Event()
+
+    async def __aenter__(self):
+        self.entered.set()
+        await self.lock.acquire()
+        return self
+
+    async def __aexit__(self, *_args):
+        self.lock.release()
+
+
+@pytest.mark.asyncio
+async def test_public_sdk_ordinary_followup_rejects_explicit_stop_winning_begin_lock(monkeypatch, tmp_path) -> None:
+    fixture = _OrdinaryNormalHandoffSdkFixture(tmp_path)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fixture.create_runtime)
+    barrier = _OrdinaryBeginLockBarrier()
+    sending = None
+    try:
+        await fixture.prepare()
+        await barrier.lock.acquire()
+        fixture.service._context_start_locks[fixture.context_id] = barrier
+        sending = asyncio.create_task(fixture.send())
+        await asyncio.wait_for(barrier.entered.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        # A real explicit Stop invalidates the old natural receipt while begin
+        # is waiting for its existing lock. No phase/proof value is fabricated.
+        await fixture.control.terminate(
+            execution_id=fixture.control.execution_id,
+            request_id="explicit-stop-wins",
+            connection_epoch=1,
+            reason="explicit_terminate",
+        )
+        await fixture.control.wait_until_recoverable_input_continuation(fixture.task_id, timeout=_STREAM_TEST_TIMEOUT)
+        assert fixture.control.termination_reason == "explicit_terminate"
+        assert not fixture.control.natural_handoff_admits_replacement()
+        barrier.lock.release()
+        with pytest.raises((InputResponseExecutionControlConflictError, InvalidParamsError)):
+            await asyncio.wait_for(sending, timeout=_STREAM_TEST_TIMEOUT)
+        assert fixture.loop.prompts == []
+        assert fixture.service.get_for_context(fixture.context_id) is fixture.control
+    finally:
+        if barrier.lock.locked():
+            barrier.lock.release()
+        if sending is not None:
+            if not sending.done():
+                sending.cancel()
+            await asyncio.gather(sending, return_exceptions=True)
+        await fixture.close()
+
+
+class _OrdinaryDiskClaimBarrier:
+    def __init__(self, admissions) -> None:
+        self._claim = admissions.claim_begin_without_admission
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def claim(self, *args, **kwargs):
+        self.entered.set()
+        if not self.release.wait(timeout=_STREAM_TEST_TIMEOUT):
+            raise TimeoutError("test disk claim barrier was not released")
+        return self._claim(*args, **kwargs)
+
+
+class _OrdinaryCompetingDiskStop:
+    @classmethod
+    def run(cls, control_path, cwd, results) -> None:
+        results.put(asyncio.run(cls.stop(control_path, cwd)))
+
+    @staticmethod
+    async def stop(control_path, cwd) -> bool:
+        from pathlib import Path
+
+        from iac_code.a2a.execution_control import ExecutionController
+
+        path = Path(control_path)
+        previous = json.loads(path.read_text(encoding="utf-8"))
+        # An independently scheduled writer uses the exact persisted identity
+        # and the production controller's termination + owner-write fence.
+        control = ExecutionController(
+            context_id=previous["contextId"],
+            task_id=previous["taskId"],
+            execution_id=previous["executionId"],
+            owner=previous["owner"],
+            owner_generation=previous["ownerGeneration"],
+            server_instance_id=previous["serverInstanceId"],
+            cwd=cwd,
+            persistence_path=path,
+            backup_service=None,
+            execution_mode="pipeline",
+        )
+        control.revision = previous["revision"]
+        control.persisted_revision = previous["persistedRevision"]
+        try:
+            await control.terminate(
+                execution_id=control.execution_id,
+                request_id="other-process-explicit-stop",
+                connection_epoch=1,
+                reason="explicit_terminate",
+            )
+            await control.wait_until_recoverable_input_continuation(control.task_id, timeout=_STREAM_TEST_TIMEOUT)
+            committed = json.loads(path.read_text(encoding="utf-8"))
+            return bool(
+                committed["executionId"] == previous["executionId"]
+                and committed["terminationReason"] == "explicit_terminate"
+                and committed["phase"] == "terminated"
+                and committed["releaseReady"] is True
+                and committed.get("naturalHandoff") is None
+            )
+        finally:
+            await control.close()
+
+
+@pytest.mark.asyncio
+async def test_public_sdk_ordinary_followup_rejects_a_competing_process_stop_at_disk_claim(
+    monkeypatch, tmp_path
+) -> None:
+    import multiprocessing
+
+    fixture = _OrdinaryNormalHandoffSdkFixture(tmp_path)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fixture.create_runtime)
+    barrier = None
+    sending = None
+    process = None
+    process_context = multiprocessing.get_context("spawn")
+    results = process_context.Queue()
+    try:
+        await fixture.prepare()
+        barrier = _OrdinaryDiskClaimBarrier(fixture.service._recoverable_input_admissions)
+        monkeypatch.setattr(
+            fixture.service._recoverable_input_admissions, "claim_begin_without_admission", barrier.claim
+        )
+        sending = asyncio.create_task(fixture.send())
+        assert await asyncio.to_thread(barrier.entered.wait, _STREAM_TEST_TIMEOUT)
+        path = fixture.service._persistence_root / "execution-control" / (fixture.context_id + ".json")
+        process = process_context.Process(
+            target=_OrdinaryCompetingDiskStop.run, args=(str(path), str(fixture.cwd), results)
+        )
+        process.start()
+        await asyncio.to_thread(process.join, _STREAM_TEST_TIMEOUT)
+        assert not process.is_alive()
+        assert process.exitcode == 0
+        assert results.get(timeout=_STREAM_TEST_TIMEOUT) is True
+        # Local state remains a positive natural receipt: only the original
+        # file-lock/CAS authority can detect the other process's newer Stop.
+        assert fixture.control.natural_handoff_admits_replacement()
+        barrier.release.set()
+        with pytest.raises((InputResponseExecutionControlConflictError, InvalidParamsError)):
+            await asyncio.wait_for(sending, timeout=_STREAM_TEST_TIMEOUT)
+        assert fixture.loop.prompts == []
+        assert fixture.service.get_for_context(fixture.context_id) is fixture.control
+        committed = json.loads(path.read_text(encoding="utf-8"))
+        assert committed["terminationReason"] == "explicit_terminate"
+        assert committed["executionId"] == fixture.control.execution_id
+    finally:
+        if barrier is not None:
+            barrier.release.set()
+        if process is not None:
+            if process.is_alive():
+                process.terminate()
+            await asyncio.to_thread(process.join, _STREAM_TEST_TIMEOUT)
+        if sending is not None:
+            if not sending.done():
+                sending.cancel()
+            await asyncio.gather(sending, return_exceptions=True)
+        results.close()
+        results.join_thread()
+        await fixture.close()
+
+
+class _CanceledSdkHintFixture:
+    """Keep the real SDK completion pending after its canceled Task was saved."""
+
+    task_id = "task-canceled-hint"
+    context_id = "ctx-canceled-hint"
+
+    def __init__(self, tmp_path) -> None:
+        self.cwd = tmp_path / "workspace"
+        self.cwd.mkdir()
+        self.call_context = ServerCallContext()
+        self.store = A2ATaskStore(persistence=A2APersistenceStore(tmp_path / "a2a"), owner_resolver=self.request_owner)
+        self.release_execute = asyncio.Event()
+        self.executed_message_ids: list[str] = []
+        self.control_message_ids: list[str] = []
+        self.handler = IacCodeRequestHandler(
+            agent_executor=self,
+            task_store=self.store,
+            agent_card=SimpleNamespace(capabilities=SimpleNamespace(streaming=True, extensions=[])),
+        )
+
+    @staticmethod
+    def request_owner(context) -> str:
+        return context.state.get("test_owner", "")
+
+    def request(self, message_id: str) -> SendMessageRequest:
+        message = Message(
+            message_id=message_id,
+            task_id=self.task_id,
+            context_id=self.context_id,
+            role=Role.ROLE_USER,
+            parts=[Part(text="Continue the interrupted planning request.")],
+        )
+        ParseDict({"iac_code": {"cwd": str(self.cwd), "run_mode": "pipeline"}}, message.metadata)
+        return SendMessageRequest(message=message)
+
+    async def prepare(self) -> None:
+        await self.store.get_or_create_context(
+            context_id=self.context_id,
+            cwd=str(self.cwd),
+            runtime_factory=lambda session_id: SimpleNamespace(session_id=session_id),
+        )
+        await self.store.save(
+            Task(
+                id=self.task_id,
+                context_id=self.context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED),
+            ),
+            self.call_context,
+        )
+        stream = self.handler.on_message_send_stream(self.request("old-accepted-stop"), self.call_context)
+        try:
+            event = await asyncio.wait_for(anext(stream), timeout=_STREAM_TEST_TIMEOUT)
+            assert isinstance(event, TaskStatusUpdateEvent)
+            assert event.status.state == TaskState.TASK_STATE_CANCELED
+        finally:
+            # Observing a Task terminal is not an SDK execute completion. Close
+            # only this subscriber while the real producer stays at its barrier.
+            await stream.aclose()
+        self.old = await self.handler._active_task_registry.get(self.task_id)
+        assert isinstance(self.old, RequestScopedActiveTask)
+        await asyncio.wait_for(self.old._is_finished.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        # Exercise the SDK's real canceled-producer boundary: execute has not
+        # returned, so cancellation cannot invent an exact _RequestCompleted.
+        assert self.old._producer_task is not None
+        self.old._producer_task.cancel()
+        await asyncio.wait_for(asyncio.shield(self.old._producer_task), timeout=_STREAM_TEST_TIMEOUT)
+        assert self.old._consumer_task is not None
+        await asyncio.wait_for(asyncio.shield(self.old._consumer_task), timeout=_STREAM_TEST_TIMEOUT)
+        assert len(self.old._pending_accepted_requests) == 1
+        assert self.old.has_unsettled_requests()
+        assert (await self.store.get(self.task_id, self.call_context)).status.state == TaskState.TASK_STATE_CANCELED
+        assert (await self.store.get_task_record(self.task_id)).state == "canceled"
+
+    async def execute(self, request_context, event_queue) -> None:
+        from iac_code.a2a.resource_selector import parse_resource_selection_response
+
+        if parse_resource_selection_response(request_context.message) is not None:
+            self.control_message_ids.append(request_context.message.message_id)
+            await event_queue.enqueue_event(self.control_ack(request_context.message))
+            return
+        self.executed_message_ids.append(request_context.message.message_id)
+        await event_queue.enqueue_event(
+            TaskStatusUpdateEvent(
+                task_id=request_context.task_id,
+                context_id=request_context.context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_CANCELED),
+            )
+        )
+        # The SDK owns _RequestCompleted and can produce it only after this
+        # real execute returns. No ledger receipt or TaskManager is fabricated.
+        await self.release_execute.wait()
+
+    async def cancel(self, _request_context, _event_queue) -> None:
+        return None
+
+    def control_ack(self, message) -> Message:
+        return Message(
+            message_id="ack-" + message.message_id,
+            task_id=self.task_id,
+            context_id=self.context_id,
+            role=Role.ROLE_AGENT,
+            parts=[Part(text="Correlated control acknowledged.")],
+        )
+
+    async def resolve_sideband_permission(self, _response, *, metadata):
+        self.control_message_ids.append(metadata.message_id)
+        return self.control_ack(metadata)
+
+    async def close(self) -> None:
+        self.release_execute.set()
+        if hasattr(self, "old"):
+            producer = self.old._producer_task
+            if producer is not None:
+                await asyncio.wait_for(asyncio.shield(producer), timeout=_STREAM_TEST_TIMEOUT)
+            await self.handler._active_task_registry.retire_for_recovery(self.task_id)
+        cleanup = tuple(self.handler._active_task_registry._cleanup_tasks)
+        if cleanup:
+            await asyncio.gather(*cleanup, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [True, False])
+async def test_public_sdk_pipeline_stop_reentry_explicit_canceled_hint_rejects_before_new_request_enqueue(
+    tmp_path, streaming
+) -> None:
+    fixture = _CanceledSdkHintFixture(tmp_path)
+    try:
+        await fixture.prepare()
+        old = fixture.old
+        pending = set(old._pending_accepted_requests)
+        request = fixture.request("new-ordinary-reentry")
+        with pytest.raises(InvalidParamsError) as rejected:
+            if streaming:
+                await asyncio.wait_for(
+                    _collect_async(fixture.handler.on_message_send_stream(request, fixture.call_context)),
+                    timeout=_STREAM_TEST_TIMEOUT,
+                )
+            else:
+                await asyncio.wait_for(
+                    fixture.handler.on_message_send(request, fixture.call_context), timeout=_STREAM_TEST_TIMEOUT
+                )
+        # Rejecting the new hint cannot settle, erase, or replay the old request.
+        assert old._pending_accepted_requests == pending
+        assert old.has_unsettled_requests()
+        assert await fixture.handler._active_task_registry.get(fixture.task_id) is old
+        assert fixture.executed_message_ids == ["old-accepted-stop"]
+        assert request.message.task_id == fixture.task_id
+        assert request.message.context_id == fixture.context_id
+        assert str(rejected.value) == (f"Task {fixture.task_id} is in terminal state: {TaskState.TASK_STATE_CANCELED}")
+    finally:
+        await fixture.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "boundary", ["context", "business-state", "sdk-state", "owner", "foreign-caller", "normal-mode"]
+)
+async def test_public_sdk_pipeline_stop_reentry_requires_matching_canceled_authorities(tmp_path, boundary) -> None:
+    fixture = _CanceledSdkHintFixture(tmp_path)
+    try:
+        await fixture.prepare()
+        request = fixture.request("mismatched-reentry")
+        call_context = fixture.call_context
+        pending = set(fixture.old._pending_accepted_requests)
+        owned = await fixture.store.get_or_create_task(task_id=fixture.task_id, context_id=fixture.context_id)
+        if boundary == "context":
+            request.message.context_id = "ctx-other"
+        elif boundary == "business-state":
+            owned.state = "completed"
+            fixture.store.mirror_task(owned)
+        elif boundary == "sdk-state":
+            status = TaskStatus(state=TaskState.TASK_STATE_WORKING)
+            status.timestamp.GetCurrentTime()
+            await fixture.store.save(
+                Task(
+                    id=fixture.task_id,
+                    context_id=fixture.context_id,
+                    status=status,
+                ),
+                fixture.call_context,
+            )
+            owned.state = "canceled"
+            fixture.store.mirror_task(owned)
+        elif boundary == "owner":
+            owned.owner = "other-owner"
+            fixture.store.mirror_task(owned)
+        elif boundary == "foreign-caller":
+            call_context = ServerCallContext()
+            call_context.state["test_owner"] = "other-owner"
+        else:
+            ParseDict({"iac_code": {"cwd": str(fixture.cwd), "run_mode": "normal"}}, request.message.metadata)
+        with pytest.raises(InvalidParamsError) as rejected:
+            await asyncio.wait_for(
+                _collect_async(fixture.handler.on_message_send_stream(request, call_context)),
+                timeout=_STREAM_TEST_TIMEOUT,
+            )
+        assert "is in terminal state:" not in str(rejected.value)
+        assert "lifecycle ended before the accepted request settled" in str(rejected.value)
+        assert fixture.executed_message_ids == ["old-accepted-stop"]
+        assert fixture.old._pending_accepted_requests == pending
+        assert await fixture.handler._active_task_registry.get(fixture.task_id) is fixture.old
+    finally:
+        await fixture.close()
+
+
+@pytest.mark.asyncio
+async def test_public_sdk_pipeline_stop_reentry_does_not_hide_task_storage_read_failure(tmp_path, monkeypatch) -> None:
+    fixture = _CanceledSdkHintFixture(tmp_path)
+    try:
+        await fixture.prepare()
+        pending = set(fixture.old._pending_accepted_requests)
+
+        async def unavailable(task_id, context=None):
+            assert task_id == fixture.task_id
+            raise OSError("offline task storage failure")
+
+        monkeypatch.setattr(fixture.store, "get", unavailable)
+        with pytest.raises(OSError, match="offline task storage failure"):
+            await _collect_async(
+                fixture.handler.on_message_send_stream(fixture.request("read-failure"), fixture.call_context)
+            )
+        assert fixture.old._pending_accepted_requests == pending
+        assert fixture.executed_message_ids == ["old-accepted-stop"]
+    finally:
+        await fixture.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [True, False])
+@pytest.mark.parametrize("kind", ["permission", "cloud_resource_selection"])
+async def test_public_sdk_pipeline_stop_reentry_preserves_correlated_control_route(tmp_path, streaming, kind) -> None:
+    fixture = _CanceledSdkHintFixture(tmp_path)
+    try:
+        await fixture.prepare()
+        pending = set(fixture.old._pending_accepted_requests)
+        response = {
+            "schemaVersion": 1,
+            "kind": kind,
+            "requestTaskId": fixture.task_id,
+            "contextId": fixture.context_id,
+            "inputId": "resource-" + "a" * 32 if kind == "cloud_resource_selection" else "permission-1",
+            "toolUseId": "tool-1",
+        }
+        response.update({"status": "canceled"} if kind == "cloud_resource_selection" else {"decision": "deny"})
+        prefix = RESOURCE_SELECTION_QUERY_PREFIX if kind == "cloud_resource_selection" else PERMISSION_QUERY_PREFIX
+        request = fixture.request("control-" + kind)
+        request.message.parts[0].text = prefix + json.dumps(response)
+        if streaming:
+            events = await asyncio.wait_for(
+                _collect_async(fixture.handler.on_message_send_stream(request, fixture.call_context)),
+                timeout=_STREAM_TEST_TIMEOUT,
+            )
+            assert len(events) == 1 and isinstance(events[0], Message)
+        else:
+            result = await asyncio.wait_for(
+                fixture.handler.on_message_send(request, fixture.call_context), timeout=_STREAM_TEST_TIMEOUT
+            )
+            if kind == "cloud_resource_selection":
+                assert isinstance(result, Task)
+                assert result.id == fixture.task_id and result.context_id == fixture.context_id
+                assert result.status.state == TaskState.TASK_STATE_CANCELED
+            else:
+                assert isinstance(result, Message)
+                assert result.task_id == fixture.task_id and result.context_id == fixture.context_id
+        assert fixture.control_message_ids == [request.message.message_id]
+        assert fixture.executed_message_ids == ["old-accepted-stop"]
+        assert fixture.old._pending_accepted_requests == pending
+        assert await fixture.handler._active_task_registry.get(fixture.task_id) is fixture.old
+    finally:
+        await fixture.close()
+
+
+class _PipelineStopModelHttp:
+    """Block the actual standard SDK's first and resumed logical model calls."""
+
+    def __init__(self) -> None:
+        self.first_model = asyncio.Event()
+        self.resumed_model = asyncio.Event()
+        self.requests: list[dict] = []
+        self.business_calls = 0
+
+    async def handle(self, request):
+        payload = json.loads(request.content)
+        self.requests.append(payload)
+        if not payload.get("stream", False):
+            return httpx.Response(
+                200,
+                json={
+                    "id": "continue-judge",
+                    "object": "chat.completion",
+                    "model": "gpt-4o",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": json.dumps(
+                                    {"action": "continue", "reason": "Continue the same planning step."}
+                                ),
+                            },
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                },
+            )
+        self.business_calls += 1
+        (self.first_model if self.business_calls == 1 else self.resumed_model).set()
+        await asyncio.Event().wait()
+        return httpx.Response(200)  # pragma: no cover
+
+
+class _PublicStoppedPipelineFixture:
+    """Exercise full SDK dispatch and real Runner/Stop/durable successor claim."""
+
+    task_id = "task-public-stop"
+    context_id = "ctx-public-stop"
+    original_text = "Remember planning marker stopped-sdk and network 10.242.0.0/16."
+    reentry_text = "Continue the interrupted plan and preserve the original network."
+
+    def __init__(self, tmp_path) -> None:
+        from iac_code.services.session_backup_staging import StagedSessionBackupService
+
+        self.cwd = tmp_path / "workspace"
+        self.cwd.mkdir()
+        self.config = tmp_path / "pipeline-config"
+        self.config.mkdir()
+        (self.config / "model.md").write_text("Plan only; do not execute external operations.", encoding="utf-8")
+        (self.config / "pipeline.yaml").write_text(
+            json.dumps(
+                {
+                    "name": "selling",
+                    "context_dependencies": {"plan": []},
+                    "steps": [
+                        {
+                            "id": "solution_planning_and_selection",
+                            "conclusion_field": "plan",
+                            "forward": None,
+                            "prompt": "model.md",
+                        }
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+        self.model = _PipelineStopModelHttp()
+        self.clients = []
+        self.runners = []
+        self.storage = SessionStorage()
+        self.backup = StagedSessionBackupService(tmp_path / "staging", self.storage, retry_delays=())
+        self.persistence = A2APersistenceStore(tmp_path / "a2a")
+        self.store = A2ATaskStore(persistence=self.persistence)
+        self.service = ExecutionControlService(persistence_root=self.persistence.root, backup_service=self.backup)
+        self.executor = IacCodeA2AExecutor(
+            task_store=self.store, model="gpt-4o", backup_service=self.backup, execution_control_service=self.service
+        )
+        self.store.set_execution_control_provider(
+            self.service.snapshot_for_context,
+            self.service.has_active_work,
+            self.service.reserve_recoverable_input_continuation,
+            self.service.release_recoverable_input_continuation,
+        )
+        self.handler = IacCodeRequestHandler(
+            agent_executor=self.executor,
+            task_store=self.store,
+            agent_card=SimpleNamespace(capabilities=SimpleNamespace(streaming=True, extensions=[])),
+        )
+        self.sending = []
+
+    def create_runtime(self, options):
+        from iac_code.tools.base import ToolRegistry
+
+        # The public factory's runtime does not configure a provider. Every
+        # actual old/new step uses its own exact standard manager below.
+        return SimpleNamespace(provider_manager=object(), tool_registry=ToolRegistry(), session_id=options.session_id)
+
+    def create_model_manager(self):
+        from openai import AsyncOpenAI
+
+        from iac_code.providers.manager import ProviderManager
+        from iac_code.providers.retry import RetryConfig
+
+        manager = ProviderManager(
+            "gpt-4o",
+            {"openai": "offline-test"},
+            provider_key_override="openai",
+            ignore_llm_source=True,
+            provider_config_override={},
+            retry_config=RetryConfig(max_retries=0),
+        )
+        self.clients.append(manager._provider._client)
+        sdk = AsyncOpenAI(
+            api_key="offline-test",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(self.model.handle)),
+            max_retries=0,
+        )
+        self.clients.append(sdk)
+        manager._provider._client = sdk
+        return manager
+
+    def create_pipeline(self, _executor, *, session_id, cwd, runtime, session_storage, **_kwargs):
+        from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
+
+        runner = PipelineRunner(
+            self.config,
+            self.create_model_manager(),
+            runtime.tool_registry,
+            session_storage,
+            session_id,
+            cwd=cwd,
+            resume_from_sidecar=True,
+            surface="a2a",
+            backup_service=self.backup,
+        )
+        self.runners.append(runner)
+        return runner
+
+    def request(self, *, task_id, message_id, text):
+        message = Message(
+            task_id=task_id,
+            context_id=self.context_id,
+            message_id=message_id,
+            role=Role.ROLE_USER,
+            parts=[Part(text=text)],
+        )
+        ParseDict({"iac_code": {"cwd": str(self.cwd), "run_mode": "pipeline"}}, message.metadata)
+        return SendMessageRequest(message=message)
+
+    async def collect_until_canceled(self, stream):
+        events = []
+        try:
+            async for event in stream:
+                events.append(event)
+                if isinstance(event, TaskStatusUpdateEvent) and event.status.state == TaskState.TASK_STATE_CANCELED:
+                    assert event.task_id == self.task_id and event.context_id == self.context_id
+                    return events
+            raise AssertionError("The stopped subscription ended before its canceled terminal was observed")
+        finally:
+            # A stopped client closes this subscriber at the delivered canceled
+            # boundary; it does not claim successful natural stream exhaustion.
+            await stream.aclose()
+
+    def send(self, request, *, close_at_canceled=False):
+        # Carrier state belongs to one SDK request, including rejected hints.
+        stream = self.handler.on_message_send_stream(request, ServerCallContext())
+        collecting = self.collect_until_canceled(stream) if close_at_canceled else _collect_async(stream)
+        sending = asyncio.create_task(collecting)
+        self.sending.append(sending)
+        return sending
+
+    async def prepare_stopped(self) -> None:
+        ctx = await self.store.get_or_create_context(
+            context_id=self.context_id,
+            cwd=str(self.cwd),
+            runtime_factory=lambda session_id: self.create_runtime(SimpleNamespace(session_id=session_id)),
+        )
+        self.storage.ensure_v2_session_dir_for_new_session(str(self.cwd), ctx.session_id)
+        self.backup.initialize_session(str(self.cwd), ctx.session_id)
+        await self.store.save(
+            Task(id=self.task_id, context_id=self.context_id, status=TaskStatus(state=TaskState.TASK_STATE_SUBMITTED)),
+            ServerCallContext(),
+        )
+        old_request = self.request(task_id=self.task_id, message_id="public-stop-first", text=self.original_text)
+        first = self.send(old_request, close_at_canceled=True)
+        await asyncio.wait_for(self.model.first_model.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        self.control = self.service.get_for_context(self.context_id)
+        assert self.control is not None and self.control.task_id == self.task_id
+        ctx = await self.store.get_context_record(self.context_id)
+        self.session_id = ctx.session_id
+        await self.control.terminate(
+            execution_id=self.control.execution_id,
+            request_id="public-stop",
+            connection_epoch=1,
+            reason="explicit_terminate",
+        )
+        first_events = await asyncio.wait_for(first, timeout=_STREAM_TEST_TIMEOUT)
+        canceled_events = [
+            event
+            for event in first_events
+            if isinstance(event, TaskStatusUpdateEvent) and event.status.state == TaskState.TASK_STATE_CANCELED
+        ]
+        assert len(canceled_events) == 1
+        await self.control.wait_until_recoverable_input_continuation(self.task_id, timeout=_STREAM_TEST_TIMEOUT)
+        self.proof = await self.store.canceled_task_release_proof(
+            context_id=self.context_id, task_id=self.task_id, include_model_boundary=True
+        )
+        assert self.proof is not None
+        assert self.control.backup["status"] == "staged_committed"
+        assert self.proof["backupCommitId"] == self.control.backup["commitId"]
+        assert self.runners[0]._attempts["items"]["att_0001"]["status"] == "failed"
+
+    async def close(self) -> None:
+        current = self.service.get_for_context(self.context_id)
+        if current is not None and current.phase not in {"terminating", "terminated"}:
+            await current.terminate(
+                execution_id=current.execution_id,
+                request_id="fixture-stop",
+                connection_epoch=1,
+                reason="explicit_terminate",
+            )
+        for sending in self.sending:
+            if not sending.done():
+                sending.cancel()
+        await asyncio.gather(*self.sending, return_exceptions=True)
+        for task_id in tuple(self.handler._active_task_registry._active_tasks):
+            await self.handler._active_task_registry.retire_for_recovery(task_id)
+        await self.service.close()
+        for client in self.clients:
+            await client.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_proof", [False, True])
+async def test_public_sdk_pipeline_stop_reentry_omitted_task_uses_real_stop_proof_runner_and_disk_claim(
+    tmp_path, monkeypatch, missing_proof
+) -> None:
+    from iac_code.a2a.pipeline_continuation import PipelineContinuationStore
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "shared"))
+    fixture = _PublicStoppedPipelineFixture(tmp_path)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", fixture.create_runtime)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", fixture.create_runtime)
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.IacCodeA2APipelineExecutor._create_pipeline",
+        lambda executor, **kwargs: fixture.create_pipeline(executor, **kwargs),
+    )
+    original_control_bytes = None
+    try:
+        await fixture.prepare_stopped()
+        pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(fixture.cwd), session_id=fixture.session_id)
+        intent_store = PipelineContinuationStore(pipeline_dir, session_dir=pipeline_dir.parent.parent)
+        assert intent_store.load(context_id=fixture.context_id) is None
+        old = await fixture.handler._active_task_registry.get(fixture.task_id)
+        old_pending = set(old._pending_accepted_requests) if old is not None else None
+        hint = fixture.request(task_id=fixture.task_id, message_id="public-stop-reentry", text=fixture.reentry_text)
+        with pytest.raises(InvalidParamsError) as refused:
+            await asyncio.wait_for(fixture.send(hint), timeout=_STREAM_TEST_TIMEOUT)
+        assert str(refused.value) == (f"Task {fixture.task_id} is in terminal state: {TaskState.TASK_STATE_CANCELED}")
+        assert fixture.model.business_calls == 1
+        assert intent_store.load(context_id=fixture.context_id) is None
+        assert await fixture.handler._active_task_registry.get(fixture.task_id) is old
+        if old is not None:
+            assert old._pending_accepted_requests == old_pending
+        # The refused hint never consumed this SDK message identity. The same
+        # request then follows the separately authorized omitted-task path.
+        request = fixture.request(task_id="", message_id="public-stop-reentry", text=fixture.reentry_text)
+        if missing_proof:
+            control_path = fixture.persistence.root / "execution-control" / (fixture.context_id + ".json")
+            original_control_bytes = control_path.read_bytes()
+            control_path.unlink()
+            with pytest.raises(InvalidParamsError, match="cancellation release proof is unavailable"):
+                await asyncio.wait_for(fixture.send(request), timeout=_STREAM_TEST_TIMEOUT)
+            assert request.message.task_id == ""
+            assert intent_store.load(context_id=fixture.context_id) is None
+            assert fixture.model.business_calls == 1
+        else:
+            sending = fixture.send(request)
+            await asyncio.wait_for(fixture.model.resumed_model.wait(), timeout=_STREAM_TEST_TIMEOUT)
+            successor = request.message.task_id
+            assert successor and successor != fixture.task_id
+            intent = intent_store.load(context_id=fixture.context_id)
+            assert intent is not None and intent.successor_task_id == successor and intent.phase == "running"
+            assert intent.cancellation_execution_id == fixture.proof["executionId"]
+            assert intent.cancellation_backup_commit_id == fixture.proof["backupCommitId"]
+            new_control = fixture.service.get_for_context(fixture.context_id)
+            assert new_control is not fixture.control and new_control.task_id == successor
+            assert new_control.owner_generation > fixture.control.owner_generation
+            canonical = json.loads(
+                (fixture.persistence.root / "execution-control" / (fixture.context_id + ".json")).read_text(
+                    encoding="utf-8"
+                )
+            )
+            assert canonical["taskId"] == successor and canonical["executionId"] == new_control.execution_id
+            active = await fixture.handler._active_task_registry.get(successor)
+            assert active is not None and len(active._pending_accepted_requests) == 1
+            assert not sending.done() and len(fixture.runners) == 2
+            assert fixture.runners[-1]._execution["active_attempt_id"] == "att_0002"
+            business = [payload for payload in fixture.model.requests if payload.get("stream")]
+            assert [row["content"] for row in business[-1]["messages"] if row["role"] == "user"] == [
+                fixture.original_text,
+                fixture.reentry_text,
+            ]
+        if old is not None:
+            assert old._pending_accepted_requests == old_pending
+    finally:
+        if original_control_bytes is not None:
+            (fixture.persistence.root / "execution-control" / (fixture.context_id + ".json")).write_bytes(
+                original_control_bytes
+            )
+        await fixture.close()

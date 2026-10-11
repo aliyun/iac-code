@@ -19,12 +19,14 @@ from contextlib import asynccontextmanager, suppress
 from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Any, AsyncIterator, Literal, TypeVar
 
 from iac_code.a2a.backup import (
     NATURAL_HANDOFF_VERSION,
     SessionBackupHandoffError,
+    SessionBackupJob,
     await_fenced,
     run_sync_fenced,
     run_sync_fenced_with_cancel_completion,
@@ -100,17 +102,21 @@ def _settled_ros_stack_operations(document: dict[str, Any]) -> bool:
     """Recognize completed ROS stack writes whose resource identity was recorded."""
 
     operations = document.get("externalOperations")
-    return isinstance(operations, list) and bool(operations) and all(
-        isinstance(operation, dict)
-        and operation.get("product") == "ros"
-        and operation.get("action") in {"CreateStack", "UpdateStack", "DeleteStack", "ContinueCreateStack"}
-        and operation.get("outcome") == "accepted"
-        and operation.get("resourceType") == "stack"
-        and isinstance(operation.get("resourceId"), str)
-        and bool(operation["resourceId"])
-        and isinstance(operation.get("regionId"), str)
-        and bool(operation["regionId"])
-        for operation in operations
+    return (
+        isinstance(operations, list)
+        and bool(operations)
+        and all(
+            isinstance(operation, dict)
+            and operation.get("product") == "ros"
+            and operation.get("action") in {"CreateStack", "UpdateStack", "DeleteStack", "ContinueCreateStack"}
+            and operation.get("outcome") == "accepted"
+            and operation.get("resourceType") == "stack"
+            and isinstance(operation.get("resourceId"), str)
+            and bool(operation["resourceId"])
+            and isinstance(operation.get("regionId"), str)
+            and bool(operation["regionId"])
+            for operation in operations
+        )
     )
 
 
@@ -154,9 +160,7 @@ def _claim_remnant_admits_input_recovery(
     ):
         return False
     revisions = (document.get("revision"), document.get("persistedRevision"))
-    if any(
-        not isinstance(revision, int) or isinstance(revision, bool) or revision < 0 for revision in revisions
-    ):
+    if any(not isinstance(revision, int) or isinstance(revision, bool) or revision < 0 for revision in revisions):
         return False
     if revisions[0] != revisions[1]:
         # Only a fully persisted publication is a settled remnant.
@@ -261,6 +265,30 @@ class _RecoverableInputAdmission:
 class _PersistedControlActivation:
     previous_control: dict[str, Any] | None
     execution_id: str
+
+
+@dataclass(frozen=True)
+class _NaturalHandoffBeginAuthority:
+    context_id: str
+    task_id: str
+    execution_id: str
+    owner: str
+    owner_generation: int
+
+    @classmethod
+    def from_control(cls, control: ExecutionController) -> _NaturalHandoffBeginAuthority:
+        return cls(control.context_id, control.task_id, control.execution_id, control.owner, control.owner_generation)
+
+    def matches(self, document: dict[str, Any] | None) -> bool:
+        return bool(
+            document is not None
+            and document.get("contextId") == self.context_id
+            and document.get("taskId") == self.task_id
+            and document.get("executionId") == self.execution_id
+            and document.get("owner") == self.owner
+            and type(document.get("ownerGeneration")) is int
+            and document["ownerGeneration"] == self.owner_generation
+        )
 
 
 class _RecoverableInputAdmissionStore:
@@ -372,11 +400,15 @@ class _RecoverableInputAdmissionStore:
         local_server_instance_id: str,
         local_input_handoff_ready: bool,
         control_snapshot: dict[str, Any],
+        *,
+        expected_natural_handoff: _NaturalHandoffBeginAuthority | None = None,
     ) -> _PersistedControlActivation | None:
         """Validate shared state and atomically publish its next running owner."""
         if local_input_handoff_ready:
             return None
         if self._root is None:
+            if expected_natural_handoff is not None:
+                return None
             return _PersistedControlActivation(
                 previous_control=None,
                 execution_id=str(control_snapshot["executionId"]),
@@ -387,6 +419,12 @@ class _RecoverableInputAdmissionStore:
                 return None
             control_path = self._root / f"{context_id}.json"
             previous_control = self._load_document(control_path)
+            if expected_natural_handoff is not None and (
+                previous_control is None
+                or not expected_natural_handoff.matches(previous_control)
+                or not self._persisted_natural_handoff_admits_replacement(previous_control, context_id)
+            ):
+                return None
             if not self._persisted_control_allows_begin_without_admission(
                 previous_control,
                 context_id=context_id,
@@ -409,6 +447,8 @@ class _RecoverableInputAdmissionStore:
         cls,
         control_path: Path,
         control_snapshot: dict[str, Any],
+        *,
+        expected_natural_retry: _NaturalHandoffBeginAuthority | None = None,
     ) -> bool:
         """Persist without replacing a newer owner or revision."""
         revision = int(control_snapshot["revision"])
@@ -416,6 +456,13 @@ class _RecoverableInputAdmissionStore:
         persisted_snapshot["persistedRevision"] = revision
         with cross_process_file_lock(cls._lock_path_for_control(control_path)):
             current = cls._load_document(control_path)
+            if expected_natural_retry is not None and (
+                not expected_natural_retry.matches(current)
+                or current is None
+                or current.get("terminationReason") != "natural_completion"
+                or current.get("phase") != "terminated"
+            ):
+                return False
             if current is not None:
                 execution_id = str(control_snapshot["executionId"])
                 if current.get("executionId") != execution_id:
@@ -971,6 +1018,8 @@ class ExecutionController:
         self._release_commit_inflight = False
         self._backup_state_committed = False
         self._pending_staged_backup: BackupResult | None = None
+        self._pending_natural_backup_job: SessionBackupJob | None = None
+        self._natural_retry_authority: _NaturalHandoffBeginAuthority | None = None
         self._persistence_path = persistence_path
         self._backup_service = backup_service
         self._backup_coordinator = backup_coordinator
@@ -1121,6 +1170,8 @@ class ExecutionController:
             self._commit_error = None
             self._backup_state_committed = False
             self._pending_staged_backup = None
+            self._pending_natural_backup_job = None
+            self._natural_retry_authority = None
             self._termination_cleanup_complete = self._termination_cleanup is None
             self._termination_cleanup_inflight = False
             self._natural_completion_generation = None
@@ -1513,9 +1564,7 @@ class ExecutionController:
                     # hands ownership over before publishing its backup.
                     if self._pending_explicit_termination_reason is None:
                         self._pending_explicit_termination_reason = reason
-                    self._resolve_natural_finalization_waiter_locked(
-                        self._claimed_natural_completion_generation
-                    )
+                    self._resolve_natural_finalization_waiter_locked(self._claimed_natural_completion_generation)
                 return self.snapshot()
             termination_generation = self._claim_termination_locked(reason)
             snapshot = self.snapshot()
@@ -2156,6 +2205,8 @@ class ExecutionController:
         slot.result.set_result(snapshot)
 
     def _claim_termination_locked(self, reason: str) -> int:
+        self._pending_natural_backup_job = None
+        self._natural_retry_authority = None
         self._resolve_natural_finalization_waiter_locked(self._claimed_natural_completion_generation)
         self._natural_completion_generation = None
         self._natural_completion_delivered_generation = None
@@ -2196,6 +2247,8 @@ class ExecutionController:
     def _claim_natural_completion_locked(self) -> int:
         """Atomically claim non-canceling finalization for a drained business turn."""
 
+        self._pending_natural_backup_job = None
+        self._natural_retry_authority = None
         self._claimed_natural_completion_generation = self._natural_completion_delivered_generation
         self._natural_completion_generation = None
         self._natural_completion_delivered_generation = None
@@ -2405,7 +2458,9 @@ class ExecutionController:
             return
         await self._commit_natural_handoff(generation, completion_generation)
 
-    async def _commit_natural_handoff(self, generation: int, completion_generation: int | None) -> None:
+    async def _commit_natural_handoff(
+        self, generation: int, completion_generation: int | None, *, resume: bool = False
+    ) -> None:
         """Delegate the directory copy, then publish the business handoff receipt."""
 
         coordinator = self._backup_coordinator
@@ -2413,16 +2468,33 @@ class ExecutionController:
             await self._perform_backup(generation)
             return
         try:
-            handoff = await coordinator.register_boundary(
-                cwd=self.cwd,
-                session_id=self.session_id,
-                context_id=self.context_id,
-                execution_id=self.execution_id,
-                boundary="natural_completion",
-                reason=BackupReason.TERMINAL,
-                completion_generation=completion_generation,
-            )
+            if resume:
+                job = self._pending_natural_backup_job
+                if job is None:
+                    raise SessionBackupHandoffError("natural completion retry has no original backup job")
+                handoff = await coordinator.resume_natural_completion(
+                    job,
+                    cwd=self.cwd,
+                    session_id=self.session_id,
+                    context_id=self.context_id,
+                    execution_id=self.execution_id,
+                    completion_generation=completion_generation,
+                )
+            else:
+                handoff = await coordinator.register_boundary(
+                    cwd=self.cwd,
+                    session_id=self.session_id,
+                    context_id=self.context_id,
+                    execution_id=self.execution_id,
+                    boundary="natural_completion",
+                    reason=BackupReason.TERMINAL,
+                    completion_generation=completion_generation,
+                )
         except SessionBackupHandoffError as exc:
+            async with self._condition:
+                if self._owns_termination_locked(generation) and self.termination_reason == "natural_completion":
+                    if not resume:
+                        self._pending_natural_backup_job = exc.job
             await self._commit_blocked_backup_state(
                 "session backup job could not be persisted",
                 exc,
@@ -2615,6 +2687,22 @@ class ExecutionController:
         await self._perform_backup(generation)
 
     async def _retry_backup(self, generation: int) -> None:
+        async with self._condition:
+            if not self._owns_termination_locked(generation):
+                return
+            natural_retry = bool(
+                self.termination_reason == "natural_completion"
+                and self._backup_coordinator is not None
+                and getattr(self._backup_coordinator, "enabled", False)
+                and self.session_id is not None
+            )
+            completion_generation = self._claimed_natural_completion_generation
+            if natural_retry:
+                self._natural_retry_authority = _NaturalHandoffBeginAuthority.from_control(self)
+        if natural_retry:
+            async with self._backup_lock:
+                await self._commit_natural_handoff(generation, completion_generation, resume=True)
+            return
         await self._perform_backup(generation)
 
     async def _perform_backup(self, generation: int) -> None:
@@ -2877,13 +2965,23 @@ class ExecutionController:
         async with self._commit_lock:
             if revision <= self.persisted_revision:
                 return
+            writer: Callable[[Path, dict[str, Any]], bool] = (
+                _RecoverableInputAdmissionStore.persist_snapshot_if_current_owner
+            )
+            expected_natural_retry = (
+                self._natural_retry_authority if snapshot.get("terminationReason") == "natural_completion" else None
+            )
+            if expected_natural_retry is not None:
+                writer = partial(writer, expected_natural_retry=expected_natural_retry)
             persisted = await run_sync_fenced(
-                _RecoverableInputAdmissionStore.persist_snapshot_if_current_owner,
+                writer,
                 self._persistence_path,
                 snapshot,
             )
             if persisted:
                 self.persisted_revision = revision
+            elif expected_natural_retry is not None:
+                raise ExecutionControlConflictError("Natural completion retry owner changed")
 
     def _spawn(self, awaitable: Awaitable[Any], name: str) -> asyncio.Task[Any]:
         task = asyncio.ensure_future(awaitable)
@@ -2979,14 +3077,31 @@ class ExecutionControlService:
         execution_mode: str = "normal",
         continue_input_required: bool = False,
         recoverable_input_admission: str | None = None,
+        expected_natural_handoff_control: ExecutionController | None = None,
     ) -> ExecutionController:
         task = asyncio.current_task()
         if task is None:
             raise RuntimeError("A2A execution requires an asyncio Task")
+        expected_natural_handoff = (
+            _NaturalHandoffBeginAuthority.from_control(expected_natural_handoff_control)
+            if expected_natural_handoff_control is not None
+            else None
+        )
         await self._await_local_snapshot_quiescence(context_id)
         retired_control: ExecutionController | None = None
         async with self._context_start_locks.setdefault(context_id, asyncio.Lock()):
             control = self._controls.get(context_id)
+            if expected_natural_handoff is not None and (
+                control is not expected_natural_handoff_control
+                or expected_natural_handoff.context_id != context_id
+                or expected_natural_handoff.task_id != task_id
+                or expected_natural_handoff.owner != owner
+                or control is None
+                or control.cwd != cwd
+                or not expected_natural_handoff.matches(control.snapshot())
+                or not control.natural_handoff_admits_replacement()
+            ):
+                raise ExecutionControlConflictError("Current execution must finish recovery before a new task starts")
             if control is not None and control.owner != owner:
                 raise ExecutionControlNotFoundError("Execution was not found")
             admission = self._recoverable_input_admissions.get(recoverable_input_admission)
@@ -3149,8 +3264,13 @@ class ExecutionControlService:
 
                 await control.attach_task(task, mark_working=False)
                 try:
+                    claim_begin: Callable[..., _PersistedControlActivation | None] = (
+                        self._recoverable_input_admissions.claim_begin_without_admission
+                    )
+                    if expected_natural_handoff is not None:
+                        claim_begin = partial(claim_begin, expected_natural_handoff=expected_natural_handoff)
                     claim = await run_sync_fenced_with_cancel_completion(
-                        self._recoverable_input_admissions.claim_begin_without_admission,
+                        claim_begin,
                         cleanup_cancelled_claim,
                         context_id,
                         retired_control.execution_id if retired_control is not None else None,

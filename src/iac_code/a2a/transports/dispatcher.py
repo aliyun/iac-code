@@ -110,6 +110,7 @@ from iac_code.a2a.request_scoped_active_task import (
 from iac_code.a2a.resource_selector import parse_resource_selection_response
 from iac_code.a2a.runtime_registry import A2ARuntimeOwner, A2ARuntimeRegistration, register_runtime_owner
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.a2a.types import TASK_STATE_CANCELED
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode
 from iac_code.services.permission_wait import PermissionWaitCheckpointStore
@@ -417,6 +418,8 @@ def create_runtime_components(
     task_store = A2ATaskStore(metrics=metrics, persistence=persistence, backup_service=backup_service)
     from iac_code.a2a.execution_control import ExecutionControlService
 
+    if backup_staging_process is not None:
+        backup_staging_process.coordinator_state_root = Path(persistence.root) if persistence is not None else None
     backup_coordinator = SessionBackupCoordinator(
         backup_service,
         state_root=Path(persistence.root) if persistence is not None else None,
@@ -635,6 +638,41 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             ),
         )
 
+    async def _reject_explicit_canceled_pipeline_task(self, params: SendMessageRequest, context: Any) -> None:
+        """Keep an old lifecycle ledger from masking the SDK's terminal refusal."""
+
+        message = params.message
+        task_id = getattr(message, "task_id", None)
+        context_id = getattr(message, "context_id", None)
+        if (
+            not task_id
+            or not context_id
+            or resolve_request_run_mode(message) is not RunMode.PIPELINE
+            or parse_permission_response(message) is not None
+            or parse_resource_selection_response(message) is not None
+            or not isinstance(self.task_store, A2ATaskStore)
+        ):
+            return
+        task = await self.task_store.get(task_id, context)
+        if (
+            task is None
+            or task.id != task_id
+            or task.context_id != context_id
+            or task.status.state != TaskState.TASK_STATE_CANCELED
+        ):
+            return
+        record = await self.task_store.get_task_record(task_id)
+        if (
+            record.task_id != task_id
+            or record.context_id != context_id
+            or record.owner != self.task_store.owner_for_context(context)
+            or record.state != TASK_STATE_CANCELED
+        ):
+            return
+        # This refuses an unaccepted hint only. The omitted-task resolver must
+        # independently prove writer release, reserve its successor, and win CAS.
+        raise InvalidParamsError(f"Task {task.id} is in terminal state: {task.status.state}")
+
     async def _release_untransferred_recovery(
         self,
         params: SendMessageRequest,
@@ -695,15 +733,32 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         ):
             state = finalized_state if isinstance(finalized_state, dict) else {}
             blockers = state.get("blockers")
-            blocker_counts = {
-                item["kind"]: item["count"] for item in blockers if isinstance(item, dict)
-                and item.get("kind") in {"execution", "agent_loop", "background_agent", "permission_cleanup",
-                                         "tool", "tool_batch", "llm"}
-                and type(item.get("count")) is int and 0 < item["count"] <= 10000
-            } if isinstance(blockers, list) else {}
+            blocker_counts = (
+                {
+                    item["kind"]: item["count"]
+                    for item in blockers
+                    if isinstance(item, dict)
+                    and item.get("kind")
+                    in {
+                        "execution",
+                        "agent_loop",
+                        "background_agent",
+                        "permission_cleanup",
+                        "tool",
+                        "tool_batch",
+                        "llm",
+                    }
+                    and type(item.get("count")) is int
+                    and 0 < item["count"] <= 10000
+                }
+                if isinstance(blockers, list)
+                else {}
+            )
             logger.warning(
                 "A2A natural handoff unavailable: phase=%s status=%s blocker_counts=%s",
-                state.get("phase"), state.get("executionStatus"), json.dumps(blocker_counts, sort_keys=True),
+                state.get("phase"),
+                state.get("executionStatus"),
+                json.dumps(blocker_counts, sort_keys=True),
             )
             raise RuntimeError("Natural completion did not produce an exact durable handoff receipt")
 
@@ -738,6 +793,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         permission_response = parse_permission_response(params.message)
         resource_selection_response = parse_resource_selection_response(params.message)
         input_response = permission_response or resource_selection_response
+        if input_response is None:
+            await self._reject_explicit_canceled_pipeline_task(params, context)
         if input_response is not None and not params.message.task_id:
             params.message.task_id = input_response.task_id
         if permission_response is not None:
@@ -801,6 +858,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         permission_response = parse_permission_response(params.message)
         resource_selection_response = parse_resource_selection_response(params.message)
         input_response = permission_response or resource_selection_response
+        if input_response is None:
+            await self._reject_explicit_canceled_pipeline_task(params, context)
         if input_response is not None and not params.message.task_id:
             params.message.task_id = input_response.task_id
         if permission_response is not None:

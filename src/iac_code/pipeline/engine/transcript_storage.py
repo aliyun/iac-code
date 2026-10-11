@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import stat
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,15 @@ from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.state_io import append_jsonl_locked, open_text_no_follow, write_text_no_follow
 
 _SAFE_TRANSCRIPT_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+
+@dataclass(frozen=True)
+class FirstModelRequestTranscript:
+    sha256: str
+    message_json: str
+
+    def messages(self) -> list[Message]:
+        return [Message.from_dict(json.loads(self.message_json))]
 
 
 class PipelineTranscriptStorage:
@@ -126,6 +137,42 @@ class PipelineTranscriptStorage:
                 raise
             return []
         return messages
+
+    def first_model_request_digest(self, cwd: str, transcript_id: str) -> str | None:
+        snapshot = self.first_model_request_snapshot(cwd, transcript_id)
+        return snapshot.sha256 if snapshot is not None else None
+
+    def first_model_request_snapshot(self, cwd: str, transcript_id: str) -> FirstModelRequestTranscript | None:
+        """Parse and hash the same complete bytes under the session mutation guard."""
+        try:
+            with session_mutation_guard(self._session_root or self._sidecar_dir):
+                path = self.session_path(cwd, transcript_id)
+                if not _is_regular_file_entry(path):
+                    return None
+                with open_text_no_follow(path, "r", encoding="utf-8") as stream:
+                    raw = stream.buffer.read()
+                text = raw.decode("utf-8")
+                if not text.endswith("\n"):
+                    return None
+                lines = text.splitlines()
+                if len(lines) != 1 or not lines[0].strip():
+                    return None
+                row = json.loads(lines[0])
+                if not isinstance(row, dict) or row.get("session_id") != transcript_id or row.get("cwd") != cwd:
+                    return None
+                message = Message.from_dict(row)
+                if message.role != "user" or not message.content:
+                    return None
+                if isinstance(message.content, list) and any(
+                    block.type not in {"text", "image"} for block in message.content
+                ):
+                    return None
+                return FirstModelRequestTranscript(
+                    sha256=hashlib.sha256(raw).hexdigest(),
+                    message_json=message.model_dump_json(),
+                )
+        except (OSError, ValueError, UnicodeError, TypeError):
+            return None
 
     def exists(self, cwd: str, session_id: str) -> bool:
         return _is_regular_file_entry(self.session_path(cwd, session_id))

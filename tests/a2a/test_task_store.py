@@ -118,7 +118,44 @@ class _StagedCancelBackup:
 
 
 @pytest.mark.asyncio
-async def test_canceled_task_release_proof_accepts_real_staged_execution_controller_receipt(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "reason,corruption",
+    [
+        pytest.param("explicit_terminate", None, id="explicit-stop"),
+        pytest.param("stream_terminal_cleanup", None, id="stream-cleanup-stop"),
+        pytest.param("disconnect_timeout", None, id="disconnect-is-not-explicit-stop"),
+        pytest.param("deadline_exceeded", None, id="deadline-is-not-explicit-stop"),
+        pytest.param("natural_completion", None, id="natural-is-not-explicit-stop"),
+        pytest.param("task_canceled", None, id="arbitrary-cancel-is-not-explicit-stop"),
+        *[
+            pytest.param("stream_terminal_cleanup", corruption, id=name)
+            for name, corruption in [
+                ("active-owner", {"activeOwner": True}),
+                ("context-owner", {"contextOwner": True}),
+                ("owner-not-canceled", {"ownerState": "completed"}),
+                ("list-reason", {"terminationReason": ["stream_terminal_cleanup"]}),
+                ("object-reason", {"terminationReason": {"reason": "stream_terminal_cleanup"}}),
+                ("wrong-context", {"contextId": "another-context"}),
+                ("wrong-task", {"taskId": "another-task"}),
+                ("missing-execution", {"executionId": ""}),
+                ("not-terminated", {"phase": "terminating"}),
+                ("not-canceled", {"executionStatus": "completed"}),
+                ("not-release-ready", {"releaseReady": False}),
+                ("commit-failed", {"commitError": "state_commit_failed"}),
+                ("revision-not-durable", {"persistedRevision": -1}),
+                ("invalid-revision", {"revision": True, "persistedRevision": True}),
+                ("blockers-remain", {"blockers": [{"id": "active-writer"}]}),
+                ("backup-pending", {"backup": {"status": "pending"}}),
+                ("backup-blocked", {"backup": {"status": "blocked"}}),
+                ("missing-backup-generation", {"backup": {"status": "staged_committed", "commitId": "commit-7"}}),
+                ("missing-backup-commit", {"backup": {"status": "staged_committed", "generation": 7}}),
+            ]
+        ],
+    ],
+)
+async def test_canceled_task_release_proof_requires_complete_durable_execution_receipt(
+    tmp_path: Path, reason: str, corruption: dict | None
+) -> None:
     persistence = A2APersistenceStore(tmp_path / "a2a")
     store = A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence)
     context = await store.get_or_create_context(
@@ -140,17 +177,35 @@ async def test_canceled_task_release_proof_accepts_real_staged_execution_control
         execution_id="exec-1",
     )
     control.bind_session(context.session_id)
+    active_writer = None
     try:
         await control.terminate(
             execution_id="exec-1",
             request_id="cancel-1",
             connection_epoch=1,
-            reason="explicit_terminate",
+            reason="explicit_terminate" if reason == "disconnect_timeout" else reason,
         )
         await wait_until(lambda: control.release_ready)
+        if corruption is not None or reason == "disconnect_timeout":
+            snapshot = persistence.load_execution_control("ctx-1")
+            assert snapshot is not None
+            changes = dict(corruption or {"terminationReason": reason})
+            if changes.pop("activeOwner", False):
+                active_writer = asyncio.create_task(asyncio.Event().wait())
+                task.active_task = active_writer
+            if changes.pop("contextOwner", False):
+                context.active_task_id = "task-1"
+            owner_state = changes.pop("ownerState", None)
+            if owner_state is not None:
+                task.state = owner_state
+            snapshot.update(changes)
+            (persistence.root / "execution-control" / "ctx-1.json").write_text(json.dumps(snapshot), encoding="utf-8")
 
         proof = await store.canceled_task_release_proof(context_id="ctx-1", task_id="task-1")
 
+        if corruption is not None or reason not in {"explicit_terminate", "stream_terminal_cleanup"}:
+            assert proof is None
+            return
         assert proof == {
             "executionId": "exec-1",
             "revision": control.persisted_revision,
@@ -158,6 +213,9 @@ async def test_canceled_task_release_proof_accepts_real_staged_execution_control
             "backupCommitId": "cancel-commit-7",
         }
     finally:
+        if active_writer is not None:
+            active_writer.cancel()
+            await asyncio.gather(active_writer, return_exceptions=True)
         await control.close()
 
 
