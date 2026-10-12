@@ -544,6 +544,7 @@ def _summarize_sse(
     *,
     session_id: str | None = None,
     mode: str = "normal",
+    permission_response: dict | None = None,
 ) -> dict:
     summary = bridge.StreamSummary(session_id, mode=mode)
     diagnostics = []
@@ -554,6 +555,12 @@ def _summarize_sse(
             diagnostics.append(event["raw"])
         else:
             summary.apply(payload)
+            # Match the production sideband reader: stop at its correlated
+            # acknowledgement, even if buffered CLI stdout also has parent output.
+            if permission_response is not None and bridge._permission_response_is_acknowledged(
+                permission_response, summary.permission_ack
+            ):
+                break
     return summary.to_result(0, stderr or "\n".join(diagnostics))
 
 
@@ -1512,7 +1519,10 @@ def test_sub_pipeline_permissions_round_trip_through_real_aliyun_cli_and_a2a(
             session_id=session.session_id,
             mode="pipeline",
         )
-        first_ack = _summarize_sse(stdout, stderr, session_id=session.session_id, mode="pipeline")
+        first_ack = _summarize_sse(
+            stdout, stderr, session_id=session.session_id, mode="pipeline",
+            permission_response=dict(first_permission, decision="allow_once"),
+        )
         assert first_ack["state"] == "permission-responded"
         assert first_ack["permissionAck"]["accepted"] is True
         assert first_ack["permissionAck"]["inputId"] == first_permission["inputId"]
@@ -1542,7 +1552,10 @@ def test_sub_pipeline_permissions_round_trip_through_real_aliyun_cli_and_a2a(
             session_id=session.session_id,
             mode="pipeline",
         )
-        second_ack = _summarize_sse(stdout, stderr, session_id=session.session_id, mode="pipeline")
+        second_ack = _summarize_sse(
+            stdout, stderr, session_id=session.session_id, mode="pipeline",
+            permission_response=dict(second_permission, decision="deny"),
+        )
         assert second_ack["state"] == "permission-responded"
         assert second_ack["permissionAck"]["accepted"] is True
         assert second_ack["permissionAck"]["inputId"] == second_permission["inputId"]

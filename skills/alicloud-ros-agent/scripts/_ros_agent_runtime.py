@@ -2,6 +2,406 @@
 # Loaded by ros_agent.py into its shared module namespace; do not execute directly.
 # ruff: noqa: F821,N802 -- names are shared; HTTP handler names are framework-defined.
 
+def _is_remote_cli(job: Dict[str, Any]) -> bool:
+    return job.get("transport") == "aliyun_cli" and job.get("aliyunCLIExecutionMode") == "remote"
+
+
+def _valid_foreground_command(command: Any, job: Dict[str, Any]) -> bool:
+    if not isinstance(command, list) or not all(isinstance(value, str) for value in command):
+        return False
+    return command[:3] == [job["aliyunPath"], "ros", "start-chat"]
+
+
+def _remote_cli_root(job_id: str) -> pathlib.Path:
+    """Keep live CLI IPC off the durable state tree, which may be an OSS mount."""
+    job_root = _job_paths(job_id)[0]
+    namespace = hashlib.sha256(os.fsencode(str(job_root.parent.parent))).hexdigest()[:24]
+    root = pathlib.Path(tempfile.gettempdir()) / ("alicloud-ros-agent-ipc-" + namespace)
+    for directory in (root, root / job_id):
+        directory.mkdir(mode=0o700, exist_ok=True)
+        if (directory.is_symlink() or not directory.is_dir()
+                or (os.name != "nt" and directory.stat().st_uid != os.getuid())):
+            raise BridgeError("invalid_config", "The remote CLI temporary directory is not private to this user.")
+        if os.name != "nt":
+            os.chmod(str(directory), 0o700)
+    return root / job_id
+
+
+class _ForegroundCLIProcess:
+    """A worker-side stream reader; only a foreground command may launch the CLI.
+
+    The private local-temp mailbox contains arguments/output, never host authorization
+    values. Keeping the parser worker alive preserves its committed cursor and
+    partial summary across foreground windows, including sideband streams.
+    """
+
+    def __init__(
+        self, job_id: str, command: List[str], environment: Dict[str, str], stderr: Any, worker_role: str,
+        debug: bool = False,
+    ) -> None:
+        root = _remote_cli_root(job_id)
+        self.job_id = job_id
+        self.path = root / ("remote-cli-{}.request.json".format(uuid.uuid4().hex))
+        self.output = self.path.with_suffix(".stdout")
+        self.errors = self.path.with_suffix(".stderr")
+        self.result_path = self.path.with_suffix(".result")
+        self.stop_path = self.path.with_suffix(".stop")
+        self.stderr = stderr
+        self.stdout = self
+        self.output_handle = None
+        self.stopping = False
+        self.closed = False
+        self.final_result = None  # type: Optional[Dict[str, Any]]
+        self.next_job_check = 0.0
+        self.on_idle = None
+        for path in (self.output, self.errors):
+            with path.open("wb"):
+                pass
+            if os.name != "nt":
+                os.chmod(str(path), 0o600)
+        request = {
+            "command": command,
+            "workerRole": worker_role,
+            "parserPid": os.getpid(),
+            "bootstrap": {key: environment[key] for key in (
+                REMOTE_BOOTSTRAP_INVOCATION_ENV, REMOTE_BOOTSTRAP_ACK_FILE_ENV, REMOTE_BOOTSTRAP_PROTOCOL_ENV
+            ) if key in environment},
+        }
+        if debug:
+            request["queuedAtUnixMs"] = round(time.time() * 1000)
+        _atomic_json(self.path, request)
+
+    def _result(self) -> Optional[Dict[str, Any]]:
+        if self.closed:
+            return self.final_result
+        if self.result_path.exists():
+            return _load_state_json(self.result_path)
+        owner = _load_state_json(self.path).get("ownerPid")
+        if owner is None and self.stop_path.exists():
+            return {"returnCode": 1, "interrupted": True}
+        if isinstance(owner, int) and not _pid_alive(owner):
+            return {"returnCode": 1, "interrupted": True}
+        if owner is None and time.monotonic() >= self.next_job_check:
+            job = _load_state_json(_job_paths(self.job_id)[1])
+            stopped = job.get("stopRequestedAt") is not None or (
+                _load_state_json(self.path).get("workerRole") != "sideband"
+                and _serial_input_boundary(job.get("inputRequired"), job.get("permissionWait"))
+            )
+            self.next_job_check = time.monotonic() + 0.25
+            if stopped:
+                return {"returnCode": 1, "interrupted": True}
+        return None
+
+    def __iter__(self) -> Iterator[str]:
+        pending = b""
+        finished = False
+        with self.output.open("rb") as handle:
+            self.output_handle = handle
+            while True:
+                chunk = handle.readline(MAX_CLI_BATCH_BYTES + 1)
+                if chunk:
+                    pending += chunk
+                    if len(pending) > MAX_CLI_BATCH_BYTES:
+                        raise BridgeError("stream_failed", "Alibaba Cloud CLI output exceeded its batch limit.")
+                    if pending.endswith(b"\n"):
+                        yield pending.decode("utf-8", "replace")
+                        pending = b""
+                elif finished:
+                    if pending:
+                        yield pending.decode("utf-8", "replace")
+                    return
+                elif self._result() is not None:
+                    # Publication can race with the preceding EOF read. Drain
+                    # again after .result, which is written after stdout closes.
+                    finished = True
+                else:
+                    if self.on_idle is not None and self.on_idle() is False:
+                        self.terminate()
+                    time.sleep(0.02)
+
+    def poll(self) -> Optional[int]:
+        result = self._result()
+        return int(result["returnCode"]) if result is not None else None
+
+    def wait(self, timeout: Optional[float] = None) -> int:
+        deadline = time.monotonic() + timeout if timeout is not None else None
+        while True:
+            result = self._result()
+            if result is not None:
+                if result.get("interrupted") is True and not self.stopping:
+                    raise BridgeError(
+                        "stream_failed", "The remote CLI reader stopped; reconnect from the committed event ID.", True
+                    )
+                return int(result["returnCode"])
+            if deadline is not None and time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired("remote aliyun", timeout)
+            time.sleep(0.02)
+
+    def terminate(self) -> None:
+        self.stopping = True
+        _atomic_json(self.stop_path, {"stop": True})
+
+    def kill(self) -> None:
+        self.terminate()
+
+    def close(self) -> None:
+        self.final_result = self._result()
+        self.closed = True
+        if self.output_handle is not None:
+            self.output_handle.close()
+        with self.errors.open("rb") as handle:
+            self.stderr.write(handle.read(MAX_DIAGNOSTIC_BYTES))
+        with StateLock(self.path.parent / ".remote-cli.lock"):
+            for path in (self.path, self.output, self.errors, self.result_path, self.stop_path):
+                with contextlib.suppress(OSError):
+                    path.unlink()
+
+
+def run_remote_cli(job_id: str, invocation_id: str) -> int:
+    """Own one foreground-launched CLI stream, without launching any retries."""
+    if re.fullmatch(r"[0-9a-f]{32}", invocation_id) is None:
+        raise BridgeError("invalid_input", "The remote CLI invocation is invalid.")
+    job_root, job_path, _spool = _job_paths(job_id)
+    root = _remote_cli_root(job_id)
+    job = _load_state_json(job_path)
+    path = root / ("remote-cli-{}.request.json".format(invocation_id))
+    request = _load_state_json(path)
+    command = request.get("command")
+    if (
+        not _is_remote_cli(job) or not _valid_foreground_command(command, job)
+    ):
+        raise BridgeError("invalid_input", "The remote CLI invocation is invalid.")
+    debug_log = (
+        _RemoteCLIDebugLog(
+            pathlib.Path(job["workspace"]), request["bootstrap"][REMOTE_BOOTSTRAP_INVOCATION_ENV],
+            "--query" not in command, request["workerRole"],
+            argparse.Namespace(debug_job_id=job_id, debug_request_seq=job["activeRequestSeq"]),
+            record_start=False,
+        ) if job.get("debug") is True else None
+    )
+    process = None
+    interrupted = False
+    interrupt_reason = None
+    return_code = 1
+    queue_to_launch_ms = None
+    cli_started = time.monotonic()
+    started_utc = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    with path.with_suffix(".stdout").open("a+b", buffering=0) as stdout, \
+            path.with_suffix(".stderr").open("a+b", buffering=0) as stderr:
+        try:
+            # The foreground caller waits for this handoff. Never start a new
+            # operation if that caller has already disappeared.
+            with StateLock(root / ".remote-cli.lock"):
+                launcher = _load_state_json(path).get("ownerPid")
+                if (not isinstance(launcher, int) or not _pid_alive(launcher)
+                        or path.with_suffix(".stop").exists()):
+                    interrupted = True
+                    return 1
+                with StateLock(job_root / ".job.lock"):
+                    latest = _load_state_json(job_path)
+                    if latest.get("stopRequestedAt") is not None:
+                        interrupted = True
+                        return 1
+                    latest["remoteCLIStartedAt"] = int(time.time())
+                    _atomic_json(job_path, latest)
+                    environment = dict(os.environ)
+                    environment.update(request["bootstrap"])
+                    cli_started = time.monotonic()
+                    queued_at = request.get("queuedAtUnixMs")
+                    if debug_log is not None and isinstance(queued_at, (int, float)):
+                        queue_to_launch_ms = max(0, round(time.time() * 1000 - queued_at))
+                    process = subprocess.Popen(
+                        command, cwd=job["workspace"], stdin=subprocess.DEVNULL,
+                        stdout=stdout, stderr=stderr, env=environment,
+                    )
+                request["ownerPid"] = os.getpid()
+                request["cliPid"] = process.pid
+                _atomic_json(path, request)
+            next_job_check = 0.0
+            while process.poll() is None:
+                stopped = path.with_suffix(".stop").exists() or not _pid_alive(request["parserPid"])
+                if not _pid_alive(launcher):
+                    stopped = True
+                    interrupt_reason = "foreground-exited"
+                if not stopped and time.monotonic() >= next_job_check:
+                    stopped = _load_state_json(job_path).get("stopStatus") in {"Stopped", "NoActiveStream"}
+                    next_job_check = time.monotonic() + 0.25
+                if stopped:
+                    _stop_process(process)
+                    interrupted = True
+                    interrupt_reason = interrupt_reason or "local-reader-stopped"
+                    break
+                time.sleep(0.02)
+            return_code = process.wait()
+        except OSError:
+            stderr.write(b"Alibaba Cloud CLI could not be started.")
+        finally:
+            if process is not None and process.poll() is None:
+                _stop_process(process)
+                return_code = process.returncode
+                interrupted = True
+            cli_finished = time.monotonic()
+            # The parser can unlink the mailbox as soon as .result is visible.
+            # Retain only a bounded snapshot, not open readers which prevent
+            # cleanup on Windows. Redaction and log I/O happen AFTER publication.
+            captured = []
+            if debug_log is not None:
+                with contextlib.suppress(Exception):
+                    limits = ((".stdout", debug_log.MAX_STDOUT_BYTES + 1), (".stderr", MAX_DIAGNOSTIC_BYTES))
+                    for suffix, limit in limits:
+                        # A writer's read view can be stale on a mounted file
+                        # system. Read the bounded snapshot through a fresh FD.
+                        with path.with_suffix(suffix).open("rb") as handle:
+                            captured.append((
+                                handle.read(limit).decode("utf-8", "replace"), os.fstat(handle.fileno()).st_size,
+                            ))
+            stdout.close()
+            stderr.close()
+            if path.exists():
+                _atomic_json(path.with_suffix(".result"), {"returnCode": return_code, "interrupted": interrupted})
+            result_ready = time.monotonic()
+            if debug_log is not None:
+                with contextlib.suppress(Exception):
+                    with debug_log.batch():
+                        debug_log.record("start", operation="start-chat", reconnect="--query" not in command,
+                                         hasQuery="--query" in command, timeUTC=started_utc)
+                        debug_log.record(
+                            "cli-result", returnCode=return_code, interrupted=interrupted,
+                            interruptReason=interrupt_reason,
+                            cliElapsedMs=round((cli_finished - cli_started) * 1000),
+                            queueToLaunchMs=queue_to_launch_ms,
+                            resultReadyDelayMs=round((result_ready - cli_finished) * 1000),
+                            ipcStorage="local-temp",
+                            stdoutBytes=captured[0][1] if captured else None,
+                            stderrBytes=captured[1][1] if len(captured) > 1 else None,
+                        )
+                        if captured:
+                            for _line in debug_log.lines(captured[0][0].splitlines(keepends=True)):
+                                if debug_log.stdout_limited:
+                                    break
+                        if len(captured) > 1:
+                            debug_log.output("stderr", captured[1][0])
+                    debug_log.record("debug-complete", debugElapsedMs=round((time.monotonic() - result_ready) * 1000))
+    return return_code
+
+
+def _drive_foreground_cli(job_id: str, cursor: int, wait_seconds: float) -> None:
+    """Keep the HIL-owning foreground alive while any CLI invocation is busy."""
+    job_root, job_path, _spool = _job_paths(job_id)
+    root = _remote_cli_root(job_id)
+    job = _load_state_json(job_path)
+    environment = _remote_cli_subprocess_environment(
+        job.get("aliyunCLIForwardEnv", []), _capture_remote_cli_environment(job.get("aliyunCLIForwardEnv", []))
+    )
+    deadline = time.monotonic() + wait_seconds
+    next_job_check = 0.0
+    ready = None
+    handoff_deadline = None
+    try:
+        while True:
+            if time.monotonic() >= next_job_check:
+                ready, job = _follow_ready_result(job_id, cursor)
+                next_job_check = time.monotonic() + 0.25
+            with StateLock(root / ".remote-cli.lock"):
+                paths = []
+                active = []
+                for path in root.glob("remote-cli-*.request.json"):
+                    request = _load_state_json(path)
+                    if not _pid_alive(request.get("parserPid")):
+                        continue
+                    paths.append(path)
+                    if (not path.with_suffix(".result").exists()
+                            and request.get("ownerPid") is not None):
+                        active.append(path)
+            return_ready = ready is not None and not isinstance(job.get("sidebandWorkerToken"), str)
+            serial_input = _serial_input_boundary(job.get("inputRequired"), job.get("permissionWait"))
+            stop_for_boundary = (
+                job.get("stopRequestedAt") is not None
+                or serial_input
+                or (return_ready and (
+                    isinstance(job.get("inputRequired"), dict)
+                    or job.get("state") in TERMINAL_STATES | {"turn-completed", "not-active"}
+                ))
+            )
+            if stop_for_boundary:
+                # Serial input must release even an unclaimed reconnect mailbox.
+                # Pipeline sideband input keeps the parent parser/cursor alive.
+                with StateLock(root / ".remote-cli.lock"):
+                    for path in paths if serial_input or job.get("stopRequestedAt") is not None else active:
+                        if path.exists() and not path.with_suffix(".result").exists():
+                            if not path.with_suffix(".stop").exists():
+                                _atomic_json(path.with_suffix(".stop"), {"stop": True})
+                if not active:
+                    if not serial_input or not _pid_alive(job.get("workerPid")):
+                        return
+                    if handoff_deadline is None:
+                        handoff_deadline = time.monotonic() + MANAGER_START_TIMEOUT_SECONDS
+                    if time.monotonic() >= handoff_deadline:
+                        raise BridgeError("job_busy", "The previous input reader is still releasing ownership.", True)
+            elif return_ready and not active:
+                return
+            # The observation timeout is an IDLE timeout, not a lifetime limit
+            # on a pending approval, running CLI, or buffered-output parser.
+            if paths:
+                deadline = time.monotonic() + wait_seconds
+            elif not stop_for_boundary and time.monotonic() >= deadline:
+                # A serial reader can remove its mailbox before releasing
+                # worker ownership. Its handoff deadline, not idle timeout,
+                # governs that final cleanup window.
+                return
+            for path in paths if not stop_for_boundary else []:
+                if path.with_suffix(".result").exists():
+                    continue
+                with StateLock(root / ".remote-cli.lock"):
+                    if not path.exists():
+                        continue
+                    request = _load_state_json(path)
+                    if request.get("ownerPid") is not None:
+                        continue
+                    command = request.get("command")
+                    if (
+                        not _valid_foreground_command(command, job)
+                    ):
+                        raise BridgeError("invalid_input", "The remote CLI invocation is invalid.")
+                    with StateLock(job_root / ".job.lock"):
+                        latest = _load_state_json(job_path)
+                        if latest.get("stopRequestedAt") is not None:
+                            return
+                    request["ownerPid"] = os.getpid()
+                    _atomic_json(path, request)
+                try:
+                    process = subprocess.Popen(
+                        [sys.executable, str(pathlib.Path(__file__).resolve()), "_remote_cli",
+                         "--job-id", job_id, "--invocation-id", path.name.split(".")[0][len("remote-cli-"):]],
+                        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        env=environment, start_new_session=os.name != "nt",
+                        creationflags=getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0,
+                    )
+                except OSError:
+                    _atomic_json(path.with_suffix(".result"), {"returnCode": 1})
+                else:
+                    # This handshake only proves process launch, NOT approval.
+                    # The outer loop remains alive until .result publication.
+                    launch_deadline = time.monotonic() + MANAGER_START_TIMEOUT_SECONDS
+                    while True:
+                        with StateLock(root / ".remote-cli.lock"):
+                            if (not path.exists() or path.with_suffix(".result").exists()
+                                    or isinstance(_load_state_json(path).get("cliPid"), int)):
+                                break
+                            if process.poll() is not None:
+                                _atomic_json(path.with_suffix(".result"), {"returnCode": process.returncode})
+                                break
+                            if time.monotonic() >= launch_deadline:
+                                _atomic_json(path.with_suffix(".stop"), {"stop": True})
+                                raise BridgeError("cli_start_failed", "The remote CLI reader did not start in time.")
+                        time.sleep(0.02)
+            time.sleep(0.02)
+    except KeyboardInterrupt as exc:
+        raise BridgeError(
+            "interrupted", "The foreground CLI was interrupted locally; remote cancellation is not confirmed.", True
+        ) from exc
+
+
 def _run_start_chat(
     args: argparse.Namespace,
     workspace: pathlib.Path,
@@ -32,11 +432,26 @@ def _consume_start_chat(
     stream_sequence = 0
     pending_applied_stream_event_id = None  # type: Optional[str]
     reconnect_attempt = 0
+    stalled_cli_truncations = 0
+    stalled_remote_interruptions = 0
+    debug_log = None
+    projection_stopped = False
+
+    def project_payload(event_id, payload, already_applied):
+        if on_payload is None:
+            return True
+        if debug_log is None:
+            return on_payload(event_id, payload, summary, already_applied)
+        started = time.monotonic()
+        try:
+            return on_payload(event_id, payload, summary, already_applied)
+        finally:
+            debug_log.elapsed["projection"] += time.monotonic() - started
 
     def boundary_is_immediate() -> bool:
         if summary.state in TERMINAL_STATES:
             return False
-        if summary.input_required is not None and not summary.input_required_from_pending:
+        if _serial_input_boundary(summary.input_required, summary.permission_wait):
             return True
         if summary.assistant_final or (summary.mode == "normal" and summary.state == "input-required"):
             return True
@@ -91,8 +506,7 @@ def _consume_start_chat(
         if can_reconnect is not None and can_reconnect() is False:
             if isinstance(observed_session_id, str) and observed_session_id:
                 summary.session_id = observed_session_id
-            if on_payload is not None:
-                on_payload(None, payload, summary, False)
+            project_payload(None, payload, False)
             return False
         event_id = event.get("id")
         heartbeat = str(payload.get("object", "")).lower() in {"heartbeat", "keepalive"}
@@ -110,6 +524,8 @@ def _consume_start_chat(
         if stream_identity is None:
             stream_identity = identity
         if sequence <= stream_sequence:
+            if debug_log is not None:
+                debug_log.replayed_event_count += 1
             return True
 
         already_applied = pending_applied_stream_event_id == event_id
@@ -124,17 +540,26 @@ def _consume_start_chat(
                 )
             pending_applied_stream_event_id = event_id
 
-        if on_payload is not None and on_payload(event_id, payload, summary, already_applied) is False:
+        if project_payload(event_id, payload, already_applied) is False:
             return False
         stream_cursor = event_id
         stream_sequence = sequence
         pending_applied_stream_event_id = None
+        if debug_log is not None:
+            debug_log.committed_event_count += 1
         return True
 
     def result() -> Dict[str, Any]:
         return summary.to_result(0, "\n".join(diagnostics))
 
     while True:
+        attempt_started = time.monotonic()
+        buffer_start_count = getattr(on_payload, "committed_count", 0)
+        buffer_start_flushes = getattr(on_payload, "flush_count", 0)
+        buffer_start_elapsed = getattr(on_payload, "flush_elapsed", 0.0)
+        attempt_start_sequence = stream_sequence
+        attempt_start_cursor = stream_cursor
+        attempt_start_diagnostics = len(diagnostics)
         reconnecting = stream_cursor is not None
         if reconnecting and can_reconnect is not None and can_reconnect() is False:
             return {"ok": True, "state": "worker-stopped", "_workerStopped": True}
@@ -202,6 +627,14 @@ def _consume_start_chat(
             invocation_id = (
                 uuid.uuid4().hex if getattr(args, "aliyun_cli_execution_mode", "local") == "remote" else None
             )
+            debug_log = (
+                _RemoteCLIDebugLog(
+                    workspace, invocation_id, reconnecting, worker_role, args,
+                    record_start=not bool(getattr(args, "managed_job_id", None)),
+                )
+                if invocation_id is not None and getattr(args, "debug", False) is True
+                else None
+            )
             with tempfile.TemporaryDirectory() as bootstrap_root, tempfile.TemporaryFile(mode="w+b") as stderr_file:
                 process_environment = None  # type: Optional[Dict[str, str]]
                 ack_path = None  # type: Optional[pathlib.Path]
@@ -212,25 +645,56 @@ def _consume_start_chat(
                     process_environment[REMOTE_BOOTSTRAP_ACK_FILE_ENV] = str(ack_path)
                     process_environment[REMOTE_BOOTSTRAP_PROTOCOL_ENV] = REMOTE_BOOTSTRAP_CAPABILITY
                 try:
-                    process = subprocess.Popen(
-                        command,
-                        cwd=str(workspace),
-                        stdin=subprocess.DEVNULL,
-                        stdout=subprocess.PIPE,
-                        stderr=stderr_file,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                        env=process_environment,
-                    )
+                    if invocation_id is not None and getattr(args, "managed_job_id", None):
+                        process = _ForegroundCLIProcess(
+                            args.managed_job_id, command, process_environment, stderr_file, worker_role,
+                            debug_log is not None,
+                        )
+                        if isinstance(on_payload, _RemoteProjectionBuffer):
+                            process.on_idle = on_payload.flush_if_due
+                    else:
+                        process = subprocess.Popen(
+                            command,
+                            cwd=str(workspace),
+                            stdin=subprocess.DEVNULL,
+                            stdout=subprocess.PIPE,
+                            stderr=stderr_file,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                            env=process_environment,
+                        )
                 except OSError as exc:
                     process = None
                     transport_error = BridgeError("cli_start_failed", "Alibaba Cloud CLI could not be started.", True)
                     transport_error.__cause__ = exc
+                    if debug_log is not None:
+                        debug_log.record(
+                            "end", returnCode=None, errorCode=transport_error.code,
+                            attemptElapsedMs=round((time.monotonic() - attempt_started) * 1000),
+                            startCursor=attempt_start_cursor, committedCursor=stream_cursor, sequenceAdvance=0,
+                            **debug_log.metrics()
+                        )
                 if process is not None:
                     assert process.stdout is not None
                     try:
-                        for event in iter_cli_plugin_payloads(process.stdout):
+                        output_lines = (
+                            debug_log.lines(process.stdout)
+                            if debug_log is not None and not isinstance(process, _ForegroundCLIProcess)
+                            else process.stdout
+                        )
+                        events = (
+                            debug_log.parse_events(output_lines) if debug_log is not None
+                            else iter_cli_plugin_payloads(output_lines)
+                        )
+                        for event in events:
+                            if debug_log is not None:
+                                started = time.monotonic()
+                                try:
+                                    with contextlib.suppress(Exception):
+                                        debug_log.parsed_event(event)
+                                finally:
+                                    debug_log.elapsed["parsedEventLog"] += time.monotonic() - started
                             if event.get("cliFailure") is True:
                                 cli_failure_seen = True
                                 raw = event.get("raw")
@@ -245,7 +709,13 @@ def _consume_start_chat(
                                 or not isinstance(bootstrap["event"].get("data"), dict)
                             ):
                                 continue
-                            if not process_event(event, invocation_id):
+                            started = time.monotonic() if debug_log is not None else None
+                            try:
+                                applied = process_event(event, invocation_id)
+                            finally:
+                                if debug_log is not None:
+                                    debug_log.elapsed["eventProcess"] += time.monotonic() - started
+                            if not applied:
                                 _stop_process(process)
                                 return {"ok": True, "state": "worker-stopped", "_workerStopped": True}
                             if (
@@ -253,6 +723,10 @@ def _consume_start_chat(
                                 and ack_path is not None
                                 and isinstance(event.get("id"), str)
                             ):
+                                flush = getattr(on_payload, "flush", None)
+                                if flush is not None and flush() is False:
+                                    _stop_process(process)
+                                    return {"ok": True, "state": "worker-stopped", "_workerStopped": True}
                                 _atomic_json(
                                     ack_path,
                                     {
@@ -282,11 +756,115 @@ def _consume_start_chat(
                         )
                         transport_error.__cause__ = exc
                     finally:
+                        # Flush complete buffered events before EOF, errors,
+                        # bootstrap handoff, or a reconnect can expose a cursor.
+                        flush = getattr(on_payload, "flush", None)
+                        if flush is not None and flush() is False:
+                            projection_stopped = True
+                        if isinstance(on_payload, _RemoteProjectionBuffer) and not projection_stopped:
+                            stream_cursor = on_payload.committed_cursor
+                            if stream_cursor is not None:
+                                stream_identity, stream_sequence = parse_stream_event_id(stream_cursor)
+                                if pending_applied_stream_event_id == stream_cursor:
+                                    pending_applied_stream_event_id = None
                         process.stdout.close()
+                        if debug_log is not None:
+                            with contextlib.suppress(Exception):
+                                if isinstance(on_payload, _RemoteProjectionBuffer):
+                                    debug_log.committed_event_count = on_payload.committed_count - buffer_start_count
+                                if not isinstance(process, _ForegroundCLIProcess):
+                                    stderr_file.seek(0)
+                                    debug_log.output(
+                                        "stderr", stderr_file.read(MAX_DIAGNOSTIC_BYTES).decode("utf-8", "replace")
+                                    )
+                                debug_log.record(
+                                    "end",
+                                    attemptElapsedMs=round((time.monotonic() - attempt_started) * 1000),
+                                    startCursor=attempt_start_cursor,
+                                    committedCursor=(
+                                        on_payload.committed_cursor
+                                        if isinstance(on_payload, _RemoteProjectionBuffer) else stream_cursor
+                                    ),
+                                    sequenceAdvance=stream_sequence - attempt_start_sequence,
+                                    returnCode=process.poll(),
+                                    errorCode=transport_error.code if transport_error is not None else (
+                                        "aliyun_cli_failed"
+                                        if cli_failure_seen or (not immediate and process.poll() not in (None, 0))
+                                        else None
+                                    ),
+                                    **debug_log.metrics()
+                                )
+                                if isinstance(on_payload, _RemoteProjectionBuffer):
+                                    debug_log.record(
+                                        "projection-batch", flushCount=on_payload.flush_count - buffer_start_flushes,
+                                        flushElapsedMs=round(
+                                            (on_payload.flush_elapsed - buffer_start_elapsed) * 1000
+                                        ),
+                                        batchEventLimit=REMOTE_PROJECTION_BATCH_EVENTS,
+                                        batchSeconds=REMOTE_PROJECTION_BATCH_SECONDS,
+                                    )
                 stderr_file.seek(0)
                 cli_stderr = stderr_file.read(MAX_DIAGNOSTIC_BYTES).decode("utf-8", "replace")
 
-        if immediate:
+        if projection_stopped:
+            return {"ok": True, "state": "worker-stopped", "_workerStopped": True}
+        if immediate or boundary_is_immediate():
+            return result()
+        if (summary.state in TERMINAL_STATES
+                and transport_error is not None and transport_error.code == "cli_output_truncated"
+                and getattr(args, "transport", "aliyun_cli") == "aliyun_cli"
+                and getattr(args, "aliyun_cli_execution_mode", "local") == "remote"):
+            # Complete terminal events were committed above; an incomplete JSON
+            # wrapper must not turn that outcome into a reconnect failure.
+            return result()
+        remote_interrupted = (
+            getattr(args, "transport", "aliyun_cli") == "aliyun_cli"
+            and getattr(args, "aliyun_cli_execution_mode", "local") == "remote"
+            and is_remote_cli_stream_interruption(cli_stderr, *diagnostics[attempt_start_diagnostics:][-8:])
+        )
+        if remote_interrupted and transport_error is None:
+            # A delivered terminal event is authoritative even if the wrapper
+            # reports a lost connection while closing its transport afterwards.
+            if summary.state in TERMINAL_STATES:
+                return result()
+            transport_error = BridgeError(
+                "remote_cli_stream_interrupted",
+                "The remote CLI reported SSE connection lost; the cloud outcome is not yet known.",
+                True,
+            )
+        if stream_sequence > attempt_start_sequence:
+            stalled_remote_interruptions = 0
+        if transport_error is not None and transport_error.code == "remote_cli_stream_interrupted":
+            has_anchor = bool(stream_cursor and summary.session_id)
+            if stream_sequence == attempt_start_sequence:
+                stalled_remote_interruptions += 1
+            exhausted = stalled_remote_interruptions >= MAX_REMOTE_STREAM_INTERRUPTION_RETRIES
+            if debug_log is not None:
+                with contextlib.suppress(Exception):
+                    debug_log.record(
+                        "recovery-decision", errorCode=transport_error.code,
+                        hasRecoveryAnchor=has_anchor, reconnectAllowed=has_anchor and not exhausted,
+                        consecutiveNoProgress=stalled_remote_interruptions, requestResubmitted=False,
+                    )
+            if not has_anchor:
+                raise BridgeError(
+                    "missing_recovery_anchor",
+                    "The remote CLI lost its SSE connection before delivering a recovery anchor for this request. "
+                    "The cloud may have accepted the request; its outcome is unknown. "
+                    "The bridge cannot safely reconnect and will not replay Query or cancel the cloud task.",
+                ) from transport_error
+            if exhausted:
+                raise BridgeError(
+                    "remote_cli_stream_interrupted",
+                    "Repeated remote CLI SSE interruptions yielded no new event. "
+                    "Automatic reconnect stopped; the cloud outcome is unknown and Query was not replayed.",
+                ) from transport_error
+        if (transport_error is None and cli_return_code == 0 and not cli_failure_seen
+                and isinstance(summary.input_required, dict)
+                and summary.input_required.get("permissionClass") == "pipeline"
+                and not summary.input_required_from_pending):
+            # A naturally ended top-level parent can resume serially. While
+            # resident it stays alive and receives replies via sideband.
             return result()
         if transport_error is None and cli_return_code == 0 and cli_failure_seen:
             raise BridgeError(
@@ -303,6 +881,8 @@ def _consume_start_chat(
                 )
             else:
                 return summary.to_result(cli_return_code, cli_stderr or diagnostic_text)
+        if stream_sequence > attempt_start_sequence:
+            stalled_cli_truncations = 0
         if transport_error is not None:
             if not transport_error.retryable:
                 raise transport_error
@@ -311,6 +891,18 @@ def _consume_start_chat(
                     "missing_recovery_anchor",
                     "StartChat was interrupted before a complete recovery anchor was committed.",
                 ) from transport_error
+            if transport_error.code == "cli_output_truncated":
+                stalled_cli_truncations = (
+                    stalled_cli_truncations + 1 if stream_sequence == attempt_start_sequence else 0
+                )
+                if stalled_cli_truncations >= 3:
+                    raise BridgeError(
+                        "cli_output_truncated",
+                        "Repeated truncated CLI output yielded no complete new event; "
+                        "the remote executor output limit must be increased.",
+                    ) from transport_error
+            else:
+                stalled_cli_truncations = 0
         elif summary.state in TERMINAL_STATES:
             return result()
         elif stream_cursor is None or not isinstance(summary.session_id, str) or not summary.session_id:
@@ -352,6 +944,15 @@ def run_respond(args: argparse.Namespace) -> Dict[str, Any]:
 def _stop_process(process: Any) -> None:
     if process.poll() is not None:
         return
+    command = getattr(process, "args", None)
+    if (os.name == "nt" and isinstance(command, list) and command
+            and pathlib.Path(command[0]).suffix.lower() in {".cmd", ".bat"}):
+        # Terminating cmd.exe alone leaves its CLI child and output handles alive.
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+        if process.poll() is not None:
+            return
     process.terminate()
     try:
         process.wait(timeout=5)
@@ -367,7 +968,7 @@ def _spawn_worker(job_id: str, request: Dict[str, Any]) -> int:
         raise BridgeError("invalid_input", "The transient remote CLI environment is invalid.")
     worker_environment = _remote_cli_subprocess_environment(
         request.get("aliyunCLIForwardEnv", []),
-        transient_environment,
+        {} if _is_remote_cli(request) else transient_environment,
     )
     request_token = uuid.uuid4().hex
     request_path = root / ("request-{}.json".format(request_token))
@@ -441,6 +1042,7 @@ def _request_from_job(job: Dict[str, Any], prompt: str) -> Dict[str, Any]:
         "transport": job.get("transport", "aliyun_cli"),
         "aliyunCLIExecutionMode": job.get("aliyunCLIExecutionMode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE),
         "aliyunCLIForwardEnv": job.get("aliyunCLIForwardEnv", legacy_forward_env),
+        "debug": job.get("debug") is True,
         "sessionId": job.get("sessionId"),
         "regionId": job.get("regionId"),
         "profile": job.get("profile"),
@@ -488,7 +1090,11 @@ def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
             raise BridgeError("unsupported_input", "The ROS CLI plugin does not support ClientContext.")
     aliyun_path = str(payload.get("aliyunPath") or "aliyun")
     if transport == "aliyun_cli":
-        resolve_aliyun(aliyun_path)
+        resolved_aliyun_path = resolve_aliyun(aliyun_path)
+        if cli_execution_mode == "remote":
+            # Queued commands use the resolved executable, so pin that same
+            # path for foreground handoff validation and subsequent calls.
+            aliyun_path = resolved_aliyun_path
     else:
         _load_code_sdk()
     job_id = uuid.uuid4().hex
@@ -506,6 +1112,7 @@ def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
         "transport": transport,
         "aliyunCLIExecutionMode": cli_execution_mode,
         "aliyunCLIForwardEnv": forward_env,
+        "debug": payload.get("debug") is True,
         "regionId": payload.get("regionId"),
         "profile": payload.get("profile"),
         "credentialSource": payload.get("credentialSource"),
@@ -521,6 +1128,8 @@ def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
         "turnStartedAt": int(time.time()),
         "artifacts": [],
     }  # type: Dict[str, Any]
+    if _is_remote_cli(job):
+        job["remoteCLIForeground"] = True
     _atomic_json(job_path, job)
     request = _request_from_job(job, prompt)
     request["clientContext"] = payload.get("clientContext")
@@ -530,6 +1139,7 @@ def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": True,
         "jobId": job_id,
+        "_foregroundCLI": _is_remote_cli(job),
         "state": "submitted",
         "mode": mode,
         "preferredLanguage": job["preferredLanguage"],
@@ -597,6 +1207,7 @@ def _continue_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": True,
         "jobId": job_id,
+        "_foregroundCLI": _is_remote_cli(job),
         "state": "submitted",
         "mode": job["mode"],
         "conversationMode": job.get("conversationMode") or job["mode"],
@@ -722,7 +1333,10 @@ def _respond_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
         cursor = len(_read_spool(spool))
         primary_worker_alive = isinstance(job.get("workerPid"), int) and _pid_alive(job["workerPid"])
         sub_pipeline = pending.get("permissionClass") == "sub_pipeline"
-        sideband = sub_pipeline
+        sideband = sub_pipeline or (
+            primary_worker_alive and pending.get("permissionClass") == "pipeline"
+            and not _serial_input_boundary(pending, job.get("permissionWait"))
+        )
         worker_token = None  # type: Optional[str]
         if sideband:
             if job.get("mode") != "pipeline":
@@ -776,6 +1390,7 @@ def _respond_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "ok": True,
         "jobId": job_id,
+        "_foregroundCLI": _is_remote_cli(job),
         "state": "submitted",
         "mode": job["mode"],
         "preferredLanguage": job.get("preferredLanguage", "en"),
@@ -785,6 +1400,12 @@ def _respond_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
         "workerPid": worker_pid,
         "permissionResponse": response,
     }
+
+
+def _stop_request_timeout(job: Dict[str, Any]) -> float:
+    # Remote executors may wait for foreground approval before issuing the
+    # 45-second StopChat RPC. Do not spend that RPC budget on human approval.
+    return float(DEFAULT_READ_TIMEOUT_SECONDS) if _is_remote_cli(job) else STOP_REQUEST_TIMEOUT_SECONDS
 
 
 def _run_stop_chat(job: Dict[str, Any], session_id: str) -> Dict[str, Any]:
@@ -822,7 +1443,7 @@ def _run_stop_chat(job: Dict[str, Any], session_id: str) -> Dict[str, Any]:
                     job.get("aliyunCLIForwardEnv", []),
                     job.get("_transientEnvironment", {}),
                 ),
-                timeout=STOP_REQUEST_TIMEOUT_SECONDS,
+                timeout=_stop_request_timeout(job),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BridgeError("stop_chat_failed", "Alibaba Cloud CLI could not complete StopChat.", True) from exc
@@ -853,11 +1474,18 @@ def _run_stop_chat(job: Dict[str, Any], session_id: str) -> Dict[str, Any]:
     return result
 
 
-def _claim_stop_dispatch(job_id: str, session_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def _claim_stop_dispatch(
+    job_id: str, session_id: Optional[str] = None, *, foreground: bool = False
+) -> Optional[Dict[str, Any]]:
     root, job_path, _spool = _job_paths(job_id)
     with StateLock(root / ".job.lock"):
         job = _load_state_json(job_path)
         if job.get("stopRequestedAt") is None:
+            return None
+        # A remote host authorization context belongs to the caller, not this
+        # detached parser worker. Deferred cancellation is dispatched by the
+        # next foreground cancel/follow with its current environment.
+        if _is_remote_cli(job) and not foreground:
             return None
         if isinstance(session_id, str) and session_id:
             existing = job.get("sessionId")
@@ -950,10 +1578,11 @@ def _record_stopped_worker_exit(
         if worker_role == "sideband":
             if job.get("sidebandWorkerToken") != worker_token:
                 return
-            if job.get("sidebandWorkerPid") == worker_pid:
-                job.pop("sidebandWorkerPid", None)
+            job.pop("sidebandWorkerPid", None)
             job.pop("sidebandWorkerToken", None)
-        elif job.get("workerPid") == worker_pid:
+        else:
+            # A Windows venv launcher may own the recorded PID. The matching
+            # request sequence above prevents an old worker clearing a new one.
             job.pop("workerPid", None)
         _atomic_json(job_path, job)
 
@@ -964,15 +1593,24 @@ def _cancel_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
     with StateLock(root / ".job.lock"):
         job = _load_state_json(job_path)
         job.setdefault("stopRequestedAt", int(time.time()))
+        if (
+            job.get("remoteCLIForeground") is True
+            and job.get("remoteCLIStartedAt") is None
+            and not job.get("sessionId")
+        ):
+            # The initial Query was queued but never executed. No remote
+            # session exists to cancel, and no background call may create one.
+            job["stopStatus"] = "NoActiveStream"
+            job["state"] = "not-active"
         _atomic_json(job_path, job)
 
     deadline = time.monotonic() + STOP_SESSION_WAIT_SECONDS
-    claimed_job = _claim_stop_dispatch(job_id)
+    claimed_job = _claim_stop_dispatch(job_id, foreground=True)
     while True:
         job = _load_state_json(job_path)
         if claimed_job is not None or job.get("stopStatus") is not None:
             break
-        claimed_job = _claim_stop_dispatch(job_id)
+        claimed_job = _claim_stop_dispatch(job_id, foreground=True)
         if claimed_job is not None:
             break
         if time.monotonic() >= deadline:
@@ -1073,6 +1711,10 @@ def run_worker(job_id: str, request_token: str) -> int:
             _fail_job(job_id, request_seq, error, worker_pid)
 
     args = argparse.Namespace(
+        managed_job_id=job_id,
+        debug=request.get("debug") is True,
+        debug_job_id=job_id,
+        debug_request_seq=request_seq,
         aliyun_path=request.get("aliyunPath", "aliyun"),
         transport=request.get("transport", "aliyun_cli"),
         aliyun_cli_execution_mode=request.get("aliyunCLIExecutionMode", DEFAULT_ALIYUN_CLI_EXECUTION_MODE),
@@ -1095,15 +1737,27 @@ def run_worker(job_id: str, request_token: str) -> int:
     attachments = request.get("attachments") if isinstance(request.get("attachments"), list) else []
     summary_mode = request.get("summaryMode") if request.get("summaryMode") in SUPPORTED_AGENT_MODES else args.mode
 
-    def worker_can_continue() -> bool:
+    remote = _is_remote_cli(request)
+    next_control_check = 0.0
+    control_allowed = True
+
+    def worker_can_continue(force: bool = False) -> bool:
+        nonlocal next_control_check, control_allowed
+        if remote and not force and time.monotonic() < next_control_check:
+            return control_allowed
         _current_root, current_job_path, _current_spool = _job_paths(job_id)
         with StateLock(_current_root / ".job.lock"):
             current = _load_state_json(current_job_path)
-            if current.get("activeRequestSeq") != request_seq or current.get("stopRequestedAt") is not None:
-                return False
-            if worker_role == "sideband" and current.get("sidebandWorkerToken") != worker_token:
-                return False
-            return True
+            control_allowed = (
+                current.get("activeRequestSeq") == request_seq
+                and current.get("stopRequestedAt") is None
+                and (worker_role != "sideband" or current.get("sidebandWorkerToken") == worker_token)
+                and (worker_role == "sideband" or not _serial_input_boundary(
+                    current.get("inputRequired"), current.get("permissionWait")
+                ))
+            )
+        next_control_check = time.monotonic() + 0.25
+        return control_allowed
 
     def project(
         stream_event_id: Optional[str],
@@ -1132,7 +1786,10 @@ def run_worker(job_id: str, request_token: str) -> int:
             client_context,
             attachments,
             summary_mode=summary_mode,
-            on_payload=project,
+            on_payload=(
+                _RemoteProjectionBuffer(job_id, summary_mode, request_seq, str(worker_role or "primary"), worker_token)
+                if remote else project
+            ),
             worker_role=str(worker_role or "primary"),
             permission_response=(
                 request.get("permissionResponse")
@@ -1143,7 +1800,7 @@ def run_worker(job_id: str, request_token: str) -> int:
         )
     except BaseException as exc:
         error = exc if isinstance(exc, BridgeError) else BridgeError("stream_failed", str(exc), True)
-        if not worker_can_continue():
+        if not worker_can_continue(True):
             claimed_job = _claim_stop_dispatch(job_id)
             if claimed_job is not None:
                 _dispatch_claimed_stop(job_id, claimed_job)
@@ -1165,7 +1822,7 @@ def run_worker(job_id: str, request_token: str) -> int:
         result["permissionResponse"] = permission_response
     if worker_role == "sideband" and isinstance(worker_token, str):
         _finish_sideband_job(job_id, request_seq, worker_token, result, worker_pid)
-        if not worker_can_continue():
+        if not worker_can_continue(True):
             claimed_job = _claim_stop_dispatch(job_id)
             if claimed_job is not None:
                 _dispatch_claimed_stop(job_id, claimed_job)
@@ -1359,6 +2016,19 @@ def _active_worker_exists() -> bool:
         with contextlib.suppress(BridgeError):
             job = _load_state_json(path)
             if _pid_alive(job.get("workerPid")) or _pid_alive(job.get("sidebandWorkerPid")):
+                if _is_remote_cli(job):
+                    root = _remote_cli_root(path.parent.name)
+                    with StateLock(root / ".remote-cli.lock"):
+                        requests = list(root.glob("remote-cli-*.request.json"))
+                        if requests and all(
+                            _load_state_json(request).get("ownerPid") is None
+                            and not request.with_suffix(".result").exists()
+                            for request in requests
+                        ):
+                            # A parser parked for a fresh foreground/HIL is not
+                            # an active CLI connection. Retain its in-memory
+                            # summary, but allow the loopback manager to idle.
+                            continue
                 return True
     return False
 
@@ -1373,6 +2043,32 @@ class _ManagerServer(ThreadingHTTPServer):
         self.activity_mtime_ns = 0
         self.startup_deadline = self.last_activity + MANAGER_START_TIMEOUT_SECONDS
         self.startup_health_checked = False
+        self.active_requests = 0
+        self.request_lock = threading.Lock()
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        # Count before starting the handler thread so idle shutdown cannot race
+        # a foreground cancellation waiting for executor approval.
+        with self.request_lock:
+            self.active_requests += 1
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            with self.request_lock:
+                self.active_requests -= 1
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            with self.request_lock:
+                self.active_requests -= 1
+                self.last_activity = time.monotonic()
+
+    def has_active_requests(self) -> bool:
+        with self.request_lock:
+            return self.active_requests > 0
 
 
 class _ManagerHandler(BaseHTTPRequestHandler):
@@ -1497,7 +2193,7 @@ def run_manager_server(record_file: str) -> int:
                 if time.monotonic() >= server.startup_deadline:
                     break
                 continue
-            if _active_worker_exists():
+            if server.has_active_requests() or _active_worker_exists():
                 server.last_activity = time.monotonic()
                 continue
             idle_seconds = float(record.get("idleSeconds") or MANAGER_IDLE_SECONDS)
@@ -1625,6 +2321,7 @@ def run_check(args: argparse.Namespace) -> Dict[str, Any]:
         "allowedAgentModes": args.allowed_agent_modes,
         "managerIdleSeconds": args.manager_idle_seconds,
         "enableThinking": args.enable_thinking,
+        "debug": args.debug,
         "aliyunCLIProfile": args.aliyun_cli_profile,
         "currentProfile": current_profile,
         "startChatReconnectReady": reconnect_ready,
@@ -1646,7 +2343,8 @@ def run_check(args: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _follow_after_command(args: argparse.Namespace, result: Dict[str, Any]) -> Dict[str, Any]:
-    if not getattr(args, "follow", False):
+    remote_cli = result.pop("_foregroundCLI", False) is True
+    if not remote_cli and not getattr(args, "follow", False):
         return result
     followed = run_follow_job(
         argparse.Namespace(
@@ -1677,6 +2375,7 @@ def run_start_job(args: argparse.Namespace) -> Dict[str, Any]:
             "transport": args.transport,
             "aliyunCLIExecutionMode": args.aliyun_cli_execution_mode,
             "aliyunCLIForwardEnv": args.aliyun_cli_forward_env,
+            "debug": args.debug,
             "transientEnvironment": _capture_remote_cli_environment(args.aliyun_cli_forward_env),
             "endpoint": args.endpoint,
             "regionId": args.region_id,
@@ -1697,6 +2396,16 @@ def run_start_job(args: argparse.Namespace) -> Dict[str, Any]:
 def run_follow_job(args: argparse.Namespace) -> Dict[str, Any]:
     wait_seconds = max(0.0, min(float(args.wait_seconds), MAX_FOLLOW_SECONDS))
     record = ensure_manager(args.manager_idle_seconds)
+    job = _load_state_json(_job_paths(args.job_id)[1])
+    if _is_remote_cli(job):
+        if job.get("stopRequestedAt") is not None and job.get("stopStatus") is None:
+            _manager_request(record, "/cancel", {
+                "jobId": args.job_id,
+                "transientEnvironment": _capture_remote_cli_environment(job.get("aliyunCLIForwardEnv", [])),
+            }, timeout=_stop_request_timeout(job) + 15)
+        else:
+            _drive_foreground_cli(args.job_id, int(args.cursor), wait_seconds)
+        wait_seconds = 0
     return _manager_request(
         record,
         "/follow",
@@ -1741,6 +2450,7 @@ def run_respond_job(args: argparse.Namespace) -> Dict[str, Any]:
 
 def run_cancel_job(args: argparse.Namespace) -> Dict[str, Any]:
     record = ensure_manager(args.manager_idle_seconds)
+    job = _load_state_json(_job_paths(args.job_id)[1])
     return _manager_request(
         record,
         "/cancel",
@@ -1748,7 +2458,7 @@ def run_cancel_job(args: argparse.Namespace) -> Dict[str, Any]:
             "jobId": args.job_id,
             "transientEnvironment": _capture_remote_cli_environment(args.aliyun_cli_forward_env),
         },
-        timeout=STOP_REQUEST_TIMEOUT_SECONDS + 15,
+        timeout=_stop_request_timeout(job) + 15,
     )
 
 
@@ -1800,6 +2510,9 @@ def build_parser() -> argparse.ArgumentParser:
     worker = subparsers.add_parser("_worker", help=argparse.SUPPRESS)
     worker.add_argument("--job-id", required=True)
     worker.add_argument("--request-token", required=True)
+    remote_cli = subparsers.add_parser("_remote_cli", help=argparse.SUPPRESS)
+    remote_cli.add_argument("--job-id", required=True)
+    remote_cli.add_argument("--invocation-id", required=True)
     return parser
 
 
@@ -1814,6 +2527,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             return run_manager_server(args.record_file)
         if args.command == "_worker":
             return run_worker(args.job_id, args.request_token)
+        if args.command == "_remote_cli":
+            return run_remote_cli(args.job_id, args.invocation_id)
         apply_skill_config(args, load_skill_config())
         if args.command == "check":
             result = run_check(args)

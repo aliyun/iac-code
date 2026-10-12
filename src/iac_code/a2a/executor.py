@@ -1637,6 +1637,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                     and existing is not None
                     and existing.owner == owner
                     and current_task is not None
+                    # A naturally finalized permission turn may still receive
+                    # a duplicate answer. Let the validated RESOLVED checkpoint
+                    # acknowledge it; attaching would reopen settled ownership.
+                    and (permission_response is None or existing.termination_reason != "natural_completion")
                 ):
                     try:
                         if (
@@ -1786,8 +1790,10 @@ class IacCodeA2AExecutor(AgentExecutor):
             return
         permission_response = parse_permission_response(getattr(context, "message", None))
         if permission_response is not None:
-            if PipelineLifecycleEventQueueCarrier.read(context) and not PipelineLifecycleEventQueueCarrier.is_bound(
-                context
+            if (
+                PipelineLifecycleEventQueueCarrier.read(context)
+                and not PipelineLifecycleEventQueueCarrier.is_bound(context)
+                and (self._execution_control_service is None or current_execution_control() is not None)
             ):
                 await self._publish_status(
                     event_queue,
@@ -3867,10 +3873,53 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
             return True
         try:
+            control = current_execution_control()
+            if control is None and self._execution_control_service is not None:
+                # Like selector answers, cold permission answers bypass ordinary
+                # execution setup. Activate the validated wait's admission so
+                # response delivery can settle ownership before the next turn.
+                pipeline = record.get("permissionClass") == "pipeline"
+                admission = RecoverableInputAdmissionCarrier.read(context)
+                reserved_admission = None
+                if admission is None:
+                    reserved_admission = await self._execution_control_service.reserve_recoverable_input_continuation(
+                        context_id=response.context_id, task_id=response.task_id, owner=owner
+                    )
+                try:
+                    control = await self._execution_control_service.begin_execution(
+                        context_id=response.context_id,
+                        task_id=response.task_id,
+                        owner=owner,
+                        cwd=context_record.cwd,
+                        execution_mode="pipeline" if pipeline else "normal",
+                        continue_input_required=pipeline,
+                        recoverable_input_admission=admission or reserved_admission,
+                    )
+                except ExecutionControlConflictError as exc:
+                    raise InputResponseExecutionControlConflictError(str(exc)) from exc
+                finally:
+                    if reserved_admission is not None:
+                        await self._execution_control_service.release_recoverable_input_continuation(reserved_admission)
+                bind_execution_control(control)
+                control.bind_session(context_record.session_id)
+                await control.checkpoint()
+                await control.mark_execution_started()
+            if PipelineLifecycleEventQueueCarrier.read(context) and not PipelineLifecycleEventQueueCarrier.is_bound(
+                context
+            ):
+                await self._publish_status(
+                    event_queue,
+                    task_id=response.task_id,
+                    context_id=response.context_id,
+                    state=TaskState.TASK_STATE_WORKING,
+                )
+                PipelineLifecycleEventQueueCarrier.mark_bound(context)
             record = store.begin_restore(boundary_id)
-        except ValueError as exc:
+        except BaseException as exc:
             await self._permission_wait_coordinator.release_restore(boundary_id)
-            raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
+            if isinstance(exc, ValueError):
+                raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
+            raise
 
         normal_recovery = record.get("permissionClass") != "pipeline"
         normal_turn_finished = False

@@ -5,6 +5,7 @@ import hashlib
 import importlib.util
 import json
 import re
+import runpy
 import subprocess
 import sys
 import tarfile
@@ -243,6 +244,7 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
         "alibabacloud-ros-agent": [
             "SKILL.md",
             "references/ram-policies.md",
+            "references/runtime-policy.md",
             "scripts/_ros_agent_core.py",
             "scripts/_ros_agent_projection.py",
             "scripts/_ros_agent_runtime.py",
@@ -274,6 +276,8 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
                 assert "skill-version/{skill-version}" in skill
             assert expected_user_agent in bridge
             if name == "alibabacloud-ros-agent":
+                assert (output / "SKILL.md").stat().st_size <= 32_000
+                assert "references/runtime-policy.md" in skill
                 assert "`scripts/requirements.txt`" in skill
                 assert "requirements-code.txt" not in skill
                 assert 'REQUIREMENTS_FILE = "scripts/requirements.txt"' in bridge
@@ -330,13 +334,24 @@ def test_agenthub_profiles_package_as_independent_products(tmp_path: Path) -> No
         assert archive.namelist() == [
             "alibabacloud-ros-agent/SKILL.md",
             "alibabacloud-ros-agent/references/ram-policies.md",
+            "alibabacloud-ros-agent/references/runtime-policy.md",
             "alibabacloud-ros-agent/scripts/_ros_agent_core.py",
             "alibabacloud-ros-agent/scripts/_ros_agent_projection.py",
             "alibabacloud-ros-agent/scripts/_ros_agent_runtime.py",
             "alibabacloud-ros-agent/scripts/requirements.txt",
             "alibabacloud-ros-agent/scripts/ros_agent.py",
         ]
+        assert archive.getinfo("alibabacloud-ros-agent/SKILL.md").file_size <= 32_000
     assert json.loads(ros_manifest.read_text(encoding="utf-8"))["skillName"] == "alibabacloud-ros-agent"
+
+
+def test_ros_skill_entrypoint_size_limit_counts_utf8_bytes() -> None:
+    namespace = runpy.run_path(str(PROFILE_SCRIPT))
+    profile = namespace["skill_profile"]("alibabacloud-ros-agent")
+    render = namespace["render_markdown"]
+    assert len(render("中" * 10666, profile).encode("utf-8")) == 31999
+    with pytest.raises(SystemExit, match="32 KB UTF-8 limit"):
+        render("中" * 10667, profile)
 
 
 def test_formal_skill_package_rejects_runtime_candidate(tmp_path: Path) -> None:
@@ -371,6 +386,7 @@ def test_publisher_contracts_are_explicit() -> None:
     assert skill_contract["profiles"]["alibabacloud-ros-agent"]["files"] == [
         "SKILL.md",
         "references/ram-policies.md",
+        "references/runtime-policy.md",
         "scripts/_ros_agent_core.py",
         "scripts/_ros_agent_projection.py",
         "scripts/_ros_agent_runtime.py",

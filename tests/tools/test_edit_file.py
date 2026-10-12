@@ -40,6 +40,9 @@ class TestEditFileTool:
         assert result.is_error is False
         assert "successfully" in result.content.lower()
         assert file_path.read_text(encoding="utf-8") == "Goodbye, world!\nThis is a test.\n"
+        assert result.metadata == {
+            "artifact": {"filename": "test.txt", "mediaType": "text/plain", "path": str(file_path)}
+        }
 
     @pytest.mark.asyncio
     async def test_old_string_not_found(self, tmp_path, edit_file_tool):
@@ -60,6 +63,7 @@ class TestEditFileTool:
         assert result.is_error is True
         assert "not found" in result.content.lower()
         assert file_path.read_text(encoding="utf-8") == "Some content here"
+        assert result.metadata is None
 
     @pytest.mark.asyncio
     async def test_old_string_multiple_matches(self, tmp_path, edit_file_tool):
@@ -135,6 +139,9 @@ class TestEditFileTool:
 
         assert result.is_error is False
         assert file_path.read_text(encoding="utf-8") == "new content"
+        assert result.metadata == {
+            "artifact": {"filename": "relative.txt", "mediaType": "text/plain", "path": str(file_path)}
+        }
 
     @pytest.mark.asyncio
     async def test_replace_with_empty_string(self, tmp_path, edit_file_tool):

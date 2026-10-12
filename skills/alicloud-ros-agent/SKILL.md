@@ -41,33 +41,11 @@ The returned `transport` is installation policy, not an Agent choice. If `check`
 
 Add `--aliyun-path <path>` to `check` or `start` only when the effective credential path requires native aliyun CLI and it is not on `PATH`; the managed job preserves it for later requests. Use the returned credential source and region without asking the user to choose a Profile. Omit `--profile` unless the user explicitly supplied a Profile and local policy did not pin one; never try to override `aliyunCLIProfile`. Never pass credentials on the command line, put them in prompt files, or expose CLI configuration.
 
-## Optional local policy
+## Local policy
 
-The bridge reads an optional `config.json` beside this `SKILL.md`. If it is absent, the transport defaults to `code`, the endpoint defaults to `ros.aliyuncs.com`, both Agent modes are allowed, Thinking is enabled, the Credentials SDK default chain selects the effective identity, and the temporary loopback manager exits 60 seconds after the last SSE worker and manager request become idle. The file accepts these settings:
+The optional `config.json` beside `SKILL.md` is installation policy; `check` reports its effective settings. Honor the configured transport, endpoint, allowed modes, Thinking and Profile policy. Never override them, edit this file during an infrastructure task, or store credentials in it.
 
-```json
-{
-  "transport": "code",
-  "endpoint": "127.0.0.1:56124",
-  "allowedAgentModes": ["normal", "pipeline"],
-  "managerIdleSeconds": 60,
-  "enableThinking": true,
-  "aliyunCLIProfile": ""
-}
-```
-
-When `transport` is `aliyun_cli`, add `"aliyunCLIExecutionMode": "local"` or `"remote"`; do not add that field to a `code` transport configuration.
-
-- `transport` accepts exactly `code` or `aliyun_cli`. `code` is the default: it delegates identity resolution to the Credentials SDK default chain unless a Profile is explicitly pinned, in which case the SDK Profile provider owns resolution and refresh. It signs and sends StartChat or StopChat to the configured endpoint while exposing SSE events as they arrive. `aliyun_cli` is the dependency-free path and invokes only the ROS plugin's validated `start-chat` and `stop-chat` operations. SDK imports are lazy and never occur in `aliyun_cli` mode. There is no silent fallback between transports or from a pinned Profile to the default chain.
-- `aliyunCLIExecutionMode` accepts exactly `local` or `remote`, defaults to `local`, and is valid only with `transport: "aliyun_cli"`. `local` uses the native local CLI, Profile, and plugin installation. `remote` treats the same-name `aliyun` executable as a host-provided executor whose routing and execution mechanism is outside the bridge contract; the bridge may invoke only `aliyun ros start-chat` and `aliyun ros stop-chat`, never CLI management or another API operation. Remote mode does not read or pass a local Profile, does not infer a local region, rejects `aliyunCLIProfile`, and requires a public `*.aliyuncs.com` endpoint. All prompt and response payloads are passed inline; never pass a file-backed CLI parameter to the remote command.
-- `aliyunCLIForwardEnv` is valid only for remote CLI execution and accepts at most 16 unique, non-secret environment variable names. It defaults to `[]`; each remote implementation must list any required names explicitly in `config.json`. Every foreground `start`, `continue`, `respond`, or `cancel` captures current values and replaces stale manager-inherited values for the launched operation. Values are never persisted or returned. The bridge does not prescribe how a remote CLI implementation uses these variables.
-- `endpoint` fixes the ROS endpoint for every StartChat and StopChat request in a managed job. A conflicting `--endpoint` is rejected, so do not try to override this local policy. Public endpoints must be `*.aliyuncs.com` hostnames. For local integration tests only, `localhost:<port>` and `127.0.0.1:<port>` are accepted; both transports use HTTPS and skip certificate verification only for those loopback addresses.
-- `allowedAgentModes` is a non-empty allowlist containing `normal`, `pipeline`, or both. Do not invoke or suggest a mode excluded by this list.
-- `managerIdleSeconds` is an integer from 1 through 86400. It defaults to 60. The countdown starts only when no StartChat SSE worker is running—including a concurrent Sub Pipeline permission-response worker—and is refreshed by each manager request; after exit, any managed command starts a new manager automatically while preserving job state.
-- `enableThinking` is a boolean and defaults to `true`. It fixes `EnableThinking` for the whole managed job; do not pass `--no-thinking` or try to override it per request.
-- `aliyunCLIProfile` is an empty or exact CLI Profile name and defaults to empty. In code mode, empty uses the Credentials SDK default chain. A non-empty value pins that Profile for code transport or local CLI execution and fails instead of falling back when the Profile is unavailable. It is invalid in remote CLI execution. Do not pass a conflicting `--profile`.
-
-Unknown fields, invalid values, and duplicate modes fail closed. Never edit `config.json` during an infrastructure task or store credentials in it; it is an administrator/user installation policy.
+Before remote CLI execution, or administrator configuration/debugging, read [references/runtime-policy.md](references/runtime-policy.md) for configuration fields, forwarded environment lifetimes, Query normalization and debug metrics. This does not authorize inspecting internal job state or changing installation policy.
 
 ## Managed StartChat workflow
 
@@ -81,6 +59,8 @@ Unknown fields, invalid values, and duplicate modes fail closed. Never edit `con
 
    Pass `--region-id` only when the user explicitly supplied a region. Otherwise the bridge uses the first supported region environment variable, then an explicitly pinned Profile region, then `cn-hangzhou`; do not query CLI configuration to fill it. Use `--mode pipeline` only when the user explicitly wants the candidate-architecture, cost-comparison, confirmation, and deployment Pipeline. Thinking is installation policy from `config.json`, not an Agent choice. Forward underspecified infrastructure requirements to ROS Agent as written so its own `ask_user_question` can gather them.
 3. Preserve the returned `jobId` and newest `cursor`. Submit `start`, `continue`, and `respond` first, then call `follow`; the legacy `--follow` option remains compatible but is not the recommended Skill flow. A temporary authenticated loopback manager owns the job, and a detached worker keeps the selected StartChat transport open after the outer tool call returns. The worker automatically reconnects the same StartChat stream from the last committed server event ID after a retryable transport failure. Keep the same `jobId`; never start a replacement job or resend the user message to recover a stream. In the default code transport, each SSE event is projected as it arrives. `follow` returns at every step start, step completion/failure, input boundary, completed turn, terminal state, or its bounded wait window so the user can see the Pipeline progressing. A result can contain multiple ordered `userUpdates` when events were already queued, and can also contain `inputRequired` or a terminal result; present all updates first, then handle that result without an extra drain-only `follow`.
+
+   Remote CLI is the lifecycle exception: `start`, `continue`, and `respond` observe automatically without `--follow`. The 60-second default (`--follow-seconds`, at most 120) is an idle wait, not a limit on active CLI execution or buffered-output processing. Keep the foreground tool call alive while `aliyun` is running, including host permission approval; request a host tool timeout covering approval and execution, and never launch this bridge command in the background. The bridge cannot extend a host-enforced tool timeout. Do not issue parallel `follow` calls to keep it alive. Input boundaries close only the local connection, not the cloud task; `respond` or `follow` can launch queued calls with fresh forwarded environment values. A foreground interruption closes its local CLI reader. Any recovery uses the same SessionId and last committed server event ID, with no Query. Background parsers never launch remote operations. Process launch alone does not prove host admission. Present returned progress, input, and final results immediately.
 4. When the result has `boundaryReached: true`, present every `userUpdates` string to the user, then immediately follow from the returned cursor:
 
    ```text
@@ -88,6 +68,8 @@ Unknown fields, invalid values, and duplicate modes fail closed. Never edit `con
    ```
 
    Follow waits at most 120 seconds even if a larger value is requested. If it returns `followTimedOut: true`, present its `heartbeat` as a visible status update and call `follow` again with the newest cursor. A timeout never stops the background worker or sends a new StartChat query.
+
+   Remote CLI stream replay requires a real SessionId and committed SSE event ID for the current request. Without that anchor, report `missing_recovery_anchor` and an unknown cloud outcome, even if the SessionId and a previous request's cursor are known. Never infer a cursor, resend the prompt or answer, or claim remote cancellation. Delayed approval alone does not end the foreground command; forwarding HIL does not renew it.
 5. For every natural-language follow-up, answer to `ask_user_question`, or `candidate_selection`, write a new prompt file and continue the same job:
 
    ```text
@@ -101,7 +83,7 @@ Unknown fields, invalid values, and duplicate modes fail closed. Never edit `con
    python3 <absolute-bridge-path>/ros_agent.py cancel --job-id <jobId>
    ```
 
-   This invokes the ROS `StopChat` OpenAPI through the job's selected transport; it does not send a StartChat query or a natural-language cancellation message. Present the returned status immediately. `Stopped` means cancellation completed, `Stopping` means it was accepted and the existing job should be observed with `follow` from its current cursor, and `NoActiveStream` means there was no active remote stream to stop. Never call `cancel` merely because `follow` timed out, a local tool call was interrupted, or the outer Agent turn ended.
+   This invokes the ROS `StopChat` OpenAPI through the job's selected transport; it does not send a StartChat query or a natural-language cancellation message. Present the returned status immediately. `Stopped` means cancellation completed, `Stopping` means acceptance only, and `NoActiveStream` means there was no active remote stream to stop. After cancellation, `follow` returns cached local state immediately, including `stopStatus` and `stopRequestId`; it does not poll ROS for a fresh cancellation status. Never describe cached `Stopping` or an old `wireState` as a confirmed cloud terminal state, or repeat `cancel` to poll. Never call `cancel` merely because `follow` timed out, a local tool call was interrupted, or the outer Agent turn ended.
 
 Without a configured endpoint, the bridge defaults to `ros.aliyuncs.com`. Use `--endpoint <ROS endpoint>` only when the user's ROS region or network requires a different endpoint and `config.json` does not fix one. The code transport sends a generic ROS RPC with API version `2019-09-10` and `ACS3-HMAC-SHA256` signing, so it does not depend on generated StartChat metadata. The `aliyun_cli` transport uses the installed/remote ROS plugin's published `start-chat` and `stop-chat` commands and does not bypass plugin validation. Both transports identify every StartChat and StopChat request with the user-agent segment `AlibabaCloud-Agent-Skills/alibabacloud-ros-agent`.
 
@@ -203,7 +185,7 @@ The JSON portion has this schema:
 
 The three permission classes share this one StartChat `respond` command, but resume differently:
 
-- `normal`: serial. The StartChat stream that exposed the permission ends naturally. `respond` uses the same correlated ROS Agent session and returns the resumed output on its new stream.
+- `normal`: serial. At a committed input boundary, the bridge releases its old local reader before returning, without canceling the cloud task. `respond` uses the same correlated ROS Agent session and returns the resumed output on its new stream. Questions and candidate selections use the same reader handoff before `continue`.
 - `pipeline`: while resident, the original parent Pipeline StartChat stream stays alive. `respond` uses ROS active Pipeline reentry only to deliver the correlated decision; resumed progress remains on the parent stream. If `permissionWait.status` is `suspended`, the parent stream has ended and `respond` recovers the same task from its durable boundary on the new stream.
 - `sub_pipeline`: sideband. Correlation identifies the waiting candidate step while the parent task remains `TASK_STATE_WORKING`; multiple pending step permissions must be answered separately. The bridge keeps the original parent StartChat SSE worker alive and starts a separate concurrent StartChat worker for each response. That response stream ends after its acknowledgement; it never takes ownership of, drains, or replaces the parent stream. After acknowledgement, another pending permission can become `inputRequired`; otherwise `follow` continues observing the original parent worker until its next Pipeline boundary.
 

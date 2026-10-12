@@ -6,6 +6,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -172,6 +173,7 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
         "subprocess",
         "sys",
         "tempfile",
+        "threading",
         "time",
         "typing",
         "urllib",
@@ -569,6 +571,7 @@ def test_check_returns_safe_default_chain_and_effective_skill_policy(monkeypatch
         "allowedAgentModes": ["normal"],
         "managerIdleSeconds": bridge.MANAGER_IDLE_SECONDS,
         "enableThinking": True,
+        "debug": False,
         "aliyunCLIProfile": "",
         "currentProfile": {"configured": True, "mode": "DefaultCredentialChain", "regionId": "cn-hangzhou"},
         "startChatReconnectReady": True,
@@ -1349,6 +1352,53 @@ def test_stream_summary_projects_input_required_and_pipeline_milestone() -> None
     assert result["inputRequired"]["inputId"] == "input-1"
     assert result["inputRequired"]["options"][0]["id"] == "candidate-a"
     assert result["milestones"][0]["eventType"] == "input_required"
+
+
+@pytest.mark.parametrize("kind", ["ask_user_question", "candidate_selection", "permission"])
+@pytest.mark.parametrize("batched", [False, True])
+def test_input_received_receipt_is_not_a_new_input_boundary(kind, batched) -> None:
+    receipt = {
+        "eventType": "input_received",
+        "status": "working",
+        "data": {
+            "kind": kind,
+            "inputId": "answered-input",
+            "options": [{"id": "answer", "label": "Answer"}],
+            "allowFreeText": True,
+        },
+    }
+    metadata = {"pipelineBatch": {"events": [receipt]}} if batched else {"pipeline": receipt}
+    payload = _status_event(state="TASK_STATE_WORKING", metadata=metadata)
+    summary = bridge.StreamSummary(mode="pipeline")
+    summary.apply(payload)
+    projection = bridge._project_managed_stream_event(payload, summary, "pipeline", 2, "primary", None)
+
+    assert summary.to_result(0, "")["state"] == "working"
+    assert "inputRequired" not in summary.to_result(0, "")
+    assert "inputRequired" not in projection
+    assert not bridge._serial_input_boundary(summary.input_required)
+
+    next_input = {
+        "schemaVersion": 1,
+        "kind": "ask_user_question",
+        "contextId": "session-1",
+        "requestTaskId": "task-1",
+        "inputId": "next-input",
+        "prompt": "Development or production?",
+        "options": [{"id": "dev", "label": "Development"}],
+        "required": True,
+    }
+    # A receipt preceding a genuine next input in one batch must not hide it.
+    payload = _status_event(
+        state="TASK_STATE_INPUT_REQUIRED",
+        metadata={"pipelineBatch": {"events": [receipt, {
+            "eventType": "input_required", "status": "input_required", "data": {"input": next_input},
+        }]}},
+    )
+    summary.apply(payload)
+    projection = bridge._project_managed_stream_event(payload, summary, "pipeline", 2, "primary", None)
+    assert summary.to_result(0, "")["inputRequired"]["inputId"] == "next-input"
+    assert projection["inputRequired"]["inputId"] == "next-input"
 
 
 def test_stream_summary_keeps_all_sub_pipeline_pending_permissions() -> None:
@@ -2414,6 +2464,57 @@ def test_code_transport_uses_same_profile_and_endpoint_for_stop_chat(monkeypatch
     assert captured["closed"] is True
 
 
+@pytest.mark.parametrize("execution_mode,expected_timeout", [("local", 60.0), ("remote", 1800.0)])
+def test_stop_chat_allows_remote_foreground_approval_wait(monkeypatch, execution_mode, expected_timeout) -> None:
+    captured = {}
+
+    def fake_run(_command, **kwargs):
+        captured.update(kwargs)
+        # Simulate an executor that needs more than two minutes for approval,
+        # without a real wait or a real cloud call.
+        if execution_mode == "remote" and kwargs["timeout"] <= 120:
+            raise subprocess.TimeoutExpired("aliyun", kwargs["timeout"])
+        return SimpleNamespace(returncode=0, stdout=b'{"Status":"Stopped","SessionId":"s-1"}', stderr=b"")
+
+    monkeypatch.setattr(bridge, "build_stop_command", lambda _job, _session: ["aliyun", "ros", "stop-chat"])
+    monkeypatch.setattr(bridge.subprocess, "run", fake_run)
+    job = {"transport": "aliyun_cli", "aliyunCLIExecutionMode": execution_mode}
+    assert bridge._run_stop_chat(job, "s-1") == {"status": "Stopped", "sessionId": "s-1"}
+    assert captured["timeout"] == expected_timeout
+
+
+@pytest.mark.parametrize("command", ["cancel", "follow"])
+@pytest.mark.parametrize("execution_mode,expected_timeout", [("local", 75.0), ("remote", 1815.0)])
+def test_cancel_manager_wait_matches_remote_executor_approval_budget(
+    monkeypatch, tmp_path: Path, command, execution_mode, expected_timeout
+) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "a" * 32
+    job = {
+        "transport": "aliyun_cli", "aliyunCLIExecutionMode": execution_mode,
+        "stopRequestedAt": 1, "aliyunCLIForwardEnv": [],
+    }
+    bridge._atomic_json(bridge._job_paths(job_id)[1], job)
+    monkeypatch.setattr(bridge, "ensure_manager", lambda _idle: {})
+    requests = []
+
+    def fake_request(_record, path, _payload, timeout):
+        requests.append((path, timeout))
+        return {"ok": True, "state": "canceled"}
+
+    monkeypatch.setattr(bridge, "_manager_request", fake_request)
+    arguments = SimpleNamespace(job_id=job_id, manager_idle_seconds=60, aliyun_cli_forward_env=[],
+                                wait_seconds=0, cursor=0)
+    if command == "cancel":
+        bridge.run_cancel_job(arguments)
+    else:
+        bridge.run_follow_job(arguments)
+        if execution_mode == "local":
+            assert requests == [("/follow", 15.0)]
+            return
+    assert requests[0] == ("/cancel", expected_timeout)
+
+
 def test_run_respond_sends_json_as_the_only_start_chat_control_payload(monkeypatch, tmp_path: Path) -> None:
     permission_file = tmp_path / "permission.json"
     permission_file.write_text(
@@ -2585,6 +2686,56 @@ def test_manager_waits_for_first_authorized_health_before_idle_shutdown(monkeypa
 
     assert delayed_health_check
     _wait_for_pid_exit(manager["pid"])
+
+
+def test_manager_does_not_idle_during_stop_chat_approval_without_worker(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    entered = tmp_path / "stop-entered"
+    release = tmp_path / "stop-release"
+    cli = _write_fake_aliyun(tmp_path, """import json, time
+from pathlib import Path
+Path(%r).touch()
+release = Path(%r)
+deadline = time.monotonic() + 15
+while not release.exists():
+    assert time.monotonic() < deadline
+    time.sleep(0.02)
+print(json.dumps({'Status': 'Stopped', 'SessionId': 'session-1'}))
+""" % (str(entered), str(release)))
+    job_id = "a" * 32
+    bridge._atomic_json(bridge._job_paths(job_id)[1], {
+        "transport": "aliyun_cli", "aliyunCLIExecutionMode": "remote",
+        "sessionId": "session-1", "state": "working", "mode": "normal", "turn": 1,
+        "workspace": str(tmp_path), "endpoint": "ros.aliyuncs.com", "aliyunPath": str(cli),
+    })
+    manager = bridge.ensure_manager(1)
+    outcome = []
+
+    def cancel():
+        try:
+            outcome.append(bridge._manager_request(manager, "/cancel", {"jobId": job_id}, timeout=15))
+        except bridge.BridgeError as exc:
+            outcome.append(exc.code)
+
+    caller = threading.Thread(target=cancel)
+    caller.start()
+    try:
+        deadline = time.monotonic() + 10
+        while not entered.exists():
+            assert time.monotonic() < deadline, "StopChat did not reach approval wait"
+            time.sleep(0.02)
+        time.sleep(1.6)
+        assert bridge._pid_alive(manager["pid"]), "An in-flight StopChat is not idle even without a worker"
+        release.touch()
+        caller.join(5)
+        assert not caller.is_alive()
+        assert outcome[0]["stopStatus"] == "Stopped"
+        assert outcome[0]["state"] == "canceled"
+    finally:
+        release.touch()
+        caller.join(5)
+        _wait_for_pid_exit(manager["pid"])
+    assert not bridge._pid_alive(manager["pid"]), "Idle shutdown should resume after the request finishes"
 
 
 def test_manager_idle_countdown_starts_after_sse_worker_exits(monkeypatch, tmp_path: Path) -> None:
@@ -2828,7 +2979,8 @@ def test_managed_remote_bootstrap_is_committed_before_ack_and_recovers_lost_resu
             "aliyunPath": str(fake_cli),
         }
     )
-    result = bridge._follow_job_local(started["jobId"], 0, 10)
+    bridge._drive_foreground_cli(started["jobId"], 0, 10)
+    result = bridge._follow_job_local(started["jobId"], 0, 0)
 
     assert result["state"] == "turn-completed"
     assert result["finalText"] == "done"
@@ -3175,6 +3327,70 @@ def test_follow_observation_rechecks_step_and_gate_arriving_after_snapshot(
         assert result["state"] == "input-required"
         assert result["inputRequired"]["inputId"] == "selection-1"
         assert result["cursor"] == 2
+
+
+@pytest.mark.parametrize("exit_kind", ["finished", "stopped"])
+@pytest.mark.parametrize(("role", "request_seq", "token"), [
+    ("primary", 1, "current"),
+    ("primary", 0, "current"),
+    ("sideband", 1, "current"),
+    ("sideband", 0, "current"),
+    ("sideband", 1, "old"),
+])
+def test_worker_exit_clears_launcher_pid_only_for_owned_request(
+    monkeypatch, tmp_path: Path, exit_kind, role, request_seq, token,
+) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    monkeypatch.setattr(bridge, "_touch_manager_activity", lambda: None)
+    job_id = "3" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    original = {
+        "jobId": job_id,
+        "state": "working",
+        "activeRequestSeq": 1,
+        "workerPid": 101,
+        "sidebandWorkerPid": 202,
+        "sidebandWorkerToken": "current",
+    }
+    bridge._atomic_json(job_path, original)
+
+    # Actual worker PID differs from both launcher PIDs persisted by Popen.
+    if exit_kind == "stopped":
+        bridge._record_stopped_worker_exit(job_id, request_seq, role, token, 303)
+    elif role == "sideband":
+        bridge._finish_sideband_job(job_id, request_seq, token, {"state": "stream-ended"}, 303)
+    else:
+        bridge._finish_job(job_id, request_seq, {"state": "completed"}, 303)
+
+    job = bridge._load_state_json(job_path)
+    if request_seq != 1 or (role == "sideband" and token != "current"):
+        assert job == original
+    elif role == "sideband":
+        assert "sidebandWorkerPid" not in job
+        assert "sidebandWorkerToken" not in job
+        assert job["workerPid"] == 101
+        assert job["state"] == "working"
+    else:
+        assert "workerPid" not in job
+        assert job["sidebandWorkerPid"] == 202
+        assert job["sidebandWorkerToken"] == "current"
+
+
+@pytest.mark.parametrize("expected_worker_pid", [0, 999])
+def test_observer_cannot_finish_a_replaced_launcher(monkeypatch, tmp_path: Path, expected_worker_pid) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "3" * 32
+    root, job_path, _spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    original = {"state": "working", "activeRequestSeq": 1, "workerPid": 101}
+    bridge._atomic_json(job_path, original)
+
+    assert not bridge._finish_job(
+        job_id, 1, {"state": "failed"}, 303, expected_worker_pid=expected_worker_pid,
+    )
+    assert bridge._load_state_json(job_path) == original
 
 
 def test_follow_dead_worker_check_does_not_overwrite_concurrent_completion(monkeypatch, tmp_path: Path) -> None:
@@ -3857,6 +4073,15 @@ def test_cancel_managed_job_calls_stop_chat_and_preserves_authoritative_state(
     else:
         assert "inputRequired" not in job or stop_status == "Failed"
 
+    # Follow must preserve the cancellation acknowledgement, not present the
+    # old StartChat wire state as a fresh observation of the cloud task.
+    followed = bridge._follow_job_local(job_id, result["cursor"], 120)
+    assert followed["state"] == persisted_state
+    assert followed["stopStatus"] == stop_status
+    assert followed["stopRequestId"] == "request-1"
+    assert followed["presentationRequired"] is True
+    assert "followTimedOut" not in followed
+
 
 def test_parser_exposes_managed_commands_without_synchronous_chat() -> None:
     parser = bridge.build_parser()
@@ -3936,6 +4161,7 @@ def test_remote_cli_job_persists_execution_mode_without_local_identity(monkeypat
             "transport": "aliyun_cli",
             "aliyunCLIExecutionMode": "remote",
             "aliyunCLIForwardEnv": ["STAROPS_HIL"],
+            "debug": True,
             "endpoint": "ros-pre.aliyuncs.com",
             "regionId": None,
             "profile": None,
@@ -3949,6 +4175,8 @@ def test_remote_cli_job_persists_execution_mode_without_local_identity(monkeypat
     job = bridge._load_state_json(job_path)
     assert job["aliyunCLIExecutionMode"] == "remote"
     assert job["aliyunCLIForwardEnv"] == ["STAROPS_HIL"]
+    assert job["debug"] is True
+    assert captured["request"]["debug"] is True
     assert "fresh.example" not in json.dumps(job)
     assert job["profile"] is None
     assert job["regionId"] is None
@@ -4059,6 +4287,7 @@ except (OSError, urllib.error.URLError) as exc:
                 "transport": "aliyun_cli",
                 "aliyunCLIExecutionMode": "remote",
                 "aliyunCLIForwardEnv": ["STAROPS_HIL"],
+                "debug": True,
                 "endpoint": "ros.aliyuncs.com",
                 "managerIdleSeconds": 2,
             },
@@ -4071,6 +4300,12 @@ except (OSError, urllib.error.URLError) as exc:
 
         assert result["state"] == "turn-completed"
         assert result["finalText"] == "remote route refreshed"
+        debug_path = workspace / ".ros-agent-debug" / "remote-aliyun-results.jsonl"
+        debug_records = [json.loads(line) for line in debug_path.read_text(encoding="utf-8").splitlines()]
+        assert debug_records[0]["jobId"] == started["jobId"]
+        assert debug_records[0]["requestSeq"] == 1
+        assert any(item["kind"] == "parsed-event" and item["idPresent"] for item in debug_records)
+        assert fresh_route not in debug_path.read_text(encoding="utf-8")
         assert len(calls) == 1
         assert calls[0]["args"][:3] == ["ros", "start-chat", "--endpoint"]
         endpoint_index = calls[0]["args"].index("--endpoint")
@@ -4084,8 +4319,9 @@ except (OSError, urllib.error.URLError) as exc:
         proxy_thread.join(timeout=2)
 
 
-def test_spawn_worker_replaces_stale_remote_cli_environment_without_persisting_values(
-    monkeypatch, tmp_path: Path
+@pytest.mark.parametrize("remote", [False, True])
+def test_spawn_worker_keeps_remote_authorization_out_of_parser_environment(
+    monkeypatch, tmp_path: Path, remote: bool
 ) -> None:
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     monkeypatch.setenv("STAROPS_HIL", "http://stale.example/hil")
@@ -4110,13 +4346,18 @@ def test_spawn_worker_replaces_stale_remote_cli_environment_without_persisting_v
     request = {
         "requestSeq": 1,
         "prompt": "hello",
+        "transport": "aliyun_cli",
+        "aliyunCLIExecutionMode": "remote" if remote else "local",
         "aliyunCLIForwardEnv": ["STAROPS_HIL"],
         "_transientEnvironment": {"STAROPS_HIL": "http://fresh.example/hil"},
     }
 
     bridge._spawn_worker(job_id, request)
 
-    assert captured["env"]["STAROPS_HIL"] == "http://fresh.example/hil"
+    if remote:
+        assert "STAROPS_HIL" not in captured["env"]
+    else:
+        assert captured["env"]["STAROPS_HIL"] == "http://fresh.example/hil"
     persisted_request = next(root.glob("request-*.json")).read_text(encoding="utf-8")
     assert "fresh.example" not in persisted_request
     assert "stale.example" not in persisted_request
@@ -4701,7 +4942,8 @@ def test_managed_respond_returns_durable_ack_for_same_duplicate_and_rejects_conf
         bridge._respond_job_local({"jobId": job_id, "inputFile": str(permission_path), "decision": "deny"})
 
 
-def test_managed_respond_waits_for_top_pipeline_parent_worker_to_reach_eof(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("suspended", [False, True])
+def test_managed_respond_preserves_resident_top_pipeline_parent(monkeypatch, tmp_path: Path, suspended) -> None:
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     job_id = "7" * 32
     workspace = tmp_path / "top-pipeline"
@@ -4739,23 +4981,34 @@ def test_managed_respond_waits_for_top_pipeline_parent_worker_to_reach_eof(monke
         },
     )
     monkeypatch.setattr(bridge, "_pid_alive", lambda pid: pid == 4321)
-    monkeypatch.setattr(
-        bridge,
-        "_spawn_worker",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("top permission must wait for parent EOF")),
-    )
+    requests = []
+    monkeypatch.setattr(bridge, "_spawn_worker", lambda _job_id, request: requests.append(request) or 9876)
 
-    with pytest.raises(bridge.BridgeError) as error:
-        bridge._respond_job_local({"jobId": job_id, "inputFile": str(permission_path), "decision": "allow_once"})
+    if suspended:
+        job = bridge._load_state_json(job_path)
+        job["permissionWait"] = {"status": "suspended", "resumable": True}
+        bridge._atomic_json(job_path, job)
+        with pytest.raises(bridge.BridgeError) as error:
+            bridge._respond_job_local({"jobId": job_id, "decision": "allow_once"})
+        assert error.value.code == "job_busy"
+        assert requests == []
+        monkeypatch.setattr(bridge, "_pid_alive", lambda _pid: False)
+        result = bridge._respond_job_local({"jobId": job_id, "decision": "allow_once"})
+        assert result["state"] == "submitted"
+        assert bridge._load_state_json(job_path)["activeRequestSeq"] == 2
+        assert requests[0].get("workerRole") != "sideband"
+        return
+
+    result = bridge._respond_job_local({"jobId": job_id, "inputFile": str(permission_path), "decision": "allow_once"})
     job = bridge._load_state_json(job_path)
 
-    assert error.value.code == "job_busy"
-    assert error.value.retryable is True
+    assert result["state"] == "submitted"
     assert job["workerPid"] == 4321
     assert job["activeRequestSeq"] == 1
-    assert job["state"] == "input-required"
-    assert job["inputRequired"] == pending
-    assert "lastPermissionResponse" not in job
+    assert job["state"] == "working"
+    assert job["sidebandResponse"] == pending
+    assert requests[0]["workerRole"] == "sideband"
+    assert requests[0]["workerToken"] == job["sidebandWorkerToken"]
 
 
 def test_managed_respond_rejects_sub_pipeline_permission_without_live_parent_stream(
@@ -5664,3 +5917,988 @@ def test_same_worker_apply_checkpoint_gap_does_not_duplicate_summary(monkeypatch
         ("v1.gap.2", True),
         ("v1.gap.3", False),
     ]
+
+
+@pytest.fixture
+def remote_lifecycle(monkeypatch, tmp_path):
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    live_context = tmp_path / "live-context"
+    live_context.write_text("fake-context-one", encoding="utf-8")
+    monkeypatch.setenv("STAROPS_HIL", "fake-context-one")
+    calls = tmp_path / "calls.jsonl"
+    cli = _write_fake_aliyun(tmp_path, """import json, os, sys, time
+from pathlib import Path
+calls = Path(%r)
+context = Path(%r)
+pipeline = context.with_suffix('.pipeline')
+multiwindow = context.with_suffix('.multiwindow')
+acknowledged = context.with_suffix('.acknowledged')
+finish = context.with_suffix('.finish')
+disconnect = context.with_suffix('.disconnect')
+disconnect_again = context.with_suffix('.disconnect-again')
+def wait_for(*paths):
+    timeout_file = context.with_suffix('.timeout')
+    deadline = time.monotonic() + (float(timeout_file.read_text(encoding='utf-8')) if timeout_file.exists() else 20)
+    while not any(path.exists() for path in paths):
+        if time.monotonic() > deadline:
+            raise SystemExit(2)
+        time.sleep(0.02)
+args = sys.argv[1:]
+with calls.open('a', encoding='utf-8') as handle:
+    handle.write(json.dumps({'args': args, 'hil': os.environ.get('STAROPS_HIL'),
+                             'pid': os.getpid(), 'parent': os.getppid()}) + '\\n')
+if os.environ.get('STAROPS_HIL') != context.read_text(encoding='utf-8'):
+    print(json.dumps({'summary': 'Failed to call tool', 'popRequestId': 'fake-request',
+                      'detail': 'HIL context expired ' + os.environ.get('STAROPS_HIL', '')}), flush=True)
+    raise SystemExit(1)
+if args[:2] == ['ros', 'stop-chat']:
+    print(json.dumps({'Status': 'Stopped', 'SessionId': 'session-1'}), flush=True)
+    raise SystemExit(0)
+query = args[args.index('--query') + 1] if '--query' in args else None
+if query in ('sse-lost', 'sse-lost-no-anchor'):
+    if query == 'sse-lost':
+        print(json.dumps({'id': 'v1.lifecycle.1', 'data': {'result': {'statusUpdate': {
+            'taskId': 'task-1', 'contextId': 'session-1', 'status': {'state': 'TASK_STATE_WORKING'}}}}}), flush=True)
+    print('Aliyun CLI call failed: failed to call tool: SSE connection lost', file=sys.stderr, flush=True)
+    raise SystemExit(1)
+if query and query.startswith('input-'):
+    kind = query[len('input-'):].split('-truncated', 1)[0]
+    envelope = {'schemaVersion': 1, 'kind': kind, 'requestTaskId': 'task-1', 'contextId': 'session-1',
+                'inputId': 'input-1', 'prompt': 'Choose A', 'options': [{'id': 'A', 'label': 'A'}]}
+    if kind == 'permission':
+        envelope['toolUseId'] = 'tool-1'
+    event = {'id': 'v1.input.1', 'data': {'result': {'statusUpdate': {
+        'taskId': 'task-1', 'contextId': 'session-1', 'status': {'state': 'TASK_STATE_INPUT_REQUIRED'},
+        'metadata': {'iac_code': {'input': envelope}}}}}}
+    if query.endswith('-truncated'):
+        print('[' + json.dumps(event) + ', {"id":"v1.input.2","data":', end='', flush=True)
+        raise SystemExit(0)
+    else:
+        print(json.dumps(event), flush=True)
+    wait_for(finish, disconnect)
+elif query == 'receipt-then-input':
+    receipt = {'eventType': 'input_received', 'status': 'working', 'data': {
+        'kind': 'ask_user_question', 'inputId': 'input-1',
+        'options': [{'id': 'A', 'label': 'A'}], 'allowFreeText': True}}
+    envelope = {'schemaVersion': 1, 'kind': 'ask_user_question', 'requestTaskId': 'task-1',
+                'contextId': 'session-1', 'inputId': 'input-2', 'prompt': 'Development or production?',
+                'options': [{'id': 'dev', 'label': 'Development'}, {'id': 'prod', 'label': 'Production'}]}
+    for number, state, metadata in (
+        (1, 'TASK_STATE_WORKING', {'pipeline': receipt}),
+        (2, 'TASK_STATE_INPUT_REQUIRED', {'input': envelope}),
+    ):
+        print(json.dumps({'id': 'v1.reply.' + str(number), 'data': {'result': {'statusUpdate': {
+            'taskId': 'task-1', 'contextId': 'session-1', 'status': {'state': state},
+            'metadata': {'iac_code': metadata}}}}}), flush=True)
+    wait_for(finish, disconnect)
+elif query == 'truncated-array':
+    first = {'id': 'v1.lifecycle.1', 'data': {'result': {'statusUpdate': {
+        'taskId': 'task-1', 'contextId': 'session-1', 'status': {'state': 'TASK_STATE_WORKING'}}}}}
+    incomplete = {'id': 'v1.lifecycle.99', 'data': {'contextId': 'wrong-session', 'padding': 'x' * 90000}}
+    print(json.dumps([first, incomplete], indent=2)[:80 * 1024], end='', flush=True)
+    wait_for(disconnect, finish)
+elif query in ('no-anchor', 'delayed-approval'):
+    queued_at = time.monotonic()
+    wait_for(context.with_suffix('.approval') if query == 'delayed-approval' else finish, disconnect)
+    if disconnect.exists():
+        raise SystemExit(0)
+    if query == 'delayed-approval':
+        foreground_pid = int(context.with_suffix('.foreground').read_text(encoding='utf-8'))
+        # Simulate admission tied to the original foreground tool invocation,
+        # not merely to the detached CLI reader's parent process.
+        if os.name == 'nt':
+            import ctypes
+            from ctypes import wintypes
+            kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel32.WaitForSingleObject.restype = wintypes.DWORD
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            handle = kernel32.OpenProcess(0x00100000, False, foreground_pid)
+            if not handle:
+                raise SystemExit('Foreground expired before approval')
+            try:
+                if kernel32.WaitForSingleObject(handle, 0) != 0x00000102:
+                    raise SystemExit('Foreground expired before approval')
+            finally:
+                kernel32.CloseHandle(handle)
+        else:
+            os.kill(foreground_pid, 0)
+        if os.environ.get('STAROPS_HIL') != context.read_text(encoding='utf-8'):
+            raise SystemExit('HIL expired before approval')
+        context.with_suffix('.admitted').write_text(json.dumps({
+            'foregroundPid': foreground_pid, 'foregroundAlive': True,
+            'waitedSeconds': time.monotonic() - queued_at,
+        }), encoding='utf-8')
+    print(json.dumps([{'id': 'v1.buffered.1', 'data': json.loads(%r)}]), flush=True)
+elif query in ('first', 'pipeline-first', 'multi-window-first', 'two-deltas'):
+    if query == 'pipeline-first':
+        pipeline.touch()
+    if query == 'multi-window-first':
+        multiwindow.touch()
+    first = json.loads(%r)
+    print(json.dumps({'id': 'v1.lifecycle.1', 'data': first}), flush=True)
+    if query == 'two-deltas':
+        first['result']['statusUpdate']['status']['message']['parts'][0]['text'] = 'second partial'
+        print(json.dumps({'id': 'v1.lifecycle.2', 'data': first}), flush=True)
+    wait_for(finish, disconnect, acknowledged)
+    if disconnect.exists():
+        raise SystemExit(0)
+    print(json.dumps({'id': 'v1.lifecycle.3' if query == 'two-deltas' else 'v1.lifecycle.2',
+                      'data': json.loads(%r)}), flush=True)
+elif query is None and multiwindow.exists() and 'v1.lifecycle.1' in args[args.index('--body') + 1]:
+    print(json.dumps({'id': 'v1.lifecycle.2', 'data': json.loads(%r)}), flush=True)
+    wait_for(disconnect_again, finish)
+    raise SystemExit(0)
+elif query and query.startswith('IAC_CODE_PERMISSION:'):
+    response = json.loads(query.split(':', 1)[1])
+    ack = dict(response, kind='permission_ack', accepted=True)
+    event = {'result': {'message': {'contextId': 'session-1', 'parts': [
+        {'mediaType': 'application/json', 'data': ack}]}}}
+    print(json.dumps({'id': 'v1.permission.1', 'data': event}), flush=True)
+    if pipeline.exists():
+        acknowledged.touch()
+    print(json.dumps({'id': 'v1.permission.2', 'data': json.loads(%r)}), flush=True)
+elif query is None and pipeline.exists():
+    while not acknowledged.exists():
+        time.sleep(0.02)
+    print(json.dumps({'id': 'v1.lifecycle.2', 'data': json.loads(%r)}), flush=True)
+else:
+    print(json.dumps({'id': ('v1.lifecycle.3' if multiwindow.exists() else 'v1.lifecycle.2')
+                      if query is None else 'v1.next-turn.1',
+                      'data': json.loads(%r)}), flush=True)
+""" % (
+        str(calls), str(live_context),
+        json.dumps(_status_event(state="TASK_STATE_COMPLETED", text="buffered final",
+                                 metadata={"assistantFinal": {"complete": True}})),
+        json.dumps(_status_event(text="first partial")),
+        json.dumps(_status_event(state="TASK_STATE_COMPLETED", text="authoritative final",
+                                 metadata={"assistantFinal": {"complete": True}})),
+        json.dumps(_status_event(text="second partial")),
+        json.dumps(_status_event(state="TASK_STATE_COMPLETED")),
+        json.dumps(_status_event(state="TASK_STATE_COMPLETED")),
+        json.dumps(_status_event(state="TASK_STATE_COMPLETED", text="authoritative final",
+                                 metadata={"assistantFinal": {"complete": True}})),
+    ))
+
+    def start(prompt="first", mode="normal", aliyun_path=None):
+        started = bridge._start_job_local({
+            "workspace": str(workspace), "prompt": prompt, "mode": mode, "transport": "aliyun_cli",
+            "aliyunCLIExecutionMode": "remote", "aliyunCLIForwardEnv": ["STAROPS_HIL"],
+            "transientEnvironment": {"STAROPS_HIL": "fake-context-one"},
+            "endpoint": "ros.aliyuncs.com", "aliyunPath": str(cli) if aliyun_path is None else aliyun_path,
+            "debug": True,
+        })
+        root = bridge._remote_cli_root(started["jobId"])
+        deadline = time.monotonic() + 5
+        while not list(root.glob("remote-cli-*.request.json")):
+            assert time.monotonic() < deadline, "The parser worker did not enqueue its CLI invocation."
+            time.sleep(0.02)
+        return started
+
+    def refresh(value="fake-context-two"):
+        live_context.write_text(value, encoding="utf-8")
+        monkeypatch.setenv("STAROPS_HIL", value)
+
+    def read_calls():
+        return [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()] if calls.exists() else []
+
+    def disconnect(job_id, again=False):
+        live_context.with_suffix(".disconnect-again" if again else ".disconnect").touch()
+        root = bridge._remote_cli_root(job_id)
+        deadline = time.monotonic() + 5
+        while not any(bridge._load_state_json(path).get("ownerPid") is None
+                      for path in root.glob("remote-cli-*.request.json") if path.exists()):
+            assert time.monotonic() < deadline, "The parser did not queue a reconnect after disconnection."
+            time.sleep(0.02)
+
+    foregrounds = []
+
+    def drive(job_id, cursor=0, seconds=1):
+        process = subprocess.Popen([
+            sys.executable, "-c",
+            "import runpy,sys; b=runpy.run_path(sys.argv[1]); "
+            "b['_drive_foreground_cli'](sys.argv[2],int(sys.argv[3]),float(sys.argv[4]))",
+            str(BRIDGE_PATH), job_id, str(cursor), str(seconds),
+        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        foregrounds.append(process)
+        live_context.with_suffix('.foreground').write_text(str(process.pid), encoding='utf-8')
+        return process
+
+    def start_command(explicit_follow):
+        scripts = tmp_path / 'installed-skill' / 'scripts'
+        scripts.mkdir(parents=True)
+        for source in BRIDGE_SOURCE_PATHS:
+            shutil.copyfile(source, scripts / source.name)
+        (scripts.parent / 'config.json').write_text(json.dumps({
+            'transport': 'aliyun_cli', 'aliyunCLIExecutionMode': 'remote', 'allowedAgentModes': ['normal'],
+            'managerIdleSeconds': 1, 'enableThinking': True, 'aliyunCLIForwardEnv': ['STAROPS_HIL'], 'debug': True,
+        }), encoding='utf-8')
+        prompt = workspace / 'prompt.md'
+        prompt.write_text('no-anchor', encoding='utf-8')
+        command = [
+            sys.executable, str(scripts / BRIDGE_PATH.name), 'start', '--prompt-file', str(prompt),
+            '--aliyun-path', str(cli), '--follow-seconds', '1',
+        ]
+        if explicit_follow:
+            command.append('--follow')
+        process = subprocess.Popen(command, cwd=workspace, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        foregrounds.append(process)
+        return process
+
+    def wait_for(predicate, timeout=5):
+        deadline = time.monotonic() + timeout
+        while not predicate():
+            assert time.monotonic() < deadline, "Timed out waiting for the remote lifecycle checkpoint."
+            time.sleep(0.02)
+
+    def finish_drive(process):
+        output, errors = process.communicate(timeout=8)
+        assert process.returncode == 0, (output, errors)
+
+    yield SimpleNamespace(start=start, refresh=refresh, calls=read_calls, workspace=workspace,
+                          context=live_context, disconnect=disconnect, drive=drive,
+                          wait_for=wait_for, finish_drive=finish_drive, start_command=start_command)
+    live_context.with_suffix(".finish").touch()
+    for process in foregrounds:
+        if process.poll() is None:
+            process.terminate()
+        process.communicate(timeout=5)
+    # Failed assertions must not leave a detached fake parser parked forever.
+    # Set local stop intent only; teardown never invokes a cloud operation.
+    for job_path in (tmp_path / 'state' / 'jobs').glob('*/job.json'):
+        with bridge.StateLock(job_path.parent / '.job.lock'):
+            job = bridge._load_state_json(job_path)
+            workers = [job.get(key) for key in ('workerPid', 'sidebandWorkerPid')
+                       if bridge._pid_alive(job.get(key))]
+            if workers:
+                job.setdefault('stopRequestedAt', int(time.time()))
+                bridge._atomic_json(job_path, job)
+        for pid in workers:
+            _wait_for_pid_exit(pid)
+            assert not bridge._pid_alive(pid), 'A fake parser leaked from the lifecycle fixture.'
+
+
+def test_remote_cli_default_command_name_resolves_before_foreground_handoff(remote_lifecycle, monkeypatch):
+    env = remote_lifecycle
+    monkeypatch.setenv("PATH", str(env.context.parent) + os.pathsep + os.environ.get("PATH", ""))
+    started = env.start(aliyun_path="aliyun")
+    job_id = started["jobId"]
+    job = bridge._load_state_json(bridge._job_paths(job_id)[1])
+    assert Path(job["aliyunPath"]) == env.context.parent / ("aliyun.cmd" if os.name == "nt" else "aliyun")
+    env.context.with_suffix(".finish").touch()
+    bridge._drive_foreground_cli(job_id, 0, 5)
+    final = bridge._follow_job_local(job_id, 0, 1)
+    assert final["state"] == "turn-completed"
+    assert len(env.calls()) == 1
+
+
+def test_remote_busy_foreground_stays_alive_without_follow_and_next_turn_uses_fresh_hil(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start()
+    job_id = started["jobId"]
+    time.sleep(0.15)
+    assert env.calls() == []  # A detached parser worker cannot invoke remote aliyun.
+    foreground = env.drive(job_id, seconds=0.05)
+    env.wait_for(lambda: len(env.calls()) == 1)
+    time.sleep(0.3)  # Well beyond the scaled-down observation timeout.
+    assert foreground.poll() is None
+    first = bridge._follow_job_local(job_id, 0, 0)
+    assert first["followTimedOut"] is True
+    assert env.calls()[0]["hil"] == "fake-context-one"
+    if os.name != "nt":
+        assert bridge._pid_alive(env.calls()[0]["pid"])
+
+    env.context.with_suffix(".finish").touch()
+    env.finish_drive(foreground)
+    final = bridge._follow_job_local(job_id, first["cursor"], 5)
+    assert final["state"] == "turn-completed"
+    assert final["finalText"] == "authoritative final"
+    assert len(env.calls()) == 1
+    assert "--query" in env.calls()[0]["args"]
+    root, _job_path, spool = bridge._job_paths(job_id)
+    assert [item.get("streamEventId") for item in bridge._read_spool(spool)].count("v1.lifecycle.1") == 1
+    assert not list(bridge._remote_cli_root(job_id).glob("remote-cli-*"))
+    for path in root.iterdir():
+        assert "fake-context-" not in path.read_text(encoding="utf-8", errors="replace")
+
+    env.refresh("fake-context-three")
+    continued = bridge._continue_job_local({"jobId": job_id, "prompt": "next question"})
+    bridge._drive_foreground_cli(job_id, continued["cursor"], 5)
+    next_turn = bridge._follow_job_local(job_id, continued["cursor"], 1)
+    assert next_turn["state"] == "turn-completed"
+    assert next_turn["turn"] == 2
+    assert env.calls()[-1]["hil"] == "fake-context-three"
+    assert "--query" in env.calls()[-1]["args"]
+    assert "--session-id" in env.calls()[-1]["args"]
+
+
+@pytest.mark.parametrize("blocked", ["launcher-gone", "launch-timed-out"])
+def test_remote_reader_cannot_launch_after_foreground_handoff_fails(remote_lifecycle, monkeypatch, blocked):
+    env = remote_lifecycle
+    started = env.start()
+    job_id = started["jobId"]
+    root = bridge._remote_cli_root(job_id)
+    path = next(root.glob("remote-cli-*.request.json"))
+    if blocked == "launch-timed-out":
+        with monkeypatch.context() as patch:
+            patch.setattr(bridge, "MANAGER_START_TIMEOUT_SECONDS", 0.05)
+            patch.setattr(bridge.subprocess, "Popen", lambda *a, **kw: SimpleNamespace(poll=lambda: None))
+            with pytest.raises(bridge.BridgeError, match="did not start in time"):
+                bridge._drive_foreground_cli(job_id, 0, 1)
+        assert path.with_suffix(".stop").exists()
+    else:
+        request = bridge._load_state_json(path)
+        request["ownerPid"] = os.getpid()
+        bridge._atomic_json(path, request)
+        monkeypatch.setattr(bridge, "_pid_alive", lambda _pid: False)
+    invocation_id = path.name.split(".")[0][len("remote-cli-"):]
+    assert bridge.run_remote_cli(job_id, invocation_id) == 1
+    assert env.calls() == []
+
+
+def test_remote_delayed_approval_or_buffered_output_does_not_end_foreground_without_anchor(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("no-anchor")
+    foreground = env.drive(started["jobId"], seconds=0.05)
+    env.wait_for(lambda: len(env.calls()) == 1)
+    time.sleep(0.3)
+    assert foreground.poll() is None
+    result = bridge._follow_job_local(started["jobId"], 0, 0)
+    assert result["followTimedOut"] is True
+    assert result["state"] != "failed"
+    assert len(env.calls()) == 1
+    env.context.with_suffix(".finish").touch()
+    env.finish_drive(foreground)
+    result = bridge._follow_job_local(started["jobId"], result["cursor"], 5)
+    assert result["state"] == "turn-completed", result
+    assert result["finalText"] == "buffered final"
+    assert len(env.calls()) == 1
+
+
+def test_remote_approval_gate_checks_original_foreground_after_observation_window(remote_lifecycle, record_property):
+    env = remote_lifecycle
+    # CI uses the same ordering at a scaled timeout; a targeted local run can
+    # exercise the real 60-second window with approval after 65 seconds.
+    delay = float(os.environ.get('ROS_AGENT_TEST_APPROVAL_DELAY_SECONDS', '0.3'))
+    window = float(os.environ.get('ROS_AGENT_TEST_FOREGROUND_IDLE_SECONDS', '0.05'))
+    assert delay > window
+    env.context.with_suffix('.timeout').write_text(str(delay + 20), encoding='utf-8')
+    started = env.start('delayed-approval')
+    foreground = env.drive(started['jobId'], seconds=window)
+    env.wait_for(lambda: len(env.calls()) == 1)
+    time.sleep(delay)
+    # No follow/heartbeat request keeps the foreground alive during this wait.
+    assert foreground.poll() is None
+    job = bridge._load_state_json(bridge._job_paths(started['jobId'])[1])
+    assert job.get('sessionId') is None
+    assert job.get('streamCursor') is None
+    assert not env.context.with_suffix('.admitted').exists()
+    env.context.with_suffix('.approval').touch()
+    env.finish_drive(foreground)
+    admitted = json.loads(env.context.with_suffix('.admitted').read_text(encoding='utf-8'))
+    assert admitted['foregroundPid'] == foreground.pid
+    assert admitted['foregroundAlive'] is True
+    assert admitted['waitedSeconds'] > window
+    final = bridge._follow_job_local(started['jobId'], 0, 5)
+    assert final['state'] == 'turn-completed', final
+    assert final['finalText'] == 'buffered final'
+    assert len(env.calls()) == 1
+    record_property('approval_delay_seconds', round(admitted['waitedSeconds'], 3))
+    record_property('foreground_idle_seconds', window)
+
+
+def test_remote_managed_reader_flushes_after_five_seconds_of_real_output_silence(remote_lifecycle, record_property):
+    env = remote_lifecycle
+    started = env.start('two-deltas')
+    job_id = started['jobId']
+    foreground = env.drive(job_id)
+    job_path = bridge._job_paths(job_id)[1]
+    env.wait_for(lambda: bridge._load_state_json(job_path).get('streamCursor') == 'v1.lifecycle.1')
+    observed_at = time.monotonic()
+    # The second delta is below the count/byte limits. No third event arrives
+    # to trigger a flush; the real mailbox reader's idle hook must do it.
+    env.wait_for(lambda: bridge._load_state_json(job_path).get('streamCursor') == 'v1.lifecycle.2', timeout=8)
+    elapsed = time.monotonic() - observed_at
+    assert 3 < elapsed < 8
+    assert foreground.poll() is None
+    assert len(env.calls()) == 1
+    env.context.with_suffix('.finish').touch()
+    env.finish_drive(foreground)
+    final = bridge._follow_job_local(job_id, 0, 5)
+    assert final['state'] == 'turn-completed', final
+    assert bridge._load_state_json(job_path)['streamCursor'] == 'v1.lifecycle.3'
+    assert len(env.calls()) == 1
+    record_property('silent_flush_observed_seconds', round(elapsed, 3))
+
+
+@pytest.mark.parametrize('explicit_follow', [False, True])
+def test_remote_public_start_command_finishes_without_a_second_follow_command(remote_lifecycle, explicit_follow):
+    env = remote_lifecycle
+    foreground = env.start_command(explicit_follow)
+    env.wait_for(lambda: len(env.calls()) == 1 or foreground.poll() is not None)
+    if foreground.poll() is not None:
+        pytest.fail('Start exited before CLI admission: {!r}'.format(foreground.communicate(timeout=1)))
+    manager = bridge._load_state_json(bridge._manager_record_path())
+    time.sleep(1.3)  # Exceeds both configured manager idle and the foreground observation window.
+    assert foreground.poll() is None
+    assert bridge._pid_alive(manager['pid'])
+    assert len(env.calls()) == 1
+    env.context.with_suffix('.finish').touch()
+    output, errors = foreground.communicate(timeout=8)
+    assert foreground.returncode == 0, (output, errors)
+    final = json.loads(output.decode('utf-8'))
+    assert final['state'] == 'turn-completed', final
+    assert final['finalText'] == 'buffered final'
+    assert len(output) < 32 * 1024
+    assert len(env.calls()) == 1
+    _wait_for_pid_exit(final['workerPid'])
+    assert not bridge._pid_alive(final['workerPid'])
+    _wait_for_pid_exit(manager['pid'])
+    assert not bridge._pid_alive(manager['pid'])
+
+
+def test_remote_real_disconnect_before_anchor_fails_without_retrying_query(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("no-anchor")
+    foreground = env.drive(started["jobId"])
+    env.wait_for(lambda: len(env.calls()) == 1)
+    env.context.with_suffix(".disconnect").touch()
+    env.finish_drive(foreground)
+    result = bridge._follow_job_local(started["jobId"], 0, 5)
+    assert result["state"] == "failed"
+    assert result["error"]["code"] == "missing_recovery_anchor"
+    env.refresh()
+    bridge._drive_foreground_cli(started["jobId"], result["cursor"], 0.1)
+    assert len(env.calls()) == 1
+    assert "stop-chat" not in env.calls()[0]["args"]
+
+
+@pytest.mark.parametrize("has_anchor", [False, True])
+def test_remote_real_sse_tool_failure_uses_foreground_reconnect_only_with_current_anchor(remote_lifecycle, has_anchor):
+    env = remote_lifecycle
+    started = env.start("sse-lost" if has_anchor else "sse-lost-no-anchor")
+    job_id = started["jobId"]
+    bridge._drive_foreground_cli(job_id, 0, 5)
+    final = bridge._follow_job_local(job_id, 0, 5)
+    calls = env.calls()
+    assert len(calls) == (2 if has_anchor else 1)
+    assert all(item["hil"] == "fake-context-one" for item in calls)
+    assert all(item["args"][:2] == ["ros", "start-chat"] for item in calls)
+    if has_anchor:
+        assert final["state"] == "turn-completed", final
+        assert final["finalText"] == "authoritative final"
+        assert ["--query" in item["args"] for item in calls] == [True, False]
+        assert _command_body(calls[1]["args"]) == {
+            "StreamOptions.Action": "Reconnect", "StreamOptions.Cursor": "v1.lifecycle.1",
+        }
+    else:
+        assert final["state"] == "failed"
+        assert final["error"]["code"] == "missing_recovery_anchor"
+        assert "outcome is unknown" in final["error"]["message"]
+        env.refresh()
+        bridge._drive_foreground_cli(job_id, final["cursor"], 0.1)
+        assert len(env.calls()) == 1
+
+
+def test_remote_abandoned_foreground_before_anchor_closes_cli_without_new_query(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("no-anchor")
+    foreground = env.drive(started["jobId"])
+    env.wait_for(lambda: len(env.calls()) == 1)
+    foreground.terminate()
+    foreground.communicate(timeout=5)
+    result = bridge._follow_job_local(started["jobId"], 0, 5)
+    assert result["error"]["code"] == "missing_recovery_anchor"
+    env.wait_for(lambda: not list(bridge._remote_cli_root(started["jobId"]).glob("remote-cli-*")))
+    assert len(env.calls()) == 1
+    assert env.calls()[0]["args"][:2] == ["ros", "start-chat"]
+
+
+def test_remote_manager_stays_busy_without_follow_then_exits_after_completion(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("no-anchor")
+    manager = bridge.ensure_manager(1)
+    foreground = env.drive(started["jobId"])
+    try:
+        env.wait_for(lambda: len(env.calls()) == 1)
+        time.sleep(1.3)
+        assert bridge._pid_alive(manager["pid"])
+        assert foreground.poll() is None
+        env.context.with_suffix(".finish").touch()
+        env.finish_drive(foreground)
+        _wait_for_pid_exit(started["workerPid"])
+        _wait_for_pid_exit(manager["pid"])
+        assert not bridge._pid_alive(started["workerPid"])
+        assert not bridge._pid_alive(manager["pid"])
+        assert bridge._load_state_json(bridge._job_paths(started["jobId"])[1])["state"] == "turn-completed"
+    finally:
+        env.context.with_suffix(".finish").touch()
+        _wait_for_pid_exit(manager["pid"], timeout=8.0)
+
+
+def test_remote_parser_waiting_for_follow_does_not_keep_manager_or_old_hil_active(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("no-anchor")
+    manager = bridge.ensure_manager(0.2)
+    try:
+        _wait_for_pid_exit(manager["pid"])
+        assert not bridge._pid_alive(manager["pid"])
+        assert bridge._pid_alive(started["workerPid"])
+        assert env.calls() == []
+        # A later command can create a new manager and supply a fresh HIL;
+        # the dormant parser has not sent the original Query on its own.
+        env.refresh()
+        env.context.with_suffix(".finish").touch()
+        foreground = env.drive(started["jobId"])
+        env.finish_drive(foreground)
+        assert len(env.calls()) == 1
+        assert env.calls()[0]["hil"] == "fake-context-two"
+    finally:
+        bridge._cancel_job_local({"jobId": started["jobId"]})
+
+
+def test_remote_real_80k_array_truncation_preserves_anchor_and_uses_fresh_hil(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("truncated-array")
+    job_id = started["jobId"]
+    foreground = env.drive(job_id)
+    env.wait_for(lambda: bridge._load_state_json(bridge._job_paths(job_id)[1]).get("streamCursor") == "v1.lifecycle.1")
+    root, _job_path, spool = bridge._job_paths(job_id)
+    foreground.terminate()
+    foreground.communicate(timeout=5)
+    env.disconnect(job_id)
+    first = bridge._follow_job_local(job_id, 0, 0)
+    assert first["state"] != "failed"
+    assert len(env.calls()) == 1
+    env.refresh()
+    bridge._drive_foreground_cli(job_id, first["cursor"], 5)
+    final = bridge._follow_job_local(job_id, first["cursor"], 5)
+    assert final["state"] == "turn-completed", final
+    assert final["finalText"] == "authoritative final"
+    calls = env.calls()
+    assert len(calls) == 2
+    assert [item["hil"] for item in calls] == ["fake-context-one", "fake-context-two"]
+    assert ["--query" in item["args"] for item in calls] == [True, False]
+    assert _command_body(calls[1]["args"]) == {
+        "StreamOptions.Action": "Reconnect", "StreamOptions.Cursor": "v1.lifecycle.1",
+    }
+    ids = [item.get("streamEventId") for item in bridge._read_spool(spool)]
+    assert ids.count("v1.lifecycle.1") == 1
+    assert "v1.lifecycle.99" not in ids
+
+
+def test_remote_real_disconnects_use_fresh_hil_and_latest_cursor_without_repeating_query(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("multi-window-first")
+    job_id = started["jobId"]
+    foreground = env.drive(job_id)
+    env.wait_for(lambda: bridge._load_state_json(bridge._job_paths(job_id)[1]).get("streamCursor") == "v1.lifecycle.1")
+    first = bridge._follow_job_local(job_id, 0, 0)
+    foreground.terminate()
+    foreground.communicate(timeout=5)
+    env.disconnect(job_id)
+    env.refresh()
+    time.sleep(0.2)
+    assert len(env.calls()) == 1  # The background parser cannot dispatch the queued reconnect.
+    foreground = env.drive(job_id, first["cursor"])
+    env.wait_for(lambda: len(env.calls()) == 2)
+    # Event 2 is an ordinary delta and is now deliberately buffered.
+    env.wait_for(lambda: any(path.with_suffix(".stdout").stat().st_size > 0
+                            for path in bridge._remote_cli_root(job_id).glob("remote-cli-*.request.json")))
+    foreground.terminate()
+    foreground.communicate(timeout=5)
+    env.disconnect(job_id, again=True)
+    second = bridge._follow_job_local(job_id, first["cursor"], 0)
+    assert second["followTimedOut"] is True
+    assert env.calls()[1]["hil"] == "fake-context-two"
+    env.refresh("fake-context-three")
+    bridge._drive_foreground_cli(job_id, second["cursor"], 5)
+    final = bridge._follow_job_local(job_id, second["cursor"], 1)
+    assert final["state"] == "turn-completed"
+    assert [item["hil"] for item in env.calls()] == ["fake-context-one", "fake-context-two", "fake-context-three"]
+    assert ["--query" in item["args"] for item in env.calls()] == [True, False, False]
+    assert [_command_body(item["args"])["StreamOptions.Cursor"] for item in env.calls()[1:]] == [
+        "v1.lifecycle.1", "v1.lifecycle.2",
+    ]
+
+
+def test_remote_expired_context_is_not_blindly_retried(remote_lifecycle, monkeypatch):
+    env = remote_lifecycle
+    started = env.start("finished")
+    env.refresh()
+    monkeypatch.setenv("STAROPS_HIL", "expired-context")
+    bridge._drive_foreground_cli(started["jobId"], 0, 3)
+    result = bridge._follow_job_local(started["jobId"], 0, 1)
+    assert result["error"]["code"] == "aliyun_cli_failed"
+    assert "HIL context expired" in result["error"]["message"]
+    assert len(env.calls()) == 1
+    log = env.workspace / ".ros-agent-debug" / "remote-aliyun-results.jsonl"
+    assert "expired-context" not in log.read_text(encoding="utf-8")
+
+
+def test_remote_cancel_uses_current_context_and_never_dispatches_from_parser(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start()
+    job_id = started["jobId"]
+    foreground = env.drive(job_id)
+    env.wait_for(lambda: bridge._load_state_json(bridge._job_paths(job_id)[1]).get("streamCursor") == "v1.lifecycle.1")
+    env.refresh()
+    root, job_path, _spool = bridge._job_paths(job_id)
+    with bridge.StateLock(root / ".job.lock"):
+        job = bridge._load_state_json(job_path)
+        job["stopRequestedAt"] = int(time.time())
+        bridge._atomic_json(job_path, job)
+    assert bridge._claim_stop_dispatch(job_id) is None
+    canceled = bridge._cancel_job_local({
+        "jobId": job_id, "transientEnvironment": {"STAROPS_HIL": "fake-context-two"},
+    })
+    assert canceled["state"] == "canceled"
+    assert env.calls()[-1]["args"][:2] == ["ros", "stop-chat"]
+    assert env.calls()[-1]["hil"] == "fake-context-two"
+    deadline = time.monotonic() + 3
+    while bridge._pid_alive(env.calls()[0]["pid"]):
+        assert time.monotonic() < deadline, "The confirmed cancellation did not close the local CLI reader."
+        time.sleep(0.02)
+    assert len(env.calls()) == 2
+    env.finish_drive(foreground)
+    bridge._drive_foreground_cli(job_id, 0, 0.1)
+    assert len(env.calls()) == 2
+
+
+def test_remote_cancel_before_first_invocation_does_not_start_a_cloud_session(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start()
+    result = bridge._cancel_job_local({"jobId": started["jobId"]})
+    assert result["state"] == "not-active"
+    assert result["stopStatus"] == "NoActiveStream"
+    bridge._drive_foreground_cli(started["jobId"], 0, 0.1)
+    assert env.calls() == []
+    root = bridge._remote_cli_root(started["jobId"])
+    deadline = time.monotonic() + 3
+    while list(root.glob("remote-cli-*")):
+        assert time.monotonic() < deadline, "The canceled parser worker did not release its pending invocation."
+        time.sleep(0.02)
+
+
+@pytest.mark.parametrize("sideband", [False, True])
+def test_remote_permission_response_uses_foreground_hil_and_preserves_parent(remote_lifecycle, sideband):
+    env = remote_lifecycle
+    started = env.start("pipeline-first" if sideband else "finished", "pipeline" if sideband else "normal")
+    job_id = started["jobId"]
+    foreground = env.drive(job_id)
+    env.wait_for(lambda: bridge._load_state_json(bridge._job_paths(job_id)[1]).get("streamCursor") is not None)
+    if not sideband:
+        env.finish_drive(foreground)
+    root, job_path, _spool = bridge._job_paths(job_id)
+    permission = {
+        "schemaVersion": 1, "kind": "permission", "requestTaskId": "task-1", "contextId": "session-1",
+        "inputId": "input-1", "toolUseId": "tool-1", "permissionClass": "sub_pipeline" if sideband else "normal",
+    }
+    with bridge.StateLock(root / ".job.lock"):
+        job = bridge._load_state_json(job_path)
+        parent_pid = job.get("workerPid")
+        job["state"] = "input-required"
+        job["inputRequired"] = permission
+        job["pendingPermissions"] = [permission]
+        bridge._atomic_json(job_path, job)
+    if sideband:
+        env.finish_drive(foreground)
+    env.refresh()
+    responded = bridge._respond_job_local({
+        "jobId": job_id, "permissionRef": bridge._permission_ref(permission), "decision": "allow_once",
+    })
+    if sideband:
+        assert bridge._load_state_json(job_path)["workerPid"] == parent_pid
+    bridge._drive_foreground_cli(job_id, responded["cursor"], 5)
+    result = bridge._follow_job_local(job_id, responded["cursor"], 1)
+    assert result["state"] == ("completed" if sideband else "turn-completed")
+    assert result["permissionAck"]["accepted"] is True
+    response_calls = [item for item in env.calls() if any(
+        "IAC_CODE_PERMISSION:" in value for value in item["args"]
+    )]
+    assert len(response_calls) == 1
+    assert response_calls[0]["hil"] == "fake-context-two"
+    if sideband:
+        assert bridge._load_state_json(job_path)["activeRequestSeq"] == 1
+        assert len(env.calls()) >= 2
+        assert all("--query" not in call["args"] for call in env.calls()
+                   if not any("IAC_CODE_PERMISSION:" in value for value in call["args"]) and call != env.calls()[0])
+    before_duplicate = len(env.calls())
+    duplicate = bridge._respond_job_local({"jobId": job_id, "decision": "allow_once"})
+    assert duplicate["duplicate"] is True
+    assert len(env.calls()) == before_duplicate
+
+
+@pytest.mark.parametrize("kind", ["permission", "ask_user_question", "candidate_selection"])
+@pytest.mark.parametrize("truncated", [False, True])
+@pytest.mark.parametrize("wrapped_worker", [False, True])
+def test_remote_serial_input_releases_reader_before_reply(
+    remote_lifecycle, monkeypatch, kind, truncated, wrapped_worker,
+):
+    env = remote_lifecycle
+    original_popen = subprocess.Popen
+
+    def launch(command, *args, **kwargs):
+        if wrapped_worker and len(command) > 2 and command[2] == "_worker":
+            # Model a Windows venv redirector: Popen.pid belongs to a launcher,
+            # while the worker runs under a distinct child PID.
+            command = [sys.executable, "-c", "import subprocess,sys; sys.exit(subprocess.call(sys.argv[1:]))"] + command
+        return original_popen(command, *args, **kwargs)
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", launch)
+    started = env.start("input-" + kind + ("-truncated" if truncated else ""))
+    job_id = started["jobId"]
+    foreground = env.drive(job_id)
+    env.finish_drive(foreground)
+    result = bridge._follow_job_local(job_id, 0, 0)
+    job_path = bridge._job_paths(job_id)[1]
+    job = bridge._load_state_json(job_path)
+    assert result["state"] == "input-required"
+    assert result["inputRequired"]["kind"] == kind
+    assert job.get("workerPid") is None
+    assert job["streamCursor"] == "v1.input.1"
+    assert not list(bridge._remote_cli_root(job_id).glob("remote-cli-*"))
+    time.sleep(0.1)  # Later approval is a new foreground/HIL, not the old parent.
+    env.refresh()
+    if kind == "permission":
+        reply = bridge._respond_job_local({"jobId": job_id, "decision": "allow_once"})
+    else:
+        reply = bridge._continue_job_local({"jobId": job_id, "prompt": "A"})
+    bridge._drive_foreground_cli(job_id, reply["cursor"], 5)
+    final = bridge._follow_job_local(job_id, reply["cursor"], 1)
+    assert final["state"] == "turn-completed", final
+    assert [call["hil"] for call in env.calls()] == ["fake-context-one", "fake-context-two"]
+    assert len(env.calls()) == 2
+    assert all("--query" in call["args"] for call in env.calls())
+    assert not any("stop-chat" in call["args"] for call in env.calls())
+
+
+@pytest.mark.parametrize("mode", ["normal", "pipeline"])
+@pytest.mark.parametrize("kind", ["ask_user_question", "candidate_selection"])
+@pytest.mark.parametrize("has_anchor", [False, True])
+def test_remote_answer_sse_loss_uses_only_current_request_anchor(remote_lifecycle, mode, kind, has_anchor):
+    env = remote_lifecycle
+    started = env.start("input-" + kind, mode)
+    job_id = started["jobId"]
+    env.finish_drive(env.drive(job_id))
+    first = bridge._follow_job_local(job_id, 0, 0)
+    job_path = bridge._job_paths(job_id)[1]
+    assert first["inputRequired"]["kind"] == kind
+    assert first["sessionId"] == "session-1"
+    assert bridge._load_state_json(job_path)["streamCursor"] == "v1.input.1"
+
+    env.refresh()
+    answer = "sse-lost" if has_anchor else "sse-lost-no-anchor"
+    reply = bridge._continue_job_local({"jobId": job_id, "prompt": answer})
+    cursor = reply["cursor"]
+    for _ in range(3):
+        env.finish_drive(env.drive(job_id, cursor, seconds=1))
+        final = bridge._follow_job_local(job_id, cursor, 0)
+        if final["state"] in {"failed", "completed", "turn-completed"}:
+            break
+        cursor = final["cursor"]
+    assert final["jobId"] == job_id
+    assert final["sessionId"] == "session-1"
+    calls = env.calls()
+    assert len(calls) == (3 if has_anchor else 2)
+    assert all(call["args"][:2] == ["ros", "start-chat"] for call in calls)
+    assert ["--query" in call["args"] for call in calls] == ([True, True, False] if has_anchor else [True, True])
+    assert calls[1]["args"][calls[1]["args"].index("--query") + 1] == answer
+    assert calls[1]["args"][calls[1]["args"].index("--session-id") + 1] == "session-1"
+    assert all(call["hil"] == "fake-context-two" for call in calls[1:])
+    if has_anchor:
+        assert final["state"] == ("completed" if mode == "pipeline" else "turn-completed"), final
+        assert _command_body(calls[2]["args"]) == {
+            "StreamOptions.Action": "Reconnect", "StreamOptions.Cursor": "v1.lifecycle.1",
+        }
+    else:
+        assert final["state"] == "failed", final
+        assert final["error"]["code"] == "missing_recovery_anchor"
+        assert final["error"]["retryable"] is False
+        assert "outcome is unknown" in final["error"]["message"]
+    env.refresh("fake-context-three")
+    bridge._drive_foreground_cli(job_id, final["cursor"], 0.1)
+    assert len(env.calls()) == len(calls)
+
+
+def test_remote_answer_receipt_does_not_retire_reader_before_second_question(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("input-ask_user_question", "pipeline")
+    job_id = started["jobId"]
+    env.finish_drive(env.drive(job_id))
+    first = bridge._follow_job_local(job_id, 0, 0)
+    assert first["inputRequired"]["inputId"] == "input-1"
+
+    env.refresh()
+    reply = bridge._continue_job_local({"jobId": job_id, "prompt": "receipt-then-input"})
+    env.finish_drive(env.drive(job_id, reply["cursor"]))
+    second = bridge._follow_job_local(job_id, reply["cursor"], 0)
+    assert second["state"] == "input-required"
+    assert second["inputRequired"]["inputId"] == "input-2"
+    assert second["inputRequired"]["prompt"] == "Development or production?"
+    assert second["sessionId"] == first["sessionId"] == "session-1"
+
+    env.refresh("fake-context-three")
+    reply = bridge._continue_job_local({"jobId": job_id, "prompt": "Development"})
+    env.finish_drive(env.drive(job_id, reply["cursor"]))
+    final = bridge._follow_job_local(job_id, reply["cursor"], 0)
+    assert final["state"] == "completed"
+    assert final["jobId"] == job_id
+    assert "inputRequired" not in final
+    calls = env.calls()
+    assert len(calls) == 3
+    assert [item["hil"] for item in calls] == ["fake-context-one", "fake-context-two", "fake-context-three"]
+    assert not any(item["args"][:2] == ["ros", "stop-chat"] for item in calls)
+
+
+@pytest.mark.parametrize("mailbox_removed", [False, True])
+def test_remote_input_handoff_timeout_starts_at_boundary_not_cli_launch(monkeypatch, tmp_path, mailbox_removed):
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "a" * 32
+    root, job_path, _spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    job = {"aliyunPath": "/fake/aliyun", "state": "working", "workerPid": 42}
+    bridge._atomic_json(job_path, job)
+    request_path = bridge._remote_cli_root(job_id) / "remote-cli-test.request.json"
+    bridge._atomic_json(request_path, {
+        "command": ["/fake/aliyun", "ros", "start-chat"], "parserPid": 43,
+    })
+    clock = [0.0]
+    observations = []
+
+    def observe(_job_id, _cursor):
+        observations.append(clock[0])
+        if len(observations) == 1:
+            return None, dict(job)
+        boundary = dict(job, state="input-required", inputRequired={"kind": "permission"})
+        bridge._atomic_json(request_path.with_suffix(".result"), {"returnCode": 0})
+        if mailbox_removed:
+            request_path.unlink(missing_ok=True)
+        if len(observations) >= 3:
+            boundary.pop("workerPid")
+        return {"state": "input-required"}, boundary
+
+    def launch(*_args, **_kwargs):
+        request = bridge._load_state_json(request_path)
+        request["cliPid"] = 44
+        bridge._atomic_json(request_path, request)
+        return SimpleNamespace(poll=lambda: None)
+
+    def advance(_seconds):
+        # The cloud input arrives after the 10-second process-launch deadline.
+        # Reader cleanup then takes another observation before releasing ownership.
+        clock[0] += 20.0 if clock[0] == 0.0 else 1.0
+
+    monkeypatch.setattr(bridge.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(bridge.time, "sleep", advance)
+    monkeypatch.setattr(bridge, "_pid_alive", lambda pid: pid in {42, 43, 44})
+    monkeypatch.setattr(bridge, "_follow_ready_result", observe)
+    monkeypatch.setattr(bridge, "_remote_cli_subprocess_environment", lambda *_args: {})
+    monkeypatch.setattr(bridge, "_capture_remote_cli_environment", lambda *_args: {})
+    monkeypatch.setattr(bridge.subprocess, "Popen", launch)
+    bridge._drive_foreground_cli(job_id, 0, 5)
+    assert observations == [0.0, 20.0, 21.0]
+
+
+@pytest.mark.parametrize("kind", ["permission", "ask_user_question", "candidate_selection"])
+@pytest.mark.parametrize("cursor", [0, 1000])
+def test_remote_orphan_serial_mailbox_is_retired_without_launching_old_query(remote_lifecycle, kind, cursor):
+    env = remote_lifecycle
+    started = env.start("no-anchor")
+    job_id = started["jobId"]
+    root, job_path, _spool = bridge._job_paths(job_id)
+    pending = {
+        "schemaVersion": 1, "kind": kind, "requestTaskId": "task-1", "contextId": "session-1",
+        "inputId": "input-1", "prompt": "Choose A",
+    }
+    if kind == "permission":
+        pending.update(toolUseId="tool-1", permissionClass="normal")
+    # Reconstruct the observed live state: a committed input and an unclaimed
+    # mailbox. The original cloud sequence is intentionally not assumed here.
+    with bridge.StateLock(root / ".job.lock"):
+        job = bridge._load_state_json(job_path)
+        job.update(state="input-required", sessionId="session-1", inputRequired=pending)
+        bridge._atomic_json(job_path, job)
+    env.finish_drive(env.drive(job_id, cursor))
+    assert bridge._load_state_json(job_path).get("workerPid") is None
+    assert env.calls() == []
+    assert not list(bridge._remote_cli_root(job_id).glob("remote-cli-*"))
+    env.refresh()
+    if kind == "permission":
+        reply = bridge._respond_job_local({"jobId": job_id, "decision": "deny"})
+    else:
+        reply = bridge._continue_job_local({"jobId": job_id, "prompt": "A"})
+    bridge._drive_foreground_cli(job_id, reply["cursor"], 5)
+    final = bridge._follow_job_local(job_id, reply["cursor"], 1)
+    assert final["state"] == "turn-completed", final
+    assert len(env.calls()) == 1
+    assert env.calls()[0]["hil"] == "fake-context-two"
+    assert "no-anchor" not in env.calls()[0]["args"]
+
+
+def test_normal_pending_permission_snapshot_is_serial(monkeypatch, tmp_path):
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/fake/aliyun")
+    envelope = {
+        "schemaVersion": 1, "kind": "permission", "requestTaskId": "task-1", "contextId": "session-1",
+        "inputId": "input-1", "toolUseId": "tool-1",
+    }
+    payload = _status_event(metadata={"pendingPermissions": [envelope]})
+    calls = []
+    monkeypatch.setattr(bridge.subprocess, "Popen", lambda cmd, **_kw: (
+        calls.append(cmd) or _FakeCLIProcess(json.dumps({"id": "v1.pending.1", "data": payload}))
+    ))
+    result = bridge._consume_start_chat(_chat_args(transport="aliyun_cli"), tmp_path, "test", None, [])
+    assert result["inputRequired"]["permissionClass"] == "normal"
+    assert result["state"] == "input-required"
+    assert len(calls) == 1
+
+
+def test_remote_repeated_mixed_inputs_keep_one_job_and_session(remote_lifecycle):
+    env = remote_lifecycle
+    started = env.start("input-ask_user_question")
+    job_id = started["jobId"]
+    env.finish_drive(env.drive(job_id))
+    first = bridge._follow_job_local(job_id, 0, 0)
+    assert first["inputRequired"]["kind"] == "ask_user_question"
+    for number, kind in enumerate(("permission", "candidate_selection", "ask_user_question"), 2):
+        env.refresh("fake-context-" + str(number))
+        reply = bridge._continue_job_local({"jobId": job_id, "prompt": "input-" + kind})
+        env.finish_drive(env.drive(job_id, reply["cursor"]))
+        result = bridge._follow_job_local(job_id, reply["cursor"], 0)
+        assert result["jobId"] == job_id
+        assert result["sessionId"] == "session-1"
+        assert result["inputRequired"]["kind"] == kind
+        assert bridge._load_state_json(bridge._job_paths(job_id)[1]).get("workerPid") is None
+        if kind == "permission":
+            env.refresh("fake-context-permission")
+            response = bridge._respond_job_local({"jobId": job_id, "decision": "deny"})
+            env.finish_drive(env.drive(job_id, response["cursor"]))
+            assert bridge._follow_job_local(job_id, response["cursor"], 0)["state"] == "turn-completed"
+    env.refresh("fake-context-final")
+    reply = bridge._continue_job_local({"jobId": job_id, "prompt": "A"})
+    env.finish_drive(env.drive(job_id, reply["cursor"]))
+    assert bridge._follow_job_local(job_id, reply["cursor"], 0)["state"] == "turn-completed"
+    assert len(env.calls()) == 6
+    assert all("--query" in call["args"] for call in env.calls())
+
+
+@pytest.mark.parametrize("terminal", [False, True])
+def test_unknown_input_fails_explicitly_but_cannot_reopen_terminal_state(terminal):
+    summary = bridge.StreamSummary("session-1", mode="normal")
+    if terminal:
+        summary.apply(_status_event(state="TASK_STATE_COMPLETED"))
+    payload = _status_event(state="TASK_STATE_INPUT_REQUIRED", metadata={
+        "input": {"kind": "future-input", "inputId": "input-unknown", "prompt": "Do not assume completion"},
+    })
+    if terminal:
+        summary.apply(payload)
+        assert summary.to_result(0, "")["state"] == "turn-completed"
+        assert summary.input_required is None
+    else:
+        with pytest.raises(bridge.BridgeError) as error:
+            summary.apply(payload)
+        assert error.value.code == "unsupported_input"

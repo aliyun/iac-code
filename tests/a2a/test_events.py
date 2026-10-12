@@ -1,3 +1,4 @@
+import hashlib
 import json
 from types import SimpleNamespace
 
@@ -2049,6 +2050,52 @@ async def test_tool_result_publishes_standard_artifact_update_event(tmp_path) ->
         dumped["artifact"]["artifactId"]
         == dump(queue.events[1])["metadata"]["iac_code"]["tool"]["artifact"]["artifactId"]
     )
+
+
+@pytest.mark.asyncio
+async def test_file_edits_publish_current_artifact_bytes_and_hash(tmp_path) -> None:
+    from iac_code.a2a.artifacts import A2AArtifactStore
+    from iac_code.tools.base import ToolContext
+    from iac_code.tools.edit_file import EditFileTool
+    from iac_code.tools.write_file import WriteFileTool
+
+    context = ToolContext(cwd=str(tmp_path))
+    store = A2AArtifactStore(tmp_path / "artifacts")
+    path = tmp_path / "template.yaml"
+    initial = "NamePrefix: v1\nVSwitch2: 192.168.2.0/24\n"
+    actions = [
+        (WriteFileTool(), {"path": str(path), "content": initial}),
+        (EditFileTool(), {"path": str(path), "old_string": "v1", "new_string": "v2"}),
+        (EditFileTool(), {"path": str(path), "old_string": "192.168.2.0/24", "new_string": "192.168.3.0/24"}),
+    ]
+    hashes = []
+    for index, (tool, tool_input) in enumerate(actions):
+        result = await tool.execute(tool_input=tool_input, context=context)
+        assert result.is_error is False
+        queue = FakeEventQueue()
+        await publish_stream_event(
+            queue,
+            task_id=f"task-{index}",
+            context_id="ctx-1",
+            event=ToolResultEvent(
+                tool_use_id=f"tool-{index}",
+                tool_name=tool.name,
+                result=result.content,
+                metadata=result.metadata,
+                is_error=False,
+            ),
+            artifact_store=store,
+            exposure_types=set(),
+        )
+        assert len(queue.events) == 1, f"Missing artifact after {tool.name} at step {index}"
+        assert isinstance(queue.events[0], TaskArtifactUpdateEvent)
+        artifact = dump(queue.events[0])["artifact"]
+        actual = path.read_bytes()
+        assert artifact["metadata"]["byteSize"] == len(actual)
+        assert artifact["metadata"]["sha256"] == hashlib.sha256(actual).hexdigest()
+        assert store.path_for(artifact["artifactId"]).read_bytes() == actual
+        hashes.append(artifact["metadata"]["sha256"])
+    assert len(set(hashes)) == 3
 
 
 @pytest.mark.asyncio
