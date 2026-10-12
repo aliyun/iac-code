@@ -119,7 +119,7 @@ from iac_code.a2a.types import (
     TASK_STATE_INPUT_REQUIRED,
     TASK_STATE_WORKING,
 )
-from iac_code.agent.message import ContentBlock
+from iac_code.agent.message import ContentBlock, ToolResultBlock
 from iac_code.agent.message import Message as AgentMessage
 from iac_code.commands.registry import PromptCommand
 from iac_code.config import get_active_provider_key, get_provider_config, load_credentials
@@ -2049,6 +2049,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 continuation_intent.unsafe_reason or "canceled checkpoint is unsafe"
                             )
             owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
+            if not pipeline_mode or route_pipeline_handoff_to_normal:
+                await self._supersede_normal_permission_wait(context_id=context_id, cwd=cwd, owner=owner)
             task = await self._task_store.get_or_create_task(
                 task_id=task_id,
                 context_id=context_id,
@@ -3408,6 +3410,124 @@ class IacCodeA2AExecutor(AgentExecutor):
             ctx.touch()
             self._task_store.mirror_task(task)
             self._task_store.mirror_context(ctx)
+
+    async def _supersede_normal_permission_wait(self, *, context_id: str, cwd: str, owner: str) -> None:
+        """Close an unexecuted permission batch before accepting a new user turn."""
+        try:
+            ctx = await self._task_store.get_context_record(context_id)
+        except ValueError:
+            return
+        if ctx.cwd != cwd:
+            raise ValueError(_("A2A context belongs to a different workspace"))
+        storage = SessionStorage()
+        messages = await run_sync_fenced(storage.load, cwd, ctx.session_id)
+        if not messages:
+            return
+        last = messages[-1]
+        tool_ids = [tool.id for tool in last.get_tool_use_blocks()] if last.role == "assistant" else []
+        canceled_boundary = last.metadata.get("supersededPermissionBoundaryId")
+        if not tool_ids and not canceled_boundary:
+            return
+        checkpoints = PermissionWaitCheckpointStore(cwd, ctx.session_id)
+        records = await run_sync_fenced(checkpoints.list_active, include_canceled=True)
+        record = next(
+            (
+                item
+                for item in sorted(records, key=lambda item: item.get("phase") == "CANCELED")
+                if item.get("permissionClass") == "normal"
+                and item.get("contextId") == context_id
+                and (
+                    (tool_ids and item.get("continuationFrame", {}).get("orderedToolUseIds") == tool_ids)
+                    or item.get("boundaryId") == canceled_boundary
+                )
+            ),
+            None,
+        )
+        if record is None:
+            return
+        task_id = str(record["taskId"])
+        task = await self._task_store.get_or_create_task(
+            task_id=task_id, context_id=context_id, owner=owner, restore_interrupted=False
+        )
+        if await self._task_store.is_task_active(task_id) or task.state not in {
+            TASK_STATE_INPUT_REQUIRED,
+            TASK_STATE_CANCELED,
+        }:
+            raise ValueError(_("Task is already working."))
+        service = self._execution_control_service
+        control = service.get_for_context(context_id) if service is not None else None
+        if control is not None and (control.task_id != task_id or control.has_managed_work()):
+            raise ValueError(_("Task is already working."))
+        admission = None
+        try:
+            if service is not None and control is None:
+                # Reclaim a dead owner's slot through the existing, fenced
+                # input-recovery path, without resuming any tool execution.
+                admission = await service.reserve_recoverable_input_continuation(
+                    context_id=context_id, task_id=task_id, owner=owner
+                )
+                if admission is None:
+                    raise ValueError(_("Task is already working."))
+                control = await service.begin_execution(
+                    context_id=context_id,
+                    task_id=task_id,
+                    owner=owner,
+                    cwd=cwd,
+                    recoverable_input_admission=admission,
+                )
+                control.bind_session(ctx.session_id)
+                current = asyncio.current_task()
+                assert current is not None
+                await control.detach_task(current, execution_status=TASK_STATE_INPUT_REQUIRED)
+
+            # The checkpoint's file lock arbitrates against a concurrent
+            # approval. A previously claimed decision must not be overwritten.
+            await run_sync_fenced(checkpoints.cancel, str(record["boundaryId"]))
+            await self._permission_input_registry.cancel_task(task_id)
+            await self._task_store.refresh_context_from_session(
+                context_id=context_id,
+                cwd=cwd,
+                session_id=ctx.session_id,
+                clear_active_task_for_proven_handoff=True,
+            )
+            if tool_ids:
+                await run_sync_fenced(
+                    storage.append,
+                    cwd,
+                    ctx.session_id,
+                    AgentMessage(
+                        role="user",
+                        content=[
+                            ToolResultBlock(
+                                tool_use_id=tool_id,
+                                content=(
+                                    "Tool call canceled before execution because a new user message superseded "
+                                    "the pending permission batch. Follow the new user message."
+                                ),
+                                is_error=True,
+                            )
+                            for tool_id in tool_ids
+                        ],
+                        metadata={"supersededPermissionBoundaryId": record["boundaryId"]},
+                    ),
+                )
+            if not await self._task_store.cancel_inactive_input_required_task(task_id=task_id, context_id=context_id):
+                raise ValueError(_("Task is already working."))
+            if control is not None:
+                await control.terminate(
+                    execution_id=control.execution_id,
+                    request_id="supersede-" + str(record["boundaryId"]),
+                    connection_epoch=max(0, control.connection_epoch),
+                    reason="new_user_message",
+                )
+                await control.wait_until_recoverable_input_continuation(
+                    task_id, timeout=_CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS
+                )
+                if not control.release_ready:
+                    raise ValueError(_("Task is already working."))
+        finally:
+            if service is not None and admission is not None:
+                await service.release_recoverable_input_continuation(admission)
 
     async def _terminate_detached_execution(self, context_id: str, task_id: str, reason: str) -> str | None:
         had_pending_permission = await self._permission_input_registry.has_pending_task(task_id)

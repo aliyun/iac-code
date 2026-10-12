@@ -526,12 +526,14 @@ class PermissionWaitCheckpointStore:
                     return record
         return None
 
-    def list_active(self) -> list[dict[str, Any]]:
+    def list_active(self, *, include_canceled: bool = False) -> list[dict[str, Any]]:
         records: list[dict[str, Any]] = []
         with cross_process_file_lock(self.paths.permission_waits_lock_path):
             for path in sorted(self.paths.permission_waits_dir.glob("pwb_*.json")):
                 record = self._read(path)
-                if record is not None and record.get("phase") in _ACTIVE_PHASES:
+                if record is not None and (
+                    record.get("phase") in _ACTIVE_PHASES or (include_canceled and record.get("phase") == "CANCELED")
+                ):
                     records.append(record)
         return records
 
