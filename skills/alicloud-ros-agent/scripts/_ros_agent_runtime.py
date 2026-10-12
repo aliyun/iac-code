@@ -1578,10 +1578,11 @@ def _record_stopped_worker_exit(
         if worker_role == "sideband":
             if job.get("sidebandWorkerToken") != worker_token:
                 return
-            if job.get("sidebandWorkerPid") == worker_pid:
-                job.pop("sidebandWorkerPid", None)
+            job.pop("sidebandWorkerPid", None)
             job.pop("sidebandWorkerToken", None)
-        elif job.get("workerPid") == worker_pid:
+        else:
+            # A Windows venv launcher may own the recorded PID. The matching
+            # request sequence above prevents an old worker clearing a new one.
             job.pop("workerPid", None)
         _atomic_json(job_path, job)
 

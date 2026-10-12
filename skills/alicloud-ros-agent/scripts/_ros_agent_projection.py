@@ -1601,8 +1601,9 @@ def _finish_job(
             job["normalHandoffReady"] = True
             job["conversationMode"] = "normal"
         job["workerExitedAt"] = int(time.time())
-        if job.get("workerPid") == worker_pid:
-            job.pop("workerPid", None)
+        # The request sequence owns this worker; a Windows venv launcher can
+        # have a different PID from the Python process executing this request.
+        job.pop("workerPid", None)
         boundary = {
             "type": "result-boundary",
             "requestSeq": request_seq,
@@ -1740,8 +1741,9 @@ def _finish_sideband_job(
                 del artifacts[:-24]
 
         job["sidebandWorkerExitedAt"] = int(time.time())
-        if job.get("sidebandWorkerPid") == worker_pid:
-            job.pop("sidebandWorkerPid", None)
+        # The matching request sequence and sideband token identify this worker,
+        # including when a launcher owns the recorded PID.
+        job.pop("sidebandWorkerPid", None)
         job.pop("sidebandWorkerToken", None)
         job.pop("sidebandResponseInputId", None)
         job.pop("sidebandResponse", None)

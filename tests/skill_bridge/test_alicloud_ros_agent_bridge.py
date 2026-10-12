@@ -3329,6 +3329,70 @@ def test_follow_observation_rechecks_step_and_gate_arriving_after_snapshot(
         assert result["cursor"] == 2
 
 
+@pytest.mark.parametrize("exit_kind", ["finished", "stopped"])
+@pytest.mark.parametrize(("role", "request_seq", "token"), [
+    ("primary", 1, "current"),
+    ("primary", 0, "current"),
+    ("sideband", 1, "current"),
+    ("sideband", 0, "current"),
+    ("sideband", 1, "old"),
+])
+def test_worker_exit_clears_launcher_pid_only_for_owned_request(
+    monkeypatch, tmp_path: Path, exit_kind, role, request_seq, token,
+) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    monkeypatch.setattr(bridge, "_touch_manager_activity", lambda: None)
+    job_id = "3" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    original = {
+        "jobId": job_id,
+        "state": "working",
+        "activeRequestSeq": 1,
+        "workerPid": 101,
+        "sidebandWorkerPid": 202,
+        "sidebandWorkerToken": "current",
+    }
+    bridge._atomic_json(job_path, original)
+
+    # Actual worker PID differs from both launcher PIDs persisted by Popen.
+    if exit_kind == "stopped":
+        bridge._record_stopped_worker_exit(job_id, request_seq, role, token, 303)
+    elif role == "sideband":
+        bridge._finish_sideband_job(job_id, request_seq, token, {"state": "stream-ended"}, 303)
+    else:
+        bridge._finish_job(job_id, request_seq, {"state": "completed"}, 303)
+
+    job = bridge._load_state_json(job_path)
+    if request_seq != 1 or (role == "sideband" and token != "current"):
+        assert job == original
+    elif role == "sideband":
+        assert "sidebandWorkerPid" not in job
+        assert "sidebandWorkerToken" not in job
+        assert job["workerPid"] == 101
+        assert job["state"] == "working"
+    else:
+        assert "workerPid" not in job
+        assert job["sidebandWorkerPid"] == 202
+        assert job["sidebandWorkerToken"] == "current"
+
+
+@pytest.mark.parametrize("expected_worker_pid", [0, 999])
+def test_observer_cannot_finish_a_replaced_launcher(monkeypatch, tmp_path: Path, expected_worker_pid) -> None:
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "3" * 32
+    root, job_path, _spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    original = {"state": "working", "activeRequestSeq": 1, "workerPid": 101}
+    bridge._atomic_json(job_path, original)
+
+    assert not bridge._finish_job(
+        job_id, 1, {"state": "failed"}, 303, expected_worker_pid=expected_worker_pid,
+    )
+    assert bridge._load_state_json(job_path) == original
+
+
 def test_follow_dead_worker_check_does_not_overwrite_concurrent_completion(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     job_id = "3" * 32
@@ -6571,8 +6635,21 @@ def test_remote_permission_response_uses_foreground_hil_and_preserves_parent(rem
 
 @pytest.mark.parametrize("kind", ["permission", "ask_user_question", "candidate_selection"])
 @pytest.mark.parametrize("truncated", [False, True])
-def test_remote_serial_input_releases_reader_before_reply(remote_lifecycle, kind, truncated):
+@pytest.mark.parametrize("wrapped_worker", [False, True])
+def test_remote_serial_input_releases_reader_before_reply(
+    remote_lifecycle, monkeypatch, kind, truncated, wrapped_worker,
+):
     env = remote_lifecycle
+    original_popen = subprocess.Popen
+
+    def launch(command, *args, **kwargs):
+        if wrapped_worker and len(command) > 2 and command[2] == "_worker":
+            # Model a Windows venv redirector: Popen.pid belongs to a launcher,
+            # while the worker runs under a distinct child PID.
+            command = [sys.executable, "-c", "import subprocess,sys; sys.exit(subprocess.call(sys.argv[1:]))"] + command
+        return original_popen(command, *args, **kwargs)
+
+    monkeypatch.setattr(bridge.subprocess, "Popen", launch)
     started = env.start("input-" + kind + ("-truncated" if truncated else ""))
     job_id = started["jobId"]
     foreground = env.drive(job_id)
