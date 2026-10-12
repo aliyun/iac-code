@@ -572,8 +572,22 @@ def _next_turn_evidence(run_dir: Path, config_dir: Path, token: str, summary: St
         "selector_next_turn_native_reply_present": False,
         "selector_next_turn_native_token_present": False,
         "selector_next_turn_native_tool_call": False,
+        "selector_next_turn_native_select_tool": False,
+        "selector_next_turn_native_memory_tool": False,
+        "selector_next_turn_native_file_tool": False,
+        "selector_next_turn_public_selection_wait": False,
+        "selector_next_turn_public_permission_wait": False,
         "selector_next_turn_scan_complete": True,
     }
+    public_path = run_dir / "next-turn.events.jsonl"
+    if public_path.is_file() and public_path.stat().st_size <= 2_000_000:
+        for line in public_path.read_text(encoding="utf-8").splitlines():
+            for item in _walk(json.loads(line)):
+                if isinstance(item, Mapping):
+                    evidence["selector_next_turn_public_selection_wait"] |= (
+                        item.get("kind") == "cloud_resource_selection"
+                    )
+                    evidence["selector_next_turn_public_permission_wait"] |= item.get("kind") == "permission"
     paths = sorted((config_dir / "projects").rglob("session.jsonl"))
     if not paths or len(paths) > 20:
         evidence["selector_next_turn_scan_complete"] = False
@@ -611,6 +625,17 @@ def _next_turn_evidence(run_dir: Path, config_dir: Path, token: str, summary: St
                     evidence["selector_next_turn_native_tool_call"] |= isinstance(content, list) and any(
                         isinstance(part, Mapping) and part.get("type") == "tool_use" for part in content
                     )
+                    for part in content if isinstance(content, list) else []:
+                        if not isinstance(part, Mapping) or part.get("type") != "tool_use":
+                            continue
+                        name = part.get("name")
+                        evidence["selector_next_turn_native_select_tool"] |= name in {
+                            "select_cloud_resource", "resolve_cloud_resource_selector",
+                        }
+                        evidence["selector_next_turn_native_memory_tool"] |= name in {"read_memory", "write_memory"}
+                        evidence["selector_next_turn_native_file_tool"] |= name in {
+                            "read_file", "list_files", "glob", "grep",
+                        }
     return evidence
 
 
