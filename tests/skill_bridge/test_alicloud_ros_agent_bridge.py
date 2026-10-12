@@ -6053,7 +6053,7 @@ else:
 
     foregrounds = []
 
-    def drive(job_id, cursor=0, seconds=0.05):
+    def drive(job_id, cursor=0, seconds=1):
         process = subprocess.Popen([
             sys.executable, "-c",
             "import runpy,sys; b=runpy.run_path(sys.argv[1]); "
@@ -6124,7 +6124,7 @@ def test_remote_cli_default_command_name_resolves_before_foreground_handoff(remo
     started = env.start(aliyun_path="aliyun")
     job_id = started["jobId"]
     job = bridge._load_state_json(bridge._job_paths(job_id)[1])
-    assert job["aliyunPath"] == str(env.context.parent / ("aliyun.cmd" if os.name == "nt" else "aliyun"))
+    assert Path(job["aliyunPath"]) == env.context.parent / ("aliyun.cmd" if os.name == "nt" else "aliyun")
     env.context.with_suffix(".finish").touch()
     bridge._drive_foreground_cli(job_id, 0, 5)
     final = bridge._follow_job_local(job_id, 0, 1)
@@ -6138,7 +6138,7 @@ def test_remote_busy_foreground_stays_alive_without_follow_and_next_turn_uses_fr
     job_id = started["jobId"]
     time.sleep(0.15)
     assert env.calls() == []  # A detached parser worker cannot invoke remote aliyun.
-    foreground = env.drive(job_id)
+    foreground = env.drive(job_id, seconds=0.05)
     env.wait_for(lambda: len(env.calls()) == 1)
     time.sleep(0.3)  # Well beyond the scaled-down observation timeout.
     assert foreground.poll() is None
@@ -6199,7 +6199,7 @@ def test_remote_reader_cannot_launch_after_foreground_handoff_fails(remote_lifec
 def test_remote_delayed_approval_or_buffered_output_does_not_end_foreground_without_anchor(remote_lifecycle):
     env = remote_lifecycle
     started = env.start("no-anchor")
-    foreground = env.drive(started["jobId"])
+    foreground = env.drive(started["jobId"], seconds=0.05)
     env.wait_for(lambda: len(env.calls()) == 1)
     time.sleep(0.3)
     assert foreground.poll() is None
@@ -6761,6 +6761,7 @@ def test_remote_orphan_serial_mailbox_is_retired_without_launching_old_query(rem
 
 
 def test_normal_pending_permission_snapshot_is_serial(monkeypatch, tmp_path):
+    monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/fake/aliyun")
     envelope = {
         "schemaVersion": 1, "kind": "permission", "requestTaskId": "task-1", "contextId": "session-1",
         "inputId": "input-1", "toolUseId": "tool-1",

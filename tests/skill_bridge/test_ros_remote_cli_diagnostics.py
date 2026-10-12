@@ -11,6 +11,7 @@ import threading
 import time
 import urllib.parse
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -69,6 +70,92 @@ def records(root):
 
 
 SSE_LOST = "Aliyun CLI call failed: failed to call tool: SSE connection lost"
+
+
+@pytest.mark.parametrize("operation", ["read", "replace"])
+@pytest.mark.parametrize("platform", ["nt", "posix"])
+@pytest.mark.parametrize("transient", [False, True])
+def test_state_sharing_violation_retries_only_on_windows(monkeypatch, tmp_path, operation, platform, transient):
+    path = tmp_path / "state.json"
+    path.write_text('{"old":true}', encoding="utf-8")
+    platform_os = SimpleNamespace(**dict(vars(os), name=platform))
+    monkeypatch.setattr(bridge, "os", platform_os)
+    calls = []
+    sleeps = []
+    monkeypatch.setattr(bridge.time, "sleep", sleeps.append)
+
+    def denied():
+        calls.append(None)
+        if not transient or len(calls) == 1:
+            raise PermissionError("sharing violation")
+
+    if operation == "read":
+        original = Path.open
+
+        def open_file(target, *args, **kwargs):
+            if target == path:
+                denied()
+            return original(target, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "open", open_file)
+
+        def invoke():
+            return bridge._load_state_json(path)
+    else:
+        original = os.replace
+
+        def replace(source, target):
+            denied()
+            return original(source, target)
+
+        monkeypatch.setattr(platform_os, "replace", replace)
+
+        def invoke():
+            return bridge._atomic_json(path, {"new": True})
+
+    if platform == "nt" and transient:
+        invoke()
+        assert len(calls) == 2
+        assert sleeps == [0.02]
+    else:
+        error = bridge.BridgeError if operation == "read" else PermissionError
+        with pytest.raises(error):
+            invoke()
+        assert len(calls) == (10 if platform == "nt" else 1)
+        assert len(sleeps) == (9 if platform == "nt" else 0)
+    assert not list(tmp_path.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("wrapper", ["aliyun.cmd", "aliyun.BAT"])
+def test_stop_windows_cli_wrapper_retires_child_tree(monkeypatch, wrapper):
+    monkeypatch.setattr(bridge, "os", SimpleNamespace(**dict(vars(os), name="nt")))
+    stopped = []
+    process = SimpleNamespace(args=[wrapper, "ros", "start-chat"], pid=123, poll=lambda: 1 if stopped else None)
+
+    def run(command, **kwargs):
+        assert command == ["taskkill", "/PID", "123", "/T", "/F"]
+        assert kwargs["timeout"] == 5
+        stopped.append(True)
+
+    monkeypatch.setattr(bridge.subprocess, "run", run)
+    bridge._stop_process(process)
+    assert stopped == [True]
+
+
+def test_foreground_close_releases_suspended_output_reader(monkeypatch, tmp_path):
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    process = bridge._ForegroundCLIProcess("a" * 32, ["aliyun", "ros", "start-chat"], {}, io.BytesIO(), "primary")
+    process.output.write_bytes(b"one complete line\n")
+    bridge._atomic_json(process.result_path, {"returnCode": 0})
+    stream = iter(process)
+    try:
+        assert next(stream) == "one complete line\n"
+        reader = process.output_handle
+        process.close()
+        assert reader.closed
+        assert not any(path.name.startswith("remote-cli-") for path in process.path.parent.iterdir())
+    finally:
+        stream.close()
 
 
 def test_foreground_stream_mailbox_rejects_other_api_operations():

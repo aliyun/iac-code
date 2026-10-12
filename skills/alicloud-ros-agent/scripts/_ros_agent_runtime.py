@@ -48,6 +48,7 @@ class _ForegroundCLIProcess:
         self.stop_path = self.path.with_suffix(".stop")
         self.stderr = stderr
         self.stdout = self
+        self.output_handle = None
         self.stopping = False
         self.closed = False
         self.final_result = None  # type: Optional[Dict[str, Any]]
@@ -95,6 +96,7 @@ class _ForegroundCLIProcess:
         pending = b""
         finished = False
         with self.output.open("rb") as handle:
+            self.output_handle = handle
             while True:
                 chunk = handle.readline(MAX_CLI_BATCH_BYTES + 1)
                 if chunk:
@@ -145,6 +147,8 @@ class _ForegroundCLIProcess:
     def close(self) -> None:
         self.final_result = self._result()
         self.closed = True
+        if self.output_handle is not None:
+            self.output_handle.close()
         with self.errors.open("rb") as handle:
             self.stderr.write(handle.read(MAX_DIAGNOSTIC_BYTES))
         with StateLock(self.path.parent / ".remote-cli.lock"):
@@ -937,6 +941,15 @@ def run_respond(args: argparse.Namespace) -> Dict[str, Any]:
 def _stop_process(process: Any) -> None:
     if process.poll() is not None:
         return
+    command = getattr(process, "args", None)
+    if (os.name == "nt" and isinstance(command, list) and command
+            and pathlib.Path(command[0]).suffix.lower() in {".cmd", ".bat"}):
+        # Terminating cmd.exe alone leaves its CLI child and output handles alive.
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5, check=False)
+        if process.poll() is not None:
+            return
     process.terminate()
     try:
         process.wait(timeout=5)

@@ -67,7 +67,15 @@ def _atomic_json(path: pathlib.Path, value: Dict[str, Any], mode: int = 0o600) -
             os.fsync(handle.fileno())
         if os.name != "nt":
             os.chmod(temporary, mode)
-        os.replace(temporary, str(path))
+        for attempt in range(10):
+            try:
+                os.replace(temporary, str(path))
+                break
+            except PermissionError:
+                # Windows readers/antivirus can briefly deny delete sharing.
+                if os.name != "nt" or attempt == 9:
+                    raise
+                time.sleep(0.02)
     finally:
         with contextlib.suppress(OSError):
             os.unlink(temporary)
@@ -75,8 +83,15 @@ def _atomic_json(path: pathlib.Path, value: Dict[str, Any], mode: int = 0o600) -
 
 def _load_state_json(path: pathlib.Path, code: str = "job_not_found") -> Dict[str, Any]:
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            value = json.load(handle)
+        for attempt in range(10):
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    value = json.load(handle)
+                break
+            except PermissionError:
+                if os.name != "nt" or attempt == 9:
+                    raise
+                time.sleep(0.02)
     except (OSError, ValueError) as exc:
         raise BridgeError(code, "Local ROS Agent bridge state is unavailable or invalid.") from exc
     if not isinstance(value, dict):
