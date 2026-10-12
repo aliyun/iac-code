@@ -265,7 +265,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         assert "enable_thinking" not in call_kwargs["extra_body"]
 
     @pytest.mark.parametrize("model", ["glm-5.2", "glm-5.2-fast-preview"])
-    async def test_glm52_models_use_total_output_limit_without_qwen_thinking_budget(self, model):
+    async def test_glm52_models_use_server_output_limit_without_qwen_thinking_budget(self, model):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -279,7 +279,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 8192
+        assert "max_completion_tokens" not in call_kwargs
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
         assert "reasoning_effort" not in call_kwargs
@@ -298,7 +298,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_tokens"] == 8192
+        assert "max_tokens" not in call_kwargs
         assert "max_completion_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": False}
         assert "reasoning_effort" not in call_kwargs
@@ -358,7 +358,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 8192
+        assert "max_completion_tokens" not in call_kwargs
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
@@ -456,7 +456,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         await provider.complete(messages=[Message.user("hi")], system="", max_tokens=8192)
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 8192
+        assert "max_completion_tokens" not in call_kwargs
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
@@ -503,7 +503,8 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 8192
+        assert "max_completion_tokens" not in call_kwargs
+        assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
 

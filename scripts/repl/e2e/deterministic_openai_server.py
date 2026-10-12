@@ -336,24 +336,18 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         if "步骤：方案确认与选择" in system_text:
+            conclusion = {
+                "user_prompt": "请选择要部署的方案：",
+                "options": [{
+                    "name": candidate_name,
+                    "summary": "Create one VSwitch in an existing VPC." if is_vswitch else "Create one isolated VPC.",
+                    "candidate_index": 0,
+                }],
+            }
+            conclusion.update(_fixture_candidate_selection(messages, candidate_name))
             self._write_named_tool_response(
                 "complete_step",
-                {
-                    "conclusion": {
-                        "user_prompt": "请选择要部署的方案：",
-                        "options": [
-                            {
-                                "name": candidate_name,
-                                "summary": (
-                                    "Create one VSwitch in an existing VPC."
-                                    if is_vswitch
-                                    else "Create one isolated VPC."
-                                ),
-                                "candidate_index": 0,
-                            }
-                        ],
-                    }
-                },
+                {"conclusion": conclusion},
             )
             return
 
@@ -469,6 +463,38 @@ def _last_user_text(messages: list[Any]) -> str:
                 str(item.get("text") or "") for item in content if isinstance(item, dict) and item.get("type") == "text"
             )
     return ""
+
+
+def _fixture_candidate_selection(messages: list[Any], candidate_name: str) -> dict[str, Any]:
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "user":
+            continue
+        text = _message_text(message).strip()
+        if text in {"选择方案0", "方案0", candidate_name}:
+            choice = {}
+        else:
+            try:
+                choice = json.loads(text)
+            except ValueError:
+                continue
+            if not isinstance(choice, dict) or not any(key in choice for key in (
+                "selected_candidate_name", "selected_candidate_index", "selected_evaluated_candidate_index",
+            )):
+                continue
+            if choice.get("selected_candidate_name", candidate_name) != candidate_name:
+                return {}
+            for key in ("selected_candidate_index", "selected_evaluated_candidate_index"):
+                if key in choice and (type(choice[key]) is not int or choice[key] != 0):
+                    return {}
+        selected = {
+            "user_input": text, "selected_candidate_name": candidate_name,
+            "selected_candidate_index": 0, "selected_evaluated_candidate_index": 0,
+        }
+        overrides = choice.get("parameter_overrides", choice.get("parameters"))
+        if isinstance(overrides, dict):
+            selected["parameter_overrides"] = overrides
+        return selected
+    return {}
 
 
 def _all_message_text(messages: list[Any]) -> str:

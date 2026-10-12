@@ -927,8 +927,8 @@ def test_model_payload_reflects_thinking_budget_capability(_isolate_config):
     gpt = _model("openai", "gpt-5.5")
     assert gpt["supportsThinkingBudget"] is False
     assert gpt["defaultThinkingBudget"] is None
-    # 「最大输出 tokens」对所有模型生效,均暴露留空回落默认(前端 placeholder 展示)。
-    assert glm["defaultMaxCompletionTokens"] == 8192
+    # GLM 留空由服务端决定输出额度;其他模型保留共享默认(前端 placeholder 展示)。
+    assert glm["defaultMaxCompletionTokens"] is None
     assert gpt["defaultMaxCompletionTokens"] == 8192
 
 

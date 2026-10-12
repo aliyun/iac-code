@@ -13,7 +13,7 @@ from dataclasses import dataclass, field, fields, is_dataclass, replace
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, unquote, urlencode
 
 import yaml
 from alibabacloud_openapi_util.client import Client as OpenApiUtil
@@ -240,6 +240,45 @@ class CanonicalWireContract:
         payload = {"contract": contract, "call_shape": shape.security_view()}
         encoded = json.dumps(_json_value(payload), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+    def matches_pathname(self, pathname: str | None, params: Mapping[str, Any]) -> bool:
+        """Compare a concrete ROA path with its metadata template and parameters."""
+        if pathname == self.pathname:
+            return True
+        if self.style != "ROA" or not isinstance(pathname, str) or not isinstance(params, Mapping):
+            return False
+        parameters = {parameter.name: parameter for parameter in self.parameters if parameter.location == "path"}
+        names = _PATH_PLACEHOLDER.findall(self.pathname)
+        pattern = re.escape(self.pathname)
+        for name in names:
+            parameter = parameters.get(name)
+            if parameter is None:
+                return False
+            pattern = pattern.replace(
+                re.escape("{" + name + "}"), "(.+)" if parameter.path_encoding == "preserve_slashes" else "([^/]+)", 1
+            )
+        matched = re.fullmatch(pattern, pathname)
+        if matched is None:
+            return False
+        values = dict(params)
+        try:
+            for index, name in enumerate(names, 1):
+                parameter = parameters[name]
+                encoded = matched.group(index)
+                decoded = unquote(encoded, errors="strict")
+                if (
+                    "\\" in decoded
+                    or any(ord(character) < 32 or ord(character) == 127 for character in decoded)
+                    or any(segment in {".", ".."} for segment in decoded.split("/"))
+                ):
+                    return False
+                value = values.setdefault(name, decoded)
+                _validate_parameter(parameter, value)
+                if _encode_path(value, parameter.path_encoding, parameter_name=name) != encoded:
+                    return False
+        except (ApiContractError, UnicodeError):
+            return False
+        return True
 
 
 @dataclass(frozen=True)

@@ -2148,6 +2148,62 @@ def contract(*parameters: ParameterMetadata, **changes: Any) -> CanonicalWireCon
     return CanonicalWireContract(**values)
 
 
+@pytest.mark.parametrize(
+    ("pathname", "params", "expected"),
+    [
+        ("/items/42", {"id": 42}, True),
+        ("/items/42", {"id": 43}, False),
+        ("/items/42", {"id": True}, False),
+        ("/items/042", {"id": 42}, False),
+        ("/items/-1", {"id": -1}, False),
+        ("/other/42", {"id": 42}, False),
+        ("/items/42/extra", {"id": 42}, False),
+    ],
+)
+def test_roa_concrete_path_matches_typed_metadata_parameters(pathname, params, expected) -> None:
+    metadata = contract(
+        parameter("id", "path", schema={"type": "integer", "enum": [42, 43]}),
+        style="ROA",
+        pathname="/items/{id}",
+    )
+
+    assert metadata.matches_pathname(pathname, params) is expected
+
+
+@pytest.mark.parametrize(
+    ("pathname", "expected"),
+    [("/items/demo/copy/demo", True), ("/items/demo/copy/other", False)],
+)
+def test_roa_concrete_path_requires_consistent_repeated_parameters(pathname, expected) -> None:
+    metadata = contract(
+        parameter("id", "path", schema={"type": "string"}),
+        style="ROA",
+        pathname="/items/{id}/copy/{id}",
+    )
+
+    assert metadata.matches_pathname(pathname, {}) is expected
+
+
+@pytest.mark.parametrize(
+    ("pathname", "expected"),
+    [
+        ("/objects/folder/demo%20file", True),
+        ("/objects/folder/demo%2Ffile", False),
+        ("/objects/folder/%2E%2E/demo", False),
+        ("/objects/folder/demo?other=route", False),
+        ("/objects/folder/%FF", False),
+    ],
+)
+def test_roa_concrete_path_uses_declared_slash_encoding(pathname, expected) -> None:
+    metadata = contract(
+        parameter("key", "path", path_encoding="preserve_slashes", schema={"type": "string"}),
+        style="ROA",
+        pathname="/objects/{key}",
+    )
+
+    assert metadata.matches_pathname(pathname, {}) is expected
+
+
 async def local_ref_sibling_contract(
     location: str,
     sibling_schema: dict[str, Any],

@@ -5,6 +5,7 @@ import json
 import shutil
 import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import httpx
@@ -4610,10 +4611,15 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_dispatcher_resumes_candidate_selection_submitted_during_input_backup(monkeypatch, tmp_path) -> None:
+@pytest.mark.parametrize("executor_workers", [1, 4])
+async def test_dispatcher_resumes_candidate_selection_submitted_during_input_backup(
+    monkeypatch, tmp_path, executor_workers
+) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
-    backup_started = threading.Event()
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=executor_workers))
+    backup_started = asyncio.Event()
     release_backup = threading.Event()
 
     class BlockingBackupService(SessionBackupService):
@@ -4623,7 +4629,7 @@ async def test_dispatcher_resumes_candidate_selection_submitted_during_input_bac
         def backup_session(self, _cwd, _session_id, *, reason, critical, publication_proofs=None) -> None:
             del critical, publication_proofs
             if reason == BackupReason.INPUT_REQUIRED:
-                backup_started.set()
+                loop.call_soon_threadsafe(backup_started.set)
                 if not release_backup.wait(timeout=_STREAM_TEST_TIMEOUT):
                     raise TimeoutError("test backup gate was not released")
 
@@ -4702,7 +4708,9 @@ async def test_dispatcher_resumes_candidate_selection_submitted_during_input_bac
             first_events.append(event)
 
     first_task = asyncio.create_task(consume_first_stream())
-    assert await asyncio.to_thread(backup_started.wait, _STREAM_TEST_TIMEOUT)
+    # Waiting for a worker-thread signal must not occupy a worker needed by
+    # runtime initialization and backup itself.
+    await asyncio.wait_for(backup_started.wait(), timeout=_STREAM_TEST_TIMEOUT)
     identity = _active_task_identity(components)
 
     async def consume_second_stream() -> None:

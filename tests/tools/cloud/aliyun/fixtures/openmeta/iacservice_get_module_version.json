@@ -1,0 +1,180 @@
+{
+  "summary": "查询指定模板的特定版本详细信息",
+  "path": "/modules/{moduleId}/versions/{moduleVersion}",
+  "methods": [
+    "get"
+  ],
+  "schemes": [
+    "https"
+  ],
+  "security": [
+    {
+      "AK": []
+    }
+  ],
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "operationType": "read",
+  "deprecated": false,
+  "systemTags": {
+    "operationType": "get",
+    "riskType": "none",
+    "chargeType": "free",
+    "abilityTreeNodes": [
+      "FEATUREopenapiexplorer7MPML0"
+    ]
+  },
+  "parameters": [
+    {
+      "name": "moduleId",
+      "in": "path",
+      "schema": {
+        "description": "模板ID",
+        "type": "string",
+        "required": false,
+        "example": "mod-14e80de4866bf71c92a04fe353b1"
+      }
+    },
+    {
+      "name": "moduleVersion",
+      "in": "path",
+      "schema": {
+        "description": "模板版本",
+        "type": "string",
+        "required": false,
+        "example": "v1"
+      }
+    }
+  ],
+  "responses": {
+    "200": {
+      "schema": {
+        "title": "Schema of Response",
+        "description": "响应体结构",
+        "type": "object",
+        "properties": {
+          "requestId": {
+            "title": "Id of the request",
+            "description": "请求ID",
+            "type": "string",
+            "example": "0D298375-F92F-5B65-82E4-EA68F02521F1"
+          },
+          "version": {
+            "description": "版本详情。",
+            "type": "object",
+            "properties": {
+              "createTime": {
+                "description": "版本创建时间，采用 ISO 8601 格式的 UTC 时间，格式为 YYYY-MM-DDTHH:mm:ssZ。",
+                "type": "string",
+                "example": "2022-09-08T18:07:40Z"
+              },
+              "description": {
+                "description": "版本描述",
+                "type": "string",
+                "example": "this is description\n"
+              },
+              "moduleId": {
+                "description": "模板ID",
+                "type": "string",
+                "example": "mod-4267dcfbf1b6dfffbc27e218d1b66"
+              },
+              "moduleVersion": {
+                "description": "模板版本号",
+                "type": "string",
+                "example": "v1"
+              },
+              "name": {
+                "description": "版本名称",
+                "type": "string",
+                "example": "versionName"
+              },
+              "source": {
+                "description": "版本来源，枚举值\n\n- OSS ：OSS导入\n- Registry : 使用模板中心的模板来创建\n- ExportTask：引用资源导出任务导出的模板\n- Upload：文件上传\n- Shared：共享克隆\n- Editor：在线编辑",
+                "type": "string",
+                "example": "OSS"
+              },
+              "sourcePath": {
+                "description": "版本来源的路径值\n\n- 来源为Registry时，取值 <工作空间名称>/<模块名称>:<模块版本>, 例如 terraform-alicloud-modules/rds:1.0.0\n- 来源为OSS时，取值为oss::<文件链接>，例如oss::https://terraform-pipeline.oss-eu-central-1.aliyuncs.com/code.zip\n- 来源为ExportTask时，取值为 <导出任务ID>:<导出的版本>,例如 ex-3b6cb9fa4751afff298da723c24ac:v1",
+                "type": "string",
+                "example": "oss::https://terraform-pipeline.oss-eu-central-1.aliyuncs.com/code.zip"
+              },
+              "statePath": {
+                "description": "模板对应的State文件的路径值，目前只针对OSS路径。 取值 oss::<文件OSS路径>/terraform.tfstate",
+                "type": "string",
+                "example": "oss::https://terraform-pipeline.oss-eu-central-1.aliyuncs.com/terraform.tfstate"
+              },
+              "terraformContext": {
+                "description": "Terraform内容",
+                "type": "object"
+              },
+              "versionStrategy": {
+                "description": "版本生成策略,取值\n\n- Manual :手动生成版本(默认)\n- SourcePathUpdated ：\n 修改sourcePath触发生成新版本",
+                "type": "string",
+                "example": "Manual"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "responseDemo": "[{\"errorExample\":\"\",\"example\":\"{\\n  \\\"requestId\\\": \\\"0D298375-F92F-5B65-82E4-EA68F02521F1\\\",\\n  \\\"version\\\": {\\n    \\\"createTime\\\": \\\"2022-09-08T18:07:40Z\\\",\\n    \\\"description\\\": \\\"this is description\\\\n\\\",\\n    \\\"moduleId\\\": \\\"mod-4267dcfbf1b6dfffbc27e218d1b66\\\",\\n    \\\"moduleVersion\\\": \\\"v1\\\",\\n    \\\"name\\\": \\\"versionName\\\",\\n    \\\"source\\\": \\\"OSS\\\",\\n    \\\"sourcePath\\\": \\\"oss::https://terraform-pipeline.oss-eu-central-1.aliyuncs.com/code.zip\\\",\\n    \\\"statePath\\\": \\\"oss::https://terraform-pipeline.oss-eu-central-1.aliyuncs.com/terraform.tfstate\\\",\\n    \\\"terraformContext\\\": {\\n      \\\"test\\\": \\\"test\\\",\\n      \\\"test2\\\": 1\\n    },\\n    \\\"versionStrategy\\\": \\\"Manual\\\"\\n  }\\n}\",\"type\":\"json\"}]",
+  "gatewayOptions": {
+    "fileTransfer": false
+  },
+  "title": "获取模板版本详情",
+  "description": "## 请求说明\n通过此接口，您可以获取指定模板的某个具体版本的详细信息，包括版本号、描述、发布时间等。请确保提供的模板 ID 和版本号是正确的。\n",
+  "changeSet": [
+    {
+      "createdAt": "2022-08-09T01:54:55.000Z",
+      "description": "响应参数发生变更"
+    },
+    {
+      "createdAt": "2022-06-27T10:03:05.000Z",
+      "description": "响应参数发生变更"
+    },
+    {
+      "createdAt": "2021-09-13T12:28:47.000Z",
+      "description": "响应参数发生变更"
+    },
+    {
+      "createdAt": "2021-09-13T12:28:47.000Z",
+      "description": "响应参数发生变更"
+    }
+  ],
+  "flowControl": {
+    "flowControlList": [
+      {
+        "threshold": "100",
+        "countWindow": 1,
+        "regionId": "*",
+        "api": "GetModuleVersion"
+      }
+    ]
+  },
+  "ramActions": [
+    {
+      "operationType": "get",
+      "ramAction": {
+        "action": "iacservice:GetModuleVersion",
+        "authLevel": "resource",
+        "actionConditions": [],
+        "resources": [
+          {
+            "validationType": "always",
+            "product": "IaCService",
+            "resourceType": "ModuleVersion",
+            "arn": "acs:iacservice::{#accountId}:module/{#ModuleId}/moduleversion/{#ModuleVersionId}"
+          }
+        ]
+      }
+    }
+  ],
+  "components": {
+    "schemas": {}
+  }
+}

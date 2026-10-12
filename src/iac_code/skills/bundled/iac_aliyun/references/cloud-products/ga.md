@@ -4,7 +4,8 @@
 
 - 本文只固化产品选型和安全边界。资源属性、枚举、支持的终端节点类型、地域覆盖和账号资格可能变化，**每次生成前必须查询当前 Schema 和可用性 API**。
 - ROS Schema：`aliyun_api(product="ros", action="GetResourceType", params={"ResourceType": "<类型>"})`。
-- Terraform Schema：`aliyun_api(product="IaCService", action="GetResourceType", style="ROA", method="GET", pathname="/resourceType/<类型>")`。
+- Terraform Schema：`aliyun_api(product="IaCService", version="2021-08-06", action="GetResourceType", params={"resourceType": "<类型>"})`。
+  `<类型>` 使用 Terraform 资源类型名；路径参数通过 `params.resourceType` 传入，由 API 元数据决定请求方式并编码路径，不显式设置 `style`、`method` 或 `pathname`。
 - 下文资源名是查询 Schema 的定位锚点，不代表当前版本一定支持全部能力。只有 Schema 返回完整资源链和准确属性后才能生成；缺失时说明限制并询问是否切换 IaC 实现，不得编造属性或用其他资源冒充。
 - Anycast、自定义路由、WAF、跨境线路、高防、大规格和特定 ISP 等受限能力，生成前确认当前地域、账号资格与产品约束；未确认不得默认启用。
 - 证书、已有资源 ID、外部源站 IP/域名均由用户提供或从真实 API 结果中选择，禁止编造。

@@ -997,9 +997,13 @@ def _runtime_is_read_only(
     contract: CanonicalWireContract,
     shape: ApiCallShape,
     metadata_contract: CanonicalWireContract,
+    *,
+    tool_input: Mapping[str, Any] | None = None,
 ) -> bool:
     overrides_match = all(
-        _normalized_override_value(name, getattr(shape, name))
+        metadata_contract.matches_pathname(shape.pathname, (tool_input or {}).get("params", {}))
+        if name == "pathname"
+        else _normalized_override_value(name, getattr(shape, name))
         == _normalized_override_value(name, getattr(metadata_contract, name))
         for name in shape.explicit_overrides
     )
@@ -1677,6 +1681,7 @@ class AliyunApi(BaseCloudApi):
             contract,
             final_shape,
             metadata_contract,
+            tool_input=normalized,
         )
         execution_class: ExecutionClass = "concurrent" if is_read_only else "serial"
         if is_read_only:
@@ -2475,6 +2480,7 @@ class AliyunApi(BaseCloudApi):
                         contract,
                         final_shape,
                         recovery_metadata_contract,
+                        tool_input=normalized,
                     )
                     else "serial"
                 )
