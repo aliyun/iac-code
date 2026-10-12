@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import contextvars
 import json
+import logging
 import os
 import shutil
 import threading
@@ -2232,6 +2233,7 @@ async def test_pipeline_executor_flushes_outbound_before_terminal_handoff_transa
 async def test_pipeline_executor_preserves_committed_terminal_when_transport_closes(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
@@ -2283,6 +2285,7 @@ async def test_pipeline_executor_preserves_committed_terminal_when_transport_clo
 
     record = await store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     assert record.state == "completed"
+    assert not any("A2A pipeline failure diagnostic" in record.msg for record in caplog.records)
     journal_events = A2APipelineJournal(pipeline_dir).read_all()
     assert any(event["eventType"] == "pipeline_completed" for event in journal_events)
     assert any(event["eventType"] == "pipeline_handoff_ready" for event in journal_events)
@@ -4051,8 +4054,7 @@ async def test_sub_pipeline_resource_selection_publishes_recoverable_input(
     resource_inputs = [
         event
         for event in dumped_events
-        if event.get("metadata", {}).get("iac_code", {}).get("input", {}).get("kind")
-        == "cloud_resource_selection"
+        if event.get("metadata", {}).get("iac_code", {}).get("input", {}).get("kind") == "cloud_resource_selection"
     ]
     assert resource_inputs, dumped_events
     resource_event = resource_inputs[0]
@@ -7946,10 +7948,24 @@ async def test_active_pause_continuation_keeps_active_owner_until_continuation_f
         assert ctx.active_task_id == "task-1"
         assert active_task.active_task is continuation
 
+        terminal_states = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED"}
+        assert not any(
+            dump(event)["status"]["state"] in terminal_states
+            for event in queue.events
+            if isinstance(event, TaskStatusUpdateEvent)
+        )
         pipeline.finish_continuation.set()
         await asyncio.wait_for(continuation, timeout=_A2A_ASYNC_TEST_TIMEOUT)
         assert ctx.active_task_id is None
         assert active_task.active_task is None
+        terminals = [
+            (index, dump(event))
+            for index, event in enumerate(queue.events)
+            if isinstance(event, TaskStatusUpdateEvent) and dump(event)["status"]["state"] in terminal_states
+        ]
+        assert len(terminals) == 1
+        assert terminals[0][0] == len(queue.events) - 1
+        assert terminals[0][1]["status"]["state"] == "TASK_STATE_COMPLETED"
     finally:
         pipeline.primary_stream.allow_close.set()
         pipeline.finish_continuation.set()
@@ -12149,3 +12165,346 @@ async def test_top_pipeline_permission_suspension_stays_input_required_without_f
         event.get("metadata", {}).get("iac_code", {}).get("pipeline", {}).get("eventType", "").startswith("rollback_")
         for event in dumped
     )
+
+
+@pytest.mark.asyncio
+async def test_pipeline_failure_diagnostic_keeps_real_corrupt_intent_failed_frame(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    from iac_code.a2a.pipeline_continuation import PipelineContinuationCorruptError, PipelineContinuationStore
+
+    session_dir = tmp_path / "session"
+    pipeline_dir = session_dir / "a2a" / "pipeline"
+    pipeline_dir.mkdir(parents=True)
+    secret = "fake-secret-token-not-for-logging"
+    (pipeline_dir / "continuation-intent.json").write_text(secret, encoding="utf-8")
+    store = PipelineContinuationStore(pipeline_dir, session_dir=session_dir)
+    with pytest.raises(PipelineContinuationCorruptError) as caught:
+        store.load()
+
+    task_id = "task-9f73b3e97d29"
+    context_id = "ae022c2ddc714cbcbda444e41fa6670f"
+    task = SimpleNamespace(task_id=task_id, context_id=context_id, state="working")
+    queue = FakeEventQueue()
+    with caplog.at_level("WARNING", logger="iac_code.a2a.pipeline_executor"):
+        await _pipeline_executor()._publish_exception_status(
+            queue, task=task, task_id=task_id, context_id=context_id, exc=caught.value, preserve_task_record=True
+        )
+
+    assert task.state == "working", "diagnostics must preserve the existing task-record guard"
+    assert len(queue.events) == 1
+    status = dump(queue.events[0])["status"]
+    assert status["state"] == "TASK_STATE_FAILED"
+    assert status["message"]["parts"][0]["text"] == (
+        "PipelineContinuationCorruptError: Continuation intent cannot be read safely"
+    )
+    diagnostics = [record.getMessage() for record in caplog.records if "A2A pipeline failure diagnostic" in record.msg]
+    assert len(diagnostics) == 1
+    assert "exception_type=PipelineContinuationCorruptError" in diagnostics[0]
+    assert "guard_reason=UNKNOWN" in diagnostics[0]
+    assert "source_module=pipeline_continuation" in diagnostics[0]
+    assert "source_function=_load_unlocked" in diagnostics[0]
+    assert f"task_id={task_id}" in diagnostics[0]
+    assert secret not in diagnostics[0]
+    assert str(tmp_path) not in diagnostics[0]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_failure_diagnostic_does_not_log_exception_text_or_change_failed_message(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    secret = "fake-access-key-secret=https://example.invalid/private?token=fake-secret"
+    try:
+        raise ValueError(secret)
+    except ValueError as caught:
+        exception = caught
+    task_id = "task-9f73b3e97d29"
+    context_id = "ae022c2ddc714cbcbda444e41fa6670f"
+    task = SimpleNamespace(task_id=task_id, context_id=context_id, state="working")
+    queue = FakeEventQueue()
+    with caplog.at_level("WARNING", logger="iac_code.a2a.pipeline_executor"):
+        await _pipeline_executor()._publish_exception_status(
+            queue, task=task, task_id=task_id, context_id=context_id, exc=exception, preserve_task_record=True
+        )
+
+    assert dump(queue.events[0])["status"]["message"]["parts"][0]["text"] == f"ValueError: {secret}"
+    diagnostics = [record.getMessage() for record in caplog.records if "A2A pipeline failure diagnostic" in record.msg]
+    assert len(diagnostics) == 1
+    assert "exception_type=ValueError" in diagnostics[0]
+    assert "source_module=UNKNOWN" in diagnostics[0]
+    assert secret not in diagnostics[0]
+    assert task.state == "working"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_site", ["builder", "handler"])
+async def test_pipeline_failure_diagnostic_failure_cannot_interrupt_original_failed_publication(
+    failure_site: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from iac_code.a2a import pipeline_executor as module
+
+    class FailingDiagnosticHandler(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            raise RuntimeError("fake-secret-diagnostic-handler-error")
+
+    if failure_site == "builder":
+
+        def fail_projection(*_args, **_kwargs):
+            raise RuntimeError("fake-secret-projection-error")
+
+        monkeypatch.setattr(module.PipelineFailureDiagnostic, "from_exception", fail_projection)
+    handler = FailingDiagnosticHandler()
+    monkeypatch.setattr(module.logger, "level", logging.WARNING)
+    if failure_site == "handler":
+        module.logger.addHandler(handler)
+    queue = FakeEventQueue()
+    task = SimpleNamespace(task_id="task-9f73b3e97d29", context_id="ae022c2ddc714cbcbda444e41fa6670f", state="working")
+    try:
+        await _pipeline_executor()._publish_exception_status(
+            queue,
+            task=task,
+            task_id=task.task_id,
+            context_id=task.context_id,
+            exc=ValueError("existing-failure"),
+            preserve_task_record=True,
+        )
+    finally:
+        module.logger.removeHandler(handler)
+    assert task.state == "working"
+    status = dump(queue.events[0])["status"]
+    assert status["state"] == "TASK_STATE_FAILED"
+    assert status["message"]["parts"][0]["text"] == "ValueError: existing-failure"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["completed", "failed", "canceled"])
+@pytest.mark.parametrize("handoff", [False, True])
+@pytest.mark.parametrize("backup_mode", ["disabled", "shared", "staged"])
+async def test_public_pipeline_emits_one_protocol_terminal_after_all_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    outcome: str,
+    handoff: bool,
+    backup_mode: str,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    if outcome == "completed":
+        stream_events = [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            ),
+        ]
+    elif outcome == "failed":
+        stream_events = [ValueError("terminal-boundary-test")]
+    else:
+        stream_events = [asyncio.CancelledError()]
+    pipeline = FakePipeline(stream_events, session_dir=tmp_path / "sidecar")
+    pipeline.handoff_enabled = handoff
+
+    def create_test_pipeline(*args, **kwargs):
+        pipeline._session_storage = kwargs["session_storage"]
+        pipeline._session_id = kwargs["session_id"]
+        pipeline._cwd = kwargs["cwd"]
+        return pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", create_test_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    from iac_code.services.session_backup import SessionBackupService
+    from iac_code.services.session_backup_staging import StagedSessionBackupService
+
+    monkeypatch.delenv("IAC_CODE_CONFIG_BACKUP_DIR", raising=False)
+    if backup_mode != "disabled":
+        monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "shared"))
+    backup_service = (
+        StagedSessionBackupService(tmp_path / "staged", retry_delays=())
+        if backup_mode == "staged"
+        else SessionBackupService(retry_delays=())
+    )
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", backup_service=backup_service)
+    queue = FakeEventQueue()
+    await executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+
+    updates = [
+        (index, dump(event)) for index, event in enumerate(queue.events) if isinstance(event, TaskStatusUpdateEvent)
+    ]
+    terminal_states = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"}
+    terminals = [(index, event) for index, event in updates if event["status"]["state"] in terminal_states]
+    assert len(terminals) == 1
+    terminal_index, terminal = terminals[0]
+    assert terminal_index == len(queue.events) - 1
+    assert terminal["status"]["state"] == f"TASK_STATE_{outcome.upper()}"
+    assert terminal["taskId"] == "task-1"
+    assert terminal["contextId"] == "ctx-1"
+    if outcome in {"failed", "canceled"}:
+        assert terminal["status"]["message"]["parts"]
+
+    metadata_updates = [
+        event for index, event in updates if "pipeline" in event.get("metadata", {}).get("iac_code", {})
+    ]
+    assert metadata_updates
+    assert all(event["status"]["state"] == "TASK_STATE_WORKING" for event in metadata_updates)
+    delivered = [event["metadata"]["iac_code"]["pipeline"] for event in metadata_updates]
+    expected_type = {"completed": "pipeline_completed", "failed": "pipeline_failed", "canceled": "pipeline_canceled"}[
+        outcome
+    ]
+    terminal_envelope = next(event for event in delivered if event["eventType"] == expected_type)
+    assert terminal_envelope["status"] == outcome
+    assert terminal_envelope["visibility"] == "committed"
+    ack = next(
+        event
+        for event in delivered
+        if event["eventType"] == "backup_committed"
+        and event["data"]["committedEventId"] == terminal_envelope["eventId"]
+    )
+    assert ack["data"]["committedSequence"] == terminal_envelope["sequence"]
+    assert ack["taskId"] == terminal["taskId"]
+    assert ack["contextId"] == terminal["contextId"]
+    record = await store.get_task_record("task-1")
+    assert record.state == outcome
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handoff", [False, True])
+async def test_public_pipeline_waits_for_owner_drain_before_protocol_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    handoff: bool,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+
+    class WaitingOwnerPipeline(FakePipeline):
+        def __init__(self) -> None:
+            super().__init__([], session_dir=tmp_path / "sidecar")
+            self.metadata_delivered = asyncio.Event()
+            self.release_owner = asyncio.Event()
+            self.handoff_enabled = handoff
+
+        async def run(self, prompt):
+            yield PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            )
+            self.metadata_delivered.set()
+            await self.release_owner.wait()
+
+    pipeline = WaitingOwnerPipeline()
+
+    def create_test_pipeline(*args, **kwargs):
+        pipeline._session_storage = kwargs["session_storage"]
+        pipeline._session_id = kwargs["session_id"]
+        pipeline._cwd = kwargs["cwd"]
+        return pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", create_test_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    owner = asyncio.create_task(
+        executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+    )
+    try:
+        await asyncio.wait_for(pipeline.metadata_delivered.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
+        assert not owner.done()
+        updates = [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+        assert updates
+        assert all(event["status"]["state"] == "TASK_STATE_WORKING" for event in updates)
+        metadata = [event["metadata"]["iac_code"]["pipeline"] for event in updates]
+        committed = next(event for event in metadata if event["eventType"] == "pipeline_completed")
+        assert committed["status"] == "completed"
+        assert committed["visibility"] == "committed"
+        assert any(
+            event["eventType"] == "backup_committed" and event["data"]["committedEventId"] == committed["eventId"]
+            for event in metadata
+        )
+        pipeline.release_owner.set()
+        await asyncio.wait_for(owner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
+        updates = [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+        assert [event["status"]["state"] for event in updates].count("TASK_STATE_COMPLETED") == 1
+        assert updates[-1]["status"]["state"] == "TASK_STATE_COMPLETED"
+        assert dump(queue.events[-1]) == updates[-1]
+    finally:
+        pipeline.release_owner.set()
+        if not owner.done():
+            await asyncio.wait_for(owner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handoff", [False, True])
+async def test_public_pipeline_push_notification_cancel_keeps_protocol_terminal_last(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    handoff: bool,
+) -> None:
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+
+    class WaitingTerminalNotifier:
+        def __init__(self) -> None:
+            self.completed_notification_started = asyncio.Event()
+            self.release_notification = asyncio.Event()
+            self.states: list[str] = []
+
+        async def notify_task_state(self, *, task_id: str, context_id: str, state: str) -> None:
+            assert task_id == "task-1"
+            assert context_id == "ctx-1"
+            self.states.append(state)
+            if state == "completed":
+                self.completed_notification_started.set()
+                await self.release_notification.wait()
+
+    pipeline = FakePipeline(
+        [
+            PipelineEvent(
+                type=PipelineEventType.PIPELINE_COMPLETED,
+                step_id=None,
+                timestamp=1717821601.0,
+                data={"total_steps": 1},
+            )
+        ],
+        session_dir=tmp_path / "sidecar",
+    )
+    pipeline.handoff_enabled = handoff
+
+    def create_test_pipeline(*args, **kwargs):
+        pipeline._session_storage = kwargs["session_storage"]
+        pipeline._session_id = kwargs["session_id"]
+        pipeline._cwd = kwargs["cwd"]
+        return pipeline
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", create_test_pipeline)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda options: _fake_runtime())
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    notifier = WaitingTerminalNotifier()
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus", push_notifier=notifier)
+    queue = FakeEventQueue()
+    owner = asyncio.create_task(
+        executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+    )
+    try:
+        await asyncio.wait_for(notifier.completed_notification_started.wait(), timeout=_A2A_ASYNC_TEST_TIMEOUT)
+        assert not owner.done()
+        owner.cancel()
+        await asyncio.wait_for(owner, timeout=_A2A_ASYNC_TEST_TIMEOUT)
+        updates = [
+            (index, dump(event)) for index, event in enumerate(queue.events) if isinstance(event, TaskStatusUpdateEvent)
+        ]
+        terminal_states = {"TASK_STATE_COMPLETED", "TASK_STATE_FAILED", "TASK_STATE_CANCELED", "TASK_STATE_REJECTED"}
+        terminals = [(index, event) for index, event in updates if event["status"]["state"] in terminal_states]
+        assert len(terminals) == 1
+        terminal_index, terminal = terminals[0]
+        assert terminal_index == len(queue.events) - 1
+        assert terminal["taskId"] == "task-1"
+        assert terminal["contextId"] == "ctx-1"
+        assert notifier.states[0] == "completed"
+        record = await store.get_task_record("task-1")
+        assert terminal["status"]["state"] == f"TASK_STATE_{record.state.upper()}"
+    finally:
+        notifier.release_notification.set()
+        if not owner.done():
+            await asyncio.wait_for(owner, timeout=_A2A_ASYNC_TEST_TIMEOUT)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,120 @@ class PipelineCheckpointIdentity:
     sequence: int
     event_id: str
 
+    @classmethod
+    def from_checkpoint(cls, snapshot: dict[str, Any], terminal_event: dict[str, Any]) -> PipelineCheckpointIdentity:
+        sequence = terminal_event.get("sequence")
+        event_id = terminal_event.get("eventId")
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
+            raise PipelineContinuationError("Canceled checkpoint has no valid sequence")
+        if not isinstance(event_id, str) or not event_id:
+            raise PipelineContinuationError("Canceled checkpoint has no event id")
+        canonical = deepcopy(snapshot)
+        a2a = canonical.get("a2a")
+        if isinstance(a2a, dict):
+            # Re-reducing the same journal stamps the current display time.
+            # Every authoritative field, including Pipeline meta, stays fenced.
+            a2a.pop("generatedAt", None)
+        encoded = json.dumps(
+            {"snapshot": canonical, "terminalEvent": terminal_event},
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return cls(version=1, digest=hashlib.sha256(encoded).hexdigest(), sequence=sequence, event_id=event_id)
+
+
+@dataclass(frozen=True)
+class PipelineModelReleaseProof:
+    """Old writer facts captured before the successor replaces its control file."""
+
+    context_id: str
+    task_id: str
+    execution_id: str
+    revision: int
+    backup_generation: int
+    backup_commit_id: str
+    backup_status: str
+    termination_reason: str
+
+    @classmethod
+    def from_dict(cls, value: Any) -> PipelineModelReleaseProof:
+        if not isinstance(value, dict) or set(value) != {
+            "executionId",
+            "revision",
+            "backupGeneration",
+            "backupCommitId",
+            "modelBoundary",
+        }:
+            raise ValueError("Invalid model release proof")
+        boundary = value["modelBoundary"]
+        if not isinstance(boundary, dict) or set(boundary) != {
+            "contextId",
+            "taskId",
+            "externalOperations",
+            "backupStatus",
+            "phase",
+            "executionStatus",
+            "terminationReason",
+            "releaseReady",
+            "commitError",
+            "persistedRevision",
+            "blockers",
+        }:
+            raise ValueError("Invalid model release boundary")
+        revision = value["revision"]
+        generation = value["backupGeneration"]
+        if (
+            type(revision) is not int
+            or revision < 0
+            or type(generation) is not int
+            or generation <= 0
+            or type(boundary["persistedRevision"]) is not int
+            or boundary["persistedRevision"] != revision
+            or boundary["externalOperations"] != []
+            or boundary["blockers"] != []
+            or boundary["phase"] != "terminated"
+            or boundary["executionStatus"] != "canceled"
+            or boundary["terminationReason"] not in ("explicit_terminate", "stream_terminal_cleanup")
+            or boundary["releaseReady"] is not True
+            or boundary["commitError"] is not None
+            or boundary["backupStatus"] not in ("staged_committed", "shared_committed")
+            or not isinstance(value["backupCommitId"], str)
+            or not value["backupCommitId"]
+        ):
+            raise ValueError("Unproved model release boundary")
+        return cls(
+            context_id=validate_protocol_id(boundary["contextId"]),
+            task_id=validate_protocol_id(boundary["taskId"]),
+            execution_id=validate_protocol_id(value["executionId"]),
+            revision=revision,
+            backup_generation=generation,
+            backup_commit_id=value["backupCommitId"],
+            backup_status=boundary["backupStatus"],
+            termination_reason=boundary["terminationReason"],
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "executionId": self.execution_id,
+            "revision": self.revision,
+            "backupGeneration": self.backup_generation,
+            "backupCommitId": self.backup_commit_id,
+            "modelBoundary": {
+                "contextId": self.context_id,
+                "taskId": self.task_id,
+                "externalOperations": [],
+                "backupStatus": self.backup_status,
+                "phase": "terminated",
+                "executionStatus": "canceled",
+                "terminationReason": self.termination_reason,
+                "releaseReady": True,
+                "commitError": None,
+                "persistedRevision": self.revision,
+                "blockers": [],
+            },
+        }
+
 
 @dataclass(frozen=True)
 class PipelineContinuationIntent:
@@ -60,6 +175,7 @@ class PipelineContinuationIntent:
     phase: str
     claim_id: str | None = None
     unsafe_reason: str | None = None
+    model_release_proof: PipelineModelReleaseProof | None = None
 
 
 class PipelineContinuationStore:
@@ -100,6 +216,7 @@ class PipelineContinuationStore:
         cancellation_revision: int,
         cancellation_backup_generation: int | None,
         cancellation_backup_commit_id: str | None,
+        model_release_proof: PipelineModelReleaseProof | None = None,
     ) -> PipelineContinuationIntent:
         context_id = validate_protocol_id(context_id)
         predecessor_task_id = validate_protocol_id(predecessor_task_id)
@@ -107,6 +224,19 @@ class PipelineContinuationStore:
         cancellation_execution_id = validate_protocol_id(cancellation_execution_id)
         if cancellation_revision < 0:
             raise ValueError("Invalid cancellation revision")
+        if model_release_proof is not None:
+            PipelineModelReleaseProof.from_dict(model_release_proof.to_dict())
+            if (
+                model_release_proof.context_id != context_id
+                or model_release_proof.task_id != predecessor_task_id
+                or model_release_proof.execution_id != cancellation_execution_id
+                or type(cancellation_revision) is not int
+                or model_release_proof.revision != cancellation_revision
+                or type(cancellation_backup_generation) is not int
+                or model_release_proof.backup_generation != cancellation_backup_generation
+                or model_release_proof.backup_commit_id != cancellation_backup_commit_id
+            ):
+                raise ValueError("Model release proof disagrees with its continuation")
         ensure_private_dir(self._pipeline_dir)
         with session_mutation_guard(self._session_dir):
             with cross_process_file_lock(self._lock_path):
@@ -125,6 +255,7 @@ class PipelineContinuationStore:
                         or current.cancellation_revision != cancellation_revision
                         or current.cancellation_backup_generation != cancellation_backup_generation
                         or current.cancellation_backup_commit_id != cancellation_backup_commit_id
+                        or current.model_release_proof != model_release_proof
                     ):
                         raise PipelineContinuationConflictError("The cancellation proof changed")
                     else:
@@ -141,6 +272,7 @@ class PipelineContinuationStore:
                     cancellation_backup_commit_id=cancellation_backup_commit_id,
                     fence=(current.fence + 1 if current is not None else 1),
                     phase="reserved",
+                    model_release_proof=model_release_proof,
                 )
                 self._write_unlocked(intent)
                 return intent
@@ -281,6 +413,9 @@ class PipelineContinuationStore:
                 "phase": intent.phase,
                 "claimId": intent.claim_id,
                 "unsafeReason": intent.unsafe_reason,
+                "modelReleaseProof": (
+                    intent.model_release_proof.to_dict() if intent.model_release_proof is not None else None
+                ),
             },
             durable=True,
         )
@@ -323,6 +458,11 @@ class PipelineContinuationStore:
                 phase=str(raw["phase"]),
                 claim_id=str(raw["claimId"]) if raw.get("claimId") is not None else None,
                 unsafe_reason=str(raw["unsafeReason"]) if raw.get("unsafeReason") is not None else None,
+                model_release_proof=(
+                    PipelineModelReleaseProof.from_dict(raw["modelReleaseProof"])
+                    if raw.get("modelReleaseProof") is not None
+                    else None
+                ),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise PipelineContinuationCorruptError("Continuation intent is invalid") from exc
@@ -336,28 +476,23 @@ class PipelineContinuationStore:
             or (intent.phase == "unsafe") != bool(intent.unsafe_reason)
         ):
             raise PipelineContinuationCorruptError("Continuation intent violates its protocol")
+        proof = intent.model_release_proof
+        if proof is not None and (
+            proof.context_id != intent.context_id
+            or proof.task_id != intent.predecessor_task_id
+            or proof.execution_id != intent.cancellation_execution_id
+            or proof.revision != intent.cancellation_revision
+            or proof.backup_generation != intent.cancellation_backup_generation
+            or proof.backup_commit_id != intent.cancellation_backup_commit_id
+            or type(raw["cancellationRevision"]) is not int
+            or type(raw["cancellationBackupGeneration"]) is not int
+        ):
+            raise PipelineContinuationCorruptError("Model release proof disagrees with its continuation")
         return intent
 
 
 def checkpoint_identity(snapshot: dict[str, Any], terminal_event: dict[str, Any]) -> PipelineCheckpointIdentity:
-    sequence = terminal_event.get("sequence")
-    event_id = terminal_event.get("eventId")
-    if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 0:
-        raise PipelineContinuationError("Canceled checkpoint has no valid sequence")
-    if not isinstance(event_id, str) or not event_id:
-        raise PipelineContinuationError("Canceled checkpoint has no event id")
-    encoded = json.dumps(
-        {"snapshot": snapshot, "terminalEvent": terminal_event},
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return PipelineCheckpointIdentity(
-        version=1,
-        digest=hashlib.sha256(encoded).hexdigest(),
-        sequence=sequence,
-        event_id=event_id,
-    )
+    return PipelineCheckpointIdentity.from_checkpoint(snapshot, terminal_event)
 
 
 __all__ = [

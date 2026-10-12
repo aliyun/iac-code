@@ -228,6 +228,30 @@ def interrupt_from_a2a(value: Mapping[str, Any]) -> Interrupt:
         }
         message = str(value.get("prompt") or translate_message("Input required", language=language))
         reason = "input_required"
+    elif kind == "deployment_confirmation":
+        confirmation_options = _DeploymentConfirmationOptions(value)
+        options = confirmation_options.standard_options
+        selection = _selection_schema(options, allow_free_text=False)
+        for branch in selection["oneOf"]:
+            branch["properties"]["parameter_overrides"] = {"type": "object"}
+        schema = {
+            "oneOf": [
+                *selection["oneOf"],
+                {
+                    "type": "object",
+                    "properties": {
+                        "action": {"type": "string", "enum": confirmation_options.actions},
+                        "parameter_overrides": {"type": "object"},
+                    },
+                    "required": ["action"],
+                    "additionalProperties": False,
+                },
+            ]
+        }
+        message = _selection_message(
+            str(value.get("prompt") or translate_message("Input required", language=language)), options
+        )
+        reason = "input_required"
     elif kind == "permission":
         schema = {
             "type": "object",
@@ -751,9 +775,65 @@ def _pipeline_custom_event(envelope: dict[str, Any], *, event_type: str) -> Cust
     return CustomEvent(name="iac-code.pipeline.v1", value=envelope, timestamp=timestamp_ms())
 
 
+class _DeploymentConfirmationOptions:
+    """Keep confirmation schema IDs and action lookup on one validated mapping."""
+
+    _ACTIONS = frozenset({"confirm", "adjust", "reselect", "cancel"})
+
+    def __init__(self, input_value: Mapping[str, Any]) -> None:
+        raw_options = input_value.get("options")
+        if not isinstance(raw_options, list) or not raw_options:
+            raise ValueError("Invalid deployment confirmation options.")
+        self.standard_options = _standard_options(raw_options, pipeline=False)
+        self._actions: dict[str, str] = {}
+        for raw_option, standard_option in zip(raw_options, self.standard_options):
+            if not isinstance(raw_option, Mapping):
+                raise ValueError("Invalid deployment confirmation options.")
+            option = cast(Mapping[str, Any], raw_option)
+            option_id = option.get("id")
+            action = option.get("action")
+            if (
+                not isinstance(option_id, str)
+                or not option_id.strip()
+                or len(option_id) > 200
+                or option_id in self._actions
+                or standard_option["id"] != option_id
+                or not isinstance(action, str)
+                or action not in self._ACTIONS
+            ):
+                raise ValueError("Invalid deployment confirmation options.")
+            self._actions[option_id] = action
+
+    @property
+    def actions(self) -> list[str]:
+        return sorted(set(self._actions.values()))
+
+    def action_for(self, selected_id: Any) -> str | None:
+        return self._actions.get(selected_id) if isinstance(selected_id, str) else None
+
+
 def resume_value(input_value: Mapping[str, Any], payload: Any) -> str:
     if not isinstance(payload, Mapping):
         return ""
+    if input_value.get("kind") == "deployment_confirmation":
+        from iac_code.pipeline.engine.ui_contract import encode_deployment_confirmation, parse_deployment_confirmation
+
+        try:
+            confirmation_options = _DeploymentConfirmationOptions(input_value)
+        except ValueError:
+            return ""
+        action = payload.get("action")
+        if action is None:
+            action = confirmation_options.action_for(payload.get("selectedId"))
+        if not isinstance(action, str) or action not in confirmation_options.actions:
+            return ""
+        confirmation_payload = {"action": action}
+        if "parameter_overrides" in payload:
+            confirmation_payload["parameter_overrides"] = payload["parameter_overrides"]
+        confirmation = parse_deployment_confirmation(confirmation_payload)
+        if confirmation is None:
+            return ""
+        return encode_deployment_confirmation(confirmation.action, confirmation.parameter_overrides)
     free_text = payload.get("freeText") or payload.get("free_text")
     if isinstance(free_text, str) and free_text:
         return free_text

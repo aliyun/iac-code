@@ -139,7 +139,7 @@ class InterruptController:
         last_response_text = ""
         for attempt in range(max_attempts):
             response = await self._provider_manager.complete(
-                messages=[ProviderMessage(role="user", content=provider_content)],
+                messages=[*state.get("resume_messages", []), ProviderMessage(role="user", content=provider_content)],
                 system=system_prompt,
             )
             last_response_text = response.text

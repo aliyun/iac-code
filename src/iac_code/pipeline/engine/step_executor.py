@@ -125,6 +125,7 @@ class StepExecutor:
         self._tool_context_env_overrides = dict(tool_context_env_overrides or {})
         self._aliyun_delegated_executor_factory = aliyun_delegated_executor_factory
         self._current_agent_loop = None
+        self.canceled_first_model_request: dict[str, str] | None = None
         self._telemetry_correlation: dict[str, str] = {}
         self._telemetry_scope: dict[str, str | int] = {}
         pipeline_name = getattr(pipeline, "name", "")
@@ -213,6 +214,7 @@ class StepExecutor:
         resource_selection_checkpoint: dict[str, Any] | None = None,
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Execute a step, yielding AgentLoop events and a final StepResult."""
+        self.canceled_first_model_request = None
         preserved_selection = self._preserved_candidate_selection(
             step,
             context,
@@ -288,6 +290,7 @@ class StepExecutor:
         last_complete_step_error: str | None = None
         last_complete_step_input: dict | None = None
         last_agent_stop_reason: str | None = None
+        mcp_prompt_started = False
 
         # Permission resume continues an already-persisted assistant tool batch.
         # AgentLoop therefore emits ToolResultEvent directly instead of replaying
@@ -428,6 +431,7 @@ class StepExecutor:
                     prompt=agent_context.initial_prompt,
                     session_id=transcript_id or session_id,
                 )
+                mcp_prompt_started = first_stream is not None
                 if first_stream is None:
                     first_stream = agent_loop.run_streaming(agent_context.initial_prompt)
             async with contextlib.aclosing(consume_complete_step_events(first_stream)) as events:
@@ -510,6 +514,28 @@ class StepExecutor:
                 ) as events:
                     async for event in events:
                         yield event
+        except asyncio.CancelledError:
+            from iac_code.agent.agent_loop import AgentLoop
+
+            adapter = agent_loop.canceled_first_model_request if type(agent_loop) is AgentLoop else None
+            if (
+                isinstance(adapter, str)
+                and step.step_type == "normal"
+                and step.on_enter is None
+                and step.on_exit is None
+                and transcript_id
+                and attempt_id
+                and not permission_checkpoint
+                and not resource_selection_checkpoint
+                and not mcp_prompt_started
+            ):
+                self.canceled_first_model_request = {
+                    "adapter": adapter,
+                    "attemptId": attempt_id,
+                    "transcriptId": transcript_id,
+                    "stepId": step.step_id,
+                }
+            raise
         finally:
             self._current_agent_loop = None
 

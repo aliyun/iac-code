@@ -7,7 +7,7 @@ import inspect
 import logging
 import os
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -30,9 +30,11 @@ from iac_code.a2a.input_required import PendingPermission, staged_permission_bac
 from iac_code.a2a.pipeline_continuation import (
     PipelineContinuationStore,
     PipelineContinuationUnsafeError,
+    PipelineModelReleaseProof,
     checkpoint_identity,
 )
 from iac_code.a2a.pipeline_events import PipelineA2AContext, PipelineEventTranslator
+from iac_code.a2a.pipeline_failure_diagnostic import PipelineFailureDiagnostic
 from iac_code.a2a.pipeline_flow_monitor import (
     PipelineA2AFlowIdentity,
     PipelineA2AFlowMonitor,
@@ -88,7 +90,11 @@ from iac_code.pipeline.engine.loader import _resolve_feature_flags, load_pipelin
 from iac_code.pipeline.engine.prerequisites import inspect_prerequisites
 from iac_code.pipeline.engine.public_errors import public_error
 from iac_code.pipeline.engine.session import PipelineSession
-from iac_code.pipeline.engine.user_input import PipelineUserInput, normalize_pipeline_user_input
+from iac_code.pipeline.engine.user_input import (
+    PipelineInputAcceptance,
+    PipelineUserInput,
+    normalize_pipeline_user_input,
+)
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary, canonical_digest
@@ -96,7 +102,7 @@ from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
 from iac_code.services.session_layout import SessionPaths
-from iac_code.services.session_storage import SessionStorage
+from iac_code.services.session_storage import PipelineUserHistoryRecord, SessionStorage
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CloudResourceSelectionEvent,
@@ -346,6 +352,35 @@ class _DetachedPipelineResourceSelection:
 class _SelectedPipelineStream:
     pipeline: Any
     stream: AsyncIterator[Any]
+    accepts_user_input: bool = False
+
+
+@dataclass(frozen=True)
+class _PipelineHistoryInput:
+    storage: SessionStorage
+    cwd: str
+    session_id: str
+    record: PipelineUserHistoryRecord
+
+    def persist(self) -> object:
+        return self.storage.append_user_input_once(self.cwd, self.session_id, self.record)
+
+    @classmethod
+    def from_request(
+        cls, context: Any, *, storage: SessionStorage, cwd: str, session_id: str, task_id: str, context_id: str
+    ) -> _PipelineHistoryInput | None:
+        message = getattr(context, "message", None)
+        if not isinstance(message, Message) or message.role != Role.ROLE_USER:
+            return None
+        texts = [part.text for part in message.parts if part.HasField("text")]
+        text = "\n".join(texts)
+        if not text.strip() or not message.message_id:
+            return None
+        if message.context_id and message.context_id != context_id:
+            raise ValueError("Pipeline user history context mismatch")
+        if message.task_id and message.task_id != task_id:
+            raise ValueError("Pipeline user history task mismatch")
+        return cls(storage, cwd, session_id, PipelineUserHistoryRecord(message.message_id, context_id, task_id, text))
 
 
 @dataclass(frozen=True)
@@ -703,6 +738,17 @@ class IacCodeA2APipelineExecutor:
                 control = current_execution_control()
                 if control is not None:
                     control.bind_session(ctx.session_id)
+                if permission_checkpoint is None and resource_selection_checkpoint is None:
+                    history = _PipelineHistoryInput.from_request(
+                        context,
+                        storage=session_storage,
+                        cwd=cwd,
+                        session_id=ctx.session_id,
+                        task_id=task_id,
+                        context_id=context_id,
+                    )
+                    if history is not None:
+                        pipeline_input = replace(pipeline_input, acceptance=PipelineInputAcceptance(history.persist))
         except asyncio.CancelledError:
             # Context creation drains and closes an unfinished runtime before
             # cancellation reaches here, even if no Pipeline exists yet.
@@ -1018,6 +1064,8 @@ class IacCodeA2APipelineExecutor:
                             claim_id=continuation_intent.claim_id,
                             expected_fence=continuation_intent.fence,
                         )
+                if selected.accepts_user_input and pipeline_input.acceptance is not None:
+                    pipeline_input.acceptance.accept()
                 stream = _stream_with_pending_rollback_cleanup(
                     stream=selected.stream,
                     pipeline=pipeline,
@@ -1241,15 +1289,20 @@ class IacCodeA2APipelineExecutor:
                                 expected_fence=continuation_intent.fence,
                             )
                 self._task_store.mirror_task(task)
-                if not stream_had_events and terminal_sidecar and not terminal_status_published:
+                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+                self._record_state(task.state)
+                # _consume_stream_until_restart has closed/flushed its outbound
+                # worker. Complete cancellable observers before the protocol
+                # terminal so their failure cannot produce a later business frame.
+                if task.state in {TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED} or (
+                    not stream_had_events and terminal_sidecar and not terminal_status_published
+                ):
                     await self._publish_status(
                         event_queue,
                         task_id=task_id,
                         context_id=context_id,
                         state=_a2a_state_from_task_state(task.state),
                     )
-                await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
-                self._record_state(task.state)
             except asyncio.CancelledError:
                 try:
                     task.state = TASK_STATE_CANCELED
@@ -1730,12 +1783,22 @@ class IacCodeA2APipelineExecutor:
                 await _maybe_await(pause_agent_loops())
                 paused = True
 
+            if pipeline_input.acceptance is not None:
+                pipeline_input.acceptance.bind_owner_guard(
+                    lambda: not bool(getattr(runtime, "terminal_publication_started", False))
+                )
             runner_input = _pipeline_runner_input(pipeline_input)
             verdict = await _maybe_await(handler(runner_input))
             async with _outbound_lock(runtime):
                 if bool(getattr(runtime, "terminal_publication_started", False)):
                     return True
                 parent_rollback: bool | None = None
+                if (
+                    getattr(verdict, "action", "") == "continue"
+                    and pipeline_input.acceptance is not None
+                    and pipeline_input.acceptance.interrupt_qualified
+                ):
+                    pipeline_input.acceptance.accept()
                 if getattr(verdict, "action", "") == "hard_interrupt":
                     apply_hard_interrupt = getattr(pipeline, "apply_hard_interrupt", None)
                     if callable(apply_hard_interrupt):
@@ -1942,6 +2005,13 @@ class IacCodeA2APipelineExecutor:
             self._task_store.mirror_task(task)
             await self._notify_terminal_task(task_id=task_id, context_id=context_id, state=task.state)
             self._record_state(task.state)
+            if task.state in {TASK_STATE_COMPLETED, TASK_STATE_FAILED, TASK_STATE_CANCELED}:
+                await self._publish_status(
+                    event_queue,
+                    task_id=task_id,
+                    context_id=context_id,
+                    state=_a2a_state_from_task_state(task.state),
+                )
         except _PipelineBackupBlockedTransitionError:
             await self._complete_backup_blocked_transition(task=task, ctx=ctx)
         except PermissionWaitSuspended:
@@ -3383,6 +3453,7 @@ class IacCodeA2APipelineExecutor:
                 return _SelectedPipelineStream(
                     pipeline=pipeline,
                     stream=pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input)),
+                    accepts_user_input=True,
                 )
             return _SelectedPipelineStream(pipeline=pipeline, stream=pipeline.continue_from_sidecar())
         if status == "backup_blocked":
@@ -3413,6 +3484,12 @@ class IacCodeA2APipelineExecutor:
                 if not callable(safety_check):
                     raise PipelineContinuationUnsafeError("checkpoint safety evidence is unavailable")
                 safety = safety_check()
+                model_safety_check = getattr(pipeline, "canceled_model_checkpoint_safety", None)
+                if not getattr(safety, "safe", False) and callable(model_safety_check):
+                    assert continuation_intent is not None
+                    frozen_proof = continuation_intent.model_release_proof
+                    proof = frozen_proof.to_dict() if frozen_proof is not None else None
+                    safety = model_safety_check(continuation_intent, proof)
                 if not getattr(safety, "safe", False):
                     reason = str(getattr(safety, "reason", None) or "canceled attempt outcome is unverified")
                     assert continuation_store is not None
@@ -3429,15 +3506,18 @@ class IacCodeA2APipelineExecutor:
                 return _SelectedPipelineStream(
                     pipeline=pipeline,
                     stream=pipeline.continue_from_sidecar(user_input=_pipeline_runner_input(pipeline_input)),
+                    accepts_user_input=True,
                 )
             pipeline = await self._fresh_pipeline_after_sidecar_mismatch(pipeline, fresh_pipeline_factory)
             return _SelectedPipelineStream(
                 pipeline=pipeline,
                 stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
+                accepts_user_input=True,
             )
         return _SelectedPipelineStream(
             pipeline=pipeline,
             stream=pipeline.run(_pipeline_runner_input(pipeline_input)),
+            accepts_user_input=True,
         )
 
     async def _fresh_pipeline_after_sidecar_mismatch(
@@ -4081,6 +4161,9 @@ class IacCodeA2APipelineExecutor:
             )
             if published is None:
                 return _PENDING_QUESTION_NOT_ROUTED
+            if future.done():
+                runtime.pending_question = None
+                return _PENDING_QUESTION_STALE_FINISHED
 
             if pipeline_input.has_images:
                 inject_pending_question_supplement = getattr(
@@ -4090,7 +4173,10 @@ class IacCodeA2APipelineExecutor:
                 )
                 if callable(inject_pending_question_supplement):
                     try:
-                        injected = inject_pending_question_supplement(pipeline_input.content, envelope=pending.envelope)
+                        injection_kwargs: dict[str, Any] = {"envelope": pending.envelope}
+                        if "input_acceptance" in inspect.signature(inject_pending_question_supplement).parameters:
+                            injection_kwargs["input_acceptance"] = pipeline_input.acceptance
+                        injected = inject_pending_question_supplement(pipeline_input.content, **injection_kwargs)
                         if inspect.isawaitable(injected):
                             injected = await injected
                     except Exception:
@@ -4102,6 +4188,12 @@ class IacCodeA2APipelineExecutor:
                 else:
                     await self._restore_pending_question_input_required(runtime, pending)
                     raise RuntimeError(_("A2A pipeline cannot accept ask_user_question image supplement."))
+            if pipeline_input.acceptance is not None:
+                try:
+                    pipeline_input.acceptance.accept()
+                except Exception:
+                    await self._restore_pending_question_input_required(runtime, pending)
+                    raise
             future.set_result(answer)
             runtime.pending_question = None
             return _PENDING_QUESTION_ANSWERED
@@ -4312,6 +4404,23 @@ class IacCodeA2APipelineExecutor:
                     self._record_state(task.state)
                 return
 
+        try:
+            diagnostic = PipelineFailureDiagnostic.from_exception(exc, task_id=task_id, context_id=context_id)
+            logger.warning(
+                "A2A pipeline failure diagnostic task_id=%s context_id=%s exception_type=%s guard_reason=%s "
+                "source_module=%s source_function=%s source_line=%s",
+                diagnostic.task_id,
+                diagnostic.context_id,
+                diagnostic.exception_type,
+                diagnostic.guard_reason,
+                diagnostic.source_module,
+                diagnostic.source_function,
+                diagnostic.source_line,
+            )
+        except Exception:
+            # Diagnostics must not interrupt the existing task/status publication.
+            pass
+
         retryable = _is_retryable_executor_error(exc)
         task_state = TASK_STATE_INPUT_REQUIRED if retryable else TASK_STATE_FAILED
         text = _retry_text() if retryable else _format_exception(exc)
@@ -4415,7 +4524,11 @@ async def _empty_stream() -> AsyncIterator[Any]:
 
 
 def _pipeline_runner_input(pipeline_input: PipelineUserInput) -> PipelineUserInput | str:
-    return pipeline_input if pipeline_input.has_images else pipeline_input.display_text
+    return (
+        pipeline_input
+        if pipeline_input.has_images or getattr(pipeline_input, "acceptance", None) is not None
+        else pipeline_input.display_text
+    )
 
 
 def _backup_reason_for_pipeline_envelope(envelope: dict[str, Any]) -> BackupReason | None:
@@ -4632,6 +4745,8 @@ async def _resume_pending_ask_user_question_stream(
 
     parameters = inspect.signature(resume_ask_user_question).parameters
     resume_kwargs: dict[str, Any] = {"tool_use_id": tool_use_id}
+    if pipeline_input.acceptance is not None and "input_acceptance" in parameters:
+        resume_kwargs["input_acceptance"] = pipeline_input.acceptance
     if pipeline_input.has_images:
         resume_kwargs["supplemental_input"] = pipeline_input
     if "pending_input" in parameters or any(
@@ -5503,9 +5618,7 @@ def recoverable_task_id_from_sidecar(
         task_id=owner.task_id,
         context_id=context_id,
     )
-    normal_handoff = (
-        authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
-    )
+    normal_handoff = authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
     if (
         isinstance(normal_handoff, dict)
         and normal_handoff.get("action") == "switch_to_normal"
@@ -5552,9 +5665,7 @@ def current_pipeline_task_id_from_sidecar(*, cwd: str, session_id: str, context_
         task_id=owner.task_id,
         context_id=context_id,
     )
-    normal_handoff = (
-        authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
-    )
+    normal_handoff = authoritative_snapshot.get("normalHandoff") if isinstance(authoritative_snapshot, dict) else None
     if (
         isinstance(normal_handoff, dict)
         and normal_handoff.get("action") == "switch_to_normal"
@@ -5618,6 +5729,12 @@ def successor_task_id_from_sidecar(
     proof_backup_commit_id = cancellation_proof.get("backupCommitId")
     if not isinstance(proof_execution_id, str) or not isinstance(proof_revision, int):
         return None
+    try:
+        model_release_proof = PipelineModelReleaseProof.from_dict(cancellation_proof)
+    except (ValueError, TypeError):
+        # Ordinary safe checkpoints retain the legacy continuation contract.
+        # Missing or incomplete optional proof never admits an active model attempt.
+        model_release_proof = None
     checkpoint = checkpoint_identity(
         {"a2a": snapshot, "pipelineMeta": sidecar_meta},
         events[-1],
@@ -5638,6 +5755,7 @@ def successor_task_id_from_sidecar(
                 proof_backup_generation if isinstance(proof_backup_generation, int) else None
             ),
             cancellation_backup_commit_id=(proof_backup_commit_id if isinstance(proof_backup_commit_id, str) else None),
+            model_release_proof=model_release_proof,
         )
         .successor_task_id
     )
