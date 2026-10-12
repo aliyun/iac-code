@@ -556,6 +556,64 @@ def _assert_turn_ready(summary: StreamSummary, *, name: str) -> None:
         raise _TurnNotReadyError(summary, name)
 
 
+class _NextTurnReplyMismatchError(AssertionError):
+    def __init__(self, diagnostics: dict[str, bool]) -> None:
+        super().__init__("the real LLM did not complete the next turn in the same A2A context")
+        self.diagnostics = diagnostics
+
+
+def _next_turn_evidence(run_dir: Path, config_dir: Path, token: str, summary: StreamSummary) -> dict[str, bool]:
+    """Compare the actual follow-up and reply locally without exporting their contents."""
+    evidence = {
+        "selector_next_turn_public_text_present": bool(summary.text.strip()),
+        "selector_next_turn_public_token_present": token in summary.text,
+        "selector_next_turn_public_token_with_whitespace": token in re.sub(r"\s+", "", summary.text),
+        "selector_next_turn_native_prompt_present": False,
+        "selector_next_turn_native_reply_present": False,
+        "selector_next_turn_native_token_present": False,
+        "selector_next_turn_native_tool_call": False,
+        "selector_next_turn_scan_complete": True,
+    }
+    paths = sorted((config_dir / "projects").rglob("session.jsonl"))
+    if not paths or len(paths) > 20:
+        evidence["selector_next_turn_scan_complete"] = False
+    for path in paths[:20]:
+        if path.is_symlink() or not path.resolve().is_relative_to(run_dir.resolve()):
+            evidence["selector_next_turn_scan_complete"] = False
+            continue
+        try:
+            with path.open("rb") as handle:
+                raw = handle.read(2_000_001)
+            if len(raw) > 2_000_000:
+                evidence["selector_next_turn_scan_complete"] = False
+                continue
+            records = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
+        except (OSError, ValueError, UnicodeError):
+            evidence["selector_next_turn_scan_complete"] = False
+            continue
+        followup = False
+        for record in records:
+            for message in _walk(record):
+                if not isinstance(message, Mapping) or message.get("role") not in {"user", "assistant"}:
+                    continue
+                content = message.get("content")
+                text = content if isinstance(content, str) else "".join(
+                    part.get("text", "") for part in content or []
+                    if isinstance(part, Mapping) and part.get("type") == "text"
+                    and isinstance(part.get("text"), str)
+                ) if isinstance(content, list) else ""
+                if message["role"] == "user" and token in text:
+                    followup = True
+                    evidence["selector_next_turn_native_prompt_present"] = True
+                elif followup and message["role"] == "assistant":
+                    evidence["selector_next_turn_native_reply_present"] |= bool(text.strip())
+                    evidence["selector_next_turn_native_token_present"] |= token in text
+                    evidence["selector_next_turn_native_tool_call"] |= isinstance(content, list) and any(
+                        isinstance(part, Mapping) and part.get("type") == "tool_use" for part in content
+                    )
+    return evidence
+
+
 class _DurableReleaseTimeoutError(AssertionError):
     def __init__(self, state: dict[str, Any]) -> None:
         super().__init__("A2A input-required execution did not reach a durable release")
@@ -973,7 +1031,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         )
         _assert_turn_ready(next_turn, name="next turn")
         if continuation_token not in next_turn.text:
-            raise AssertionError("the real LLM did not complete the next turn in the same A2A context")
+            raise _NextTurnReplyMismatchError(_next_turn_evidence(run_dir, config_dir, continuation_token, next_turn))
 
         logs = _server_logs(run_dir)
         allowed_markers = {"Task already exists"} if args.scenario == "duplicate-and-conflict" else set()
@@ -1045,7 +1103,7 @@ def main() -> None:
             "passed": False, "scenario": args.scenario,
             "error_type": type(exc).__name__, "error_site": error_site,
         }
-        if isinstance(exc, _SelectorAssociationMismatchError):
+        if isinstance(exc, (_SelectorAssociationMismatchError, _NextTurnReplyMismatchError)):
             failure['diagnostics'] = exc.diagnostics
         if isinstance(exc, _TurnNotReadyError):
             failure["a2a_states"] = exc.states

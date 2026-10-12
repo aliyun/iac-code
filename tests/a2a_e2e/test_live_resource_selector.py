@@ -15,12 +15,37 @@ from scripts.a2a.e2e.resource_selector.run_live_resource_selector import (
     SCENARIOS,
     _answer_selection,
     _iac_code_values,
+    _next_turn_evidence,
     _resource_selection_inputs,
     _selected_result_evidence,
     _selection_response,
     _SelectorAssociationMismatchError,
     _wait_for_released_execution,
 )
+
+
+@pytest.mark.parametrize("reply,public,expected_native", [
+    ("TEST_NEXT_REPLY", "unrelated", True),
+    ("wrong reply", "wrong reply", False),
+])
+def test_followup_diagnostics_distinguish_transport_loss_from_model_reply(tmp_path, reply, public, expected_native):
+    native = tmp_path / "config/projects/p/s/session.jsonl"
+    native.parent.mkdir(parents=True)
+    messages = [
+        {"role": "assistant", "content": "TEST_NEXT_REPLY"},  # Earlier reply is not follow-up evidence.
+        {"role": "user", "content": [{"type": "text", "text": "reply TEST_NEXT_REPLY"}]},
+        {"role": "assistant", "content": [{"type": "text", "text": reply}]},
+    ]
+    native.write_text("\n".join(json.dumps(row) for row in messages), encoding="utf-8")
+    evidence = _next_turn_evidence(tmp_path, tmp_path / "config", "TEST_NEXT_REPLY",
+                                   StreamSummary(name="next-turn", prompt="", text=public))
+    assert evidence["selector_next_turn_native_prompt_present"] is True
+    assert evidence["selector_next_turn_native_reply_present"] is True
+    assert evidence["selector_next_turn_native_token_present"] is expected_native
+    assert evidence["selector_next_turn_public_token_present"] is False
+    assert evidence["selector_next_turn_scan_complete"] is True
+    assert all(isinstance(value, bool) for value in evidence.values())
+    assert "TEST_NEXT_REPLY" not in json.dumps(evidence)
 
 
 @pytest.mark.parametrize('value,present,shape', [(None, False, False), ('private-label', True, False),
