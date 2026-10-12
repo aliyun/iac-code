@@ -77,6 +77,7 @@ PROFILES = {
         files=(
             ("SKILL.md.template", "SKILL.md"),
             ("references/ram-policies.md", "references/ram-policies.md"),
+            ("references/runtime-policy.md", "references/runtime-policy.md"),
             ("scripts/_ros_agent_core.py", "scripts/_ros_agent_core.py"),
             ("scripts/_ros_agent_projection.py", "scripts/_ros_agent_projection.py"),
             ("scripts/_ros_agent_runtime.py", "scripts/_ros_agent_runtime.py"),
@@ -123,7 +124,11 @@ def render_markdown(source: str, profile: SkillProfile) -> str:
         raise SystemExit(
             "Skill template contains unresolved placeholders: {}".format(", ".join(sorted(set(unresolved))))
         )
-    return rendered.rstrip() + "\n"
+    rendered = rendered.rstrip() + "\n"
+    # Stay below both decimal 32 KB and binary 32 KiB host entrypoint limits.
+    if profile.name == "alibabacloud-ros-agent" and len(rendered.encode("utf-8")) > 32_000:
+        raise SystemExit("alibabacloud-ros-agent SKILL.md exceeds the 32 KB UTF-8 limit; move details into references")
+    return rendered
 
 
 def _replace_constant(source: str, name: str, value: str) -> str:

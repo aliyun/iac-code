@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import mimetypes
 import os
 from typing import Any
 
@@ -114,7 +115,16 @@ class EditFileTool(Tool):
         except Exception as e:
             return ToolResult.error(f"Error writing file: {e}")
 
-        return ToolResult.success(f"Successfully edited {path}")
+        return ToolResult(
+            content=f"Successfully edited {path}",
+            metadata={
+                "artifact": {
+                    "filename": os.path.basename(path),
+                    "mediaType": mimetypes.guess_type(path)[0] or "text/plain",
+                    "path": path,
+                }
+            },
+        )
 
     # UI rendering methods
     def render_tool_use_message(self, input: dict, *, verbose: bool = False):

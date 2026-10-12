@@ -245,11 +245,16 @@ def load_skill_config(path: Optional[pathlib.Path] = None) -> Dict[str, Any]:
         "aliyunCLIForwardEnv",
         "enableThinking",
         "aliyunCLIProfile",
+        "debug",
     }
     if unknown:
         raise BridgeError("invalid_config", "The Skill config.json contains unsupported fields.")
 
     result = {}  # type: Dict[str, Any]
+    if "debug" in value:
+        if not isinstance(value["debug"], bool):
+            raise BridgeError("invalid_config", "debug must be true or false.")
+        result["debug"] = value["debug"]
     if "transport" in value:
         transport = value["transport"]
         if not isinstance(transport, str) or transport not in SUPPORTED_TRANSPORTS:
@@ -354,6 +359,7 @@ def apply_skill_config(args: argparse.Namespace, config: Dict[str, Any]) -> None
     configured_profile = config.get("aliyunCLIProfile", "")
     forwarded_environment = config.get("aliyunCLIForwardEnv", list(DEFAULT_REMOTE_CLI_FORWARD_ENV))
     args.manager_idle_seconds = config.get("managerIdleSeconds", MANAGER_IDLE_SECONDS)
+    args.debug = config.get("debug", False)
     args.enable_thinking = enable_thinking
     args.aliyun_cli_profile = configured_profile
     args.aliyun_cli_execution_mode = cli_execution_mode
@@ -717,7 +723,6 @@ def build_command(
         str(args.read_timeout),
         "--user-agent",
         USER_AGENT,
-        "--yes",
     ]
     if endpoint_kind == "loopback":
         command.extend(["--secure", "--skip-secure-verify"])
@@ -725,6 +730,9 @@ def build_command(
         command.extend(["--profile", args.profile])
     if args.region_id:
         command.extend(["--region", args.region_id])
+    if execution_mode == "remote":
+        # Host command validators may reject literal line breaks inside an argument.
+        prompt = re.sub(r"\r\n|\r|\n", " ", prompt.rstrip("\r\n"))
     command.extend(
         [
             "--query",
@@ -771,7 +779,6 @@ def build_reconnect_command(args: argparse.Namespace, session_id: str, cursor: s
         str(args.read_timeout),
         "--user-agent",
         USER_AGENT,
-        "--yes",
     ]
     if endpoint_kind == "loopback":
         command.extend(["--secure", "--skip-secure-verify"])
@@ -817,7 +824,6 @@ def build_stop_command(job: Dict[str, Any], session_id: str) -> List[str]:
         "45",
         "--user-agent",
         USER_AGENT,
-        "--yes",
     ]
     if endpoint_kind == "loopback":
         command.extend(["--secure", "--skip-secure-verify"])
@@ -1219,14 +1225,309 @@ def iter_sse_payloads(lines: Iterable[str]) -> Iterator[Dict[str, Any]]:
         yield decode(data_lines, raw_lines, event_id)
 
 
+_DEBUG_SECRET_KEY = re.compile(
+    r"(?i)(access[-_ ]?key|secret|token|password|passwd|passphrase|authorization|cookie|credential|"
+    r"private[-_ ]?key|signature|starops[-_ ]?hil|prompt|query|client[-_ ]?context|history)"
+)
+_DEBUG_TEXT_SECRET = re.compile(
+    r"(?i)((?:access[-_ ]?key(?:[-_ ]?id|[-_ ]?secret)?|security[-_ ]?token|token|password|passwd|passphrase|"
+    r"authorization|cookie|credential|private[-_ ]?key|signature|starops[-_ ]?hil|"
+    r"prompt|query|client[-_ ]?context|history|text)[\"']?\s*[:=]\s*)"
+    r"(?:\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*'|[^\r\n,;&}\]]+)"
+)
+
+
+class _RemoteCLIDebugLog(object):
+    """Best-effort, bounded and redacted JSONL diagnostics for the remote CLI boundary."""
+
+    MAX_FILE_BYTES = 4 * 1024 * 1024
+    MAX_RAW_LINE_BYTES = 64 * 1024
+    MAX_STDOUT_BYTES = 256 * 1024
+    MAX_TEXT_BYTES = 12 * 1024
+
+    def __init__(self, workspace, invocation_id, reconnecting, worker_role, args, *, record_start=True):
+        self.path = workspace / ".ros-agent-debug" / "remote-aliyun-results.jsonl"
+        self.context = {
+            "schemaVersion": 1,
+            "invocationId": invocation_id,
+            "jobId": getattr(args, "debug_job_id", None),
+            "requestSeq": getattr(args, "debug_request_seq", None),
+            "workerRole": worker_role,
+            "pid": os.getpid(),
+        }
+        self.stdout_bytes = 0
+        self.stdout_limited = False
+        self.file_limited = False
+        self.warned = False
+        self.pending_records = None
+        self.pending_bytes = 0
+        self.elapsed = {name: 0.0 for name in ("outputRead", "parse", "eventProcess", "projection", "parsedEventLog")}
+        self.complete_event_count = 0
+        self.committed_event_count = 0
+        self.replayed_event_count = 0
+        self.secret_values = []
+        for name, value in os.environ.items():
+            if len(value) >= 8 and _DEBUG_SECRET_KEY.search(name):
+                for variant in (
+                    value,
+                    json.dumps(value, ensure_ascii=False)[1:-1],
+                    json.dumps(value, ensure_ascii=True)[1:-1],
+                    urllib.parse.quote(value, safe=""),
+                ):
+                    if variant not in self.secret_values:
+                        self.secret_values.append(variant)
+        self.secret_values.sort(key=len, reverse=True)
+        if record_start:
+            self.record("start", operation="start-chat", reconnect=reconnecting, hasQuery=not reconnecting)
+
+    def _text(self, value):
+        for secret in self.secret_values:
+            value = value.replace(secret, "[REDACTED]")
+        value = SECRET_PATTERN.sub(lambda match: match.group(1) + "[REDACTED]", value)
+        value = _DEBUG_TEXT_SECRET.sub(lambda match: match.group(1) + '"[REDACTED]"', value)
+        value = re.sub(r"\bLTAI[A-Za-z0-9]{12,}\b", "[REDACTED]", value)
+        return value
+
+    def _value(self, value, depth=0):
+        if depth > 16:
+            return "[DEPTH-LIMIT]"
+        if isinstance(value, dict):
+            return {
+                self._text(str(key)): "[REDACTED]"
+                if _DEBUG_SECRET_KEY.search(str(key))
+                else self._value(child, depth + 1)
+                for key, child in value.items()
+            }
+        if isinstance(value, list):
+            return [self._value(child, depth + 1) for child in value]
+        if isinstance(value, str):
+            try:
+                nested = json.loads(value)
+            except (ValueError, RecursionError):
+                nested = None
+            if isinstance(nested, (dict, list)):
+                return json.dumps(self._value(nested, depth + 1), ensure_ascii=False, separators=(",", ":"))
+            return self._text(value)
+        return value
+
+    def record(self, kind, **fields):
+        if self.file_limited:
+            return
+        try:
+            value = dict(self.context, timeUTC=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), kind=kind)
+            value.update(fields)
+            encoded = (json.dumps(self._value(value), ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+            if self.pending_records is not None:
+                if self.pending_bytes + len(encoded) > self.MAX_FILE_BYTES - 1024:
+                    encoded = self._file_limit_record()
+                    self.file_limited = True
+                self.pending_records.append(encoded)
+                self.pending_bytes += len(encoded)
+            else:
+                self._append_records([encoded])
+        except Exception:
+            self._warn()
+
+    def _file_limit_record(self):
+        return (json.dumps(dict(self.context, kind="file-limit", maxBytes=self.MAX_FILE_BYTES)) + "\n").encode("utf-8")
+
+    def _warn(self):
+        if not self.warned:
+            print("ROS Agent debug log unavailable; executor handling is unchanged.", file=sys.stderr)
+            self.warned = True
+
+    def _append_records(self, records):
+        if not records:
+            return
+        try:
+            if self.path.parent.is_symlink() or self.path.is_symlink():
+                raise OSError("debug log symlinks are not allowed")
+            _secure_directory(self.path.parent)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+            descriptor = os.open(str(self.path), flags, 0o600)
+            try:
+                if os.name != "nt":
+                    os.fchmod(descriptor, 0o600)
+                size = os.fstat(descriptor).st_size
+                output = bytearray()
+                for encoded in records:
+                    if size + len(output) + len(encoded) > self.MAX_FILE_BYTES - 1024:
+                        encoded = self._file_limit_record()
+                        self.file_limited = True
+                        if size + len(output) + len(encoded) <= self.MAX_FILE_BYTES:
+                            output.extend(encoded)
+                        break
+                    output.extend(encoded)
+                remaining = memoryview(output)
+                while remaining:
+                    written = os.write(descriptor, remaining)
+                    if written <= 0:
+                        raise OSError("debug log write made no progress")
+                    remaining = remaining[written:]
+            finally:
+                os.close(descriptor)
+        except Exception:
+            self._warn()
+
+    @contextlib.contextmanager
+    def batch(self):
+        """Keep redacted records bounded in memory and append them in one batch."""
+        self.pending_records = []
+        self.pending_bytes = 0
+        try:
+            yield
+        finally:
+            records = self.pending_records
+            self.pending_records = None
+            self.pending_bytes = 0
+            self._append_records(records)
+
+    def output(self, kind, text):
+        size = len(text.encode("utf-8"))
+        if size > self.MAX_RAW_LINE_BYTES:
+            self.record(kind, bytes=size, textOmitted="line-size-limit")
+            return
+        try:
+            parsed = json.loads(text)
+        except (ValueError, RecursionError):
+            parsed = None
+        if isinstance(parsed, (dict, list)):
+            redacted = json.dumps(self._value(parsed), ensure_ascii=False, separators=(",", ":"))
+            format_name = "json"
+        else:
+            redacted = self._text(text)
+            format_name = "text"
+        preview = _truncate_utf8(redacted, self.MAX_TEXT_BYTES)
+        self.record(
+            kind,
+            bytes=size,
+            format=format_name,
+            text=preview,
+            truncated=len(redacted.encode("utf-8")) > self.MAX_TEXT_BYTES,
+        )
+
+    def lines(self, lines):
+        for line in lines:
+            self.stdout_bytes += len(line.encode("utf-8"))
+            if self.stdout_bytes <= self.MAX_STDOUT_BYTES:
+                with contextlib.suppress(Exception):
+                    self.output("stdout", line)
+            elif not self.stdout_limited:
+                self.record("stdout-limit", maxBytes=self.MAX_STDOUT_BYTES)
+                self.stdout_limited = True
+            yield line
+
+    def parsed_event(self, event):
+        payload = event.get("payload")
+        raw = event.get("raw")
+        envelope = None
+        if isinstance(raw, str) and len(raw.encode("utf-8")) <= self.MAX_RAW_LINE_BYTES:
+            with contextlib.suppress(ValueError, RecursionError):
+                envelope = json.loads(raw)
+        self.record(
+            "parsed-event",
+            id=event.get("id"),
+            idPresent=event.get("id") is not None,
+            payloadKeys=sorted(str(key) for key in payload)[:32] if isinstance(payload, dict) else [],
+            envelopeKeys=sorted(str(key) for key in envelope)[:32] if isinstance(envelope, dict) else [],
+            bootstrapPresent=isinstance(event.get("bootstrap"), dict),
+            cliFailure=event.get("cliFailure") is True,
+        )
+
+    def parse_events(self, lines):
+        """Time parser work separately from waiting for its next input line."""
+        source = iter(lines)
+
+        def measured_lines():
+            while True:
+                started = time.monotonic()
+                try:
+                    line = next(source)
+                except StopIteration:
+                    return
+                finally:
+                    self.elapsed["outputRead"] += time.monotonic() - started
+                yield line
+
+        events = iter_cli_plugin_payloads(measured_lines())
+        while True:
+            read_before = self.elapsed["outputRead"]
+            started = time.monotonic()
+            try:
+                event = next(events)
+            except StopIteration:
+                return
+            finally:
+                self.elapsed["parse"] += max(
+                    0.0, time.monotonic() - started - (self.elapsed["outputRead"] - read_before)
+                )
+            payload = event.get("payload")
+            if (isinstance(event.get("id"), str) and isinstance(payload, dict)
+                    and str(payload.get("object", "")).lower() not in {"heartbeat", "keepalive"}):
+                self.complete_event_count += 1
+            yield event
+
+    def metrics(self):
+        return dict(
+            {name + "ElapsedMs": round(seconds * 1000) for name, seconds in self.elapsed.items()},
+            completeEventCount=self.complete_event_count,
+            committedEventCount=self.committed_event_count,
+            replayedEventCount=self.replayed_event_count,
+        )
+
+
 def _cli_plugin_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
     data = payload.get("data")
     return data if isinstance(data, dict) else payload
 
 
+def _is_cli_stream_interruption(value: Any) -> bool:
+    if isinstance(value, dict):
+        # Only inspect transport envelopes, never text inside a business event.
+        if any(key in value for key in ("id", "data", "event", "result", "parts", "object")):
+            return False
+        code = value.get("code", value.get("Code"))
+        status = value.get("statusCode", value.get("httpStatus"))
+        if code is not None or (isinstance(status, int) and 400 <= status < 500):
+            return False  # Structured auth, expiry and cursor errors stay authoritative.
+        return any(_is_cli_stream_interruption(value.get(key)) for key in ("detail", "message", "Message", "error"))
+    if not isinstance(value, str):
+        return False
+    return re.fullmatch(
+        r"\s*(?:(?:error|aliyun cli call failed|failed to call tool):\s*)*SSE connection lost[.!]?\s*",
+        value,
+        re.IGNORECASE,
+    ) is not None
+
+
+def is_remote_cli_stream_interruption(*diagnostics: str) -> bool:
+    candidates = []
+    for diagnostic in diagnostics:
+        try:
+            value = json.loads(diagnostic)
+        except ValueError:
+            value = diagnostic
+        # A precise structured error must not be overridden by a generic
+        # disconnect message elsewhere in the same invocation's diagnostics.
+        nested = value
+        while isinstance(nested, dict) and not any(key in nested for key in ("id", "data", "event", "result")):
+            status = nested.get("statusCode", nested.get("httpStatus"))
+            if (nested.get("code", nested.get("Code")) is not None
+                    or (isinstance(status, int) and 400 <= status < 500)):
+                return False
+            nested = nested.get("error")
+        candidates.append(value)
+    return any(_is_cli_stream_interruption(value) for value in candidates)
+
+
 def _is_cli_failure_envelope(value: Any) -> bool:
     if not isinstance(value, dict) or any(key in value for key in ("id", "data", "event")):
         return False
+    # Host-provided remote executors can return an MCP error instead of ROS events.
+    if value.get("summary") == "Failed to call tool" and isinstance(value.get("detail"), str):
+        return True
+    if _is_cli_stream_interruption(value):
+        return True
     candidates = [value]
     nested = value.get("error")
     if isinstance(nested, dict):
@@ -1243,6 +1544,7 @@ def iter_cli_plugin_payloads(lines: Iterable[str]) -> Iterator[Dict[str, Any]]:
     buffer = ""
     raw_bytes = 0
     decoded_bytes = 0
+    array_state = None  # type: Optional[str]
 
     def projected(value: Any, raw: str) -> Iterator[Dict[str, Any]]:
         nonlocal decoded_bytes
@@ -1287,9 +1589,33 @@ def iter_cli_plugin_payloads(lines: Iterable[str]) -> Iterator[Dict[str, Any]]:
             raise BridgeError("cli_output_too_large", "Buffered StartChat CLI output exceeded the batch limit.")
         while buffer.strip():
             leading = len(buffer) - len(buffer.lstrip())
+            first = buffer[leading]
+            if array_state is None and first == "[":
+                # Commit complete array members without waiting for the closing
+                # bracket: remote executors can truncate a buffered CLI result.
+                buffer = buffer[leading + 1:]
+                array_state = "first"
+                continue
+            if array_state == "separator":
+                if first == ",":
+                    buffer = buffer[leading + 1:]
+                    array_state = "item"
+                    continue
+                if first != "]":
+                    raise BridgeError("invalid_cli_output", "StartChat CLI returned an invalid JSON array separator.")
+            if array_state is not None and first == "]":
+                if array_state == "item":
+                    raise BridgeError(
+                        "invalid_cli_output", "StartChat CLI returned a JSON array with a trailing comma."
+                    )
+                buffer = buffer[leading + 1:]
+                array_state = None
+                continue
             try:
                 value, end = decoder.raw_decode(buffer, leading)
             except ValueError:
+                if array_state is not None:
+                    break
                 first_line, separator, remainder = buffer.partition("\n")
                 if not separator or not first_line.strip() or not remainder.strip():
                     break
@@ -1303,9 +1629,22 @@ def iter_cli_plugin_payloads(lines: Iterable[str]) -> Iterator[Dict[str, Any]]:
                 yield {"id": None, "payload": None, "raw": first_line.strip()}
                 buffer = remainder
                 continue
+            if array_state is not None:
+                # A numeric token can still grow in the next chunk (e.g. 1e2).
+                if isinstance(value, (int, float)) and not isinstance(value, bool):
+                    remainder = buffer[end:].lstrip()
+                    if not remainder or remainder[0] not in ",]":
+                        break
+                array_state = "separator"
             raw = buffer[leading:end]
-            yield from projected(value, raw)
             buffer = buffer[end:]
+            yield from projected(value, raw)
+    if array_state is not None:
+        raise BridgeError(
+            "cli_output_truncated",
+            "StartChat CLI output ended inside a JSON array; only complete events were committed.",
+            True,
+        )
     if buffer.strip():
         yield {"id": None, "payload": None, "raw": buffer.strip()}
 

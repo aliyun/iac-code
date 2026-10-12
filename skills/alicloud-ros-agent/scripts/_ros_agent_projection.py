@@ -358,6 +358,11 @@ def _input_from_metadata(metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return direct
 
     def find(value: Any) -> Optional[Dict[str, Any]]:
+        # Receipts echo the answered kind/id/options for diagnostics, not a
+        # new input request. Recursing into them would reopen the old boundary
+        # and retire the live reader before the next question can arrive.
+        if isinstance(value, dict) and value.get("eventType") == "input_received":
+            return None
         projected = _safe_input(value)
         if projected is not None:
             return projected
@@ -426,8 +431,24 @@ def _permission_class(value: Dict[str, Any], *, mode: str, sideband: bool) -> Di
     if value.get("kind") != "permission":
         return value
     result = _permission_with_ref(value)
-    result["permissionClass"] = "sub_pipeline" if sideband else ("pipeline" if mode == "pipeline" else "normal")
+    result["permissionClass"] = "sub_pipeline" if sideband and mode == "pipeline" else (
+        "pipeline" if mode == "pipeline" else "normal"
+    )
     return result
+
+
+def _serial_input_boundary(input_required: Any, permission_wait: Any = None) -> bool:
+    """Only serial user input releases the primary parser before a reply."""
+    if not isinstance(input_required, dict):
+        return False
+    if input_required.get("kind") != "permission":
+        return True
+    permission_class = input_required.get("permissionClass")
+    if permission_class == "sub_pipeline":
+        return False
+    if permission_class == "pipeline":
+        return isinstance(permission_wait, dict) and permission_wait.get("status") == "suspended"
+    return True
 
 
 def _permission_ref(value: Any) -> Optional[str]:
@@ -700,6 +721,10 @@ class StreamSummary:
             self.wire_state = wire_state
         metadata = _metadata_from_result(result)
         terminal_state_seen = self.state in TERMINAL_STATES
+        raw_input = metadata.get("input")
+        if (not terminal_state_seen and isinstance(raw_input, dict)
+                and raw_input.get("kind") not in {"permission", "ask_user_question", "candidate_selection"}):
+            raise BridgeError("unsupported_input", "StartChat returned an unsupported user-input envelope.")
         if terminal_state_seen:
             # Terminal ownership also closes every waiting boundary. A stale
             # trailing status may still contribute artifacts, Pipeline
@@ -1127,231 +1152,332 @@ def _project_managed_stream_event(
     return projection
 
 
-def _append_projection(job_id: str, projection: Dict[str, Any], stream_event_id: Optional[str] = None) -> bool:
+def _apply_projection(job: Dict[str, Any], projection: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Apply one bounded event in memory; the caller owns the durable commit."""
+    worker_role = projection.get("workerRole")
+    projection_error = projection.get("error")
+    if (
+        worker_role != "sideband"
+        and isinstance(job.get("permissionResponseInput"), dict)
+        and isinstance(projection_error, dict)
+        and projection_error.get("code") == SESSION_BACKUP_NOT_READY_CODE
+        and projection_error.get("retryable") is True
+    ):
+        projection["type"] = "input-required"
+        projection["state"] = "input-required"
+        projection["inputRequired"] = job["permissionResponseInput"]
+    primary_terminal = job.get("primaryStreamTerminalSeen") is True or job.get("state") in TERMINAL_STATES
+    if primary_terminal:
+        projection = _without_wait_boundaries(projection)
+    if projection.get("type") == "terminal" and worker_role != "sideband":
+        # Do not publish an incomplete final result before EOF, but close
+        # the primary stream's user-input ownership immediately. The
+        # internal marker also prevents a concurrent sideband worker from
+        # reopening the parent Pipeline while the primary worker exits.
+        projection = _without_wait_boundaries(projection)
+        job["primaryStreamTerminalSeen"] = True
+        job.pop("inputRequired", None)
+        job.pop("pendingPermissions", None)
+        job.pop("permissionWait", None)
+    identity_changed = False
+    for key in ("sessionId", "taskId", "iacCodeSessionId", "requestId", "wireState"):
+        value = projection.get(key)
+        if isinstance(value, str) and value and job.get(key) != value:
+            job[key] = value
+            identity_changed = True
+    latest_text = projection.get("latestText")
+    if isinstance(latest_text, str) and latest_text:
+        job["latestText"] = latest_text
+    projected_ack = projection.get("permissionAck")
+    effective_ack = projected_ack if isinstance(projected_ack, dict) else job.get("permissionAck")
+    in_flight_input_id = job.get("sidebandResponseInputId")
+    acknowledged_input_ids = {value for value in job.get("acknowledgedPermissionIds", []) if isinstance(value, str)}
+    if isinstance(effective_ack, dict) and isinstance(effective_ack.get("inputId"), str):
+        acknowledged_input_ids.add(effective_ack["inputId"])
+    seen_sideband_input_ids = {
+        value for value in job.get("seenSidebandPermissionIds", []) if isinstance(value, str)
+    }
+    resolved_sideband_input_ids = {
+        value for value in job.get("resolvedSidebandPermissionIds", []) if isinstance(value, str)
+    }
+    resolved_sideband_input_ids.update(acknowledged_input_ids)
+    if isinstance(projection.get("pendingPermissions"), list):
+        projected_pending_ids = {
+            value.get("inputId")
+            for value in projection["pendingPermissions"]
+            if isinstance(value, dict) and isinstance(value.get("inputId"), str)
+        }
+        resolved_sideband_input_ids.update(seen_sideband_input_ids - projected_pending_ids)
+        seen_sideband_input_ids.update(projected_pending_ids)
+        job["seenSidebandPermissionIds"] = list(seen_sideband_input_ids)[-64:]
+        job["resolvedSidebandPermissionIds"] = list(resolved_sideband_input_ids)[-64:]
+        pending = [
+            value
+            for value in projection["pendingPermissions"]
+            if not _permission_is_acknowledged(value, effective_ack)
+            and value.get("inputId") != in_flight_input_id
+            and value.get("inputId") not in acknowledged_input_ids
+            and value.get("inputId") not in resolved_sideband_input_ids
+        ]
+        projection["pendingPermissions"] = pending
+        if pending:
+            job["pendingPermissions"] = pending
+            current = job.get("inputRequired")
+            pending_ids = {value.get("inputId") for value in pending if isinstance(value, dict)}
+            if not isinstance(current, dict) or current.get("inputId") not in pending_ids:
+                job["inputRequired"] = pending[0]
+        else:
+            job.pop("pendingPermissions", None)
+            current = job.get("inputRequired")
+            if isinstance(current, dict) and current.get("permissionClass") == "sub_pipeline":
+                job.pop("inputRequired", None)
+    input_required = projection.get("inputRequired")
+    current_input = job.get("inputRequired")
+    if (
+        isinstance(input_required, dict)
+        and isinstance(current_input, dict)
+        and input_required.get("inputId") == current_input.get("inputId")
+        and current_input.get("permissionClass") == "sub_pipeline"
+    ):
+        input_required = dict(input_required)
+        input_required["permissionClass"] = "sub_pipeline"
+        projection["inputRequired"] = input_required
+    if isinstance(input_required, dict) and input_required.get("inputId") in resolved_sideband_input_ids:
+        projection.pop("inputRequired", None)
+        if projection.get("type") == "input-required":
+            projection["type"] = "status"
+    elif isinstance(input_required, dict) and input_required.get("inputId") == in_flight_input_id:
+        projection.pop("inputRequired", None)
+        if projection.get("type") == "input-required":
+            projection["type"] = "status"
+    elif _permission_is_acknowledged(input_required, effective_ack) or (
+        isinstance(input_required, dict) and input_required.get("inputId") in acknowledged_input_ids
+    ):
+        projection.pop("inputRequired", None)
+        if projection.get("type") == "input-required":
+            projection["type"] = "permission-ack" if isinstance(projected_ack, dict) else "status"
+    elif isinstance(input_required, dict):
+        job["inputRequired"] = input_required
+        job["state"] = "input-required"
+    permission_wait = projection.get("permissionWait")
+    if isinstance(permission_wait, dict):
+        job["permissionWait"] = permission_wait
+    permission_recovered = projection.get("permissionRecovered")
+    if isinstance(permission_recovered, dict):
+        job["permissionRecovered"] = permission_recovered
+        job.pop("permissionWait", None)
+        recovered_input_id = permission_recovered.get("inputId")
+        current = job.get("inputRequired")
+        if isinstance(current, dict) and current.get("inputId") == recovered_input_id:
+            job.pop("inputRequired", None)
+        remaining = [
+            value
+            for value in job.get("pendingPermissions", [])
+            if isinstance(value, dict) and value.get("inputId") != recovered_input_id
+        ]
+        if remaining:
+            job["pendingPermissions"] = remaining
+        else:
+            job.pop("pendingPermissions", None)
+        if job.get("state") == "input-required" and not isinstance(job.get("inputRequired"), dict):
+            job["state"] = "working"
+    permission_ack = projection.get("permissionAck")
+    if isinstance(permission_ack, dict):
+        job["permissionAck"] = permission_ack
+        input_id = permission_ack.get("inputId")
+        if isinstance(input_id, str):
+            history = job.setdefault("acknowledgedPermissionIds", [])
+            if input_id not in history:
+                history.append(input_id)
+                del history[:-64]
+        remaining = [
+            value
+            for value in job.get("pendingPermissions", [])
+            if isinstance(value, dict) and value.get("inputId") != input_id
+        ]
+        if remaining:
+            job["pendingPermissions"] = remaining
+            job["inputRequired"] = remaining[0]
+            job["state"] = "input-required"
+        else:
+            job.pop("pendingPermissions", None)
+            current = job.get("inputRequired")
+            if isinstance(current, dict) and current.get("inputId") == input_id:
+                job.pop("inputRequired", None)
+            if worker_role == "sideband" and job.get("state") not in TERMINAL_STATES:
+                job["state"] = "working"
+    artifact = projection.get("artifact")
+    if isinstance(artifact, dict):
+        artifacts = job.setdefault("artifacts", [])
+        if artifact not in artifacts:
+            artifacts.append(artifact)
+            del artifacts[:-24]
+    if projection.get("type") == "assistant-final" and isinstance(projection.get("finalText"), str):
+        job["assistantFinal"] = projection["finalText"]
+        job["assistantFinalComplete"] = projection.get("finalTextComplete") is True
+    if projection.get("type") == "failed" and worker_role == "sideband":
+        job["sidebandError"] = projection.get("error")
+    elif projection.get("type") == "failed":
+        job["state"] = "failed"
+        job["error"] = projection.get("error")
+    if projection.get("normalHandoffReady") is True and job.get("mode") == "pipeline":
+        job["normalHandoffReady"] = True
+        job["conversationMode"] = "normal"
+
+    wire_projection = dict(projection)
+    wire_projection.pop("latestText", None)
+    wire_projection.pop("workerRole", None)
+    wire_projection.pop("workerToken", None)
+    meaningful = wire_projection.get("type") != "status" or identity_changed
+    return wire_projection if meaningful else None
+
+
+def _append_projection_batch(
+    job_id: str, projections: List[Tuple[Dict[str, Any], Optional[str]]],
+) -> bool:
+    if not projections:
+        return True
     root, job_path, spool = _job_paths(job_id)
     _secure_directory(root)
-    projection = _bound_projection(projection)
+    projections = [(_bound_projection(value), event_id) for value, event_id in projections]
     with StateLock(root / ".job.lock"):
         job = _load_state_json(job_path)
-        request_seq = projection.get("requestSeq")
-        if isinstance(request_seq, int) and request_seq != job.get("activeRequestSeq"):
-            return False
-        worker_role = projection.get("workerRole")
-        worker_token = projection.get("workerToken")
-        if worker_role == "sideband" and worker_token != job.get("sidebandWorkerToken"):
-            return False
+        # Revalidate ownership and cancellation at every batch commit, even if
+        # the remote worker cached its per-event control-plane check.
+        for projection, _event_id in projections:
+            request_seq = projection.get("requestSeq")
+            if isinstance(request_seq, int) and request_seq != job.get("activeRequestSeq"):
+                return False
+            if (projection.get("workerRole") == "sideband"
+                    and projection.get("workerToken") != job.get("sidebandWorkerToken")):
+                return False
         if job.get("stopRequestedAt") is not None:
-            session_id = projection.get("sessionId")
-            if isinstance(session_id, str) and session_id and not isinstance(job.get("sessionId"), str):
-                job["sessionId"] = session_id
-                _atomic_json(job_path, job)
+            if not isinstance(job.get("sessionId"), str):
+                for projection, _event_id in projections:
+                    session_id = projection.get("sessionId")
+                    if isinstance(session_id, str) and session_id:
+                        job["sessionId"] = session_id
+                        _atomic_json(job_path, job)
+                        break
             return False
-        projection_error = projection.get("error")
-        if (
-            worker_role != "sideband"
-            and isinstance(job.get("permissionResponseInput"), dict)
-            and isinstance(projection_error, dict)
-            and projection_error.get("code") == SESSION_BACKUP_NOT_READY_CODE
-            and projection_error.get("retryable") is True
-        ):
-            projection["type"] = "input-required"
-            projection["state"] = "input-required"
-            projection["inputRequired"] = job["permissionResponseInput"]
-        primary_terminal = job.get("primaryStreamTerminalSeen") is True or job.get("state") in TERMINAL_STATES
-        if primary_terminal:
-            projection = _without_wait_boundaries(projection)
-        if projection.get("type") == "terminal" and worker_role != "sideband":
-            # Do not publish an incomplete final result before EOF, but close
-            # the primary stream's user-input ownership immediately. The
-            # internal marker also prevents a concurrent sideband worker from
-            # reopening the parent Pipeline while the primary worker exits.
-            projection = _without_wait_boundaries(projection)
-            job["primaryStreamTerminalSeen"] = True
-            job.pop("inputRequired", None)
-            job.pop("pendingPermissions", None)
-            job.pop("permissionWait", None)
-        identity_changed = False
-        for key in ("sessionId", "taskId", "iacCodeSessionId", "requestId", "wireState"):
-            value = projection.get(key)
-            if isinstance(value, str) and value and job.get(key) != value:
-                job[key] = value
-                identity_changed = True
-        latest_text = projection.get("latestText")
-        if isinstance(latest_text, str) and latest_text:
-            job["latestText"] = latest_text
-        projected_ack = projection.get("permissionAck")
-        effective_ack = projected_ack if isinstance(projected_ack, dict) else job.get("permissionAck")
-        in_flight_input_id = job.get("sidebandResponseInputId")
-        acknowledged_input_ids = {value for value in job.get("acknowledgedPermissionIds", []) if isinstance(value, str)}
-        if isinstance(effective_ack, dict) and isinstance(effective_ack.get("inputId"), str):
-            acknowledged_input_ids.add(effective_ack["inputId"])
-        seen_sideband_input_ids = {
-            value for value in job.get("seenSidebandPermissionIds", []) if isinstance(value, str)
-        }
-        resolved_sideband_input_ids = {
-            value for value in job.get("resolvedSidebandPermissionIds", []) if isinstance(value, str)
-        }
-        resolved_sideband_input_ids.update(acknowledged_input_ids)
-        if isinstance(projection.get("pendingPermissions"), list):
-            projected_pending_ids = {
-                value.get("inputId")
-                for value in projection["pendingPermissions"]
-                if isinstance(value, dict) and isinstance(value.get("inputId"), str)
-            }
-            resolved_sideband_input_ids.update(seen_sideband_input_ids - projected_pending_ids)
-            seen_sideband_input_ids.update(projected_pending_ids)
-            job["seenSidebandPermissionIds"] = list(seen_sideband_input_ids)[-64:]
-            job["resolvedSidebandPermissionIds"] = list(resolved_sideband_input_ids)[-64:]
-            pending = [
-                value
-                for value in projection["pendingPermissions"]
-                if not _permission_is_acknowledged(value, effective_ack)
-                and value.get("inputId") != in_flight_input_id
-                and value.get("inputId") not in acknowledged_input_ids
-                and value.get("inputId") not in resolved_sideband_input_ids
-            ]
-            projection["pendingPermissions"] = pending
-            if pending:
-                job["pendingPermissions"] = pending
-                current = job.get("inputRequired")
-                pending_ids = {value.get("inputId") for value in pending if isinstance(value, dict)}
-                if not isinstance(current, dict) or current.get("inputId") not in pending_ids:
-                    job["inputRequired"] = pending[0]
-            else:
-                job.pop("pendingPermissions", None)
-                current = job.get("inputRequired")
-                if isinstance(current, dict) and current.get("permissionClass") == "sub_pipeline":
-                    job.pop("inputRequired", None)
-        input_required = projection.get("inputRequired")
-        current_input = job.get("inputRequired")
-        if (
-            isinstance(input_required, dict)
-            and isinstance(current_input, dict)
-            and input_required.get("inputId") == current_input.get("inputId")
-            and current_input.get("permissionClass") == "sub_pipeline"
-        ):
-            input_required = dict(input_required)
-            input_required["permissionClass"] = "sub_pipeline"
-            projection["inputRequired"] = input_required
-        if isinstance(input_required, dict) and input_required.get("inputId") in resolved_sideband_input_ids:
-            projection.pop("inputRequired", None)
-            if projection.get("type") == "input-required":
-                projection["type"] = "status"
-        elif isinstance(input_required, dict) and input_required.get("inputId") == in_flight_input_id:
-            projection.pop("inputRequired", None)
-            if projection.get("type") == "input-required":
-                projection["type"] = "status"
-        elif _permission_is_acknowledged(input_required, effective_ack) or (
-            isinstance(input_required, dict) and input_required.get("inputId") in acknowledged_input_ids
-        ):
-            projection.pop("inputRequired", None)
-            if projection.get("type") == "input-required":
-                projection["type"] = "permission-ack" if isinstance(projected_ack, dict) else "status"
-        elif isinstance(input_required, dict):
-            job["inputRequired"] = input_required
-            job["state"] = "input-required"
-        permission_wait = projection.get("permissionWait")
-        if isinstance(permission_wait, dict):
-            job["permissionWait"] = permission_wait
-        permission_recovered = projection.get("permissionRecovered")
-        if isinstance(permission_recovered, dict):
-            job["permissionRecovered"] = permission_recovered
-            job.pop("permissionWait", None)
-            recovered_input_id = permission_recovered.get("inputId")
-            current = job.get("inputRequired")
-            if isinstance(current, dict) and current.get("inputId") == recovered_input_id:
-                job.pop("inputRequired", None)
-            remaining = [
-                value
-                for value in job.get("pendingPermissions", [])
-                if isinstance(value, dict) and value.get("inputId") != recovered_input_id
-            ]
-            if remaining:
-                job["pendingPermissions"] = remaining
-            else:
-                job.pop("pendingPermissions", None)
-            if job.get("state") == "input-required" and not isinstance(job.get("inputRequired"), dict):
-                job["state"] = "working"
-        permission_ack = projection.get("permissionAck")
-        if isinstance(permission_ack, dict):
-            job["permissionAck"] = permission_ack
-            input_id = permission_ack.get("inputId")
-            if isinstance(input_id, str):
-                history = job.setdefault("acknowledgedPermissionIds", [])
-                if input_id not in history:
-                    history.append(input_id)
-                    del history[:-64]
-            remaining = [
-                value
-                for value in job.get("pendingPermissions", [])
-                if isinstance(value, dict) and value.get("inputId") != input_id
-            ]
-            if remaining:
-                job["pendingPermissions"] = remaining
-                job["inputRequired"] = remaining[0]
-                job["state"] = "input-required"
-            else:
-                job.pop("pendingPermissions", None)
-                current = job.get("inputRequired")
-                if isinstance(current, dict) and current.get("inputId") == input_id:
-                    job.pop("inputRequired", None)
-                if worker_role == "sideband" and job.get("state") not in TERMINAL_STATES:
-                    job["state"] = "working"
-        artifact = projection.get("artifact")
-        if isinstance(artifact, dict):
-            artifacts = job.setdefault("artifacts", [])
-            if artifact not in artifacts:
-                artifacts.append(artifact)
-                del artifacts[:-24]
-        if projection.get("type") == "assistant-final" and isinstance(projection.get("finalText"), str):
-            job["assistantFinal"] = projection["finalText"]
-            job["assistantFinalComplete"] = projection.get("finalTextComplete") is True
-        if projection.get("type") == "failed" and worker_role == "sideband":
-            job["sidebandError"] = projection.get("error")
-        elif projection.get("type") == "failed":
-            job["state"] = "failed"
-            job["error"] = projection.get("error")
-        if projection.get("normalHandoffReady") is True and job.get("mode") == "pipeline":
-            job["normalHandoffReady"] = True
-            job["conversationMode"] = "normal"
-
-        wire_projection = dict(projection)
-        wire_projection.pop("latestText", None)
-        wire_projection.pop("workerRole", None)
-        wire_projection.pop("workerToken", None)
-        meaningful = wire_projection.get("type") != "status" or identity_changed
-        already_spooled = False
-        if meaningful and isinstance(stream_event_id, str):
-            wire_projection["streamEventId"] = stream_event_id
-            already_spooled = any(
-                value.get("streamEventId") == stream_event_id
-                and value.get("requestSeq") == request_seq
-                for value in _read_spool(spool)
-            )
-        if meaningful:
-            data = _json_bytes(wire_projection) + b"\n"
+        spooled_ids = None
+        records = []
+        for projection, event_id in projections:
+            wire_projection = _apply_projection(job, projection)
+            if wire_projection is not None:
+                duplicate = False
+                if isinstance(event_id, str):
+                    wire_projection["streamEventId"] = event_id
+                    if spooled_ids is None:
+                        spooled_ids = {
+                            (value.get("streamEventId"), value.get("requestSeq")) for value in _read_spool(spool)
+                        }
+                    identity_key = (event_id, projection.get("requestSeq"))
+                    duplicate = identity_key in spooled_ids
+                    spooled_ids.add(identity_key)
+                if not duplicate:
+                    records.append(_json_bytes(wire_projection) + b"\n")
+            if isinstance(event_id, str):
+                identity, sequence = parse_stream_event_id(event_id)
+                prefix = "sidebandStream" if projection.get("workerRole") == "sideband" else "stream"
+                job[prefix + "Cursor"] = event_id
+                job[prefix + "Identity"] = identity
+                job[prefix + "Sequence"] = sequence
+        if records:
+            data = b"".join(records)
             current_size = spool.stat().st_size if spool.exists() else 0
-            if not already_spooled and current_size + len(data) > MAX_SPOOL_BYTES:
+            if current_size + len(data) > MAX_SPOOL_BYTES:
                 raise BridgeError("stream_failed", "The bounded ROS Agent event spool is full.")
-            if not already_spooled:
-                with spool.open("ab") as handle:
-                    handle.write(data)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                if os.name != "nt":
-                    os.chmod(str(spool), 0o600)
-        if isinstance(stream_event_id, str):
-            identity, sequence = parse_stream_event_id(stream_event_id)
-            if worker_role == "sideband":
-                job["sidebandStreamCursor"] = stream_event_id
-                job["sidebandStreamIdentity"] = identity
-                job["sidebandStreamSequence"] = sequence
-            else:
-                job["streamCursor"] = stream_event_id
-                job["streamIdentity"] = identity
-                job["streamSequence"] = sequence
+            with spool.open("ab") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            if os.name != "nt":
+                os.chmod(str(spool), 0o600)
+        # Never persist a recovery cursor ahead of its event spool. A crash
+        # between these writes can replay the batch; spool IDs deduplicate it.
         _atomic_json(job_path, job)
     return True
+
+
+def _append_projection(job_id: str, projection: Dict[str, Any], stream_event_id: Optional[str] = None) -> bool:
+    return _append_projection_batch(job_id, [(projection, stream_event_id)])
+
+
+class _RemoteProjectionBuffer:
+    """Batch ordinary remote CLI deltas, never externally actionable boundaries."""
+
+    def __init__(self, job_id, mode, request_seq, worker_role, worker_token):
+        self.job_id = job_id
+        self.mode = mode
+        self.request_seq = request_seq
+        self.worker_role = worker_role
+        self.worker_token = worker_token
+        self.pending = []  # type: List[Tuple[Dict[str, Any], Optional[str]]]
+        self.pending_bytes = 0
+        self.last_flush = time.monotonic()
+        self.committed_cursor = None  # type: Optional[str]
+        self.committed_count = 0
+        self.flush_count = 0
+        self.flush_elapsed = 0.0
+        self.stopped = False
+        self.last_controls = {}  # type: Dict[str, Any]
+
+    def __call__(self, event_id, payload, summary, _already_applied):
+        if _already_applied and event_id == self.committed_cursor:
+            return not self.stopped
+        projection = _project_managed_stream_event(
+            payload, summary, self.mode, self.request_seq, self.worker_role, self.worker_token,
+        )
+        projection_bytes = len(_json_bytes(projection))
+        if (self.pending and self.pending_bytes + projection_bytes > REMOTE_PROJECTION_BATCH_BYTES
+                and self.flush() is False):
+            return False
+        # Projection values are bounded snapshots, not references to the mutable
+        # stream summary. Only these snapshots wait in memory between commits.
+        self.pending.append((projection, event_id))
+        self.pending_bytes += projection_bytes
+        controls = {key: projection[key] for key in (
+            "inputRequired", "pendingPermissions", "permissionWait", "permissionRecovered", "permissionAck",
+        ) if key in projection}
+        controls_changed = any(self.last_controls.get(key) != value for key, value in controls.items())
+        self.last_controls.update(controls)
+        if (
+            self.committed_cursor is None
+            or projection.get("type") != "status"
+            or controls_changed
+            or len(self.pending) >= REMOTE_PROJECTION_BATCH_EVENTS
+            or self.pending_bytes >= REMOTE_PROJECTION_BATCH_BYTES
+            or time.monotonic() - self.last_flush >= REMOTE_PROJECTION_BATCH_SECONDS
+        ):
+            return self.flush()
+        return True
+
+    def flush(self):
+        if not self.pending:
+            return not self.stopped
+        started = time.monotonic()
+        try:
+            committed = _append_projection_batch(self.job_id, self.pending)
+        finally:
+            self.flush_elapsed += time.monotonic() - started
+        if committed:
+            for _projection, event_id in self.pending:
+                if isinstance(event_id, str):
+                    self.committed_cursor = event_id
+                    self.committed_count += 1
+            self.flush_count += 1
+        else:
+            self.stopped = True
+        self.pending = []
+        self.pending_bytes = 0
+        self.last_flush = time.monotonic()
+        return committed
+
+    def flush_if_due(self):
+        if time.monotonic() - self.last_flush >= REMOTE_PROJECTION_BATCH_SECONDS:
+            return self.flush()
+        return not self.stopped
 
 
 def _finish_job(
@@ -1906,9 +2032,11 @@ def _job_result(
         "milestones": milestones[-MAX_FOLLOW_EVENTS:],
         "folded": folded,
     }  # type: Dict[str, Any]
-    for key in ("sessionId", "taskId", "iacCodeSessionId", "requestId", "wireState"):
+    for key in ("sessionId", "taskId", "iacCodeSessionId", "requestId", "wireState", "stopStatus", "stopRequestId"):
         if isinstance(job.get(key), str):
             result[key] = job[key]
+    if isinstance(job.get("stopStatus"), str):
+        result["presentationRequired"] = True
     if job.get("conversationMode") in SUPPORTED_AGENT_MODES:
         result["conversationMode"] = job["conversationMode"]
     if job.get("normalHandoffReady") is True:
@@ -1918,7 +2046,6 @@ def _job_result(
         result["presentationRequired"] = True
     if isinstance(job.get("permissionRecovered"), dict):
         result["permissionRecovered"] = job["permissionRecovered"]
-        result["presentationRequired"] = True
     if boundary_reached:
         updates = [
             _format_user_update(value, result["preferredLanguage"])
@@ -1964,6 +2091,14 @@ def _job_result(
             if result["preferredLanguage"] == "zh"
             else "ROS Agent is still working ({}s).".format(elapsed)
         )
+        if (job.get("transport") == "aliyun_cli" and job.get("aliyunCLIExecutionMode") == "remote"
+                and not isinstance(job.get("streamCursor"), str)):
+            result["heartbeat"] = (
+                "\u7b49\u5f85\u8fdc\u7a0b\u6267\u884c\u5668\u786e\u8ba4\u6216\u8fd4\u56de\uff0c"
+                "\u5c1a\u672a\u6536\u5230\u4e91\u7aef\u4e8b\u4ef6\uff08{} \u79d2\uff09\u3002".format(elapsed)
+                if result["preferredLanguage"] == "zh"
+                else "Waiting for the remote executor; no cloud event received yet ({}s).".format(elapsed)
+            )
         result["presentationRequired"] = True
         if isinstance(job.get("latestText"), str):
             result["latestText"] = job["latestText"]
