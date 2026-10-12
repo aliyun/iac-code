@@ -13,8 +13,10 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from anthropic import APIConnectionError as AnthropicAPIConnectionError
+from anthropic import AsyncAnthropic
 from loguru import logger
 from openai import APIConnectionError as OpenAIAPIConnectionError
+from openai import AsyncAzureOpenAI, AsyncOpenAI
 from opentelemetry.trace import Status, StatusCode
 
 from iac_code.i18n import _
@@ -1001,6 +1003,56 @@ class ProviderManager:
             )
         token.state = "consumed"
 
+    def model_only_request_adapter(self, lease: ProviderRequestLease, *, interrupted: bool = False) -> str | None:
+        """Identify this request's repository-owned inference adapter exactly."""
+        if type(self) is not ProviderManager or type(lease) is not ProviderRequestLease:
+            return None
+        expected_state = "consumed" if interrupted else "active"
+        expected_requests = 1 if interrupted else 0
+        if (
+            lease._owner_identity is not self._lease_owner_identity
+            or lease._lease_token.state != expected_state
+            or lease._lease_token.inference_requests != expected_requests
+        ):
+            return None
+        provider_type = type(lease.provider)
+        adapter = f"{provider_type.__module__}.{provider_type.__name__}"
+        if not ProviderManager.model_only_adapter_identity(adapter):
+            return None
+        if type(getattr(lease.provider, "_client", None)) not in (AsyncOpenAI, AsyncAzureOpenAI, AsyncAnthropic):
+            return None
+        return adapter if provider_type is _import_provider_class(adapter) else None
+
+    @staticmethod
+    def model_only_adapter_identity(adapter: Any) -> bool:
+        # An arbitrary Provider subclass can execute effects inside stream().
+        # Keep this internal proof restricted to the shipped inference adapters.
+        supported = {
+            "anthropic_provider.AnthropicProvider",
+            "openai_provider.OpenAIProvider",
+            "dashscope_provider.DashScopeProvider",
+            "qwen_provider.QwenProvider",
+            "responses_provider.ResponsesProvider",
+            "responses_provider.DashScopeResponsesProvider",
+            "azure_openai_provider.AzureOpenAIProvider",
+            "deepseek_provider.DeepSeekProvider",
+            "gemini_provider.GeminiProvider",
+            "kimi_provider.KimiProvider",
+            "lmstudio_provider.LMStudioProvider",
+            "minimax_provider.MiniMaxProvider",
+            "modelscope_provider.ModelScopeProvider",
+            "ollama_provider.OllamaProvider",
+            "openrouter_provider.OpenRouterProvider",
+            "siliconflow_provider.SiliconFlowProvider",
+            "volcengine_provider.VolcengineProvider",
+            "zhipu_provider.ZhiPuProvider",
+        }
+        return (
+            isinstance(adapter, str)
+            and adapter.startswith("iac_code.providers.")
+            and adapter.removeprefix("iac_code.providers.") in supported
+        )
+
     def release_request(self, lease: ProviderRequestLease) -> None:
         self._validate_request_lease(lease)
         token = lease._lease_token
@@ -1276,6 +1328,7 @@ class ProviderManager:
         ``_stream_impl``.
         """
         provider = lease.provider
+        lease._lease_token.inference_requests += 1
         model = lease.context_window_model
         provider_name = _telemetry_provider_name(provider)
         provider_identity_attrs = _provider_telemetry_attrs(provider)
@@ -1800,6 +1853,7 @@ class ProviderManager:
                         )
                     replay_first_token_received = False
                     try:
+                        lease._lease_token.inference_requests += 1
                         replay_iter = provider.stream(messages, system, tools, max_tokens)
                         async for replay_event in replay_iter:
                             if isinstance(replay_event, MessageStartEvent):
@@ -1908,6 +1962,7 @@ class ProviderManager:
                 return
             try:
                 with replace_span_attributes(captured_scope), _safe_attach_parent_context(captured_parent):
+                    lease._lease_token.inference_requests += 1
                     completion = await self._complete_with_retry_result(
                         messages,
                         system,

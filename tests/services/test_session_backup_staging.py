@@ -957,7 +957,7 @@ def test_staging_worker_runs_final_scan_after_stop(monkeypatch: pytest.MonkeyPat
     scans: list[int] = []
 
     class FakeWorker:
-        def __init__(self, _staging_root: str, _backup_root: str) -> None:
+        def __init__(self, _staging_root: str, _backup_root: str, **_kwargs) -> None:
             pass
 
         def run_once(self) -> int:

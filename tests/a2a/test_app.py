@@ -47,6 +47,7 @@ from iac_code.a2a.task_store import A2ATaskStore, _task_updated_at_from_sdk_task
 from iac_code.a2a.transports.dispatcher import create_runtime_components
 from iac_code.mcp.errors import MCPNeedsAuthError
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.user_input import normalize_pipeline_user_input
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     PermissionWaitPolicy,
@@ -1289,7 +1290,7 @@ def test_pipeline_streaming_starts_with_task_before_status_update(monkeypatch, t
             self.handoff_enabled = False
 
         async def run(self, prompt: str):
-            self.prompts.append(prompt)
+            self.prompts.append(normalize_pipeline_user_input(prompt).display_text)
             yield PipelineEvent(
                 type=PipelineEventType.PIPELINE_STARTED,
                 step_id=None,
