@@ -14,14 +14,42 @@ from scripts.a2a.e2e.common import StreamSummary
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import (
     SCENARIOS,
     _answer_selection,
+    _assert_next_turn_reply,
     _iac_code_values,
     _next_turn_evidence,
+    _NextTurnReplyMismatchError,
     _resource_selection_inputs,
     _selected_result_evidence,
     _selection_response,
     _SelectorAssociationMismatchError,
     _wait_for_released_execution,
 )
+
+
+@pytest.mark.parametrize("text,state,context,selection_wait,passed", [
+    ("EXACT_REPLY_MARKER", "TASK_STATE_INPUT_REQUIRED", "ctx-1", False, True),
+    ("EXACT_REPLY_MARKER", "TASK_STATE_COMPLETED", "ctx-1", False, True),
+    ("wrong response", "TASK_STATE_INPUT_REQUIRED", "ctx-1", False, False),
+    ("EXACT REPLY MARKER", "TASK_STATE_INPUT_REQUIRED", "ctx-1", False, False),
+    ("EXACT_REPLY_MARKER", "TASK_STATE_INPUT_REQUIRED", "ctx-other", False, False),
+    ("EXACT_REPLY_MARKER", "TASK_STATE_INPUT_REQUIRED", "ctx-1", True, False),
+])
+def test_next_turn_requires_original_exact_marker_same_context_and_no_new_selector(
+    tmp_path, text, state, context, selection_wait, passed,
+):
+    events = {"result": {"metadata": {"iac_code": {"inputRequired": {"kind": "cloud_resource_selection"}}}}}
+    (tmp_path / "next-turn.events.jsonl").write_text(
+        json.dumps(events if selection_wait else {}) + "\n", encoding="utf-8",
+    )
+    summary = StreamSummary(name="next-turn", prompt="", context_id=context, status_states=[state], text=text)
+    arguments = {"context_id": "ctx-1", "token": "EXACT_REPLY_MARKER", "run_dir": tmp_path,
+                 "config_dir": tmp_path / "config"}
+    if passed:
+        assert all(_assert_next_turn_reply(summary, **arguments).values())
+    else:
+        with pytest.raises(_NextTurnReplyMismatchError) as error:
+            _assert_next_turn_reply(summary, **arguments)
+        assert not all(error.value.checks.values())
 
 
 @pytest.mark.parametrize("reply,public,expected_native", [
