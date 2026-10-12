@@ -6678,7 +6678,8 @@ def test_remote_answer_receipt_does_not_retire_reader_before_second_question(rem
     assert not any(item["args"][:2] == ["ros", "stop-chat"] for item in calls)
 
 
-def test_remote_input_handoff_timeout_starts_at_boundary_not_cli_launch(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mailbox_removed", [False, True])
+def test_remote_input_handoff_timeout_starts_at_boundary_not_cli_launch(monkeypatch, tmp_path, mailbox_removed):
     monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
     job_id = "a" * 32
     root, job_path, _spool = bridge._job_paths(job_id)
@@ -6698,6 +6699,8 @@ def test_remote_input_handoff_timeout_starts_at_boundary_not_cli_launch(monkeypa
             return None, dict(job)
         boundary = dict(job, state="input-required", inputRequired={"kind": "permission"})
         bridge._atomic_json(request_path.with_suffix(".result"), {"returnCode": 0})
+        if mailbox_removed:
+            request_path.unlink(missing_ok=True)
         if len(observations) >= 3:
             boundary.pop("workerPid")
         return {"state": "input-required"}, boundary

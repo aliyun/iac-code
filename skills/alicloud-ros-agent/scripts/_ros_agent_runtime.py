@@ -344,7 +344,10 @@ def _drive_foreground_cli(job_id: str, cursor: int, wait_seconds: float) -> None
             # on a pending approval, running CLI, or buffered-output parser.
             if paths:
                 deadline = time.monotonic() + wait_seconds
-            elif time.monotonic() >= deadline:
+            elif not stop_for_boundary and time.monotonic() >= deadline:
+                # A serial reader can remove its mailbox before releasing
+                # worker ownership. Its handoff deadline, not idle timeout,
+                # governs that final cleanup window.
                 return
             for path in paths if not stop_for_boundary else []:
                 if path.with_suffix(".result").exists():
