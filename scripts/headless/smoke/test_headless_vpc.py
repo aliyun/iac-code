@@ -39,9 +39,9 @@ def _record_output_diagnostics(output_format: str, result: subprocess.CompletedP
         "exit_code": result.returncode,
         "stdout_length": len(stdout),
         "stderr_length": len(result.stderr),
-        "tool_error_count": 0,
-        "permission_denial_count": 0,
     }
+    if output_format != "text":
+        detail.update(tool_error_count=0, permission_denial_count=0)
     error_text = result.stderr
 
     def record_tool_error(value):
