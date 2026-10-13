@@ -1408,6 +1408,31 @@ h3 {
   display: block;
 }
 
+.send-action.is-submitting .composer-icon {
+  display: none;
+}
+
+.send-action.is-submitting::after {
+  content: "";
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: iac-thread-spin 0.85s linear infinite;
+}
+
+.composer.is-submitting .file-action {
+  pointer-events: none;
+  opacity: 0.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .send-action.is-submitting::after {
+    animation: none;
+  }
+}
+
 .send-action:disabled {
   border-color: transparent;
   background: rgba(32, 32, 29, 0.15);

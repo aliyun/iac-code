@@ -218,6 +218,64 @@ def _run_output_panel_script(tmp_path: Path, source: str) -> dict[str, object]:
     return json.loads(result.stdout)
 
 
+def _run_composer_submission_script(tmp_path: Path, source: str) -> dict[str, object]:
+    return _run_composer_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const { createComposerController } = await import(__COMPOSER_MODULE__);
+            class Element {
+              constructor() {
+                this.children = [];
+                this.listeners = {};
+                this.dataset = {};
+                this.value = "";
+                this.className = "";
+                this.textContent = "";
+                this.disabled = false;
+                this.style = { setProperty() {} };
+                this.classList = {
+                  toggle: (name, force) => {
+                    const classes = new Set(this.className.split(" ").filter(Boolean));
+                    force ? classes.add(name) : classes.delete(name);
+                    this.className = [...classes].join(" ");
+                  },
+                };
+              }
+              append(...children) { this.children.push(...children); }
+              replaceChildren(...children) { this.children = children; }
+              setAttribute(name, value) { this[name] = String(value); }
+              addEventListener(type, handler) { (this.listeners[type] ??= []).push(handler); }
+              dispatch(type, extra = {}) {
+                for (const handler of this.listeners[type] || []) {
+                  handler({ preventDefault() {}, ...extra });
+                }
+              }
+              querySelectorAll() { return this.children; }
+              querySelector() { return null; }
+              focus() {}
+            }
+            globalThis.document = { createElement: () => new Element() };
+            function deferred() {
+              let resolve, reject;
+              const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+              return { promise, resolve, reject };
+            }
+            function elements() {
+              return Object.fromEntries([
+                "form", "textarea", "sendButton", "fileInput", "attachmentChips", "errorTarget",
+              ].map((key) => [key, new Element()]));
+            }
+            function locked(elements) {
+              return elements.textarea.disabled && elements.fileInput.disabled && elements.sendButton.disabled &&
+                elements.sendButton.className.includes("is-submitting") && elements.form["aria-busy"] === "true";
+            }
+            """
+        )
+        + source,
+    )
+
+
 def _run_diagram_preview_library_script(tmp_path: Path, source: str) -> dict[str, object]:
     node = shutil.which("node")
     if node is None:
@@ -1769,15 +1827,15 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-323" in html
-    assert "/static/js/app.js?v=web-repl-ui-380" in html
+    assert "/static/styles.css?v=web-repl-ui-324" in html
+    assert "/static/js/app.js?v=web-repl-ui-381" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
     assert "./api.js?v=web-repl-ui-314" in app_source
-    assert "./components/composer.js?v=session-model-v22" in app_source
+    assert "./components/composer.js?v=session-model-v23" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
     assert "./components/tool_cards.js?v=live-inline-tools-v26" in app_source
@@ -1804,7 +1862,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-380" in index_html
+    assert "web-repl-ui-381" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-324" in app_source
@@ -3572,6 +3630,163 @@ def test_composer_disables_send_until_text_or_attachment_exists(tmp_path) -> Non
         "enabledWithAttachment": True,
         "formClassName": "has-attachments",
     }
+
+
+@pytest.mark.parametrize("phase", ["session", "upload", "message", "command", "queued", "compacting"])
+@pytest.mark.parametrize("fails", [False, True])
+def test_composer_locks_submission_until_request_finishes(tmp_path: Path, phase: str, fails: bool) -> None:
+    output = _run_composer_submission_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const { phase, fails } = __SCENARIO__;
+            const ui = elements();
+            const request = deferred();
+            const started = deferred();
+            const calls = [];
+            let paused = false;
+            async function endpoint(name, result) {
+              calls.push(name);
+              if (name === phase && !paused) {
+                paused = true;
+                started.resolve();
+                await request.promise;
+              }
+              return result;
+            }
+            const controller = createComposerController(ui, {
+              uploadImage: () => endpoint("upload", { imageId: "image-1" }),
+              postMessage: () => endpoint("message", { accepted: true }),
+              postCommand: () => endpoint("command", { accepted: true }),
+              postQueuedInput: () => endpoint(phase === "compacting" ? "compacting" : "queued", {}),
+              postInterrupt: () => endpoint("interrupt", {}),
+            }, {
+              async createSessionForSubmit() {
+                await endpoint("session", {});
+                controller.setSession("S", { preserveDraft: true });
+                return { webSessionId: "S" };
+              },
+            });
+            if (phase !== "session" && phase !== "upload") controller.setSession("S");
+            if (phase === "upload") await controller.addFiles([{ name: "image.png", type: "image/png" }]);
+            if (phase === "queued") controller.setTurnActive(true);
+            if (phase === "compacting") controller.setCompacting(true);
+            const draft = phase === "command" ? "/status" : "deploy a vpc";
+            ui.textarea.value = draft;
+            ui.textarea.dispatch("input");
+
+            const submitted = controller.submit();
+            const immediatelyLocked = locked(ui);
+            await started.promise;
+            // A stream update can announce the turn before the HTTP response arrives.
+            if (phase === "message") controller.setTurnActive(true);
+            controller.setReadOnly(false);
+            const stillLocked = locked(ui);
+            for (let index = 0; index < 5; index += 1) {
+              ui.textarea.dispatch("keydown", { key: "Enter", repeat: true });
+              ui.form.dispatch("submit");
+              ui.sendButton.dispatch("click");
+              await controller.submit();
+            }
+            await controller.addFiles([{ name: "extra.png", type: "image/png" }]);
+            ui.attachmentChips.children[0]?.dispatch("click");
+            const chipCountWhileSending = ui.attachmentChips.children.length;
+            const callsWhileSending = [...calls];
+            fails ? request.reject(new Error("request failed")) : request.resolve();
+            await submitted;
+
+            const after = {
+              editable: !ui.textarea.disabled && !ui.fileInput.disabled,
+              busy: ui.form["aria-busy"],
+              spinning: ui.sendButton.className.includes("is-submitting"),
+              draft: ui.textarea.value,
+              error: ui.errorTarget.textContent,
+              chips: ui.attachmentChips.children.length,
+            };
+            if (fails) {
+              controller.setTurnActive(false);
+              await controller.submit();
+            }
+            console.log(JSON.stringify({
+              immediatelyLocked, stillLocked, callsWhileSending, chipCountWhileSending, after,
+              draftAfterRetry: ui.textarea.value,
+            }));
+            """
+        ).replace("__SCENARIO__", json.dumps({"phase": phase, "fails": fails})),
+    )
+
+    expected_calls = {"session": ["session"], "upload": ["session", "upload"]}.get(phase, [phase])
+    assert output == {
+        "immediatelyLocked": True,
+        "stillLocked": True,
+        "callsWhileSending": expected_calls,
+        "chipCountWhileSending": int(phase == "upload"),
+        "after": {
+            "editable": True,
+            "busy": "false",
+            "spinning": False,
+            "draft": ("/status" if phase == "command" else "deploy a vpc") if fails else "",
+            "error": "request failed" if fails else "",
+            "chips": int(phase == "upload" and fails),
+        },
+        "draftAfterRetry": "",
+    }
+
+
+def test_composer_old_request_cannot_unlock_new_session_submission(tmp_path: Path) -> None:
+    output = _run_composer_submission_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const ui = elements();
+            const requests = { A: deferred(), B: deferred() };
+            const started = { A: deferred(), B: deferred() };
+            const controller = createComposerController(ui, {
+              postMessage(sessionId) {
+                started[sessionId].resolve();
+                return requests[sessionId].promise;
+              },
+            });
+            controller.setSession("A");
+            ui.textarea.value = "message A";
+            const submitA = controller.submit();
+            await started.A.promise;
+            controller.setSession("B");
+            const newSessionEditable = !ui.textarea.disabled;
+            ui.textarea.value = "message B";
+            const submitB = controller.submit();
+            await started.B.promise;
+            requests.A.resolve({ accepted: true });
+            await submitA;
+            const newSubmissionStillLocked = locked(ui);
+            const newDraft = ui.textarea.value;
+            controller.setReadOnly(true);
+            requests.B.resolve({ accepted: true });
+            await submitB;
+            console.log(JSON.stringify({
+              newSessionEditable, newSubmissionStillLocked, newDraft,
+              staysReadOnly: ui.textarea.disabled,
+              busy: ui.form["aria-busy"],
+            }));
+            """
+        ),
+    )
+
+    assert output == {
+        "newSessionEditable": True,
+        "newSubmissionStillLocked": True,
+        "newDraft": "message B",
+        "staysReadOnly": True,
+        "busy": "false",
+    }
+
+
+def test_composer_submission_spinner_styles() -> None:
+    styles = _source(STYLES_CSS)
+
+    assert "display: none;" in _css_block(styles, ".send-action.is-submitting .composer-icon")
+    assert "animation: iac-thread-spin" in _css_block(styles, ".send-action.is-submitting::after")
+    assert "pointer-events: none;" in _css_block(styles, ".composer.is-submitting .file-action")
 
 
 def test_composer_clears_session_scoped_draft_state_when_switching_sessions(tmp_path) -> None:
@@ -11405,7 +11620,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-380" in html
+    assert "web-repl-ui-381" in html
     assert "web-repl-ui-343" not in html
 
 

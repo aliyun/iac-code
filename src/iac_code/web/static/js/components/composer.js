@@ -582,6 +582,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   let sessionId = "";
   let sessionRevision = 0;
   let restoreRevision = 0;
+  let pendingSubmission = null;
   let turnActive = false;
   // 压缩/自动压缩进行中:与 turnActive 一样让提交进入排队(而非新起 turn),
   // 但不把发送按钮变成「停止」——压缩期间没有可中断的 turn。压缩完成后由后端排空队列。
@@ -659,7 +660,25 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   }
 
   function syncSendButtonState() {
+    const submitting = Boolean(pendingSubmission);
+    if (textarea) {
+      textarea.disabled = readOnly || submitting;
+    }
+    if (fileInput) {
+      fileInput.disabled = readOnly || submitting;
+    }
+    form?.classList?.toggle("is-submitting", submitting);
+    form?.setAttribute?.("aria-busy", String(submitting));
+    for (const button of chips?.querySelectorAll?.(".attachment-chip-remove, button.attachment-chip") || []) {
+      button.disabled = submitting;
+    }
     if (!sendButton) {
+      return;
+    }
+    sendButton.classList?.toggle("is-submitting", submitting);
+    sendButton.setAttribute("aria-busy", String(submitting));
+    if (submitting) {
+      sendButton.disabled = true;
       return;
     }
     // 运行中：发送按钮变身为"停止"按钮，需保持可点击以便中断当前轮次。
@@ -737,6 +756,9 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       const label =
         attachment.status === "ready" ? `${prefix}${attachment.name}` : `${attachment.name} · ${attachment.status}`;
       const removeAttachment = () => {
+        if (pendingSubmission) {
+          return;
+        }
         revokeAttachmentPreview(attachment);
         attachments = attachments.filter((item) => item.id !== attachment.id);
         renderAttachmentChips();
@@ -764,6 +786,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "attachment-chip-remove";
+        remove.disabled = Boolean(pendingSubmission);
         remove.setAttribute("aria-label", t("Remove {name}", { name: label }));
         remove.textContent = "×";
         remove.addEventListener("click", removeAttachment);
@@ -773,6 +796,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
         const chip = document.createElement("button");
         chip.type = "button";
         chip.className = "attachment-chip";
+        chip.disabled = Boolean(pendingSubmission);
         chip.title = label;
         chip.setAttribute("aria-label", t("Remove {name}", { name: label }));
         chip.textContent = label;
@@ -1463,6 +1487,9 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   }
 
   async function refreshSuggestions() {
+    if (pendingSubmission) {
+      return;
+    }
     const prefix = currentPrefix();
     const kind = suggestionKind(prefix);
     if (!kind) {
@@ -1503,28 +1530,27 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     if (!commandText || !sessionId) {
       return false;
     }
-    textarea.value = `${beforeCursor.slice(0, beforeCursor.length - prefix.length)}${afterCursor}`.trimStart();
-    localDraftDirty = Boolean(text(textarea.value).trim());
-    syncSendButtonState();
-    textarea.focus();
-    clearSuggestions();
-    try {
-      const result = await api.postCommand?.(sessionId, commandText);
-      options.onCommandResult?.(result);
-      options.onSubmitAccepted?.({ sessionId, result, kind: "command", text: commandText });
-    } catch (error) {
-      if (!isRecoverableError(error)) {
-        setError(error.message || t("Command failed"));
-      } else {
-        setError(error.message || t("The command was not accepted"));
+    await withSubmissionLock(async () => {
+      textarea.value = `${beforeCursor.slice(0, beforeCursor.length - prefix.length)}${afterCursor}`.trimStart();
+      localDraftDirty = Boolean(text(textarea.value).trim());
+      try {
+        const result = await api.postCommand?.(sessionId, commandText);
+        options.onCommandResult?.(result);
+        options.onSubmitAccepted?.({ sessionId, result, kind: "command", text: commandText });
+      } catch (error) {
+        if (!isRecoverableError(error)) {
+          setError(error.message || t("Command failed"));
+        } else {
+          setError(error.message || t("The command was not accepted"));
+        }
       }
-    }
+    });
     return true;
   }
 
   async function acceptSuggestion(index = activeSuggestionIndex) {
     const suggestion = visibleSuggestions[index];
-    if (!suggestion || !textarea) {
+    if (!suggestion || !textarea || pendingSubmission || readOnly) {
       return;
     }
     const value = text(textarea.value);
@@ -1577,6 +1603,9 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   }
 
   async function addFiles(files) {
+    if (pendingSubmission || readOnly) {
+      return;
+    }
     for (const file of [...(files || [])]) {
       const attachment = makeAttachment(file);
       if (!attachment.isImage) {
@@ -1735,8 +1764,31 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     resetHistoryNav();
   }
 
+  async function withSubmissionLock(action) {
+    if (pendingSubmission || readOnly) {
+      return;
+    }
+    // Acquire before the first await, including session creation and attachment uploads.
+    // Keep an identity so an old session's completion cannot unlock a newer submission.
+    const submission = {};
+    pendingSubmission = submission;
+    syncSendButtonState();
+    clearSuggestions();
+    try {
+      return await action();
+    } finally {
+      if (pendingSubmission === submission) {
+        pendingSubmission = null;
+        syncSendButtonState();
+        if (!readOnly) {
+          textarea?.focus();
+        }
+      }
+    }
+  }
+
   async function submit() {
-    if (!textarea) {
+    if (!textarea || pendingSubmission || readOnly) {
       return;
     }
     const draft = textarea.value;
@@ -1762,6 +1814,10 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       );
       return;
     }
+    await withSubmissionLock(() => sendDraft(draft, submittedDraft, submittedSessionRevision, submittedRestoreRevision));
+  }
+
+  async function sendDraft(draft, submittedDraft, submittedSessionRevision, submittedRestoreRevision) {
     let activeSessionId;
     let payload;
     try {
@@ -1961,6 +2017,10 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   });
 
   textarea?.addEventListener("keydown", (event) => {
+    if (pendingSubmission) {
+      event.preventDefault();
+      return;
+    }
     // IME 组合输入中(如中文输入法选词)时,Enter/方向键等按键属于输入法:
     // 不能触发提交、联想或历史导航,否则回车会直接提交而不是上屏候选。
     // keyCode 229 是组合期事件在部分内核下的兜底标识。
@@ -2038,6 +2098,10 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   });
   // 发送按钮在运行中充当"停止"：点击时中断当前轮次，而不是触发表单提交。
   sendButton?.addEventListener("click", (event) => {
+    if (pendingSubmission) {
+      event.preventDefault();
+      return;
+    }
     if (turnActive) {
       event.preventDefault();
       void stopCurrentTurn();
@@ -2112,6 +2176,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       const preserveDraft = sessionOptions.preserveDraft === true;
       if (next !== sessionId && !preserveDraft) {
         sessionRevision += 1;
+        pendingSubmission = null;
         if (textarea) {
           textarea.value = "";
         }
@@ -2133,9 +2198,6 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     },
     setReadOnly(value) {
       readOnly = Boolean(value);
-      if (textarea) {
-        textarea.disabled = readOnly;
-      }
       syncPlaceholder();
       syncSendButtonState();
     },

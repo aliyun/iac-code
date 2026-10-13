@@ -22,12 +22,15 @@ function parseArgs(argv) {
     host: "127.0.0.1",
     port: 8767,
     headed: false,
+    composerOnly: false,
     installPlaywrightCore: process.env.IAC_CODE_WEB_SMOKE_INSTALL_PLAYWRIGHT === "1",
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--headed") {
       args.headed = true;
+    } else if (arg === "--composer-only") {
+      args.composerOnly = true;
     } else if (arg === "--install-playwright-core") {
       args.installPlaywrightCore = true;
     } else if (arg === "--host") {
@@ -286,7 +289,7 @@ async function main() {
     });
 
     const composer = page.locator('[data-app-shell="composer-input"]');
-    await check("composer Shift+Enter inserts newline and Enter submits", async () => {
+    await check("composer locks delayed submissions and Shift+Enter inserts newline", async () => {
       await composer.fill("Smoke line 1");
       await composer.press("Shift+Enter");
       await composer.type("Smoke line 2");
@@ -294,15 +297,63 @@ async function main() {
       if (!draft.includes("\n")) {
         throw new Error("Shift+Enter did not insert a newline");
       }
-      await composer.press("Enter");
+      let releaseMessage;
+      const messageGate = new Promise((resolve) => { releaseMessage = resolve; });
+      let messageRequests = 0;
+      const messageRoute = async (route) => {
+        messageRequests += 1;
+        await messageGate;
+        await route.continue();
+      };
+      await page.route("**/api/sessions/*/messages", messageRoute);
+      try {
+        const messageStarted = page.waitForRequest("**/api/sessions/*/messages", { timeout: 10000 });
+        await composer.press("Enter");
+        await messageStarted;
+        await page.waitForFunction(() => {
+          const send = document.querySelector('[data-app-shell="composer-send"]');
+          const input = document.querySelector('[data-app-shell="composer-input"]');
+          return send?.disabled && send.classList.contains("is-submitting") && input?.disabled;
+        });
+        const spinner = await page.locator('[data-app-shell="composer-send"]').evaluate((button) => {
+          const icon = button.querySelector(".composer-icon-send");
+          return {
+            animation: getComputedStyle(button, "::after").animationName,
+            iconHidden: getComputedStyle(icon).display === "none",
+          };
+        });
+        if (spinner.animation !== "iac-thread-spin" || !spinner.iconHidden) {
+          throw new Error(`pending submission spinner is missing: ${JSON.stringify(spinner)}`);
+        }
+        for (let index = 0; index < 5; index += 1) {
+          await page.keyboard.press("Enter");
+          await page.evaluate(() => document.querySelector('[data-app-shell="composer-form"]').requestSubmit());
+        }
+        if (await composer.inputValue() !== draft) {
+          throw new Error("pending submission changed the draft");
+        }
+        await page.screenshot({ path: path.join(os.tmpdir(), "iac-code-web-e2e-submitting.png") });
+      } finally {
+        releaseMessage();
+      }
       await expectText(page, "Smoke line 2");
       await expectText(page, "normal assistant response from fake runtime");
+      await page.waitForFunction(() => !document.querySelector('[data-app-shell="composer-input"]')?.disabled);
+      await page.unroute("**/api/sessions/*/messages", messageRoute);
+      if (messageRequests !== 1 || await composer.inputValue() !== "") {
+        throw new Error(`delayed submission produced ${messageRequests} requests or failed to clear its draft`);
+      }
       await page.locator(".session-item.is-active").waitFor({ state: "visible", timeout: 10000 });
       const sessionId = await activeSessionId(page);
       if (!sessionId || sessionId.trim() === "-") {
         throw new Error("first submit did not materialize an active session");
       }
     });
+
+    if (args.composerOnly) {
+      console.log(JSON.stringify({ status: "passed", checks }, null, 2));
+      return;
+    }
 
     await check("assistant tool card renders", async () => {
       await expectText(page, "fakeRosPlan");
