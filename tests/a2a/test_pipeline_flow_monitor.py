@@ -230,9 +230,16 @@ async def test_close_cancels_sleeping_watcher_without_sampling_delay(tmp_path: P
     await monitor.start()
     monitor.event_enqueued(_item(clock))
     await asyncio.sleep(0)
-    await asyncio.wait_for(monitor.close(aborted=True), timeout=0.2)
     assert monitor._watch_task is not None
+    close_task = asyncio.create_task(monitor.close(aborted=True))
+    try:
+        # Log I/O has its own deadline; only watcher cancellation must finish
+        # before the next sampling interval, regardless of disk latency.
+        await asyncio.wait_for(asyncio.gather(monitor._watch_task, return_exceptions=True), timeout=0.2)
+    finally:
+        await close_task
     assert monitor._watch_task.done()
+    assert monitor._watch_task.cancelled()
 
 
 @pytest.mark.asyncio
