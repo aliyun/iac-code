@@ -593,7 +593,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                     continue
                 detail = {}
                 for field in ("stdout_length", "stderr_length", "text_length", "parse_error_line",
-                              "parse_error_column", "parse_error_count", "line_count"):
+                              "parse_error_column", "parse_error_count", "line_count", "tool_error_count",
+                              "permission_denial_count"):
                     value = raw.get(field)
                     if type(value) is int and 0 <= value <= 1024 * 1024 * 1024:
                         detail[field] = value
