@@ -584,6 +584,45 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
     raw_diagnostics = summary.get("diagnostics")
     if isinstance(raw_diagnostics, dict):
         diagnostics: dict[str, Any] = {}
+        headless = raw_diagnostics.get("headless_output")
+        if isinstance(headless, dict):
+            output_details = {}
+            for output_format in ("text", "json", "stream-json"):
+                raw = headless.get(output_format)
+                if not isinstance(raw, dict):
+                    continue
+                detail = {}
+                for field in ("stdout_length", "stderr_length", "text_length", "parse_error_line",
+                              "parse_error_column", "parse_error_count", "line_count"):
+                    value = raw.get(field)
+                    if type(value) is int and 0 <= value <= 1024 * 1024 * 1024:
+                        detail[field] = value
+                if type(raw.get("exit_code")) is int and -128 <= raw["exit_code"] <= 255:
+                    detail["exit_code"] = raw["exit_code"]
+                for field in ("json_valid", "json_object", "text_field_present", "usage_field_present",
+                              "usage_object", "input_tokens_integer", "error_present"):
+                    if type(raw.get(field)) is bool:
+                        detail[field] = raw[field]
+                if raw.get("error_category") in {
+                    "none", "other", "rate_limit", "authentication", "timeout", "connection", "max_turns",
+                }:
+                    detail["error_category"] = raw["error_category"]
+                for field, allowed in {
+                    "event_counts": {"text_delta", "thinking_delta", "message_end", "error", "tool_use_start",
+                                     "tool_use_end", "tool_result", "tool_input_delta", "permission_request", "other"},
+                    "stop_reason_counts": {"end_turn", "tool_use", "max_turns", "stop_sequence", "max_tokens", "other"},
+                    "checks": {"JSON parsed successfully", "contains text field", "text is non-empty",
+                               "contains usage field", "usage contains input_tokens", "at least 3 event lines",
+                               "all lines are valid JSON", "contains text_delta events", "contains message_end event"},
+                }.items():
+                    values = raw.get(field)
+                    if isinstance(values, dict):
+                        detail[field] = {key: value for key, value in values.items() if key in allowed and (
+                            type(value) is bool if field == "checks"
+                            else type(value) is int and 0 <= value <= 1000000
+                        )}
+                output_details[output_format] = detail
+            diagnostics["headless_output"] = output_details
         categories = raw_diagnostics.get("2c4g_constraint_categories")
         allowed_categories = {
             "property:" + value for value in {

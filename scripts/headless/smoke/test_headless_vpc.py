@@ -29,6 +29,78 @@ FAIL = "[FAIL]"
 INFO = "[INFO]"
 HEADLESS_WORKSPACE = "."
 TEXT_DIAGNOSTICS: dict[str, int | bool] = {}
+OUTPUT_DIAGNOSTICS: dict[str, dict] = {}
+
+
+def _record_output_diagnostics(output_format: str, result: subprocess.CompletedProcess) -> None:
+    """Record output shape and error categories without exporting model output."""
+    stdout = result.stdout.strip()
+    detail = {
+        "exit_code": result.returncode,
+        "stdout_length": len(stdout),
+        "stderr_length": len(result.stderr),
+    }
+    error_text = result.stderr
+    if output_format == "json":
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            detail.update(json_valid=False, parse_error_line=exc.lineno, parse_error_column=exc.colno)
+        else:
+            detail.update(json_valid=True, json_object=isinstance(data, dict))
+            if isinstance(data, dict):
+                usage = data.get("usage")
+                text = data.get("text")
+                detail.update(
+                    text_field_present="text" in data,
+                    text_length=len(text) if isinstance(text, str) else 0,
+                    usage_field_present="usage" in data,
+                    usage_object=isinstance(usage, dict),
+                    input_tokens_integer=isinstance(usage, dict) and isinstance(usage.get("input_tokens"), int),
+                    error_present=bool(data.get("error")),
+                )
+                error_text += "\n" + str(data.get("error", ""))
+    elif output_format == "stream-json":
+        events: dict[str, int] = {}
+        stops: dict[str, int] = {}
+        parse_errors = 0
+        lines = stdout.splitlines()
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                parse_errors += 1
+                continue
+            kind = event.get("type") if isinstance(event, dict) else None
+            if kind not in {"text_delta", "thinking_delta", "message_end", "error", "tool_use_start",
+                            "tool_use_end", "tool_result", "tool_input_delta", "permission_request"}:
+                kind = "other"
+            events[kind] = events.get(kind, 0) + 1
+            if kind == "message_end":
+                stop = event.get("stop_reason")
+                if stop not in {"end_turn", "tool_use", "max_turns", "stop_sequence", "max_tokens"}:
+                    stop = "other"
+                stops[stop] = stops.get(stop, 0) + 1
+            elif kind == "error":
+                error_text += "\n" + str(event.get("error", ""))
+        detail.update(line_count=len([line for line in lines if line.strip()]), parse_error_count=parse_errors,
+                      event_counts=events, stop_reason_counts=stops)
+    error_lower = error_text.lower()
+    category = "none" if not error_lower.strip() else "other"
+    for label, markers in (
+        ("rate_limit", ("ratelimit", "rate limit", "rate_limit", "throttl", "too many requests")),
+        ("authentication", ("invalid_api_key", "invalid api key", "unauthorized", "authenticationerror")),
+        ("timeout", ("timeout", "timed out")),
+        ("connection", ("connectionerror", "connection error", "connection reset", "connecterror")),
+        ("max_turns", ("max_turns", "max turns")),
+    ):
+        if any(marker in error_lower for marker in markers):
+            category = label
+            break
+    detail["error_category"] = category
+    OUTPUT_DIAGNOSTICS[output_format] = detail
 
 
 def run_headless(output_format: str, extra_args: list[str] | None = None) -> subprocess.CompletedProcess:
@@ -65,6 +137,7 @@ def run_headless(output_format: str, extra_args: list[str] | None = None) -> sub
 def test_text_output():
     print("\n=== Test 1: headless text output ===")
     result = run_headless("text")
+    _record_output_diagnostics("text", result)
     TEXT_DIAGNOSTICS.update(
         text_exit_code=result.returncode,
         text_output_length=len(result.stdout.strip()),
@@ -107,6 +180,7 @@ def test_text_output():
 def test_json_output():
     print("\n=== Test 2: headless JSON output ===")
     result = run_headless("json")
+    _record_output_diagnostics("json", result)
 
     if result.returncode != 0:
         print(f"{FAIL} Process exited with non-zero code: {result.returncode}")
@@ -126,13 +200,18 @@ def test_json_output():
         print(f"{INFO} Raw output first 300 chars: {stdout[:300]}")
         return False
 
+    if not isinstance(data, dict):
+        print(f"{FAIL} JSON output is not an object")
+        return False
+    usage = data.get("usage")
     checks = {
         "JSON parsed successfully": True,
         "contains text field": "text" in data,
         "text is non-empty": bool(data.get("text")),
         "contains usage field": "usage" in data,
-        "usage contains input_tokens": isinstance(data.get("usage", {}).get("input_tokens"), int),
+        "usage contains input_tokens": isinstance(usage, dict) and isinstance(usage.get("input_tokens"), int),
     }
+    OUTPUT_DIAGNOSTICS["json"]["checks"] = checks
 
     all_pass = True
     for desc, ok in checks.items():
@@ -152,6 +231,7 @@ def test_json_output():
 def test_stream_json_output():
     print("\n=== Test 3: headless stream-json output ===")
     result = run_headless("stream-json")
+    _record_output_diagnostics("stream-json", result)
 
     if result.returncode != 0:
         print(f"{FAIL} Process exited with non-zero code: {result.returncode}")
@@ -185,6 +265,7 @@ def test_stream_json_output():
         "contains text_delta events": type_counts.get("text_delta", 0) > 0,
         "contains message_end event": type_counts.get("message_end", 0) > 0,
     }
+    OUTPUT_DIAGNOSTICS["stream-json"]["checks"] = checks
 
     all_pass = True
     for desc, ok in checks.items():
@@ -235,7 +316,8 @@ def main():
     if args.run_dir is not None:
         (args.run_dir / "summary.json").write_text(
             json.dumps(
-                {"passed": all_pass, "checks": results, "diagnostics": TEXT_DIAGNOSTICS},
+                {"passed": all_pass, "checks": results,
+                 "diagnostics": {**TEXT_DIAGNOSTICS, "headless_output": OUTPUT_DIAGNOSTICS}},
                 ensure_ascii=False,
                 indent=2,
             ) + "\n",
