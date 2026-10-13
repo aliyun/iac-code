@@ -125,10 +125,9 @@ def run_headless(output_format: str, extra_args: list[str] | None = None) -> sub
         "-p", PROMPT,
         "--output-format", output_format,
         "--max-turns", "20",
-        "--permission-mode", "dont_ask",
-        # Generation skills save templates before returning them. Permit local
-        # editing while retaining dont_ask for other approval-required tools.
-        "--allowed-tools", "write_file,edit_file",
+        # Generation skills save and inspect local templates. Keep the normal
+        # headless approval flow, including its cloud-write rejection guard.
+        "--permission-mode", "accept_edits",
     ]
     if extra_args:
         cmd.extend(extra_args)
