@@ -23,6 +23,7 @@ function parseArgs(argv) {
     port: 8767,
     headed: false,
     composerOnly: false,
+    desktopLinksOnly: false,
     installPlaywrightCore: process.env.IAC_CODE_WEB_SMOKE_INSTALL_PLAYWRIGHT === "1",
   };
   for (let index = 0; index < argv.length; index += 1) {
@@ -31,6 +32,8 @@ function parseArgs(argv) {
       args.headed = true;
     } else if (arg === "--composer-only") {
       args.composerOnly = true;
+    } else if (arg === "--desktop-links-only") {
+      args.desktopLinksOnly = true;
     } else if (arg === "--install-playwright-core") {
       args.installPlaywrightCore = true;
     } else if (arg === "--host") {
@@ -267,6 +270,18 @@ async function main() {
     await waitForHealth(url, server);
     browser = await launchBrowser(playwright, args.headed);
     const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+    if (args.desktopLinksOnly) {
+      await context.route("**/api/desktop/git-bash", (route) => route.fulfill({ json: { status: "not_required" } }));
+      await context.addInitScript(() => {
+        window.__IAC_DESKTOP__ = { runtime: "desktop", platform: "macos", capabilities: {} };
+        window.__desktopLinkCalls = [];
+        window.__TAURI__ = { core: { invoke: async (command, payload) => {
+          if (command !== "open_external_url") throw new Error(`unexpected native command: ${command}`);
+          window.__desktopLinkCalls.push(payload.url);
+          if (window.__failDesktopLink) throw new Error("fake native browser failure");
+        } } };
+      });
+    }
     const page = await context.newPage();
     page.on("console", (message) => {
       consoleMessages.push(message.text());
@@ -278,7 +293,6 @@ async function main() {
       consoleMessages.push(error.message);
       consoleErrors.push(error.message);
     });
-
     await check("app loads in an unpersisted new-session draft", async () => {
       await page.goto(url, { waitUntil: "domcontentloaded" });
       await waitReady(page);
@@ -287,6 +301,58 @@ async function main() {
         throw new Error("new-session draft was persisted before the first message");
       }
     });
+
+    if (args.desktopLinksOnly) {
+      const destination = "https://desktop-link.example.test/docs?source=chat#details";
+      const addMarkdownLink = async (targetPage) => {
+        await targetPage.evaluate(async (href) => {
+          const moduleUrl = document.querySelector('script[type="module"][src*="/app.js"]').src;
+          const { renderMarkdownInto } = await import(moduleUrl);
+          const message = document.createElement("article");
+          message.className = "markdown-body desktop-link-smoke";
+          renderMarkdownInto(message, `[Open documentation](${href})`);
+          document.querySelector('[data-app-shell="message-stack"]').append(message);
+        }, destination);
+      };
+      await check("Desktop streamed Markdown links call the native opener exactly once", async () => {
+        await addMarkdownLink(page);
+        await page.locator(".desktop-link-smoke a").click();
+        await page.waitForFunction(() => window.__desktopLinkCalls.length === 1);
+        const calls = await page.evaluate(() => window.__desktopLinkCalls);
+        if (calls[0] !== destination || context.pages().length !== 1 || page.url() !== `${url}/`) {
+          throw new Error(`Desktop link did not use the native opener: ${JSON.stringify(calls)}`);
+        }
+      });
+      await check("Desktop native opener failures show a visible toast", async () => {
+        await page.evaluate(() => { window.__failDesktopLink = true; });
+        await page.locator(".desktop-link-smoke a").click();
+        await page.locator('[data-app-shell="app-toast"]').waitFor({ state: "visible" });
+        const message = await page.locator('[data-app-shell="app-toast"]').textContent();
+        const expected = await page.evaluate(() => {
+          const msgid = "Could not open the link. Please try again.";
+          return window.__IAC_I18N__?.messages?.[msgid] || msgid;
+        });
+        if (message !== expected) throw new Error(`unexpected link error toast: ${message}`);
+      });
+      await check("Web Markdown links still open a normal browser tab", async () => {
+        const webContext = await browser.newContext();
+        await webContext.route("https://desktop-link.example.test/**", (route) => route.fulfill({ body: "Fake documentation" }));
+        const webPage = await webContext.newPage();
+        await webPage.goto(url, { waitUntil: "domcontentloaded" });
+        await waitReady(webPage);
+        await addMarkdownLink(webPage);
+        const [popup] = await Promise.all([
+          webPage.waitForEvent("popup"),
+          webPage.locator(".desktop-link-smoke a").click(),
+        ]);
+        await popup.waitForLoadState("domcontentloaded");
+        if (popup.url() !== destination) throw new Error(`unexpected Web link destination: ${popup.url()}`);
+        await webContext.close();
+      });
+      if (consoleErrors.length > 0) throw new Error(consoleErrors.join("\n"));
+      console.log(JSON.stringify({ status: "passed", checks }, null, 2));
+      return;
+    }
 
     const composer = page.locator('[data-app-shell="composer-input"]');
     await check("composer locks delayed submissions and Shift+Enter inserts newline", async () => {

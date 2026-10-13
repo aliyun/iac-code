@@ -4313,3 +4313,7 @@ msgstr ""
 #~ "As alterações entram em vigor após "
 #~ "reiniciar o ambiente de execução local"
 #~ " do Desktop."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not open the link. Please try again."
+msgstr "Não foi possível abrir o link. Tente novamente."

@@ -4168,3 +4168,7 @@ msgstr "本地运行时无法重新启动。请打开诊断目录查看详情。
 
 #~ msgid "Changes take effect after restarting the Desktop local runtime."
 #~ msgstr "重新启动 Desktop 本地运行时后，更改才会生效。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not open the link. Please try again."
+msgstr "无法打开链接，请重试。"

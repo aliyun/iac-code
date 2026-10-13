@@ -4338,3 +4338,7 @@ msgstr ""
 #~ msgstr ""
 #~ "Änderungen werden nach dem Neustart der"
 #~ " lokalen Desktop-Laufzeit wirksam."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not open the link. Please try again."
+msgstr "Der Link konnte nicht geöffnet werden. Bitte erneut versuchen."
