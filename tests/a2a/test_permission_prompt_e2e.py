@@ -274,7 +274,7 @@ def test_new_prompt_cancels_unexecuted_permission_batch(tmp_path, monkeypatch, r
 
 @pytest.mark.integration
 @pytest.mark.parametrize("restart", [False, True], ids=["same-process", "after-restart"])
-def test_permission_confirmation_continues_existing_batch(tmp_path, monkeypatch, restart):
+def test_permission_confirmation_continues_batch_and_accepts_next_prompt(tmp_path, monkeypatch, restart):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "workspace").mkdir()
     server = Server(tmp_path)
@@ -337,12 +337,22 @@ def test_permission_confirmation_continues_existing_batch(tmp_path, monkeypatch,
         # applying its decision. Check approval and replay safety separately.
         assert checkpoints.find_by_input_id(third["inputId"])["decision"]["status"] == "applied"
 
+        # Check the next ordinary message before replaying any old permission
+        # reply, so a stale click cannot explain a failure to release execution.
+        next_events = server.send("new prompt")
+        next_output = json.dumps(next_events)
+        assert not any("error" in event for event in next_events), next_events
+        assert "Current execution is active in another process" not in next_output, next_events
+        assert "handled new prompt" in next_output, next_events
+        assert len(executions_path.read_text(encoding="utf-8").splitlines()) == 3
+        assert len(inputs_path.read_text(encoding="utf-8").splitlines()) == 3
+
         # Repeated confirmations must acknowledge/reject the old receipt,
         # without executing the already completed batch a second time.
         for permission in (second, third):
             server.send(_reply(permission), task_id=permission["requestTaskId"])
         assert len(executions_path.read_text(encoding="utf-8").splitlines()) == 3
-        assert len(inputs_path.read_text(encoding="utf-8").splitlines()) == 2
+        assert len(inputs_path.read_text(encoding="utf-8").splitlines()) == 3
     finally:
         server.stop()
         server.client.close()

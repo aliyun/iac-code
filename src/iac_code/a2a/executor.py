@@ -1738,7 +1738,12 @@ class IacCodeA2AExecutor(AgentExecutor):
                             )
                         else:
                             try:
-                                await existing.attach_task(current_task, mark_working=True)
+                                # Permission replies continue the active turn;
+                                # its original stream still owns completion.
+                                if permission_response is not None:
+                                    await existing.attach_task(current_task, mark_working=True, advance_turn=False)
+                                else:
+                                    await existing.attach_task(current_task, mark_working=True)
                             except ExecutionControlConflictError:
                                 # A natural claim/ACK can win after the first
                                 # proof read. Absorb only this pre-business

@@ -160,6 +160,14 @@ PERMISSION_CASES = (
     )
     for mode in ("normal", "pipeline")
     for decision in ("allow_once", "deny")
+) + tuple(
+    Case(
+        "permission-{}-{}".format(scenario, mode),
+        "scripts/a2a/e2e/permission_wait/run_permission_prompt_handoff.py",
+        ("--scenario", scenario, "--mode", mode), 90, "full",
+    )
+    for scenario in ("prompt-supersede", "confirmation-followup")
+    for mode in ("same-process", "after-restart")
 ) + (
     Case(
         "permission-pipeline-candidate-first", PERMISSION_SCRIPT,
