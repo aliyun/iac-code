@@ -1102,13 +1102,16 @@ class ExecutionController:
         finally:
             await self.end_activity(activity_id)
 
-    async def attach_task(self, task: asyncio.Task[Any], *, mark_working: bool = True) -> int:
+    async def attach_task(
+        self, task: asyncio.Task[Any], *, mark_working: bool = True, advance_turn: bool = True
+    ) -> int:
         async with self._condition:
             if self.phase in {"terminating", "terminated"}:
                 raise ExecutionControlConflictError("Execution is terminating")
             generation = self._turn_generation_by_task.get(task)
             if generation is None:
-                self._turn_generation += 1
+                if advance_turn or self._turn_generation == 0:
+                    self._turn_generation += 1
                 generation = self._turn_generation
                 self._turn_generation_by_task[task] = generation
                 self._natural_completion_generation = None

@@ -350,6 +350,33 @@ async def test_new_execution_waits_for_natural_finalized_cleanup(tmp_path: Path)
 
 
 @pytest.mark.asyncio
+async def test_permission_reply_preserves_parent_completion_generation(tmp_path: Path) -> None:
+    control = _controller(tmp_path)
+    current = asyncio.current_task()
+    assert current is not None
+    parent_generation = await control.attach_task(current)
+
+    async def answer_permission() -> None:
+        reply_task = asyncio.current_task()
+        assert reply_task is not None
+        assert await control.attach_task(reply_task, advance_turn=False) == parent_generation
+        assert await control.detach_task(reply_task, execution_status="working") is None
+
+    await asyncio.create_task(answer_permission())
+    completion_generation = await control.detach_task(
+        current, execution_status="input-required", natural_completion=True
+    )
+    assert completion_generation == parent_generation
+    settled = await control.finalize_natural_completion(
+        task_id="task-1", completion_generation=completion_generation
+    )
+    assert settled["phase"] == "terminated"
+    assert settled["terminationReason"] == "natural_completion"
+    await _wait_for_condition(lambda: control.release_ready)
+    await control.close()
+
+
+@pytest.mark.asyncio
 async def test_old_response_boundary_cannot_finalize_newer_same_task_turn(tmp_path: Path) -> None:
     control = _controller(tmp_path)
     current = asyncio.current_task()
