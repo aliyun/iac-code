@@ -124,3 +124,9 @@ def test_tool_denials_are_counted_without_exporting_result_content():
     exported = run_e2e._public_live_summary({"diagnostics": {"headless_output": smoke.OUTPUT_DIAGNOSTICS}})
     assert exported["diagnostics"]["headless_output"]["json"] == detail
     assert "private" not in json.dumps(exported)
+
+
+def test_text_output_does_not_claim_unobservable_tool_results():
+    smoke._record_output_diagnostics("text", subprocess.CompletedProcess([], 0, "VPC", ""))
+    assert "tool_error_count" not in smoke.OUTPUT_DIAGNOSTICS["text"]
+    assert "permission_denial_count" not in smoke.OUTPUT_DIAGNOSTICS["text"]
