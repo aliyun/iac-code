@@ -4341,3 +4341,7 @@ msgstr ""
 #~ "Les modifications prennent effet après "
 #~ "le redémarrage de l’environnement d’exécution"
 #~ " local Desktop."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not open the link. Please try again."
+msgstr "Impossible d’ouvrir le lien. Veuillez réessayer."

@@ -104,6 +104,14 @@ def test_desktop_stack_links_use_allowlisted_native_external_opener() -> None:
         assert "allow-open-external-url" in capability["permissions"]
 
 
+def test_desktop_disables_opener_plugin_automatic_click_interception() -> None:
+    lib_rs = (SRC_TAURI / "src/lib.rs").read_text(encoding="utf-8")
+
+    assert "tauri_plugin_opener::Builder::new()" in lib_rs
+    assert ".open_js_links_on_click(false)" in lib_rs
+    assert "tauri_plugin_opener::init()" not in lib_rs
+
+
 def test_windows_release_host_uses_gui_subsystem() -> None:
     main_rs = (SRC_TAURI / "src/main.rs").read_text(encoding="utf-8")
 

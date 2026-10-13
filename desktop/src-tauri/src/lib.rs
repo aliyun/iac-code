@@ -894,7 +894,13 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                // Web links use our origin-checked open_external_url command. The
+                // plugin's default click hook invokes a separate, ungranted IPC command.
+                .open_js_links_on_click(false)
+                .build(),
+        );
 
     #[cfg(feature = "updater")]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());

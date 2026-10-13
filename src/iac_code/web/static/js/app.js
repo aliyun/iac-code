@@ -32,6 +32,36 @@ async function invokeDesktop(command, payload = {}) {
   return invoke(command, payload);
 }
 
+export function bindDesktopExternalLinks(target, openExternal, onError) {
+  const openLink = async (event) => {
+    if (event.defaultPrevented || ![0, 1].includes(event.button) || event.altKey) {
+      return;
+    }
+    const anchor = event.target?.closest?.("a[href]");
+    if (!anchor || anchor.hasAttribute("download")) {
+      return;
+    }
+    let url;
+    try {
+      url = new URL(anchor.getAttribute("href"), window.location.href);
+    } catch (_error) {
+      return;
+    }
+    if (!["http:", "https:"].includes(url.protocol) || url.origin === window.location.origin) {
+      return;
+    }
+    event.preventDefault();
+    try {
+      await openExternal(url.href);
+    } catch (error) {
+      onError?.(error);
+    }
+  };
+  // Delegate so streamed Markdown and newly rendered links need no rebinding.
+  target.addEventListener("click", openLink);
+  target.addEventListener("auxclick", openLink);
+}
+
 export function desktopGitBashNeedsGuide(payload = {}) {
   return text(payload?.status).toLowerCase() === "unavailable";
 }
@@ -7264,6 +7294,13 @@ async function start() {
   applyDomI18n(document);
   if (!root) {
     return;
+  }
+  if (DESKTOP_RUNTIME) {
+    bindDesktopExternalLinks(
+      document,
+      (url) => invokeDesktop("open_external_url", { url }),
+      () => showAppToast(t("Could not open the link. Please try again.")),
+    );
   }
   composer = createComposerController(
     {

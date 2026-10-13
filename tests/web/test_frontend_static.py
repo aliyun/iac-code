@@ -1000,6 +1000,110 @@ def test_markdown_links_open_in_new_tab_without_opener(tmp_path) -> None:
     }
 
 
+@pytest.mark.parametrize("button,modifiers", [(0, {}), (1, {}), (0, {"ctrlKey": True}), (0, {"metaKey": True})])
+def test_desktop_external_links_use_native_command_for_delegated_clicks(
+    tmp_path: Path, button: int, modifiers: dict[str, bool]
+) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById() { return null; } };
+            globalThis.window = { location: new URL("http://127.0.0.1:8767/") };
+            const { bindDesktopExternalLinks } = await import(__APP_MODULE__);
+            const handlers = {};
+            const calls = [];
+            const errors = [];
+            bindDesktopExternalLinks(
+              { addEventListener(type, handler) { handlers[type] = handler; } },
+              async (url) => { calls.push(url); throw new Error("native open failed"); },
+              (error) => errors.push(error.message),
+            );
+            // The anchor is created after binding, as it would be in streamed Markdown.
+            const anchor = {
+              getAttribute() { return "https://example.test/path?x=1#details"; },
+              hasAttribute() { return false; },
+            };
+            const event = {
+              ...__EVENT__,
+              defaultPrevented: false,
+              target: { closest(selector) { return selector === "a[href]" ? anchor : null; } },
+              preventDefault() { this.defaultPrevented = true; },
+            };
+            await handlers[event.button === 1 ? "auxclick" : "click"](event);
+            console.log(JSON.stringify({ calls, errors, prevented: event.defaultPrevented }));
+            """
+        ).replace("__EVENT__", json.dumps({"button": button, **modifiers})),
+    )
+
+    assert output == {
+        "calls": ["https://example.test/path?x=1#details"],
+        "errors": ["native open failed"],
+        "prevented": True,
+    }
+
+
+@pytest.mark.parametrize(
+    "href,event_options,download",
+    [
+        ("/diagram-preview", {}, False),
+        ("#details", {}, False),
+        ("http://127.0.0.1:8767/outputs", {}, False),
+        ("mailto:user@example.test", {}, False),
+        ("javascript:alert(1)", {}, False),
+        ("file:///tmp/output.yaml", {}, False),
+        ("https://[invalid", {}, False),
+        ("https://example.test", {"defaultPrevented": True}, False),
+        ("https://example.test", {"button": 2}, False),
+        ("https://example.test", {"altKey": True}, False),
+        ("https://example.test", {}, True),
+    ],
+)
+def test_desktop_external_link_handler_preserves_other_clicks(
+    tmp_path: Path, href: str, event_options: dict[str, object], download: bool
+) -> None:
+    output = _run_app_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            globalThis.document = { getElementById() { return null; } };
+            globalThis.window = { location: new URL("http://127.0.0.1:8767/") };
+            const { bindDesktopExternalLinks } = await import(__APP_MODULE__);
+            const { href, eventOptions, download } = __SCENARIO__;
+            const handlers = {};
+            const calls = [];
+            bindDesktopExternalLinks(
+              { addEventListener(type, handler) { handlers[type] = handler; } },
+              (url) => calls.push(url),
+            );
+            let preventCalls = 0;
+            await handlers.click({
+              button: 0,
+              ...eventOptions,
+              target: {
+                closest() {
+                  return { getAttribute: () => href, hasAttribute: () => download };
+                },
+              },
+              preventDefault() { preventCalls += 1; },
+            });
+            console.log(JSON.stringify({ calls, preventCalls }));
+            """
+        ).replace("__SCENARIO__", json.dumps({"href": href, "eventOptions": event_options, "download": download})),
+    )
+
+    assert output == {"calls": [], "preventCalls": 0}
+
+
+def test_external_link_interception_is_only_bound_in_desktop_runtime() -> None:
+    source = _source(APP_JS)
+    start_body = source.split("async function start() {", 1)[1]
+
+    assert "if (DESKTOP_RUNTIME) {\n    bindDesktopExternalLinks(" in start_body
+    assert '(url) => invokeDesktop("open_external_url", { url })' in start_body
+    assert 'showAppToast(t("Could not open the link. Please try again."))' in start_body
+
+
 def test_markdown_mermaid_fence_uses_shared_renderer(tmp_path) -> None:
     output = _run_app_script(
         tmp_path,
@@ -1828,7 +1932,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-324" in html
-    assert "/static/js/app.js?v=web-repl-ui-381" in html
+    assert "/static/js/app.js?v=web-repl-ui-382" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1862,7 +1966,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-381" in index_html
+    assert "web-repl-ui-382" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-324" in app_source
@@ -11620,7 +11724,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-381" in html
+    assert "web-repl-ui-382" in html
     assert "web-repl-ui-343" not in html
 
 

@@ -37,6 +37,9 @@ src/iac_code/web/static/js/api.js
 src/iac_code/web/static/js/app.js
 src/iac_code/web/static/js/components/workspace.js
 src/iac_code/web/static/js/components/output_panel.js
+# Desktop shares the composer submission state and the offline browser smoke harness.
+src/iac_code/web/static/js/components/composer.js
+scripts/web/e2e/web_repl_smoke.mjs
 tests/web/test_frontend_static.py
 # Desktop reuses the Web command suggestion endpoint; keep its non-blocking
 # dynamic MCP snapshot regression test inside the explicit shared boundary.
