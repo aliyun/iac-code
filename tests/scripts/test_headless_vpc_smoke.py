@@ -1,7 +1,10 @@
 """Offline failures retain the smoke acceptance and explain output shape."""
 
+import asyncio
+import io
 import json
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -84,12 +87,16 @@ def test_public_output_diagnostics_reject_unstructured_content():
 
 
 @pytest.mark.asyncio
-async def test_smoke_command_allows_template_file_without_allowing_cloud_mutation(monkeypatch, tmp_path):
+async def test_smoke_permission_flow_allows_local_work_and_rejects_cloud_writes(monkeypatch, tmp_path):
+    from iac_code.cli.headless import HeadlessRunner
+    from iac_code.cli.output_formats import OutputFormat
     from iac_code.services.permissions.loader import parse_cli_permission_mode
     from iac_code.services.permissions.pipeline import check_tool_permission
+    from iac_code.tools.bash.bash_tool import BashTool
     from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
     from iac_code.tools.write_file import WriteFileTool
-    from iac_code.types.permissions import ToolPermissionContext
+    from iac_code.types.permissions import PermissionMode, ToolPermissionContext
+    from iac_code.types.stream_events import MessageEndEvent, PermissionRequestEvent, Usage
 
     commands = []
 
@@ -101,16 +108,43 @@ async def test_smoke_command_allows_template_file_without_allowing_cloud_mutatio
     smoke.run_headless("json")
     command = commands[0]
     mode = parse_cli_permission_mode(command[command.index("--permission-mode") + 1])
-    allow = command[command.index("--allowed-tools") + 1].split(",")
-    context = ToolPermissionContext(mode=mode, cwd=str(tmp_path), allow_rules={"cli_arg": allow},
-                                    deny_rules={}, ask_rules={})
+    context = ToolPermissionContext(mode=mode, cwd=str(tmp_path), allow_rules={}, deny_rules={}, ask_rules={})
     generated_file = {"file_path": str(tmp_path / "template.json"), "content": "{}"}
-    old_context = ToolPermissionContext(mode=mode, cwd=str(tmp_path), allow_rules={}, deny_rules={}, ask_rules={})
+    old_context = ToolPermissionContext(mode=PermissionMode.DONT_ASK, cwd=str(tmp_path),
+                                       allow_rules={}, deny_rules={}, ask_rules={})
     assert (await check_tool_permission(WriteFileTool(), generated_file, old_context)).behavior == "deny"
-    assert (await check_tool_permission(WriteFileTool(), generated_file, context)).behavior == "allow"
-    denied = await check_tool_permission(AliyunApi(), {"product": "ros", "action": "CreateStack",
-                                                     "params": {"StackName": "test"}}, context)
-    assert denied.behavior == "deny"
+    local_file = await check_tool_permission(WriteFileTool(), generated_file, context)
+    assert local_file.behavior == "ask"
+    local_command = {"command": "mkdir generated"}
+    assert (await check_tool_permission(BashTool(), local_command, old_context)).behavior == "deny"
+    assert (await check_tool_permission(BashTool(), local_command, context)).behavior == "allow"
+    cloud = await check_tool_permission(AliyunApi(), {"product": "ros", "action": "CreateStack",
+                                                    "params": {"StackName": "test"}}, context)
+    assert cloud.behavior == "ask" and cloud.audit.is_read_only is False
+    answers = {}
+
+    async def events(prompt):
+        for name, tool_input, decision in (
+            ("write_file", generated_file, local_file),
+            ("aliyun_api", {"product": "ros", "action": "CreateStack"}, cloud),
+        ):
+            future = asyncio.get_running_loop().create_future()
+            yield PermissionRequestEvent(
+                tool_name=name, tool_input=tool_input, tool_use_id="offline-" + name, response_future=future,
+                audit_context={"session_id": "offline-e2e", "metadata": decision.audit},
+            )
+            answers[name] = future.result()
+        yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    runner = HeadlessRunner(model="offline-model", output_format=OutputFormat.JSON,
+                            output_stream=io.StringIO(), cli_permission_mode=mode.value)
+    monkeypatch.setattr(runner, "_create_agent_loop", lambda: SimpleNamespace(run_streaming=events))
+    monkeypatch.setattr("iac_code.cli.headless.start_background_housekeeping", lambda: None)
+    monkeypatch.setattr("iac_code.cli.headless.emit_auto_permission_audit", lambda *args, **kwargs: True)
+    monkeypatch.setattr("iac_code.cli.headless.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("iac_code.cli.headless.graceful_shutdown", lambda: None)
+    assert await runner.run(smoke.PROMPT) == 0
+    assert answers == {"write_file": True, "aliyun_api": False}
 
 
 def test_tool_denials_are_counted_without_exporting_result_content():
@@ -130,3 +164,73 @@ def test_text_output_does_not_claim_unobservable_tool_results():
     smoke._record_output_diagnostics("text", subprocess.CompletedProcess([], 0, "VPC", ""))
     assert "tool_error_count" not in smoke.OUTPUT_DIAGNOSTICS["text"]
     assert "permission_denial_count" not in smoke.OUTPUT_DIAGNOSTICS["text"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_format", ["json", "stream-json"])
+@pytest.mark.parametrize("mode", ["dont_ask", "accept_edits"])
+async def test_generation_skill_file_step_reproduces_old_smoke_failure(monkeypatch, tmp_path, output_format, mode):
+    from iac_code.agent.agent_loop import AgentLoop
+    from iac_code.cli.headless import EXIT_MAX_TURNS, HeadlessRunner
+    from iac_code.cli.output_formats import OutputFormat
+    from iac_code.tools.base import ToolRegistry
+    from iac_code.tools.write_file import WriteFileTool
+    from iac_code.types.permissions import PermissionMode, ToolPermissionContext
+    from iac_code.types.stream_events import (
+        MessageEndEvent,
+        MessageStartEvent,
+        TextDeltaEvent,
+        ToolUseEndEvent,
+        ToolUseStartEvent,
+        Usage,
+    )
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    target = tmp_path / "template.json"
+    template = '{"Resources":{"Vpc":{"Type":"ALIYUN::ECS::VPC"}}}'
+
+    class GenerationProvider:
+        calls = 0
+
+        def get_model_name(self):
+            return "offline-model"
+
+        async def stream(self, messages, system, tools=None, **kwargs):
+            self.calls += 1
+            yield MessageStartEvent(message_id=str(self.calls))
+            # Replay the skill's existing file-before-output workflow. The real
+            # AgentLoop, permission pipeline and WriteFileTool determine success.
+            if target.is_file():
+                yield TextDeltaEvent(text=template)
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=1))
+            else:
+                call_id = "write-" + str(self.calls)
+                yield ToolUseStartEvent(tool_use_id=call_id, name="write_file")
+                yield ToolUseEndEvent(tool_use_id=call_id, name="write_file",
+                                      input={"path": str(target), "content": template})
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage(input_tokens=1))
+
+    provider = GenerationProvider()
+    registry = ToolRegistry()
+    registry.register(WriteFileTool())
+    loop = AgentLoop(provider_manager=provider, system_prompt="Save the generated template before returning it.",
+                     tool_registry=registry, cwd=str(tmp_path), max_turns=20,
+                     permission_context=ToolPermissionContext(mode=PermissionMode(mode), cwd=str(tmp_path)))
+    output = io.StringIO()
+    runner = HeadlessRunner(model="offline-model", output_format=OutputFormat(output_format), output_stream=output)
+    monkeypatch.setattr(runner, "_create_agent_loop", lambda: loop)
+    monkeypatch.setattr("iac_code.cli.headless.start_background_housekeeping", lambda: None)
+    monkeypatch.setattr("iac_code.cli.headless.log_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr("iac_code.cli.headless.graceful_shutdown", lambda: None)
+    code = await runner.run(smoke.PROMPT)
+    result = subprocess.CompletedProcess([], code, output.getvalue(), "")
+    monkeypatch.setattr(smoke, "run_headless", lambda _: result)
+    passed = smoke.test_json_output() if output_format == "json" else smoke.test_stream_json_output()
+    if mode == "dont_ask":
+        assert code == EXIT_MAX_TURNS and provider.calls == 20
+        assert not target.exists() and passed is False
+        assert smoke.OUTPUT_DIAGNOSTICS[output_format]["permission_denial_count"] == 20
+    else:
+        assert code == 0 and provider.calls == 2
+        assert target.read_text() == template and passed is True
+        assert smoke.OUTPUT_DIAGNOSTICS[output_format]["permission_denial_count"] == 0
