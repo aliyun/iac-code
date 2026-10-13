@@ -39,8 +39,18 @@ def _record_output_diagnostics(output_format: str, result: subprocess.CompletedP
         "exit_code": result.returncode,
         "stdout_length": len(stdout),
         "stderr_length": len(result.stderr),
+        "tool_error_count": 0,
+        "permission_denial_count": 0,
     }
     error_text = result.stderr
+
+    def record_tool_error(value):
+        if isinstance(value, dict) and value.get("is_error") is True:
+            detail["tool_error_count"] += 1
+            text = json.dumps(value.get("result", ""), ensure_ascii=False).lower()
+            if "permission" in text or "denied" in text or "拒绝" in text:
+                detail["permission_denial_count"] += 1
+
     if output_format == "json":
         try:
             data = json.loads(stdout)
@@ -60,6 +70,10 @@ def _record_output_diagnostics(output_format: str, result: subprocess.CompletedP
                     error_present=bool(data.get("error")),
                 )
                 error_text += "\n" + str(data.get("error", ""))
+                tools = data.get("tool_uses")
+                if isinstance(tools, list):
+                    for tool in tools:
+                        record_tool_error(tool)
     elif output_format == "stream-json":
         events: dict[str, int] = {}
         stops: dict[str, int] = {}
@@ -85,6 +99,8 @@ def _record_output_diagnostics(output_format: str, result: subprocess.CompletedP
                 stops[stop] = stops.get(stop, 0) + 1
             elif kind == "error":
                 error_text += "\n" + str(event.get("error", ""))
+            elif kind == "tool_result":
+                record_tool_error(event)
         detail.update(line_count=len([line for line in lines if line.strip()]), parse_error_count=parse_errors,
                       event_counts=events, stop_reason_counts=stops)
     error_lower = error_text.lower()
@@ -110,6 +126,9 @@ def run_headless(output_format: str, extra_args: list[str] | None = None) -> sub
         "--output-format", output_format,
         "--max-turns", "20",
         "--permission-mode", "dont_ask",
+        # Generation skills save templates before returning them. Permit local
+        # editing while retaining dont_ask for other approval-required tools.
+        "--allowed-tools", "write_file,edit_file",
     ]
     if extra_args:
         cmd.extend(extra_args)

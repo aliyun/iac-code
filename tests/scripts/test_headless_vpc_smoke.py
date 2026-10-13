@@ -81,3 +81,46 @@ def test_public_output_diagnostics_reject_unstructured_content():
                  "checks": {"text is non-empty": False}, "event_counts": {"error": 1}},
     }
     assert "private" not in json.dumps(public)
+
+
+@pytest.mark.asyncio
+async def test_smoke_command_allows_template_file_without_allowing_cloud_mutation(monkeypatch, tmp_path):
+    from iac_code.services.permissions.loader import parse_cli_permission_mode
+    from iac_code.services.permissions.pipeline import check_tool_permission
+    from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
+    from iac_code.tools.write_file import WriteFileTool
+    from iac_code.types.permissions import ToolPermissionContext
+
+    commands = []
+
+    def capture(command, **kwargs):
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, "{}", "")
+
+    monkeypatch.setattr(smoke.subprocess, "run", capture)
+    smoke.run_headless("json")
+    command = commands[0]
+    mode = parse_cli_permission_mode(command[command.index("--permission-mode") + 1])
+    allow = command[command.index("--allowed-tools") + 1].split(",")
+    context = ToolPermissionContext(mode=mode, cwd=str(tmp_path), allow_rules={"cli_arg": allow},
+                                    deny_rules={}, ask_rules={})
+    generated_file = {"file_path": str(tmp_path / "template.json"), "content": "{}"}
+    old_context = ToolPermissionContext(mode=mode, cwd=str(tmp_path), allow_rules={}, deny_rules={}, ask_rules={})
+    assert (await check_tool_permission(WriteFileTool(), generated_file, old_context)).behavior == "deny"
+    assert (await check_tool_permission(WriteFileTool(), generated_file, context)).behavior == "allow"
+    denied = await check_tool_permission(AliyunApi(), {"product": "ros", "action": "CreateStack",
+                                                     "params": {"StackName": "test"}}, context)
+    assert denied.behavior == "deny"
+
+
+def test_tool_denials_are_counted_without_exporting_result_content():
+    payload = {"text": "", "usage": {"input_tokens": 1}, "tool_uses": [
+        {"is_error": True, "result": "Permission denied: private-path"},
+    ]}
+    smoke._record_output_diagnostics("json", subprocess.CompletedProcess([], 2, json.dumps(payload), ""))
+    detail = smoke.OUTPUT_DIAGNOSTICS["json"]
+    assert detail["tool_error_count"] == detail["permission_denial_count"] == 1
+    assert detail["text_length"] == 0 and detail["exit_code"] == 2
+    exported = run_e2e._public_live_summary({"diagnostics": {"headless_output": smoke.OUTPUT_DIAGNOSTICS}})
+    assert exported["diagnostics"]["headless_output"]["json"] == detail
+    assert "private" not in json.dumps(exported)
