@@ -11,6 +11,7 @@ from iac_code.providers.base import Provider
 @dataclass
 class LeaseToken:
     state: str = "active"
+    inference_requests: int = 0
 
 
 @dataclass(frozen=True)

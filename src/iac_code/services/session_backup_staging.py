@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import multiprocessing
 import os
 import re
@@ -18,6 +19,7 @@ from loguru import logger
 
 from iac_code.services.session_backup import (
     BACKUP_ENV_VAR,
+    BACKUP_STATE_FILENAME,
     BackupReason,
     BackupResult,
     SessionBackupBlocked,
@@ -27,14 +29,15 @@ from iac_code.services.session_backup import (
     SessionReconcileResult,
     _log_backup_session_elapsed,
 )
-from iac_code.services.session_backup_state import BackupPublicationProof, SessionBackupState
+from iac_code.services.session_backup_state import BackupPublicationProof, SessionBackupState, SessionBackupStateError
 from iac_code.services.session_layout import UnsupportedSessionLayoutError
 from iac_code.services.session_mutation_guard import session_mutation_guard
 from iac_code.services.session_storage import SessionStorage
 from iac_code.utils.file_security import ensure_private_dir
-from iac_code.utils.state_io import atomic_write_json, cross_process_append_lock
+from iac_code.utils.state_io import atomic_write_json, cross_process_append_lock, cross_process_file_lock
 
 BACKUP_TMP_ENV_VAR = "IAC_CODE_CONFIG_BACKUP_TMP_DIR"
+_UNMANAGED_COMMIT_PREFIX = "staged-unmanaged:"
 _COPYING_SUFFIX = ".copying"
 _COPYING_OWNER_MARKER_FILENAME = ".copying-owner-v1.lock"
 _COPYING_LOCK_ROOT_SUFFIX = ".copying-locks"
@@ -142,7 +145,7 @@ class StagedSessionBackupService(SessionBackupService):
         requested_proofs = dict(publication_proofs or {})
         requested_operation_commit_id = operation_commit_id
         if operation_commit_id is None:
-            operation_commit_id = str(uuid.uuid4())
+            operation_commit_id = _UNMANAGED_COMMIT_PREFIX + str(uuid.uuid4())
         elif not isinstance(operation_commit_id, str) or not operation_commit_id.strip():
             raise SessionBackupError("backup operation commit id must be a non-empty string")
 
@@ -322,6 +325,50 @@ class StagedSessionBackupService(SessionBackupService):
                 result=failure_result,
             ) from None
         return failure_result
+
+    def adopt_coordinator_capture(
+        self,
+        cwd: str,
+        session_id: str,
+        result: BackupResult,
+        *,
+        committed_state: SessionBackupState | None = None,
+    ) -> None:
+        """Repair a failed local marker using exact committed snapshot metadata."""
+        snapshot = committed_state
+        if snapshot is None:
+            destination = result.destination
+            if destination is None or not destination.is_relative_to(self._staging_root):
+                return
+            snapshot = self._read_state(destination, session_id=session_id, shared=True)
+        # Historical shared metadata arrives by value from the publisher lock.
+        # Never re-read remote storage while owning local capture/session locks.
+        if (
+            snapshot is None
+            or snapshot.status != "succeeded"
+            or snapshot.session_id != session_id
+            or snapshot.generation != result.generation
+            or snapshot.commit_id != result.commit_id
+        ):
+            raise SessionBackupError("coordinator capture state does not match its immutable proof")
+        source = self._source_for_backup(cwd, session_id)
+        if source is None:
+            raise SessionBackupError("coordinator capture local session is unavailable")
+        with session_mutation_guard(source), self._session_backup_lock(source):
+            current = self._read_state(source, session_id=session_id)
+            if current is None:
+                raise SessionBackupError("coordinator capture local state is unavailable")
+            if current.generation >= snapshot.generation:
+                return  # Never downgrade a later local commit or failed attempt.
+            if current.status == "failed" and current.attempt_commit_id != snapshot.commit_id:
+                return  # A different boundary owns this newer failed attempt.
+            if current.generation != snapshot.parent_generation:
+                raise SessionBackupConflict(
+                    "coordinator capture parent does not match local state",
+                    local_generation=current.generation,
+                    shared_generation=snapshot.generation,
+                )
+            self._write_state(source, snapshot)
 
     def wait_until_shared_committed(
         self,
@@ -538,12 +585,14 @@ class SessionBackupStagingWorker:
         backup_root: str | Path,
         *,
         max_concurrent_sessions: int = _DEFAULT_MAX_CONCURRENT_SESSIONS,
+        coordinator_state_root: str | Path | None = None,
     ) -> None:
         if max_concurrent_sessions < 1:
             raise ValueError("max_concurrent_sessions must be positive")
         self.staging_root = Path(staging_root)
         self.backup_root = Path(backup_root)
         self.max_concurrent_sessions = max_concurrent_sessions
+        self.coordinator_state_root = None if coordinator_state_root is None else Path(coordinator_state_root)
         self._service_local = threading.local()
         self._cleanup_lock = threading.Lock()
         self._service._validate_backup_root(str(staging_root), self.staging_root)
@@ -562,9 +611,22 @@ class SessionBackupStagingWorker:
 
         retained = 0
         recovered = 0
-        projects_root = self.staging_root / "projects"
-        if projects_root.is_dir():
-            for path in sorted(projects_root.glob("*/*{}".format(_COPYING_SUFFIX))):
+        projects_root = self._safe_projects_root()
+        if projects_root is None:
+            return 0
+        self._cleanup_retired_snapshots(projects_root)
+        for project_dir in self._safe_project_directories(projects_root):
+            for path in self._directory_entries(project_dir):
+                if not path.name.endswith(_COPYING_SUFFIX):
+                    continue
+                try:
+                    self._validate_snapshot_removal_path(path)
+                except SessionBackupError:
+                    retained += 1
+                    continue
+                if path.is_symlink() or self._service._is_reparse_point(path) or not path.is_dir():
+                    retained += 1
+                    continue
                 owner_marker = path / _COPYING_OWNER_MARKER_FILENAME
                 if not owner_marker.is_file():
                     retained += 1
@@ -573,6 +635,9 @@ class SessionBackupStagingWorker:
                 lease = _CopyingSnapshotOwnerLock(self._service, owner_lock)
                 with lease.acquire(blocking=False) as acquired:
                     if not acquired:
+                        retained += 1
+                        continue
+                    if not self._copying_recovery_paths_are_safe(path):
                         retained += 1
                         continue
                     parsed = parse_staged_snapshot_name(path.name[: -len(_COPYING_SUFFIX)])
@@ -584,26 +649,97 @@ class SessionBackupStagingWorker:
                         state = self._service._read_state(path, session_id=session_id, shared=True)
                     except SessionBackupError:
                         state = None
+                    if not self._copying_recovery_paths_are_safe(path):
+                        retained += 1
+                        continue
                     if state is None or state.generation != generation:
                         self._remove_snapshot(path)
                         continue
                     destination = path.with_name(path.name[: -len(_COPYING_SUFFIX)])
+                    if not self._copying_recovery_paths_are_safe(path, destination):
+                        retained += 1
+                        continue
                     if destination.exists():
                         existing = self._service._read_state(destination, session_id=session_id, shared=True)
                         if existing is None or not existing.same_lineage(state):
                             retained += 1
                             continue
+                        if not self._copying_recovery_paths_are_safe(path, destination):
+                            retained += 1
+                            continue
                         self._remove_snapshot(path)
                     else:
+                        if not self._copying_recovery_paths_are_safe(path, destination):
+                            retained += 1
+                            continue
                         owner_marker.unlink()
-                        self._service._fsync_parent_dir(owner_marker)
                         os.replace(path, destination)
+                        self._service._fsync_parent_dir(destination / _COPYING_OWNER_MARKER_FILENAME)
                         self._service._fsync_parent_dir(destination)
                     recovered += 1
-            if retained:
-                logger.info("Retaining incomplete staged session snapshots count={}", retained)
+        if retained:
+            logger.info("Retaining incomplete staged session snapshots count={}", retained)
         self._prune_empty_staging_dirs()
         return recovered
+
+    def _copying_recovery_paths_are_safe(self, source: Path, destination: Path | None = None) -> bool:
+        try:
+            self._validate_snapshot_removal_path(source)
+            if source.is_symlink() or self._service._is_reparse_point(source) or not source.is_dir():
+                return False
+            if destination is not None:
+                self._validate_snapshot_removal_path(destination)
+                if destination.is_symlink() or self._service._is_reparse_point(destination):
+                    return False
+        except SessionBackupError:
+            return False
+        return True
+
+    @staticmethod
+    def _directory_entries(directory: Path) -> list[Path]:
+        try:
+            return sorted(directory.iterdir())
+        except FileNotFoundError:
+            return []  # Another publisher completed retirement and pruned this directory.
+
+    def _safe_projects_root(self) -> Path | None:
+        projects_root = self.staging_root / "projects"
+        if projects_root.is_symlink() or self._service._is_reparse_point(projects_root):
+            return None
+        try:
+            self._validate_snapshot_removal_path(projects_root)
+        except SessionBackupError:
+            return None
+        return projects_root
+
+    def _safe_project_directories(self, projects_root: Path) -> list[Path]:
+        return [
+            project_dir
+            for project_dir in self._directory_entries(projects_root)
+            if not project_dir.is_symlink()
+            and not self._service._is_reparse_point(project_dir)
+            and project_dir.is_dir()
+        ]
+
+    def _cleanup_retired_snapshots(self, projects_root: Path) -> None:
+        for project_dir in self._safe_project_directories(projects_root):
+            for retired in self._directory_entries(project_dir):
+                if not retired.name.startswith(".retired-"):
+                    continue
+                try:
+                    self._validate_snapshot_removal_path(retired)
+                    if retired.is_symlink() or self._service._is_reparse_point(retired) or not retired.is_dir():
+                        continue
+                    marker = retired / BACKUP_STATE_FILENAME
+                    with self._service._open_source_file_no_follow(marker) as handle:
+                        state = SessionBackupState.from_dict(json.load(handle), shared=True)
+                    if state.generation <= 0 or not state.commit_id:
+                        raise SessionBackupError("retired snapshot has no committed capture metadata")
+                    self._service._validate_session_id(state.session_id)
+                except (OSError, UnicodeError, ValueError, TypeError, SessionBackupError, SessionBackupStateError):
+                    logger.warning("Retaining retired staged snapshot without safe committed metadata path={}", retired)
+                    continue
+                self._remove_snapshot(retired)
 
     def run_once(self) -> int:
         sessions: dict[tuple[str, str], list[StagedSessionSnapshot]] = {}
@@ -636,15 +772,18 @@ class SessionBackupStagingWorker:
         return published
 
     def scan_snapshots(self) -> list[StagedSessionSnapshot]:
-        projects_root = self.staging_root / "projects"
-        if not projects_root.is_dir():
+        projects_root = self._safe_projects_root()
+        if projects_root is None:
             return []
         snapshots: list[StagedSessionSnapshot] = []
-        for project_dir in projects_root.iterdir():
-            if project_dir.is_symlink() or not project_dir.is_dir():
-                continue
-            for path in project_dir.iterdir():
-                if path.name.endswith(_COPYING_SUFFIX) or path.is_symlink() or not path.is_dir():
+        for project_dir in self._safe_project_directories(projects_root):
+            for path in self._directory_entries(project_dir):
+                if (
+                    path.name.endswith(_COPYING_SUFFIX)
+                    or path.is_symlink()
+                    or self._service._is_reparse_point(path)
+                    or not path.is_dir()
+                ):
                     continue
                 parsed = parse_staged_snapshot_name(path.name)
                 if parsed is None:
@@ -668,6 +807,8 @@ class SessionBackupStagingWorker:
             self._publish_snapshot_locked(snapshot)
 
     def _publish_snapshot_locked(self, snapshot: StagedSessionSnapshot) -> None:
+        if not snapshot.path.exists():
+            return  # Another publisher already retired this scanned snapshot.
         state = self._service._read_state(snapshot.path, session_id=snapshot.session_id, shared=True)
         if state is None or state.generation != snapshot.generation:
             raise SessionBackupError("staged session backup generation does not match its directory")
@@ -681,7 +822,7 @@ class SessionBackupStagingWorker:
         )
         if shared_state is not None:
             if shared_state.generation > state.generation:
-                self._remove_snapshot(snapshot.path)
+                self._retire_snapshot(snapshot, state)
                 return
             if shared_state.generation == state.generation:
                 if shared_state.commit_id != state.commit_id:
@@ -690,7 +831,7 @@ class SessionBackupStagingWorker:
                         local_generation=state.generation,
                         shared_generation=shared_state.generation,
                     )
-                self._remove_snapshot(snapshot.path)
+                self._retire_snapshot(snapshot, state)
                 return
 
         logger.info(
@@ -704,7 +845,7 @@ class SessionBackupStagingWorker:
         committed = self._service._read_state(destination, session_id=snapshot.session_id, shared=True)
         if committed is None or not committed.same_lineage(state):
             raise SessionBackupError("shared session backup state did not commit the staged snapshot")
-        self._remove_snapshot(snapshot.path)
+        self._retire_snapshot(snapshot, state)
         logger.info(
             "Published staged session backup session_id={} generation={} elapsed_ms={:.3f}",
             snapshot.session_id,
@@ -712,11 +853,86 @@ class SessionBackupStagingWorker:
             (time.perf_counter() - started_at) * 1000,
         )
 
+    def _retire_snapshot(self, snapshot: StagedSessionSnapshot, state: SessionBackupState) -> None:
+        """Keep exact immutable capture proof until its coordinator ACK is durable."""
+        root = self.coordinator_state_root
+        if root is None:
+            # Standalone staging backups do not use coordinator jobs.
+            self._remove_snapshot(snapshot.path)
+            return
+        from iac_code.a2a.backup import SessionBackupCoordinator
+
+        coordinator = SessionBackupCoordinator(StagedSessionBackupService(self.staging_root), state_root=root)
+        state_dir = coordinator._session_state_dir(snapshot.project, snapshot.session_id)
+        retired = snapshot.path.with_name(".retired-{}".format(uuid.uuid4().hex))
+        # Shared copy finished before acquiring this short local lock. Recovery
+        # holds the same lock while reading snapshot state, never during I/O.
+        with cross_process_file_lock(state_dir / "coordinator.lock"):
+            jobs = [
+                job
+                for _path, job in coordinator._pending_documents()
+                if job.project == snapshot.project
+                and job.session_id == snapshot.session_id
+                and job.capture_commit_id == state.commit_id
+            ]
+            acknowledged = False
+            for job in jobs:
+                if job.staged_commit_id == state.commit_id and job.staged_generation == state.generation:
+                    acknowledged = True
+                elif coordinator._read_receipt_locked(job) is not None:
+                    acknowledged = True
+            receipts = state_dir / "receipts"
+            for path in receipts.glob("*.json"):
+                receipt = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(receipt, dict):
+                    raise SessionBackupError("session backup completion receipt is unreadable")
+                if receipt.get("commitId") != state.commit_id:
+                    continue
+                if (
+                    receipt.get("version") != 1
+                    or receipt.get("project") != snapshot.project
+                    or receipt.get("sessionId") != snapshot.session_id
+                    or receipt.get("backupGeneration") != state.generation
+                    or receipt.get("jobId") != path.stem
+                    or not isinstance(receipt.get("coveredThroughBusinessRevision"), int)
+                    or not isinstance(receipt.get("boundary"), str)
+                ):
+                    raise SessionBackupError("session backup completion receipt identity conflicts")
+                acknowledged = True
+            if jobs and not acknowledged:
+                return
+            if (
+                not jobs
+                and not acknowledged
+                and not (state.commit_id is not None and state.commit_id.startswith(_UNMANAGED_COMMIT_PREFIX))
+            ):
+                # Pre-coordinator backups also used bare UUID commits. Keep
+                # unknown captures, but their successful shared publication
+                # must not prevent newer generations from reaching shared storage.
+                logger.warning(
+                    "Retaining staged snapshot without exact coordinator retirement proof session_id={} generation={}",
+                    snapshot.session_id,
+                    snapshot.generation,
+                )
+                return
+            if not snapshot.path.exists():
+                return
+            self._validate_snapshot_removal_path(snapshot.path)
+            if (
+                snapshot.path.is_symlink()
+                or self._service._is_reparse_point(snapshot.path)
+                or not snapshot.path.is_dir()
+            ):
+                raise SessionBackupError("staged snapshot retirement source is unsafe")
+            self._validate_snapshot_removal_path(retired)
+            if retired.exists() or retired.is_symlink() or self._service._is_reparse_point(retired):
+                raise SessionBackupError("staged snapshot retirement destination is unsafe")
+            os.replace(snapshot.path, retired)
+            self._service._fsync_parent_dir(retired)
+        self._remove_snapshot(retired)
+
     def _remove_snapshot(self, path: Path) -> None:
-        try:
-            path.relative_to(self.staging_root)
-        except ValueError as exc:
-            raise SessionBackupError("staged backup path is outside the staging root") from exc
+        self._validate_snapshot_removal_path(path)
         if path.is_symlink() or self._service._is_reparse_point(path) or not path.is_dir():
             self._service._unlink(path)
         else:
@@ -725,17 +941,32 @@ class SessionBackupStagingWorker:
         with self._cleanup_lock:
             self._prune_empty_staging_dirs()
 
+    def _validate_snapshot_removal_path(self, path: Path) -> None:
+        try:
+            path.relative_to(self.staging_root)
+        except ValueError as exc:
+            raise SessionBackupError("staged backup path is outside the staging root") from exc
+        if (
+            path == self.staging_root
+            or self.staging_root.is_symlink()
+            or self._service._is_reparse_point(self.staging_root)
+        ):
+            raise SessionBackupError("staged backup removal ancestry is unsafe")
+        self._service._reject_symlinked_destination_ancestry(self.staging_root, path)
+        if not path.parent.resolve().is_relative_to(self.staging_root.resolve()):
+            raise SessionBackupError("staged backup path resolves outside the staging root")
+
     def _prune_empty_staging_dirs(self) -> None:
-        projects_root = self.staging_root / "projects"
-        if projects_root.is_dir():
-            for project_dir in tuple(projects_root.iterdir()):
-                if project_dir.is_dir() and not project_dir.is_symlink():
-                    with suppress(OSError):
-                        project_dir.rmdir()
-                        self._service._fsync_parent_dir(project_dir)
+        projects_root = self._safe_projects_root()
+        if projects_root is None:
+            return
+        for project_dir in self._safe_project_directories(projects_root):
             with suppress(OSError):
-                projects_root.rmdir()
-                self._service._fsync_parent_dir(projects_root)
+                project_dir.rmdir()
+                self._service._fsync_parent_dir(project_dir)
+        with suppress(OSError):
+            projects_root.rmdir()
+            self._service._fsync_parent_dir(projects_root)
 
 
 class SessionBackupStagingProcess:
@@ -749,26 +980,35 @@ class SessionBackupStagingProcess:
         poll_interval: float = 1.0,
         startup_timeout: float = 5.0,
         process_context: Any | None = None,
+        coordinator_state_root: str | Path | None = None,
     ) -> None:
         self.staging_root = Path(staging_root)
         self.backup_root = Path(backup_root)
         self.poll_interval = poll_interval
         self.startup_timeout = startup_timeout
         self._process_context = process_context
+        self.coordinator_state_root = None if coordinator_state_root is None else Path(coordinator_state_root)
         self._stop_event: Any | None = None
         self._process: Any | None = None
 
     def start(self) -> None:
         if self._process is not None:
             return
-        SessionBackupStagingWorker(self.staging_root, self.backup_root).cleanup_incomplete_snapshots()
+        SessionBackupStagingWorker(
+            self.staging_root, self.backup_root, coordinator_state_root=self.coordinator_state_root
+        ).cleanup_incomplete_snapshots()
         process_context = self._process_context or multiprocessing.get_context("spawn")
         stop_event = process_context.Event()
         ready_event = process_context.Event()
         process = process_context.Process(
             target=run_staging_worker,
             args=(str(self.staging_root), str(self.backup_root), stop_event, ready_event),
-            kwargs={"poll_interval": self.poll_interval},
+            kwargs={
+                "poll_interval": self.poll_interval,
+                "coordinator_state_root": None
+                if self.coordinator_state_root is None
+                else str(self.coordinator_state_root),
+            },
             name="iac-code-session-backup-publisher",
             daemon=True,
         )
@@ -825,8 +1065,9 @@ def run_staging_worker(
     ready_event: Any,
     *,
     poll_interval: float = 1.0,
+    coordinator_state_root: str | None = None,
 ) -> None:
-    worker = SessionBackupStagingWorker(staging_root, backup_root)
+    worker = SessionBackupStagingWorker(staging_root, backup_root, coordinator_state_root=coordinator_state_root)
     logger.info("Staged session backup publisher process started")
     ready_event.set()
     try:

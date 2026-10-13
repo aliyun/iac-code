@@ -23,10 +23,14 @@ Each ``session.jsonl`` file is a stream of two kinds of JSONL lines:
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import stat
+import sys
 from contextlib import nullcontext
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -56,7 +60,40 @@ from iac_code.utils.project_paths import (
     is_conversation_session_file,
     project_dir_candidates,
 )
-from iac_code.utils.state_io import append_jsonl_locked, atomic_write_text, safe_replace
+from iac_code.utils.state_io import (
+    append_jsonl_locked,
+    atomic_write_text,
+    cross_process_append_lock,
+    open_text_no_follow,
+    safe_replace,
+)
+
+PIPELINE_USER_HISTORY_KEY = "a2a_pipeline_user_input"
+
+
+class UserInputHistoryWriteResult(Enum):
+    APPENDED = "appended"
+    ALREADY_PRESENT = "already_present"
+    NOT_SUPPORTED = "not_supported"
+
+
+@dataclass(frozen=True)
+class PipelineUserHistoryRecord:
+    message_id: str
+    context_id: str
+    task_id: str
+    text: str
+
+    def identity(self) -> dict[str, str]:
+        values = (self.message_id, self.context_id, self.task_id)
+        if any(type(value) is not str or not value or len(value) > 1024 for value in values):
+            raise ValueError("Invalid Pipeline user history identity")
+        if type(self.text) is not str or not self.text.strip():
+            raise ValueError("Empty Pipeline user history input")
+        return {"message_id": self.message_id, "context_id": self.context_id, "task_id": self.task_id}
+
+    def message(self) -> Message:
+        return Message(role="user", content=self.text, metadata={PIPELINE_USER_HISTORY_KEY: self.identity()})
 
 
 def _utc_now() -> str:
@@ -695,6 +732,105 @@ class SessionStorage:
             append_jsonl_locked(path, [data])
             ensure_private_file(path)
             self._ensure_new_session_metadata(cwd, session_id, git_branch=git_branch, was_new=was_new)
+
+    def append_user_input_once(
+        self, cwd: str, session_id: str, record: PipelineUserHistoryRecord
+    ) -> UserInputHistoryWriteResult:
+        """Durably append one accepted SDK input to V2 public history.
+
+        The SDK message id is unique within this bound session. All remaining
+        identity and content fields must agree on a retry. Legacy whole-file
+        writers do not share the mutation barrier, so retain their behavior
+        without claiming the new history guarantee for those layouts.
+        """
+        identity = record.identity()
+        session_dir = self.v2_session_dir(cwd, session_id)
+        if session_dir is None:
+            if self._legacy_file_wins_over_metadata_only_dir(cwd, session_id):
+                return UserInputHistoryWriteResult.NOT_SUPPORTED
+            # Resolver failure is not a legacy guarantee: an explicitly V2
+            # directory with damaged metadata/root entries must fail closed.
+            for candidate in self._session_dirs_for(cwd, session_id):
+                if session_metadata_entry_exists(candidate):
+                    version = require_supported_session_layout(candidate)
+                    if version == SESSION_LAYOUT_VERSION_V2:
+                        raise ValueError("Unsafe Pipeline user history layout")
+            return UserInputHistoryWriteResult.NOT_SUPPORTED
+        with session_mutation_guard(session_dir):
+            if self.v2_session_dir(cwd, session_id) != session_dir:
+                raise ValueError("Pipeline user history layout changed")
+            path, was_new = self._prepare_session_write(cwd, session_id)
+            with cross_process_append_lock(path):
+                matches = 0
+                if path.exists():
+                    with open_text_no_follow(path, "r", encoding="utf-8") as stream:
+                        for line in stream:
+                            if not line.endswith("\n") or not line.strip():
+                                raise ValueError("Incomplete Pipeline user history")
+                            try:
+                                row = json.loads(line, object_pairs_hook=self._history_json_object)
+                            except (ValueError, TypeError) as exc:
+                                raise ValueError("Corrupt Pipeline user history") from exc
+                            if not isinstance(row, dict):
+                                raise ValueError("Corrupt Pipeline user history")
+                            metadata = row.get("metadata")
+                            if not isinstance(metadata, dict) or PIPELINE_USER_HISTORY_KEY not in metadata:
+                                continue
+                            old_identity = metadata[PIPELINE_USER_HISTORY_KEY]
+                            if (
+                                type(old_identity) is not dict
+                                or set(old_identity) != set(identity)
+                                or any(
+                                    type(value) is not str or not value or len(value) > 1024
+                                    for value in old_identity.values()
+                                )
+                                or row.get("role") != "user"
+                                or type(row.get("content")) is not str
+                                or row.get("session_id") != session_id
+                                or row.get("cwd") != cwd
+                            ):
+                                raise ValueError("Corrupt Pipeline user history identity")
+                            if old_identity["context_id"] != record.context_id:
+                                raise ValueError("Pipeline user history context changed")
+                            if old_identity["message_id"] == record.message_id:
+                                if old_identity != identity or row["content"] != record.text:
+                                    raise ValueError("Pipeline user history identity conflict")
+                                matches += 1
+                if matches > 1:
+                    raise ValueError("Duplicate Pipeline user history identity")
+                data = self._stamp(record.message().to_dict(), cwd, session_id, None)
+                with open_text_no_follow(path, "a", encoding="utf-8") as stream:
+                    if not matches:
+                        stream.write(json.dumps(data, ensure_ascii=False, allow_nan=False) + "\n")
+                    # A complete row may be left by a failed flush/fsync. A
+                    # retry must reestablish durability even on its no-op path.
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                self._sync_history_parent(path)
+            ensure_private_file(path)
+            self._ensure_new_session_metadata(cwd, session_id, git_branch=None, was_new=was_new)
+        return UserInputHistoryWriteResult.ALREADY_PRESENT if matches else UserInputHistoryWriteResult.APPENDED
+
+    @staticmethod
+    def _history_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Ambiguous Pipeline user history")
+            result[key] = value
+        return result
+
+    @staticmethod
+    def _sync_history_parent(path: Path) -> None:
+        # Windows has no POSIX directory-fsync operation; the durable file
+        # flush follows the repository's existing Windows storage contract.
+        if sys.platform == "win32":
+            return
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
 
     def append_meta(self, cwd: str, session_id: str, meta_entry: dict[str, Any]) -> None:
         """Append a lite-meta row (no ``role``, distinguished by ``type``)."""

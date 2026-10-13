@@ -556,6 +556,118 @@ def _assert_turn_ready(summary: StreamSummary, *, name: str) -> None:
         raise _TurnNotReadyError(summary, name)
 
 
+class _NextTurnReplyMismatchError(AssertionError):
+    def __init__(self, diagnostics: dict[str, bool], checks: dict[str, bool]) -> None:
+        super().__init__("the real LLM did not complete the next turn in the same A2A context")
+        self.diagnostics = diagnostics
+        self.checks = checks
+
+
+def _next_turn_evidence(run_dir: Path, config_dir: Path, token: str, summary: StreamSummary) -> dict[str, bool]:
+    """Compare the actual follow-up and reply locally without exporting their contents."""
+    evidence = {
+        "selector_next_turn_public_text_present": bool(summary.text.strip()),
+        "selector_next_turn_public_token_present": token in summary.text,
+        "selector_next_turn_public_token_with_whitespace": token in re.sub(r"\s+", "", summary.text),
+        "selector_next_turn_native_prompt_present": False,
+        "selector_next_turn_native_reply_present": False,
+        "selector_next_turn_native_token_present": False,
+        "selector_next_turn_native_tool_call": False,
+        "selector_next_turn_native_select_tool": False,
+        "selector_next_turn_native_memory_tool": False,
+        "selector_next_turn_native_file_tool": False,
+        "selector_next_turn_public_selection_wait": False,
+        "selector_next_turn_public_permission_wait": False,
+        "selector_next_turn_scan_complete": True,
+    }
+    public_path = run_dir / "next-turn.events.jsonl"
+    if public_path.is_file() and public_path.stat().st_size <= 2_000_000:
+        for line in public_path.read_text(encoding="utf-8").splitlines():
+            try:
+                record = json.loads(line)
+            except ValueError:
+                evidence["selector_next_turn_scan_complete"] = False
+                continue
+            for item in _walk(record):
+                if isinstance(item, Mapping):
+                    evidence["selector_next_turn_public_selection_wait"] |= (
+                        item.get("kind") == "cloud_resource_selection"
+                    )
+                    evidence["selector_next_turn_public_permission_wait"] |= item.get("kind") == "permission"
+    paths = sorted((config_dir / "projects").rglob("session.jsonl"))
+    if not paths or len(paths) > 20:
+        evidence["selector_next_turn_scan_complete"] = False
+    for path in paths[:20]:
+        if path.is_symlink() or not path.resolve().is_relative_to(run_dir.resolve()):
+            evidence["selector_next_turn_scan_complete"] = False
+            continue
+        try:
+            with path.open("rb") as handle:
+                raw = handle.read(2_000_001)
+            if len(raw) > 2_000_000:
+                evidence["selector_next_turn_scan_complete"] = False
+                continue
+            records = [json.loads(line) for line in raw.decode("utf-8").splitlines() if line.strip()]
+        except (OSError, ValueError, UnicodeError):
+            evidence["selector_next_turn_scan_complete"] = False
+            continue
+        followup = False
+        for record in records:
+            for message in _walk(record):
+                if not isinstance(message, Mapping) or message.get("role") not in {"user", "assistant"}:
+                    continue
+                content = message.get("content")
+                text = content if isinstance(content, str) else "".join(
+                    part.get("text", "") for part in content or []
+                    if isinstance(part, Mapping) and part.get("type") == "text"
+                    and isinstance(part.get("text"), str)
+                ) if isinstance(content, list) else ""
+                if message["role"] == "user" and token in text:
+                    followup = True
+                    evidence["selector_next_turn_native_prompt_present"] = True
+                elif followup and message["role"] == "assistant":
+                    evidence["selector_next_turn_native_reply_present"] |= bool(text.strip())
+                    evidence["selector_next_turn_native_token_present"] |= token in text
+                    evidence["selector_next_turn_native_tool_call"] |= isinstance(content, list) and any(
+                        isinstance(part, Mapping) and part.get("type") == "tool_use" for part in content
+                    )
+                    for part in content if isinstance(content, list) else []:
+                        if not isinstance(part, Mapping) or part.get("type") != "tool_use":
+                            continue
+                        name = part.get("name")
+                        evidence["selector_next_turn_native_select_tool"] |= name in {
+                            "select_cloud_resource", "resolve_cloud_resource_selector",
+                        }
+                        evidence["selector_next_turn_native_memory_tool"] |= name in {"read_memory", "write_memory"}
+                        evidence["selector_next_turn_native_file_tool"] |= name in {
+                            "read_file", "list_files", "glob", "grep",
+                        }
+    return evidence
+
+
+def _next_turn_prompt(token: str) -> str:
+    return (
+        "此前的云资源选择已经结束。这是同一会话中的下一条普通消息，与云资源无关。"
+        "不要继续资源选择，不要调用任何工具。只需逐字回复下面这一行，保留大小写和下划线；"
+        "不要解释、翻译或添加空格：\n{}"
+    ).format(token)
+
+
+def _assert_next_turn_reply(
+    summary: StreamSummary, *, context_id: str, token: str, run_dir: Path, config_dir: Path,
+) -> dict[str, bool]:
+    _assert_turn_ready(summary, name="next turn")
+    evidence = _next_turn_evidence(run_dir, config_dir, token, summary)
+    checks = {
+        "next turn completed in same A2A context": summary.context_id == context_id,
+        "next turn returned exact reply marker": token in summary.text,
+        "next turn did not reopen resource selection": not evidence["selector_next_turn_public_selection_wait"],
+    }
+    if not all(checks.values()):
+        raise _NextTurnReplyMismatchError(evidence, checks)
+    return checks
+
+
 class _DurableReleaseTimeoutError(AssertionError):
     def __init__(self, state: dict[str, Any]) -> None:
         super().__init__("A2A input-required execution did not reach a durable release")
@@ -968,12 +1080,12 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         continuation_token = "LIVE_SELECTOR_NEXT_TURN_OK_" + uuid.uuid4().hex[:8]
         next_turn = harness.stream(
             name="next-turn",
-            prompt="这是同一会话的下一条普通消息。只回复：{}".format(continuation_token),
+            prompt=_next_turn_prompt(continuation_token),
             context_id=initial.context_id,
         )
-        _assert_turn_ready(next_turn, name="next turn")
-        if continuation_token not in next_turn.text:
-            raise AssertionError("the real LLM did not complete the next turn in the same A2A context")
+        checks = _assert_next_turn_reply(
+            next_turn, context_id=initial.context_id, token=continuation_token, run_dir=run_dir, config_dir=config_dir,
+        )
 
         logs = _server_logs(run_dir)
         allowed_markers = {"Task already exists"} if args.scenario == "duplicate-and-conflict" else set()
@@ -1002,6 +1114,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             "contextId": initial.context_id,
             "serverStarts": harness.server_index,
             "nextTurnCompleted": True,
+            "checks": checks,
             "duplicateAcknowledged": duplicate_acknowledged,
             "conflictRejected": conflict_rejected,
             "pipelineHandoffVerified": pipeline_handoff_verified,
@@ -1045,8 +1158,11 @@ def main() -> None:
             "passed": False, "scenario": args.scenario,
             "error_type": type(exc).__name__, "error_site": error_site,
         }
-        if isinstance(exc, _SelectorAssociationMismatchError):
+        if isinstance(exc, (_SelectorAssociationMismatchError, _NextTurnReplyMismatchError)):
             failure['diagnostics'] = exc.diagnostics
+        if isinstance(exc, _NextTurnReplyMismatchError):
+            failure["error_type"] = "AssertionError"
+            failure["checks"] = exc.checks
         if isinstance(exc, _TurnNotReadyError):
             failure["a2a_states"] = exc.states
             failure["a2a_phase"] = "next-turn" if exc.name == "next turn" else "answer"

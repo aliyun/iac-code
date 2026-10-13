@@ -14,6 +14,19 @@ import pytest
 from scripts.ci import run_e2e
 
 
+def test_selector_followup_diagnostics_export_only_booleans():
+    public = run_e2e._public_live_summary({"diagnostics": {
+        "selector_next_turn_native_prompt_present": True,
+        "selector_next_turn_native_token_present": False,
+        "selector_next_turn_native_reply_present": "private-response",
+        "reply": "private-response",
+    }})
+    assert public["diagnostics"] == {
+        "selector_next_turn_native_prompt_present": True,
+        "selector_next_turn_native_token_present": False,
+    }
+
+
 def test_dependency_probe_survives_public_report_without_cloud_identity():
     public = run_e2e._public_live_summary({'diagnostics': {
         'cleanup_dependency_owned_stacks': 2, 'cleanup_dependency_old_vpc_count': 1,

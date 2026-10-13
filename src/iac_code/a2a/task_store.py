@@ -1544,7 +1544,9 @@ class A2ATaskStore(TaskStore):
             context = self._contexts.get(context_id)
             return bool(context is not None and context.active_task_id is not None)
 
-    async def canceled_task_release_proof(self, *, context_id: str, task_id: str) -> dict[str, object] | None:
+    async def canceled_task_release_proof(
+        self, *, context_id: str, task_id: str, include_model_boundary: bool = False
+    ) -> dict[str, object] | None:
         """Return a durable proof only after the old writer is fully released."""
 
         context_id = validate_protocol_id(context_id)
@@ -1574,7 +1576,7 @@ class A2ATaskStore(TaskStore):
             or control.get("taskId") != task_id
             or control.get("phase") != "terminated"
             or control.get("executionStatus") != TASK_STATE_CANCELED
-            or control.get("terminationReason") != "explicit_terminate"
+            or control.get("terminationReason") not in ("explicit_terminate", "stream_terminal_cleanup")
             or control.get("releaseReady") is not True
             or control.get("commitError") is not None
             or isinstance(revision, bool)
@@ -1604,12 +1606,27 @@ class A2ATaskStore(TaskStore):
             or not backup.get("commitId")
         ):
             return None
-        return {
+        proof: dict[str, object] = {
             "executionId": execution_id,
             "revision": revision,
             "backupGeneration": backup.get("generation"),
             "backupCommitId": backup.get("commitId"),
         }
+        if include_model_boundary:
+            proof["modelBoundary"] = {
+                "contextId": context_id,
+                "taskId": task_id,
+                "externalOperations": control.get("externalOperations"),
+                "backupStatus": backup.get("status"),
+                "phase": control.get("phase"),
+                "executionStatus": control.get("executionStatus"),
+                "terminationReason": control.get("terminationReason"),
+                "releaseReady": control.get("releaseReady"),
+                "commitError": control.get("commitError"),
+                "persistedRevision": control.get("persistedRevision"),
+                "blockers": control.get("blockers"),
+            }
+        return proof
 
     async def wait_until_task_inactive(self, task_id: str, *, timeout: float) -> None:
         """Wait for the current in-process domain owner without canceling it."""
