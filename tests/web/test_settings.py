@@ -9,6 +9,190 @@ from iac_code.web import settings as settings_module
 from iac_code.web import settings as web_settings
 
 
+def test_console_signin_role_settings_persist_only_valid_role_arn(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+
+    assert web_settings.console_signin_role_settings() == {
+        "roleArn": "",
+        "configured": False,
+        "setupComplete": False,
+    }
+    saved = web_settings.save_console_signin_role(" acs:ram::1001:role/IacCodeConsoleSigninRole ")
+    assert saved == {
+        "roleArn": "acs:ram::1001:role/IacCodeConsoleSigninRole",
+        "configured": True,
+        "setupComplete": True,
+    }
+    assert web_settings.console_signin_role_settings() == saved
+
+    with pytest.raises(ValueError, match="resource_signin_role_arn_invalid"):
+        web_settings.save_console_signin_role("acs:ram::1001:user/not-a-role")
+    assert web_settings.save_console_signin_role("") == {
+        "roleArn": "",
+        "configured": False,
+        "setupComplete": False,
+    }
+
+
+def test_console_signin_role_settings_api_and_explicit_create_action(monkeypatch, tmp_path) -> None:
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.services.providers.aliyun import AliyunCredential
+    from iac_code.web import resource_signin_role
+
+    app = _app(monkeypatch, tmp_path)
+    credential = AliyunCredential(mode="AK", access_key_id="fake", access_key_secret="fake")
+    monkeypatch.setattr(CloudCredentials, "get_provider", lambda self, name: credential if name == "aliyun" else None)
+
+    async def create(_credential):
+        assert _credential is credential
+        return {
+            "status": "ready",
+            "roleArn": "acs:ram::1001:role/IacCodeConsoleSigninRole",
+            "configured": True,
+            "policyName": "ReadOnlyAccess",
+        }
+
+    monkeypatch.setattr(resource_signin_role, "create_console_signin_role", create)
+    with TestClient(app) as client:
+        initial = client.get("/api/settings/console-signin-role").json()
+        assert {key: initial[key] for key in ("roleArn", "configured", "setupComplete")} == {
+            "roleArn": "",
+            "configured": False,
+            "setupComplete": False,
+        }
+        assert initial["supplementPolicy"]["name"] == "IacCodeConsoleReadOnlySupplement"
+        assert initial["supplementPolicy"]["needsRepair"] is False
+        assert "odps:CheckTunnelAdditional" in initial["supplementPolicy"]["actions"]
+        invalid = client.put(
+            "/api/settings/console-signin-role",
+            json={"roleArn": "acs:ram::1001:user/not-a-role"},
+        )
+        saved = client.put(
+            "/api/settings/console-signin-role",
+            json={"roleArn": "acs:ram::1001:role/PreviewRole"},
+        )
+        created = client.post("/api/settings/console-signin-role/create", json={})
+
+    assert invalid.status_code == 400
+    assert invalid.json()["error"]["code"] == "resource_signin_role_arn_invalid"
+    assert saved.json() == {
+        "roleArn": "acs:ram::1001:role/PreviewRole",
+        "configured": True,
+        "setupComplete": True,
+    }
+    assert created.status_code == 200
+    assert created.json()["status"] == "ready"
+
+
+def test_console_signin_role_create_api_returns_safe_provider_diagnostics(monkeypatch, tmp_path) -> None:
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.services.providers.aliyun import AliyunCredential
+    from iac_code.web import resource_signin_role
+
+    app = _app(monkeypatch, tmp_path)
+    credential = AliyunCredential(mode="AK", access_key_id="fake", access_key_secret="fake")
+    monkeypatch.setattr(CloudCredentials, "get_provider", lambda self, name: credential if name == "aliyun" else None)
+
+    async def create(_credential):
+        raise resource_signin_role.ConsoleSigninRoleError(
+            "resource_signin_role_create_denied",
+            diagnostic={
+                "source": "alibabaCloud",
+                "type": "ResponseException",
+                "code": "Forbidden.RAM",
+                "message": "Not authorized to ram:CreateRole",
+                "requestId": "request-123",
+            },
+        )
+
+    monkeypatch.setattr(resource_signin_role, "create_console_signin_role", create)
+    with TestClient(app) as client:
+        response = client.post("/api/settings/console-signin-role/create", json={})
+
+    assert response.status_code == 403
+    assert response.json() == {
+        "error": {
+            "message": "resource_signin_role_create_denied",
+            "code": "resource_signin_role_create_denied",
+            "diagnostic": {
+                "source": "alibabaCloud",
+                "type": "ResponseException",
+                "code": "Forbidden.RAM",
+                "message": "Not authorized to ram:CreateRole",
+                "requestId": "request-123",
+            },
+        }
+    }
+
+
+def test_console_signin_role_repair_is_explicit_and_revision_bound(monkeypatch, tmp_path) -> None:
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.services.providers.aliyun import AliyunCredential
+    from iac_code.web import resource_signin_role
+    from iac_code.web.console_readonly_policy import policy_revision
+
+    app = _app(monkeypatch, tmp_path)
+    credential = AliyunCredential(mode="AK", access_key_id="fake", access_key_secret="fake")
+    monkeypatch.setattr(CloudCredentials, "get_provider", lambda self, name: credential)
+    arn = "acs:ram::1001:role/iaccodeconsolesigninrole"
+    web_settings.save_console_signin_role(arn)
+    calls = []
+
+    async def repair(value):
+        assert value is credential
+        calls.append("repair")
+        return {"status": "ready", "roleArn": arn}
+
+    monkeypatch.setattr(resource_signin_role, "repair_console_signin_role", repair)
+    with TestClient(app) as client:
+        assert client.get("/api/settings/console-signin-role").json()["supplementPolicy"]["needsRepair"]
+        assert calls == []
+        for body in (
+            {},
+            {"roleArn": arn, "revision": "stale"},
+            {"roleArn": "acs:ram::1001:role/other", "revision": policy_revision()},
+        ):
+            assert client.post("/api/settings/console-signin-role/repair", json=body).status_code == 409
+        assert calls == []
+        result = client.post(
+            "/api/settings/console-signin-role/repair", json={"roleArn": arn, "revision": policy_revision()}
+        )
+        assert result.status_code == 200
+        assert calls == ["repair"]
+
+
+@pytest.mark.parametrize(
+    "code,status",
+    [
+        ("resource_signin_role_policy_denied", 403),
+        ("resource_signin_role_policy_conflict", 409),
+        ("resource_signin_role_repair_target_invalid", 409),
+    ],
+)
+def test_console_signin_role_repair_errors_remain_actionable(monkeypatch, tmp_path, code, status) -> None:
+    from iac_code.services.cloud_credentials import CloudCredentials
+    from iac_code.services.providers.aliyun import AliyunCredential
+    from iac_code.web import resource_signin_role
+    from iac_code.web.console_readonly_policy import policy_revision
+
+    app = _app(monkeypatch, tmp_path)
+    credential = AliyunCredential(mode="AK", access_key_id="fake", access_key_secret="fake")
+    monkeypatch.setattr(CloudCredentials, "get_provider", lambda self, name: credential)
+    arn = "acs:ram::1001:role/iaccodeconsolesigninrole"
+    web_settings.save_console_signin_role(arn)
+
+    async def repair(_value):
+        raise resource_signin_role.ConsoleSigninRoleError(code)
+
+    monkeypatch.setattr(resource_signin_role, "repair_console_signin_role", repair)
+    with TestClient(app) as client:
+        result = client.post(
+            "/api/settings/console-signin-role/repair", json={"roleArn": arn, "revision": policy_revision()}
+        )
+        assert result.status_code == status
+        assert result.json()["error"]["code"] == code
+
+
 def _app(monkeypatch, tmp_path, *, token_mode: bool = False):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     for name in ("IAC_CODE_PROVIDER", "IAC_CODE_MODEL", "IAC_CODE_BASE_URL", "IAC_CODE_API_KEY"):

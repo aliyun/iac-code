@@ -21,7 +21,7 @@ STACK_PROGRESS_RECORD_DELTA = 5.0
 class _StackProgressRecordSnapshot:
     status: str
     progress_percentage: float
-    resources_signature: tuple[tuple[str, str, str, str], ...]
+    resources_signature: tuple[str, ...]
 
 
 @dataclass
@@ -38,6 +38,10 @@ class DisplayStackProgress:
     progress_percentage: float = 0.0
     resources: list[dict[str, Any]] = field(default_factory=list)
     elapsed_seconds: int = 0
+    region_id: str = ""
+    tool_use_id: str = ""
+    account_scope: str = ""
+    console_partition: str = ""
 
 
 @dataclass
@@ -182,6 +186,10 @@ class PipelineDisplayRecorder:
             "elapsed_seconds": getattr(event, "elapsed_seconds", 0),
             "resources": resources if isinstance(resources, list) else [],
         }
+        for key in ("region_id", "tool_use_id", "account_scope", "console_partition"):
+            value = getattr(event, key, "")
+            if isinstance(value, str) and value:
+                payload[key] = value
         if not self._should_record_stack_progress(step_id, payload):
             return
         self.record(
@@ -198,7 +206,8 @@ class PipelineDisplayRecorder:
         current = _StackProgressRecordSnapshot(
             status=str(payload.get("status") or ""),
             progress_percentage=self._payload_float(payload.get("progress_percentage")),
-            resources_signature=self._resources_signature(payload.get("resources")),
+            resources_signature=self._resources_signature(payload.get("resources"))
+            + (json.dumps({key: payload.get(key) for key in ("region_id", "account_scope", "console_partition")}),),
         )
         previous = self._stack_progress_snapshots.get(key)
         if previous is None:
@@ -232,21 +241,31 @@ class PipelineDisplayRecorder:
             return 0.0
 
     @staticmethod
-    def _resources_signature(resources: Any) -> tuple[tuple[str, str, str, str], ...]:
+    def _resources_signature(resources: Any) -> tuple[str, ...]:
         if not isinstance(resources, list):
             return ()
         signature = []
         for resource in resources:
             if not isinstance(resource, dict):
                 continue
-            signature.append(
-                (
-                    str(resource.get("name") or ""),
-                    str(resource.get("resource_type") or ""),
-                    str(resource.get("status") or ""),
-                    str(resource.get("status_reason") or ""),
-                )
+            # A locator/alias can arrive without any status or percentage change.
+            fields = (
+                "name",
+                "resource_type",
+                "status",
+                "status_reason",
+                "physical_resource_id",
+                "identifier",
+                "identifier_kind",
+                "identifier_field",
+                "aliases",
+                "attributes",
+                "account_scope",
+                "console_partition",
+                "scope_kind",
+                "region_id",
             )
+            signature.append(json.dumps({key: resource[key] for key in fields if key in resource}, sort_keys=True))
         return tuple(sorted(signature))
 
     def record_candidate_diagram(self, event: Any, *, step_id: str | None = None) -> None:
@@ -419,6 +438,10 @@ class PipelineDisplayReducer:
                     status=str(payload.get("status") or ""),
                     progress_percentage=self._optional_float(payload.get("progress_percentage")) or 0.0,
                     elapsed_seconds=self._optional_int(payload.get("elapsed_seconds")) or 0,
+                    region_id=str(payload.get("region_id") or ""),
+                    tool_use_id=str(payload.get("tool_use_id") or ""),
+                    account_scope=str(payload.get("account_scope") or ""),
+                    console_partition=str(payload.get("console_partition") or ""),
                     resources=[
                         dict(resource)
                         for resource in (resources if isinstance(resources, list) else [])

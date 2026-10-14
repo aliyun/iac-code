@@ -198,25 +198,32 @@ class AliyunApiDoc(Tool):
         canonical_product = contract.product
         version = contract.version
         action = normalize_action(canonical_product, action)
-        fetch_for_selection = getattr(self._services.openmeta, "get_api_for_version_selection", None)
-        if callable(fetch_for_selection):
-            metadata_fetch = await fetch_for_selection(canonical_product, version, action)
+        metadata = None
+        if contract.transport == "ots_sdk":
+            from iac_code.tools.cloud.aliyun.ots_data_adapter import ots_list_table_metadata
+
+            metadata = ots_list_table_metadata()
         else:
-            metadata_fetch = await self._services.openmeta.get_api(canonical_product, version, action)
-        if metadata_fetch.value is None:
-            outcome = metadata_fetch.error or "protocol_error"
-            emit_aliyun_api_doc(detail, outcome)
-            return ToolResult.error(
-                public_aliyun_error(
-                    _metadata_public_error(outcome, not_found="metadata_not_found"),
-                    product=canonical_product,
-                    version=version,
-                    action=action,
+            fetch_for_selection = getattr(self._services.openmeta, "get_api_for_version_selection", None)
+            if callable(fetch_for_selection):
+                metadata_fetch = await fetch_for_selection(canonical_product, version, action)
+            else:
+                metadata_fetch = await self._services.openmeta.get_api(canonical_product, version, action)
+            if metadata_fetch.value is None:
+                outcome = metadata_fetch.error or "protocol_error"
+                emit_aliyun_api_doc(detail, outcome)
+                return ToolResult.error(
+                    public_aliyun_error(
+                        _metadata_public_error(outcome, not_found="metadata_not_found"),
+                        product=canonical_product,
+                        version=version,
+                        action=action,
+                    )
                 )
-            )
+            metadata = metadata_fetch.value
 
         try:
-            document = _render_document(contract, metadata_fetch.value, detail=detail)
+            document = _render_document(contract, metadata, detail=detail)
             content = _serialize(document)
         except (ApiContractError, TypeError, ValueError) as error:
             emit_aliyun_api_doc(detail, "contract_error")

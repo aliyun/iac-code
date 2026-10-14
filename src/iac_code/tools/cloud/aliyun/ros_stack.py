@@ -28,6 +28,7 @@ from iac_code.services.telemetry.sanitize import (
     sanitize_terraform_provider,
 )
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.cloud.aliyun.resource_reference_extractors import credential_reference_context
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory, public_ecs_credential_message
 from iac_code.tools.cloud.aliyun.template_source import (
     check_local_template_url_read_permission,
@@ -555,7 +556,11 @@ class RosStack(BaseCloudStack):
     def _get_client(self, region: str) -> Any:
         credentials = CloudCredentials()
         cred = credentials.get_provider("aliyun")
+        self._last_resource_context = credential_reference_context(cred)
         return RosClientFactory.create(cred, region_id=region)
+
+    def _resource_reference_context(self) -> dict[str, str]:
+        return dict(getattr(self, "_last_resource_context", {}))
 
     def _call_action_kwargs(self, context: ToolContext) -> dict[str, Any]:
         return {
@@ -1165,6 +1170,7 @@ class RosStack(BaseCloudStack):
             raise
         data = response.body.to_map()
         resources = []
+        reference_context = self._resource_reference_context()
         for r in data.get("Resources", []):
             resources.append(
                 ResourceStatus(
@@ -1172,6 +1178,9 @@ class RosStack(BaseCloudStack):
                     resource_type=r.get("ResourceType", ""),
                     status=r.get("Status", ""),
                     status_reason=r.get("StatusReason", ""),
+                    physical_resource_id=r.get("PhysicalResourceId") or "",
+                    account_scope=reference_context.get("account_scope", ""),
+                    console_partition=reference_context.get("console_partition", ""),
                 )
             )
         return resources

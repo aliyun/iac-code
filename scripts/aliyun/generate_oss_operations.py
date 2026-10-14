@@ -149,6 +149,29 @@ def _wire_name_matches(openmeta_name: str, sdk_name: str) -> bool:
     return right.startswith(prefix) and right.endswith(suffix)
 
 
+def _reviewed_put_bucket_xml(request_model: type[Any], metadata: Mapping[str, Any]) -> bool:
+    """One reviewed typed body alias; never a generic XML/name fallback."""
+    if (
+        request_model.__name__ != "PutBucketRequest"
+        or metadata.get("action") != "PutBucket"
+        or metadata.get("method") != "PUT"
+        or metadata.get("sdk_method") != "put_bucket"
+        or metadata.get("consumes") != ["application/xml"]
+    ):
+        return False
+    attributes = getattr(request_model, "_attribute_map", {})
+    bodies = [
+        (field, description)
+        for field, description in attributes.items()
+        if isinstance(description, Mapping)
+        and description.get("tag") == "input" and description.get("position") == "body"
+    ]
+    return len(bodies) == 1 and bodies[0][0] == "create_bucket_configuration" and (
+        bodies[0][1].get("type") == "xml"
+        and bodies[0][1].get("rename") == "CreateBucketConfiguration"
+    )
+
+
 def _field_mapping(request_model: type[Any], metadata: Mapping[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
     attributes = getattr(request_model, "_attribute_map", None)
     if not isinstance(attributes, Mapping):
@@ -173,7 +196,12 @@ def _field_mapping(request_model: type[Any], metadata: Mapping[str, Any]) -> tup
                 continue
             if raw_description.get("tag") != "input" or raw_description.get("position") != location:
                 continue
-            if _wire_name_matches(openmeta_name, _wire_name(sdk_field, raw_description)):
+            reviewed_body_alias = (
+                _reviewed_put_bucket_xml(request_model, metadata)
+                and location == "body" and openmeta_name == "body"
+                and sdk_field == "create_bucket_configuration"
+            )
+            if reviewed_body_alias or _wire_name_matches(openmeta_name, _wire_name(sdk_field, raw_description)):
                 candidates.append((sdk_field, raw_description))
         if len(candidates) != 1:
             suffix = "missing" if not candidates else "ambiguous"
@@ -270,7 +298,9 @@ def _operation_row(
     mapping, mapping_reasons = _field_mapping(request_model, metadata)
     reasons.extend(mapping_reasons)
     body_type = _body_type(request_model)
-    if body_type not in {"none", "byte"}:
+    if body_type not in {"none", "byte"} and not (
+        body_type == "xml" and _reviewed_put_bucket_xml(request_model, metadata)
+    ):
         reasons.append(f"request_body_type_unsupported:{body_type}")
     reasons = sorted(set(reasons))
     supported = not reasons and isinstance(method, str)

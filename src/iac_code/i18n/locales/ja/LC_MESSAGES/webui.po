@@ -335,6 +335,8 @@ msgid "Search chats or run a command"
 msgstr "チャットを検索またはコマンドを実行"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 msgid "Close"
 msgstr "閉じる"
 
@@ -391,6 +393,7 @@ msgstr "Git Bash を使用できます。"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Loading…"
 msgstr "読み込み中…"
@@ -469,9 +472,18 @@ msgid "Copied"
 msgstr "コピーしました"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Copy failed"
 msgstr "コピーに失敗しました"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show less"
+msgstr "折りたたむ"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show more"
+msgstr "もっと見る"
 
 #: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
@@ -699,14 +711,6 @@ msgstr "{label} で新しいチャット"
 #: src/iac_code/web/static/js/app.js
 msgid "Loading..."
 msgstr "読み込み中..."
-
-#: src/iac_code/web/static/js/app.js
-msgid "Show less"
-msgstr "折りたたむ"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Show more"
-msgstr "もっと見る"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Expand all sessions"
@@ -1005,6 +1009,7 @@ msgid "Update failed: {error}"
 msgstr "更新に失敗しました: {error}"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 msgid "Retry"
 msgstr "再試行"
 
@@ -1028,6 +1033,10 @@ msgstr "更新を開始できませんでした。詳細は診断を開いて確
 #, python-brace-format
 msgid "Failed to start update: {error}"
 msgstr "更新の開始に失敗しました: {error}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not open the link. Please try again."
+msgstr "リンクを開けませんでした。もう一度お試しください。"
 
 #: src/iac_code/web/static/js/architecture_diagram.js
 #: src/iac_code/web/static/js/components/output_panel.js
@@ -1225,6 +1234,7 @@ msgid "Additional details"
 msgstr "補足情報"
 
 #: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 msgid "Select"
 msgstr "選択"
 
@@ -1243,6 +1253,7 @@ msgstr "拒否"
 
 #: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 #: src/iac_code/web/static/js/components/tool_cards.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Region"
@@ -1708,6 +1719,101 @@ msgstr "結果"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No pipeline data."
 msgstr "パイプラインデータはありません。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Cloud credentials for this resource are unavailable or have changed."
+msgstr "このリソースのクラウド認証情報が利用できないか、変更されています。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid ""
+"Resource lookup needs permission. Review the permission settings, then "
+"retry."
+msgstr "リソースの照会には権限が必要です。権限設定を確認してから再試行してください。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Resource information changed. Reopen the link and try again."
+msgstr "リソース情報が変更されました。リンクを開き直して再試行してください。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Resource lookup failed. Retry or enter the missing information."
+msgstr "リソースの照会に失敗しました。再試行するか、不足している情報を入力してください。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Resource link"
+msgstr "リソースリンク"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid ""
+"This name belonged to a deleted resource. Confirm the current object "
+"before opening it."
+msgstr "この名前は削除済みのリソースで使われていました。開く前に現在の対象を確認してください。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Complete resource context"
+msgstr "リソースの情報を補完"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Choose a resource"
+msgstr "リソースを選択"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Account"
+msgstr "アカウント"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Configured credentials (account not verified)"
+msgstr "設定済み認証情報（アカウント未確認）"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Use configured cloud credentials"
+msgstr "設定済みのクラウド認証情報を使用"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Open console"
+msgstr "コンソールを開く"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Load missing resource attributes"
+msgstr "不足しているリソース属性を取得"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Copy name"
+msgstr "名前をコピー"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Copy ID"
+msgstr "ID をコピー"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "This choice is not saved yet."
+msgstr "この選択はまだ保存されていません。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "This console route has not been verified."
+msgstr "このコンソールのリンク先はまだ検証されていません。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Loading credential context..."
+msgstr "認証情報のコンテキストを読み込み中..."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Loading resource attributes..."
+msgstr "リソース属性を取得中…"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Resource attributes loaded. Choose a link to open the console."
+msgstr "リソース属性を取得しました。リンクを選択してコンソールを開いてください。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid ""
+"No cloud credential context is available. Configure credentials, then "
+"retry."
+msgstr "利用可能なクラウド認証情報のコンテキストがありません。認証情報を設定してから再試行してください。"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Alibaba Cloud API"
@@ -2573,8 +2679,8 @@ msgid "Stack: {name}"
 msgstr "スタック: {name}"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Account"
-msgstr "アカウント"
+msgid "Resource identifier"
+msgstr "リソース識別子"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Developer"
@@ -3987,6 +4093,139 @@ msgid "The permission mode preset for new sessions."
 msgstr "新規セッションにプリセットされる権限モード。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Embedded console sign-in"
+msgstr "埋め込みコンソールへのサインイン"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Open supported cloud resources here without signing in again."
+msgstr "対応するクラウドリソースを再ログインせずにここで開きます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save role"
+msgstr "ロールを保存"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Create read-only role"
+msgstr "読み取り専用ロールを作成"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Repair read-only permissions"
+msgstr "読み取り専用権限を修復"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Additional read-only permissions (all resources):"
+msgstr "追加の読み取り専用権限（すべてのリソース）："
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "RAM role ARN"
+msgstr "RAM ロール ARN"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"With a role configured, supported resources open here; other resources "
+"open in a new tab."
+msgstr "ロールを設定すると、対応するリソースはここで、それ以外は新しいタブで開きます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"One-click creation requires RAM write and sts:AssumeRole permissions; "
+"root accounts are not supported."
+msgstr "ワンクリック作成には RAM 書き込み権限と sts:AssumeRole 権限が必要です。ルートアカウントはサポートされません。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"This creates or updates the supplemental policy and attaches it with "
+"ReadOnlyAccess. Existing non-default policy versions may rotate. "
+"Continue?"
+msgstr ""
+"補足ポリシーを作成または更新し、ReadOnlyAccess "
+"とともにロールに付与します。古い非デフォルトのポリシーバージョンはローテーションされる場合があります。続行しますか？"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The RAM role ARN is invalid."
+msgstr "RAM ロール ARN が無効です。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configure Alibaba Cloud credentials first."
+msgstr "先に Alibaba Cloud 認証情報を設定してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Alibaba Cloud root accounts cannot assume roles. Use a RAM user or RAM "
+"role credential."
+msgstr "Alibaba Cloud のルートアカウントはロールを引き受けられません。RAM ユーザーまたは RAM ロールの認証情報を使用してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"A role named IacCodeConsoleSigninRole already exists and was not "
+"modified. Enter its ARN manually."
+msgstr "IacCodeConsoleSigninRole というロールがすでに存在するため、変更しませんでした。ARN を手動で入力してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The current identity cannot create the RAM role."
+msgstr "現在の ID では RAM ロールを作成できません。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The role was created, but ReadOnlyAccess could not be attached."
+msgstr "ロールは作成されましたが、ReadOnlyAccess を付与できませんでした。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The current identity cannot assume the configured role."
+msgstr "現在の ID では設定済みロールを引き受けられません。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"RAM role setup timed out. Check the role in the Alibaba Cloud console "
+"before retrying."
+msgstr "RAM ロールの設定がタイムアウトしました。再試行する前に Alibaba Cloud コンソールでロールを確認してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The role or supplemental policy was modified outside iac-code. No "
+"conflicting permissions were overwritten."
+msgstr "ロールまたは補足ポリシーが iac-code の外部で変更されています。競合する権限は上書きしていません。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Supplemental policy setup failed. Check RAM policy-management permissions"
+" and retry."
+msgstr "補足ポリシーの設定に失敗しました。RAM ポリシー管理権限を確認して再試行してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Could not configure the console sign-in role."
+msgstr "コンソールサインイン用ロールを設定できませんでした。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Role saved. Embedded sign-in will be used when AssumeRole succeeds."
+msgstr "ロールを保存しました。AssumeRole が成功すると埋め込みサインインが使用されます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Role configuration cleared. Resource links will use the normal new-tab "
+"behavior."
+msgstr "ロール設定を消去しました。リソースリンクは通常どおり新しいタブで開きます。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Creating and verifying the read-only RAM role…"
+msgstr "読み取り専用 RAM ロールを作成して検証しています…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only role created and verified."
+msgstr "読み取り専用ロールを作成して検証しました。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save the role before repairing its permissions."
+msgstr "権限を修復する前にロールを保存してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Updating and verifying read-only permissions…"
+msgstr "読み取り専用権限を更新して検証しています…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only permissions updated. Reopen the resource preview to use them."
+msgstr "読み取り専用権限を更新しました。新しい権限を使用するにはリソースプレビューを開き直してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Color scheme"
 msgstr "配色テーマ"
 
@@ -4073,6 +4312,14 @@ msgid "Install failed: {error}"
 msgstr "インストールに失敗しました: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only permissions need an update. Use the repair button."
+msgstr "読み取り専用権限の更新が必要です。修復ボタンを使用してください。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Could not load the console sign-in role."
+msgstr "コンソールサインイン用ロールを読み込めませんでした。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Debug options"
 msgstr "デバッグオプション"
 
@@ -4130,6 +4377,12 @@ msgstr "再起動しています。サービスが復旧するとページが自
 msgid "The local runtime could not restart. Open diagnostics for details."
 msgstr "ローカルランタイムを再起動できませんでした。詳細は診断を開いて確認してください。"
 
+msgid "Max output tokens"
+msgstr "最大出力トークン数"
+
+msgid "Max output tokens per reply; leave blank to use model default"
+msgstr "返信ごとの最大出力トークン数。空欄の場合はモデルのデフォルトを使用します"
+
 #~ msgid "Completing step: {step}"
 #~ msgstr "ステップを完了しています: {step}"
 
@@ -4176,3 +4429,36 @@ msgstr "リンクを開けませんでした。もう一度お試しください
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated cost"
 msgstr "概算費用"
+
+#~ msgid "Leave blank and save to keep the normal new-tab behavior."
+#~ msgstr "空欄のまま保存すると、通常どおり新しいタブで開きます。"
+
+#~ msgid ""
+#~ "One-click creation creates "
+#~ "IacCodeConsoleSigninRole and attaches "
+#~ "ReadOnlyAccess. The current RAM user or"
+#~ " role must have RAM write and "
+#~ "sts:AssumeRole permissions. Alibaba Cloud root"
+#~ " accounts cannot assume roles."
+#~ msgstr ""
+#~ "ワンクリック作成では IacCodeConsoleSigninRole を作成し、ReadOnlyAccess"
+#~ " を付与します。現在の RAM ユーザーまたはロールには RAM 書き込み権限と"
+#~ " sts:AssumeRole 権限が必要です。Alibaba Cloud "
+#~ "のルートアカウントはロールを引き受けられません。"
+
+#~ msgid "Use a dedicated RAM role for embedded sign-in."
+#~ msgstr "埋め込みサインイン専用の RAM ロールを使用します。"
+
+#~ msgid ""
+#~ "Only the ARN is saved. STS "
+#~ "credentials stay in memory and refresh"
+#~ " automatically."
+#~ msgstr "保存されるのは ARN のみです。STS 認証情報はメモリ内に保持され、自動更新されます。"
+
+#~ msgid "Leave blank to open in a new tab."
+#~ msgstr "空欄の場合は新しいタブで開きます。"
+
+#~ msgid ""
+#~ "Role created, but the current identity"
+#~ " still needs sts:AssumeRole permission."
+#~ msgstr "ロールは作成されましたが、現在の ID には引き続き sts:AssumeRole 権限が必要です。"

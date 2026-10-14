@@ -17,6 +17,10 @@ from pathlib import PurePath
 from typing import Any
 
 from iac_code.mcp.progress import mcp_progress_metadata
+from iac_code.tools.cloud.resource_references import (
+    RESOURCE_REFERENCES_METADATA_KEY,
+    resource_references_from_metadata,
+)
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
@@ -46,6 +50,7 @@ from iac_code.types.stream_events import (
     ToolUseStartEvent,
     Usage,
 )
+from iac_code.web.resource_references import resource_fact_to_web
 
 logger = logging.getLogger(__name__)
 PIPELINE_IDENTITY_FIELDS = ("contextId", "taskId", "lastSequence")
@@ -298,8 +303,11 @@ class WebEventTranslator:
         result_kind: str,
         summary: Any,
         artifacts: list[Any],
+        message_id: str | None = None,
+        turn_id: str | None = None,
         submitted_delta: dict[str, Any] | None = None,
         normalized_conclusion: dict[str, Any] | None = None,
+        resource_references: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload = {
             "toolUseId": tool_use_id,
@@ -307,10 +315,16 @@ class WebEventTranslator:
             "summary": summary,
             "artifacts": list(artifacts),
         }
+        if message_id:
+            payload["messageId"] = message_id
+        if turn_id:
+            payload["turnId"] = turn_id
         if isinstance(submitted_delta, dict):
             payload["submittedDelta"] = submitted_delta
         if isinstance(normalized_conclusion, dict):
             payload["normalizedConclusion"] = normalized_conclusion
+        if resource_references:
+            payload["resourceReferences"] = resource_fact_to_web(resource_references)
         return self._make("tool.result", payload)
 
     def tool_finished(
@@ -396,6 +410,8 @@ class WebEventTranslator:
             from iac_code.types.stream_events import TOOL_RENDER_METADATA_KEY
 
             public_metadata = dict(event.metadata or {})
+            resource_references = resource_references_from_metadata(public_metadata)
+            public_metadata.pop(RESOURCE_REFERENCES_METADATA_KEY, None)
             submitted_delta = public_metadata.pop("submitted_delta", None)
             step_result = public_metadata.pop("step_result", None)
             normalized_conclusion = (
@@ -412,8 +428,11 @@ class WebEventTranslator:
                 result_kind="error" if event.is_error else "text",
                 summary=event.result,
                 artifacts=[public_metadata] if public_metadata else [],
+                message_id=self._current_message_id,
+                turn_id=turn_id,
                 submitted_delta=submitted_delta if isinstance(submitted_delta, dict) else None,
                 normalized_conclusion=(normalized_conclusion if isinstance(normalized_conclusion, dict) else None),
+                resource_references=resource_references,
             )
         if isinstance(event, MCPProgressEvent):
             payload = mcp_progress_metadata(event)
@@ -611,6 +630,8 @@ class WebEventTranslator:
                     "deploymentSucceeded": _stack_deployment_succeeded(event.status),
                     "deploymentComplete": _stack_deployment_succeeded(event.status),
                     "resources": event.resources,
+                    **({"accountScope": event.account_scope} if event.account_scope else {}),
+                    **({"consolePartition": event.console_partition} if event.console_partition else {}),
                     "elapsedSeconds": event.elapsed_seconds,
                 },
             )
@@ -676,6 +697,7 @@ class WebEventBuffer:
         self._condition = asyncio.Condition()
         # 活跃的 stream_after 消费者数量（即实时 SSE 观看者）。用于判定会话结束时是否有人在看。
         self._subscribers = 0
+        self.resource_observer: Callable[[dict[str, Any]], None] | None = None
 
     @property
     def subscriber_count(self) -> int:
@@ -712,6 +734,8 @@ class WebEventBuffer:
         event = make_event(self.session_id, self._next_sequence, event_type, payload)
         self._next_sequence += 1
         self._events.append(event)
+        if self.resource_observer is not None:
+            _notify_event_observer(self.resource_observer, event)
         observer = _EVENT_OBSERVER.get()
         if observer is not None:
             _notify_event_observer(observer, event)

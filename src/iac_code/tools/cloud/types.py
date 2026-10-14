@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from iac_code.i18n import _
 
@@ -82,6 +83,29 @@ class ResourceStatus:
     resource_type: str
     status: str
     status_reason: str
+    # The API field may contain a name (RAM Role, OSS Bucket), not an ID.
+    physical_resource_id: str = ""
+    attributes: dict[str, str] = field(default_factory=dict)
+    account_scope: str = ""
+    console_partition: str = ""
+
+    def to_progress_dict(self) -> dict[str, Any]:
+        """Keep legacy progress fields and add only observed locator facts."""
+        result: dict[str, Any] = {
+            "name": self.name,
+            "resource_type": self.resource_type,
+            "status": self.status,
+            "status_reason": self.status_reason,
+        }
+        if self.physical_resource_id:
+            result["physical_resource_id"] = self.physical_resource_id
+        if self.attributes:
+            result["attributes"] = dict(self.attributes)
+        if self.account_scope:
+            result["account_scope"] = self.account_scope
+        if self.console_partition:
+            result["console_partition"] = self.console_partition
+        return result
 
     @property
     def status_icon(self) -> str:

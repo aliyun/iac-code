@@ -158,7 +158,7 @@ def create_app(
         from starlette.applications import Starlette
         from starlette.concurrency import run_in_threadpool
         from starlette.middleware import Middleware
-        from starlette.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+        from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
         from starlette.routing import Mount, Route
         from starlette.staticfiles import StaticFiles
     except ImportError as exc:  # pragma: no cover - exercised when optional extra is absent
@@ -226,6 +226,7 @@ def create_app(
         install_in_progress,
         stream_install_review_step_prerequisite,
     )
+    from iac_code.web.resource_link_catalog import resource_link_catalog_payload
     from iac_code.web.runtime import (
         WebModelSelection,
         WebSessionRuntime,
@@ -249,6 +250,7 @@ def create_app(
         AliyunOAuthManualFlowStore,
         aliyun_cloud_summary,
         clear_provider_config,
+        console_signin_role_settings,
         developer_settings,
         get_appearance_theme,
         get_architecture_diagram_renderer,
@@ -262,6 +264,7 @@ def create_app(
         save_aliyun_cloud,
         save_appearance_theme,
         save_architecture_diagram_renderer,
+        save_console_signin_role,
         save_developer_settings,
         save_foreign_sessions_visibility,
         save_provider_config,
@@ -290,6 +293,18 @@ def create_app(
     manager: WebSessionManager = session_manager or WebSessionManager(
         cwd=desktop_config.default_project_cwd if desktop_config is not None else None
     )
+    resource_signin_relays: dict[str, tuple[float, str, str]] = {}
+    resource_signin_relay_ttl_seconds = 60.0
+    resource_signin_relay_limit = 128
+
+    def prune_resource_signin_relays() -> None:
+        now = time.monotonic()
+        for relay_id, (expires_at, _session_id, _url) in list(resource_signin_relays.items()):
+            if expires_at <= now:
+                resource_signin_relays.pop(relay_id, None)
+        while len(resource_signin_relays) >= resource_signin_relay_limit:
+            resource_signin_relays.pop(next(iter(resource_signin_relays)))
+
     desktop_controller = None
     if desktop_config is not None:
         from iac_code.desktop.controller import DesktopRuntimeController
@@ -551,6 +566,11 @@ def create_app(
             for session in sessions:
                 session.active_turn_task = None
                 session.active_local_tasks.clear()
+                if session.resource_references is not None:
+                    try:
+                        await session.resource_references.close()
+                    except BaseException as error:
+                        record_cleanup_error(error)
                 try:
                     await release_turn_admission_lock(session)
                 except BaseException as error:
@@ -606,10 +626,18 @@ def create_app(
             response.headers["Cache-Control"] = "no-store"
             return response
 
-    def json_error(message: str, status_code: int, *, code: str | None = None) -> JSONResponse:
-        error = {"message": message}
+    def json_error(
+        message: str,
+        status_code: int,
+        *,
+        code: str | None = None,
+        diagnostic: Mapping[str, Any] | None = None,
+    ) -> JSONResponse:
+        error: dict[str, Any] = {"message": message}
         if code is not None:
             error["code"] = code
+        if diagnostic:
+            error["diagnostic"] = dict(diagnostic)
         return JSONResponse({"error": error}, status_code=status_code)
 
     def foreign_read_only_response(session: WebSession) -> JSONResponse | None:
@@ -982,6 +1010,7 @@ def create_app(
         return owner
 
     async def release_pipeline_action_owner(session: WebSession, owner: asyncio.Task[Any]) -> None:
+        await session.flush_resource_references()
         async with session.turn_admission_lock:
             if session.active_turn_task is owner:
                 session.active_turn_task = None
@@ -1230,6 +1259,7 @@ def create_app(
                 input_consumed=input_consumed,
             )
             session.status = "idle"
+            await session.flush_resource_references()
             current_task = asyncio.current_task()
             if session.active_turn_task is current_task:
                 session.active_turn_task = None
@@ -1993,7 +2023,10 @@ def create_app(
         i18n_script = "<script>window.__IAC_I18N__ = {};</script>".format(
             json.dumps({"lang": lang, "messages": catalog}, ensure_ascii=False).replace("<", "\\u003c")
         )
-        injected_scripts = i18n_script
+        resource_links_script = "<script>window.__IAC_RESOURCE_LINKS__ = {};</script>".format(
+            json.dumps(resource_link_catalog_payload(), ensure_ascii=False).replace("<", "\\u003c")
+        )
+        injected_scripts = i18n_script + "\n  " + resource_links_script
         if desktop_config is not None:
             assert desktop_controller is not None
             desktop_script = "<script>window.__IAC_DESKTOP__ = {};</script>".format(
@@ -2517,17 +2550,59 @@ def create_app(
             return json_error(_("image not found"), 404)
         return Response(image.data, media_type=image.media_type)
 
+    async def resource_transcript(session, transcript=None):
+        from iac_code.web.resource_sources import with_error_source, with_request_sources
+
+        if transcript is None:
+            transcript = manager.load_visible_transcript(session.session_id, cwd=session.cwd)
+        snapshot = None
+        if session_accepts_pipeline_input(session):
+            snapshot = await load_pipeline_snapshot(context_id=session.context_id, task_id=session.task_id)
+        if manager.get_session(session.web_session_id) is not session:
+            return {"messages": [], "tools": {}}
+        visible = with_error_source(with_request_sources(transcript, session, snapshot), session)
+        controller = session.resource_references
+        return controller.preview_sources.project(visible) if controller is not None else visible
+
     async def get_messages(request):
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
             return json_error(_("session not found"), 404)
         transcript = manager.load_visible_transcript(session.session_id, cwd=session.cwd)
+        if session.resource_references is not None:
+            transcript["resourceReferences"] = session.resource_references.hydrate(
+                await resource_transcript(session, transcript)
+            )
         # 服务器重启后 buffer 从序号 1 重新计数,而前端把存储转录里的可见行按位置重排为
         # 1..N。若不播种,流水线恢复后补发的实时事件(如 step 标记)会拿到低序号排到存储行
         # 之上(Issue 3:step5 排到 step4 上方)。以可见行数播种,令后续实时事件序号 > N。
         session.events.ensure_sequence_above(len(transcript.get("messages", [])))
         return JSONResponse(transcript)
+
+    async def get_resource_references(request):
+        from iac_code.web.resource_references import ResourceRevisionConflictError
+
+        session = manager.get_session(request.path_params["session_id"])
+        if session is None:
+            return json_error(_("session not found"), 404)
+        controller = session.resource_references
+        if controller is None:
+            return json_error("resource_index_unavailable", 503)
+        try:
+            # Hydrate only visible history; the sidecar cannot add hidden tools.
+            controller.hydrate(await resource_transcript(session))
+            limit = query_int(request, "limit")
+            return JSONResponse(
+                controller.snapshot(
+                    cursor=query_string(request, "cursor", "") or None,
+                    limit=500 if limit is None else limit,
+                )
+            )
+        except ResourceRevisionConflictError:
+            return json_error("resource_revision_conflict", 409)
+        except ValueError:
+            return json_error("resource_cursor_invalid", 400)
 
     async def get_outputs(request):
         session_id = request.path_params["session_id"]
@@ -2541,7 +2616,225 @@ def create_app(
         )
         return JSONResponse(outputs_payload(manager, session, optimizing))
 
+    async def load_resource_account_context():
+        from iac_code.web.resource_accounts import load_configured_resource_context
+
+        return await asyncio.to_thread(load_configured_resource_context)
+
+    async def get_resource_account_context(request):
+        session_id = request.path_params["session_id"]
+        session = manager.get_session(session_id)
+        if session is None:
+            return json_error(_("session not found"), 404)
+        if (read_only := foreign_read_only_response(session)) is not None:
+            return read_only
+        controller = session.resource_references
+        if controller is None:
+            return json_error("resource_index_unavailable", 503)
+        # The client selects the action, never a profile/path/provider or API.
+        if await request.body() not in {b"", b"{}"}:
+            return json_error("resource_context_invalid", 400)
+        context = await load_resource_account_context()
+        if manager.get_session(session_id) is not session:
+            return json_error(_("session not found"), 404)
+        try:
+            return JSONResponse(controller.offer_account_context(context))
+        except ValueError:
+            return json_error("resource_session_unavailable", 409)
+
+    async def create_resource_signin(request):
+        from iac_code.web.resource_signin import ResourceSigninError, create_resource_console_signin
+
+        session_id = request.path_params["session_id"]
+        session = manager.get_session(session_id)
+        if session is None:
+            return json_error(_("session not found"), 404)
+        if (read_only := foreign_read_only_response(session)) is not None:
+            return read_only
+        if session.resource_references is None:
+            return json_error("resource_index_unavailable", 503)
+        body = await request.body()
+        if len(body) > 32768:
+            return json_error("resource_signin_request_too_large", 413, code="resource_signin_request_too_large")
+        try:
+            payload = json.loads(body)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return json_error("resource_signin_request_invalid", 400, code="resource_signin_request_invalid")
+        account_scope = payload.get("accountScope") if isinstance(payload, dict) else None
+        account_known = session.resource_references.has_account_scope(account_scope)
+        if not account_known:
+            configured_context = await load_resource_account_context()
+            account_known = configured_context.get("account_scope") == account_scope
+        if not account_known:
+            return json_error("resource_signin_request_invalid", 400, code="resource_signin_request_invalid")
+        relay_id = uuid.uuid4().hex + uuid.uuid4().hex
+        relay_path = "/api/sessions/{}/resource-references/signin-relay/{}".format(session_id, relay_id)
+        try:
+            result = await asyncio.wait_for(
+                create_resource_console_signin(
+                    payload,
+                    allow_unknown_account_scope=True,
+                ),
+                timeout=22,
+            )
+        except asyncio.TimeoutError:
+            return json_error("resource_signin_timeout", 504, code="resource_signin_timeout")
+        except ResourceSigninError as error:
+            code = str(error)
+            status = (
+                400
+                if code
+                in {
+                    "resource_signin_request_invalid",
+                    "resource_signin_destination_invalid",
+                }
+                else 409
+                if code
+                in {
+                    "resource_signin_credentials_required",
+                    "resource_signin_temporary_credentials_required",
+                    "resource_signin_credentials_rejected",
+                    "resource_signin_role_required",
+                    "resource_signin_role_assume_denied",
+                    "resource_signin_account_changed",
+                    "resource_signin_site_mismatch",
+                }
+                else 502
+            )
+            return json_error(code, status, code=code)
+        if manager.get_session(session_id) is not session:
+            return json_error(_("session not found"), 404)
+        signin_url = result.get("url")
+        if not isinstance(signin_url, str):
+            return json_error("resource_signin_response_invalid", 502, code="resource_signin_response_invalid")
+        prune_resource_signin_relays()
+        resource_signin_relays[relay_id] = (
+            time.monotonic() + resource_signin_relay_ttl_seconds,
+            session_id,
+            signin_url,
+        )
+        result = {**result, "url": relay_path}
+        return JSONResponse(
+            result,
+            headers={
+                "Cache-Control": "no-store",
+                "Pragma": "no-cache",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+
+    async def redirect_resource_signin(request):
+        session_id = request.path_params["session_id"]
+        relay_id = request.path_params["relay_id"]
+        session = manager.get_session(session_id)
+        if session is None:
+            return json_error(_("session not found"), 404)
+        prune_resource_signin_relays()
+        relay = resource_signin_relays.pop(relay_id, None)
+        if relay is None or relay[1] != session_id:
+            return json_error("resource_signin_relay_expired", 404, code="resource_signin_relay_expired")
+        return RedirectResponse(
+            relay[2],
+            status_code=302,
+            headers={
+                "Cache-Control": "no-store",
+                "Pragma": "no-cache",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
+
+    async def get_resource_signin_capability(request):
+        from iac_code.web.resource_signin import resource_console_open_capability
+
+        session_id = request.path_params["session_id"]
+        session = manager.get_session(session_id)
+        if session is None:
+            return json_error(_("session not found"), 404)
+        if (read_only := foreign_read_only_response(session)) is not None:
+            return read_only
+        try:
+            result = await asyncio.wait_for(resource_console_open_capability(), timeout=12)
+        except asyncio.TimeoutError:
+            result = {"openMode": "external"}
+        if manager.get_session(session_id) is not session:
+            return json_error(_("session not found"), 404)
+        return JSONResponse(result, headers={"Cache-Control": "no-store", "Pragma": "no-cache"})
+
+    async def resolve_resource_reference(request):
+        from iac_code.web.resource_references import ResourceRevisionConflictError
+
+        session_id = request.path_params["session_id"]
+        session = manager.get_session(session_id)
+        if session is None:
+            return json_error(_("session not found"), 404)
+        controller = session.resource_references
+        if controller is None:
+            return json_error("resource_index_unavailable", 503)
+        body = await request.body()
+        if len(body) > 65536:
+            return json_error("resource_choice_too_large", 413)
+        try:
+            payload = json.loads(body)
+            if isinstance(payload, dict) and payload.get("queryMissingAttributes") is True:
+                from iac_code.config import get_config_dir
+                from iac_code.web.resource_queries import (
+                    ResourceQueryError,
+                    read_resource_attributes,
+                    request_resource_query_permission,
+                )
+
+                async def current_resource_transcript():
+                    if manager.get_session(session_id) is not session:
+                        return {"messages": [], "tools": {}}
+                    return await resource_transcript(session)
+
+                async def read_attributes(plan, attempt):
+                    return await read_resource_attributes(
+                        plan,
+                        cwd=session.cwd,
+                        session_id=session.session_id,
+                        permission_context=manager.ensure_permission_context(session),
+                        cache_dir=get_config_dir() / "openmeta-cache",
+                        attempt=attempt,
+                        permission_resolver=lambda event: request_resource_query_permission(manager, session, event),
+                        load_permission_context=lambda: manager.ensure_permission_context(session),
+                    )
+
+                try:
+                    result = await controller.resolve_attributes(
+                        payload,
+                        load_current=current_resource_transcript,
+                        reader=read_attributes,
+                    )
+                except ResourceQueryError as error:
+                    return JSONResponse({"status": "needs_context", "reason": str(error)})
+                return JSONResponse(result)
+            transcript = await resource_transcript(session)
+            result = await controller.resolve_choice(
+                transcript, payload, load_account_context=load_resource_account_context
+            )
+            if manager.get_session(session_id) is not session:
+                return json_error(_("session not found"), 404)
+            # Persisting can yield to another request that replaces/tombstones
+            # the source. Do not acknowledge a stale binding after that yield.
+            latest = await resource_transcript(session)
+            snapshot = controller.hydrate(latest)
+            if not any(binding["sourceKey"] == result["sourceKey"] for binding in snapshot["bindings"]):
+                raise ResourceRevisionConflictError("resource_source_changed")
+            result.update(snapshot=snapshot, revision=snapshot["revision"])
+            return JSONResponse(result)
+        except ResourceRevisionConflictError as error:
+            return json_error(str(error), 409)
+        except (ValueError, TypeError, OverflowError, RecursionError, UnicodeError) as error:
+            code = str(error)
+            if not code.startswith("resource_"):
+                code = "resource_choice_invalid"
+            return json_error(code, 400)
+
     async def get_output_file(request):
+        from iac_code.web.resource_previews import preview_source
+        from iac_code.web.resource_references import resource_fact_to_web
+
         session_id = request.path_params["session_id"]
         session = manager.get_session(session_id)
         if session is None:
@@ -2551,12 +2844,24 @@ def create_app(
             return json_error(_("path required"), 400)
         # 只放行面板已派生的输出文件(可能在 cwd 之外,如 /tmp),不放开任意路径穿越。
         allowed = {entry["path"] for entry in outputs_payload(manager, session)["files"]}
+        source = preview_source(session.cwd, path)
+        controller = session.resource_references
         try:
-            return JSONResponse(read_output_file(session, path, allowed_paths=allowed))
+            data = read_output_file(session, path, allowed_paths=allowed)
         except OutputPathForbidden:
+            if controller is not None:
+                controller.forget_preview(source, await resource_transcript(session))
             return json_error(_("forbidden"), 403)
         except OutputFileMissing:
+            if controller is not None:
+                controller.forget_preview(source, await resource_transcript(session))
             return json_error(_("file not found"), 404)
+        if controller is not None:
+            data["resourceReferences"] = await controller.observe_preview(
+                source, data["content"], await resource_transcript(session)
+            )
+            data["resourceSource"] = resource_fact_to_web(source)
+        return JSONResponse(data)
 
     async def get_file_search(request):
         session_id = query_string(request, "sessionId", "")
@@ -3440,6 +3745,9 @@ def create_app(
             payload = await state_transaction(save_aliyun_cloud, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
+        from iac_code.web.resource_signin_role import invalidate_console_signin_role_cache
+
+        invalidate_console_signin_role_cache()
         return JSONResponse(payload)
 
     async def post_cloud_aliyun_oauth_login(request):
@@ -3453,6 +3761,9 @@ def create_app(
                 payload = await run_in_threadpool(login_aliyun_oauth, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
+        from iac_code.web.resource_signin_role import invalidate_console_signin_role_cache
+
+        invalidate_console_signin_role_cache()
         return JSONResponse(payload)
 
     async def post_cloud_aliyun_oauth_start(request):
@@ -3473,6 +3784,9 @@ def create_app(
             payload = await run_in_threadpool(aliyun_oauth_manual_flows.complete, data)
         except ValueError as exc:
             return json_error(str(exc), 400)
+        from iac_code.web.resource_signin_role import invalidate_console_signin_role_cache
+
+        invalidate_console_signin_role_cache()
         return JSONResponse(payload)
 
     async def get_suggestions(request):
@@ -3616,6 +3930,89 @@ def create_app(
         except ValueError as exc:
             return json_error(str(exc), 400)
         return JSONResponse(await state_transaction(save_foreign_sessions_visibility, show_pipeline, show_normal))
+
+    async def get_console_signin_role_settings(_request):
+        from iac_code.web.resource_signin_role import console_signin_policy_settings
+
+        return JSONResponse(
+            console_signin_policy_settings(console_signin_role_settings()), headers={"Cache-Control": "no-store"}
+        )
+
+    async def put_console_signin_role_settings(request):
+        from iac_code.web.resource_signin_role import invalidate_console_signin_role_cache
+
+        try:
+            data = await json_object_body(request)
+            role_arn = required_string(data, "roleArn")
+            payload = await state_transaction(save_console_signin_role, role_arn)
+        except ValueError as exc:
+            code = str(exc)
+            return json_error(code, 400, code=code)
+        invalidate_console_signin_role_cache()
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    async def post_console_signin_role_setup(request, *, repair=False):
+        from iac_code.services.cloud_credentials import CloudCredentials
+        from iac_code.web.console_readonly_policy import policy_revision
+        from iac_code.web.resource_signin_role import (
+            ConsoleSigninRoleError,
+            create_console_signin_role,
+            repair_console_signin_role,
+        )
+
+        if repair:
+            try:
+                data = await json_object_body(request)
+                role_arn = required_string(data, "roleArn")
+                revision = required_string(data, "revision")
+                if (
+                    role_arn != console_signin_role_settings().get("roleArn")
+                    or revision != policy_revision()
+                    or not role_arn
+                ):
+                    raise ValueError("resource_signin_role_repair_target_invalid")
+            except ValueError as exc:
+                return json_error(str(exc), 409, code=str(exc))
+
+        try:
+            credential = await asyncio.to_thread(CloudCredentials().get_provider, "aliyun")
+        except Exception:
+            credential = None
+        if credential is None:
+            code = "resource_signin_role_credentials_required"
+            return json_error(code, 409, code=code)
+        try:
+            setup = repair_console_signin_role if repair else create_console_signin_role
+            payload = await asyncio.wait_for(setup(credential), timeout=30)
+        except asyncio.TimeoutError:
+            code = "resource_signin_role_setup_timeout"
+            return json_error(code, 504, code=code)
+        except ConsoleSigninRoleError as exc:
+            code = str(exc)
+            if code in {
+                "resource_signin_role_root_unsupported",
+                "resource_signin_role_name_conflict",
+                "resource_signin_role_policy_conflict",
+                "resource_signin_role_repair_target_invalid",
+            }:
+                status = 409
+            elif code in {
+                "resource_signin_role_create_denied",
+                "resource_signin_role_attach_denied",
+                "resource_signin_role_assume_denied",
+                "resource_signin_role_policy_denied",
+            }:
+                status = 403
+            else:
+                status = 502
+            return json_error(code, status, code=code, diagnostic=exc.diagnostic)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    async def post_console_signin_role_create(request):
+        return await post_console_signin_role_setup(request)
+
+    async def post_console_signin_role_repair(request):
+        return await post_console_signin_role_setup(request, repair=True)
 
     async def get_developer_settings(request):
         return JSONResponse(developer_settings())
@@ -4957,6 +5354,7 @@ def create_app(
         finally:
             await coordinator.release_restore(boundary_id)
             session.status = "idle"
+            await session.flush_resource_references()
             if session.active_turn_task is asyncio.current_task():
                 session.active_turn_task = None
 
@@ -5545,6 +5943,18 @@ def create_app(
             Route("/api/memory/auto", put_memory_auto, methods=["PUT"]),
             Route("/api/settings/foreign-sessions", get_foreign_settings, methods=["GET"]),
             Route("/api/settings/foreign-sessions", put_foreign_settings, methods=["PUT"]),
+            Route("/api/settings/console-signin-role", get_console_signin_role_settings, methods=["GET"]),
+            Route("/api/settings/console-signin-role", put_console_signin_role_settings, methods=["PUT"]),
+            Route(
+                "/api/settings/console-signin-role/create",
+                post_console_signin_role_create,
+                methods=["POST"],
+            ),
+            Route(
+                "/api/settings/console-signin-role/repair",
+                post_console_signin_role_repair,
+                methods=["POST"],
+            ),
             Route("/api/settings/developer", get_developer_settings, methods=["GET"]),
             Route("/api/settings/developer", put_developer_settings, methods=["PUT"]),
             Route("/api/settings/telemetry", get_telemetry_settings, methods=["GET"]),
@@ -5608,6 +6018,30 @@ def create_app(
             Route("/api/sessions/{session_id}/debug", get_session_debug, methods=["GET"]),
             Route("/api/sessions/{session_id}/images", post_image, methods=["POST"]),
             Route("/api/sessions/{session_id}/messages", get_messages, methods=["GET"]),
+            Route("/api/sessions/{session_id}/resource-references", get_resource_references, methods=["GET"]),
+            Route(
+                "/api/sessions/{session_id}/resource-references/account-context",
+                get_resource_account_context,
+                methods=["POST"],
+            ),
+            Route(
+                "/api/sessions/{session_id}/resource-references/signin",
+                create_resource_signin,
+                methods=["POST"],
+            ),
+            Route(
+                "/api/sessions/{session_id}/resource-references/signin-relay/{relay_id}",
+                redirect_resource_signin,
+                methods=["GET"],
+            ),
+            Route(
+                "/api/sessions/{session_id}/resource-references/signin-capability",
+                get_resource_signin_capability,
+                methods=["GET"],
+            ),
+            Route(
+                "/api/sessions/{session_id}/resource-references/resolve", resolve_resource_reference, methods=["POST"]
+            ),
             Route("/api/sessions/{session_id}/messages", post_message, methods=["POST"]),
             Route("/api/sessions/{session_id}/outputs", get_outputs, methods=["GET"]),
             Route("/api/sessions/{session_id}/outputs/file", get_output_file, methods=["GET"]),

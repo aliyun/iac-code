@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iac-code.local/schemas/resource-link-execution-receipt-v2.json",
+  "title": "Resource-link browser execution receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "capturedAt", "catalogRevisionDigest", "sourceType", "source", "contractId",
+    "site", "navigation", "sampleLevel", "actualApiCalled", "sourceChainStatus", "sourceEvidenceDigest",
+    "liveDestinationStatus", "cleanupStatus", "expectedNavigation", "expectedNavigationReason",
+    "actualUiClick", "actualNavigation", "newTabObserved", "landingKind", "routeMatched", "loginPassed",
+    "resourceMatched", "failureReason", "attemptCount", "browserAccessMode", "sessionIdDigest",
+    "accountScopeDigest", "regionId", "resourceIdentifierDigest", "finalUrlDigest", "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 2},
+    "capturedAt": {"type": "string", "format": "date-time"},
+    "catalogRevisionDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sourceType": {"type": "string", "minLength": 1},
+    "source": {"enum": ["route_catalog", "ros_stack", "query_api", "create_api"]},
+    "contractId": {"type": "string", "minLength": 1},
+    "site": {"const": "aliyun"},
+    "navigation": {"enum": ["normal", "shift"]},
+    "sampleLevel": {"enum": ["L1", "L2", "L3"]},
+    "actualApiCalled": {"type": "boolean"},
+    "sourceChainStatus": {"enum": ["pending", "blocked", "passed"]},
+    "sourceEvidenceDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "liveDestinationStatus": {"enum": ["pending", "blocked", "passed"]},
+    "cleanupStatus": {"enum": ["pending", "blocked", "passed", "not_applicable"]},
+    "expectedNavigation": {"enum": ["iframe", "new_tab"]},
+    "expectedNavigationReason": {
+      "enum": [
+        "configured_signin_role", "credential_role", "external_default",
+        "product_external_only", "shift_override"
+      ]
+    },
+    "actualUiClick": {"type": "boolean"},
+    "actualNavigation": {"enum": ["iframe", "new_tab", "none"]},
+    "newTabObserved": {"type": "boolean"},
+    "landingKind": {
+      "enum": [
+        "exact_detail", "product_list", "parent_detail", "parent_list",
+        "shared_tab", "external_only", "unknown"
+      ]
+    },
+    "routeMatched": {"type": "boolean"},
+    "loginPassed": {"type": "boolean"},
+    "resourceMatched": {"type": "boolean"},
+    "failureReason": {
+      "type": ["string", "null"],
+      "enum": [
+        null, "route_error", "wrong_edition_or_variant", "login_error", "wrong_account",
+        "permission_denied", "network_or_gateway", "resource_absent", "parent_context_missing",
+        "new_tab_not_observed", "browser_auth_unavailable", "ui_link_missing", "navigation_timeout",
+        "source_not_ready", "inconclusive"
+      ]
+    },
+    "attemptCount": {"type": "integer", "minimum": 1, "maximum": 2},
+    "browserAccessMode": {"enum": ["existing-chrome", "dedicated-chrome-profile"]},
+    "sessionIdDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "accountScopeDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "regionId": {"type": ["string", "null"], "pattern": "^[a-z0-9-]+$"},
+    "resourceIdentifierDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "finalUrlDigest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "finalHost": {"type": ["string", "null"]},
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "contains": {
+        "type": "object",
+        "properties": {"kind": {"const": "observation"}},
+        "required": ["kind"]
+      },
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "path", "digest"],
+        "properties": {
+          "kind": {"enum": ["observation", "screenshot", "dom_snapshot"]},
+          "path": {"type": "string", "minLength": 1},
+          "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"liveDestinationStatus": {"const": "passed"}}},
+      "then": {
+        "properties": {
+          "sourceChainStatus": {"const": "passed"},
+          "actualUiClick": {"const": true},
+          "actualNavigation": {"enum": ["iframe", "new_tab"]},
+          "landingKind": {"not": {"const": "unknown"}},
+          "routeMatched": {"const": true},
+          "loginPassed": {"const": true},
+          "resourceMatched": {"const": true},
+          "failureReason": {"type": "null"},
+          "finalUrlDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"liveDestinationStatus": {"const": "blocked"}}},
+      "then": {"properties": {"failureReason": {"type": "string"}}}
+    },
+    {
+      "if": {"properties": {"navigation": {"const": "shift"}}, "required": ["navigation"]},
+      "then": {
+        "properties": {
+          "expectedNavigation": {"const": "new_tab"},
+          "expectedNavigationReason": {"const": "shift_override"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "navigation": {"const": "shift"},
+          "liveDestinationStatus": {"const": "passed"}
+        },
+        "required": ["navigation", "liveDestinationStatus"]
+      },
+      "then": {
+        "properties": {
+          "actualNavigation": {"const": "new_tab"},
+          "newTabObserved": {"const": true}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "navigation": {"const": "normal"},
+          "expectedNavigation": {"const": "iframe"},
+          "liveDestinationStatus": {"const": "passed"}
+        },
+        "required": ["navigation", "expectedNavigation", "liveDestinationStatus"]
+      },
+      "then": {
+        "properties": {
+          "actualNavigation": {"const": "iframe"},
+          "newTabObserved": {"const": false},
+          "expectedNavigationReason": {"enum": ["configured_signin_role", "credential_role"]}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "navigation": {"const": "normal"},
+          "expectedNavigation": {"const": "new_tab"},
+          "liveDestinationStatus": {"const": "passed"}
+        },
+        "required": ["navigation", "expectedNavigation", "liveDestinationStatus"]
+      },
+      "then": {
+        "properties": {
+          "actualNavigation": {"const": "new_tab"},
+          "newTabObserved": {"const": true},
+          "expectedNavigationReason": {"enum": ["external_default", "product_external_only"]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"sampleLevel": {"const": "L3"}}},
+      "then": {
+        "properties": {
+          "actualApiCalled": {"const": true},
+          "sourceChainStatus": {"const": "passed"},
+          "liveDestinationStatus": {"const": "passed"},
+          "cleanupStatus": {"const": "passed"}
+        }
+      }
+    }
+  ]
+}

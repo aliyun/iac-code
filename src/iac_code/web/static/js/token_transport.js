@@ -33,6 +33,17 @@ function storedToken() {
   }
 }
 
+function tokenFromUrl() {
+  const hash = window.location.hash || "";
+  if (!hash.startsWith("#")) return "";
+  const params = new URLSearchParams(hash.slice(1));
+  if (!params.has("web_token")) return "";
+  // Fragments are not sent to the server. Remove the token from browser history
+  // before starting any asynchronous authentication requests.
+  window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}`);
+  return params.get("web_token")?.trim() || "";
+}
+
 function saveToken(token) {
   try {
     window.sessionStorage?.setItem(TOKEN_STORAGE_KEY, token);
@@ -214,7 +225,9 @@ async function createSession(token) {
 }
 
 async function establishSession() {
-  let token = storedToken();
+  const suppliedToken = tokenFromUrl();
+  let token = validTokenFormat(suppliedToken) ? suppliedToken : storedToken();
+  if (token === suppliedToken && token) saveToken(token);
   let message = "";
   for (;;) {
     if (!validTokenFormat(token)) token = await tokenPrompt(message);

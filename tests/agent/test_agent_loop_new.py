@@ -37,6 +37,7 @@ from iac_code.types.stream_events import (
     QueuedInputSubmittedEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
+    TombstoneEvent,
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
@@ -276,6 +277,77 @@ class TestAgentLoopInit:
         assert defs[0].name == "read_file"
         assert defs[0].description == "Read file"
 
+    @pytest.mark.parametrize("gate_value", [None, "", "isolated-gate.sqlite3"])
+    @pytest.mark.parametrize("explicit_tools", [False, True])
+    def test_controlled_gate_filters_advertised_tools(self, monkeypatch, tmp_path, gate_value, explicit_tools):
+        from scripts.web.e2e.resource_link_workflow.execution_gate import ENV
+
+        if gate_value is None:
+            monkeypatch.delenv(ENV, raising=False)
+        else:
+            monkeypatch.setenv(ENV, "" if not gate_value else str(tmp_path / gate_value))
+        tools = [
+            SimpleNamespace(name=name, description=name, input_schema={"type": "object"})
+            for name in ("read_file", "aliyun_api", "ros_deploy", "Shell", "mcp_external")
+        ]
+        registry = MagicMock()
+        registry.list_tools.return_value = tools
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.tool_registry = registry
+        supplied = tools[1:3] if explicit_tools else tools
+
+        definitions = loop._get_tool_definitions(supplied if explicit_tools else None)
+
+        expected = supplied if gate_value is None else [tools[1]]
+        assert [definition.name for definition in definitions] == [tool.name for tool in expected]
+        assert [definition.input_schema for definition in definitions] == [tool.input_schema for tool in expected]
+        assert registry.list_tools.return_value == tools
+        assert len(tools) == 5
+
+    def test_controlled_gate_without_cloud_tool_advertises_nothing(self, monkeypatch, tmp_path):
+        from scripts.web.e2e.resource_link_workflow.execution_gate import ENV
+
+        monkeypatch.setenv(ENV, str(tmp_path / "missing-gate.sqlite3"))
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.tool_registry = MagicMock()
+        tool = SimpleNamespace(name="read_file", description="Read", input_schema={"type": "object"})
+        loop.tool_registry.list_tools.return_value = [tool]
+
+        assert loop._get_tool_definitions() == []
+        assert loop._get_tool_definitions([]) == []
+
+    def test_controlled_gate_filters_provider_lease_and_context_accounting(self, monkeypatch, tmp_path):
+        from scripts.web.e2e.resource_link_workflow.execution_gate import ENV
+
+        monkeypatch.setenv(ENV, str(tmp_path / "missing-gate.sqlite3"))
+        cloud = SimpleNamespace(name="aliyun_api", description="Cloud", input_schema={"type": "object"})
+        filesystem = SimpleNamespace(name="read_file", description="Read", input_schema={"type": "object"})
+        loop = AgentLoop.__new__(AgentLoop)
+        loop.tool_registry = MagicMock()
+        loop.tool_registry.list_tools.return_value = [filesystem, cloud]
+        loop.context_manager = MagicMock()
+        loop._provider_manager = SimpleNamespace(get_model_name=lambda: "test-model")
+        loop._pending_provider_context_sync = False
+
+        class RequestManager:
+            def begin_request(self, system_prompt, definitions):
+                self.definitions = definitions
+                return SimpleNamespace(system_prompt=system_prompt, context_window_model="test-model")
+
+        manager = RequestManager()
+        _, _, definitions = loop._prepare_request_lease(manager, base_system_prompt="Reviewed instructions")
+
+        assert [definition.name for definition in manager.definitions] == ["aliyun_api"]
+        assert definitions == manager.definitions
+        loop.context_manager.set_tool_definitions.assert_called_with(definitions)
+        assert loop._sync_tool_definitions() == definitions
+        assert loop.tool_registry.list_tools.return_value == [filesystem, cloud]
+
+    def test_controlled_gate_attests_advertised_tool_filter(self):
+        from scripts.web.e2e.resource_link_workflow.execution_gate import ATTEST_MODULES
+
+        assert "iac_code.agent.agent_loop" in ATTEST_MODULES
+
     def test_init_syncs_tool_definitions_to_context_usage(self, mock_provider):
         tool = SimpleNamespace(name="read_file", description="Read file", input_schema={"type": "object"})
         registry = MagicMock()
@@ -471,6 +543,137 @@ class TestAgentLoopInit:
 
 @pytest.mark.asyncio
 class TestAgentLoopStreaming:
+    async def test_known_provider_error_is_not_replaced_by_empty_response(self, mock_provider, mock_registry):
+        from iac_code.types.stream_events import ErrorEvent
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            yield ErrorEvent(error="provider-specific-error", is_retryable=False)
+            yield MessageEndEvent(stop_reason="stream_error", usage=Usage(output_tokens=23, reported=True))
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        events = [event async for event in loop.run_streaming("question")]
+        assert [event.error for event in events if event.type == "error"] == ["provider-specific-error"]
+        assert events[-1].stop_reason == "stream_error"
+        assert events[-1].usage.output_tokens == 23
+
+    @pytest.mark.parametrize("finish_reason", ["stop", "length", None])
+    async def test_reasoning_only_provider_response_fails_without_replay(self, mock_registry, tmp_path, finish_reason):
+        from iac_code.providers.dashscope_provider import DashScopeProvider
+        from iac_code.providers.manager import ProviderManager
+        from iac_code.services.session_usage import SessionUsageStore
+        from tests.providers._fakes import FakeOpenAIClient, ns
+
+        usage = ns(prompt_tokens=28371, completion_tokens=8192)
+        client = FakeOpenAIClient(
+            stream_chunks=[
+                ns(
+                    usage=None,
+                    choices=[
+                        ns(
+                            finish_reason=None,
+                            delta=ns(content=None, tool_calls=None, reasoning_content="reasoning"),
+                        )
+                    ],
+                ),
+                ns(
+                    usage=usage,
+                    choices=[ns(finish_reason=finish_reason, delta=ns(content=None, tool_calls=None))],
+                ),
+            ]
+        )
+        provider = DashScopeProvider(model="deepseek-v4-flash-0731", client=client, effort="high")
+        with patch("iac_code.providers.manager.create_provider", return_value=provider):
+            manager = ProviderManager(model="deepseek-v4-flash-0731", credentials={"dashscope": "fake"})
+        loop = AgentLoop(
+            provider_manager=manager,
+            system_prompt="test",
+            tool_registry=mock_registry,
+            cwd=str(tmp_path),
+            session_id="empty-response",
+            session_usage_store=SessionUsageStore(projects_dir=tmp_path / "projects"),
+        )
+        loop._tool_executor.execute_batch = AsyncMock()
+
+        events = [event async for event in loop.run_streaming("approved operation")]
+
+        errors = [event for event in events if event.type == "error"]
+        assert len(errors) == 1
+        ending = next(event for event in reversed(events) if isinstance(event, MessageEndEvent))
+        if finish_reason == "length":
+            assert errors[0].i18n_message_id == (
+                "The model reached its output token limit. Try splitting the task into smaller steps."
+            )
+            assert ending.stop_reason == "max_tokens"
+            assert any(isinstance(event, TombstoneEvent) for event in events)
+        else:
+            assert errors[0].error == "provider_response_empty"
+            assert ending.stop_reason == "stream_error"
+        assert errors[0].is_retryable is False
+        assert ending.usage.input_tokens == 28371
+        assert ending.usage.output_tokens == 8192
+        assert ending.usage.usage_reported is True
+        assert len(client.chat.completions.calls) == 1
+        assert client.chat.completions.calls[0]["stream"] is True
+        assert "max_tokens" not in client.chat.completions.calls[0]
+        assert "max_completion_tokens" not in client.chat.completions.calls[0]
+        assert manager.get_model_name() == "deepseek-v4-flash-0731"
+        loop._tool_executor.execute_batch.assert_not_awaited()
+        assert not any(message.role == "assistant" for message in loop.context_manager.get_messages())
+        assert loop.get_session_usage().has_recorded_usage is True
+
+    @pytest.mark.parametrize("output", ["none", "whitespace", "metadata", "partial_tool"])
+    async def test_empty_terminal_stream_is_not_successful(self, mock_provider, mock_registry, output):
+        calls = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            calls.append(messages)
+            yield MessageStartEvent(message_id="m1")
+            if output == "whitespace":
+                yield TextDeltaEvent(text=" \n\t")
+            elif output == "metadata":
+                yield ThinkingDeltaEvent(text="", provider_metadata={"signature": "opaque"})
+            elif output == "partial_tool":
+                yield ToolUseStartEvent(tool_use_id="partial", name="read_file")
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+        loop._tool_executor.execute_batch = AsyncMock()
+
+        events = [event async for event in loop.run_streaming("question")]
+
+        assert len(calls) == 1
+        assert [event.error for event in events if event.type == "error"] == ["provider_response_empty"]
+        assert events[-1].stop_reason == "stream_error"
+        loop._tool_executor.execute_batch.assert_not_awaited()
+
+    async def test_reasoning_followed_by_text_preserves_terminal_reason(self, mock_provider, mock_registry):
+        calls = []
+
+        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+            calls.append(messages)
+            if len(calls) > 1:
+                yield MessageStartEvent(message_id="m2")
+                yield TextDeltaEvent(text="completed answer")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+                return
+            yield MessageStartEvent(message_id="m1")
+            yield ThinkingDeltaEvent(text="reasoning")
+            yield TextDeltaEvent(text="partial answer")
+            yield MessageEndEvent(stop_reason="max_tokens", usage=Usage(output_tokens=8192, reported=True))
+
+        mock_provider.stream = fake_stream
+        loop = AgentLoop(provider_manager=mock_provider, system_prompt="test", tool_registry=mock_registry)
+
+        events = [event async for event in loop.run_streaming("question")]
+
+        assert not any(event.type == "error" for event in events)
+        endings = [event for event in events if isinstance(event, MessageEndEvent)]
+        assert [event.stop_reason for event in endings] == ["max_tokens", "end_turn"]
+        assert endings[0].usage.output_tokens == 8192
+        assert len(calls) == 2
+
     async def test_provider_stream_can_close_from_a_different_asyncio_context(self, mock_provider, mock_registry):
         async def fake_stream(messages, system, tools=None):
             assert get_span_attributes()[PipelineAttr.NAME] == "selling"
@@ -3285,3 +3488,119 @@ class TestAgentLoopSetProvider:
 
         loop.context_manager.set_model.assert_called_once_with("claude-opus-4-7")
         loop.context_manager.set_tool_definitions.assert_called_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "controlled,source_succeeds,later_authorized",
+    [
+        (False, True, True),
+        (True, True, True),
+        (True, False, True),
+        (True, True, False),
+    ],
+)
+async def test_controlled_batch_defers_later_permissions_until_new_source_turn(
+    mock_provider,
+    mock_registry,
+    monkeypatch,
+    tmp_path,
+    controlled,
+    source_succeeds,
+    later_authorized,
+):
+    from scripts.web.e2e.resource_link_workflow.execution_gate import ENV
+
+    if controlled:
+        monkeypatch.setenv(ENV, str(tmp_path / "isolated-gate.sqlite3"))
+    else:
+        monkeypatch.delenv(ENV, raising=False)
+    provider_calls = 0
+    source_ready = False
+    permission_calls = []
+    execution_calls = []
+
+    async def permission(tool_input, context):
+        action = tool_input["action"]
+        permission_calls.append(action)
+        if controlled and action == "GetResourceGroup" and (not source_ready or not later_authorized):
+            return PermissionResult(behavior="deny", message="test_execution_gate_denied")
+        return PermissionResult(behavior="allow", execution_class="concurrent")
+
+    cloud = SimpleNamespace(
+        name="aliyun_api",
+        description="Cloud",
+        input_schema={},
+        check_permissions=permission,
+        needs_event_queue=lambda: False,
+        permission_audit_operation=lambda tool_input: {"action": tool_input["action"]},
+        is_read_only=lambda tool_input: True,
+    )
+    mock_registry.list_tools.return_value = [cloud]
+    mock_registry.get.side_effect = lambda name: cloud if name == "aliyun_api" else None
+    actions = ["ListStackResources", "GetResourceGroup"]
+
+    async def fake_stream(messages, system, tools=None, **kwargs):
+        nonlocal provider_calls
+        provider_calls += 1
+        yield MessageStartEvent(message_id=f"message-{provider_calls}")
+        current_actions = (
+            actions if provider_calls == 1 else (["GetResourceGroup"] if controlled and provider_calls == 2 else [])
+        )
+        for action in current_actions:
+            identifier = f"call-{provider_calls}-{action}"
+            yield ToolUseStartEvent(tool_use_id=identifier, name="aliyun_api")
+            yield ToolUseEndEvent(
+                tool_use_id=identifier,
+                name="aliyun_api",
+                input={"action": action},
+            )
+        yield MessageEndEvent(stop_reason="tool_use" if current_actions else "end_turn", usage=Usage())
+
+    mock_provider.stream = fake_stream
+    loop = AgentLoop(
+        provider_manager=mock_provider,
+        system_prompt="test",
+        tool_registry=mock_registry,
+        cwd=str(tmp_path),
+        session_id="isolated-session",
+    )
+    loop._result_storage = MagicMock()
+    loop._result_storage.process.side_effect = lambda content, *args, **kwargs: SimpleNamespace(content=content)
+    loop.context_manager = MagicMock()
+    loop.context_manager.get_api_messages.return_value = []
+    loop.context_manager.needs_compaction.return_value = False
+
+    async def execute(requests, context):
+        nonlocal source_ready
+        execution_calls.append([request.input["action"] for request in requests])
+        await asyncio.sleep(0)
+        source_ready = source_succeeds
+        return [
+            ToolResult.success(json.dumps({"actual": request.input["action"]}))
+            if source_succeeds
+            else ToolResult.error("source read failed")
+            for request in requests
+        ]
+
+    loop._tool_executor.execute_batch = AsyncMock(side_effect=execute)
+    events = [event async for event in loop.run_streaming("Use the reviewed plan")]
+    results = [event for event in events if isinstance(event, ToolResultEvent)]
+    assert permission_calls == actions
+    if controlled:
+        if source_succeeds and later_authorized:
+            assert execution_calls == [["ListStackResources"], ["GetResourceGroup"]]
+            assert results[-1].is_error is False
+        else:
+            assert execution_calls == [["ListStackResources"]]
+            assert results[-1].is_error is True
+            assert results[-1].result == "test_execution_gate_denied"
+        deferred = next(result for result in results if result.tool_use_id == "call-1-GetResourceGroup")
+        assert deferred.is_error is True
+        assert "controlled_test_call_deferred" in deferred.result
+        assert "not executed" in deferred.result
+        assert "no quota" in deferred.result
+        assert results[-1].tool_use_id == "call-2-GetResourceGroup"
+    else:
+        assert execution_calls == [actions]
+        assert all(not result.is_error for result in results)

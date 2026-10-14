@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import threading
 import time
@@ -39,8 +40,66 @@ from iac_code.types.permissions import PermissionMode
 
 _FOREIGN_SESSIONS_SETTINGS_KEY = "foreignSessions"
 
+_CONSOLE_SIGNIN_ROLE_SETTINGS_KEY = "consoleSigninRole"
+_CONSOLE_SIGNIN_ROLE_ARN = re.compile(r"acs:ram::(?P<account_id>[0-9]{1,32}):role/(?P<role_name>[A-Za-z0-9.-]{1,64})\Z")
+
 # 区分「请求里没带该字段」(保持现状)与「带了但为空/null」(清除回落默认)。
 _UNSET = object()
+
+
+def console_signin_role_settings() -> dict[str, Any]:
+    """Return the optional, non-secret role used for embedded console sign-in."""
+    settings = _load_yaml(get_settings_path())
+    section = settings.get(_CONSOLE_SIGNIN_ROLE_SETTINGS_KEY)
+    if not isinstance(section, dict):
+        section = {}
+    role_arn = section.get("roleArn")
+    if not isinstance(role_arn, str) or _CONSOLE_SIGNIN_ROLE_ARN.fullmatch(role_arn.strip()) is None:
+        role_arn = ""
+    setup_complete = bool(section.get("setupComplete", True)) if role_arn else False
+    result: dict[str, Any] = {
+        "roleArn": role_arn.strip(),
+        "configured": bool(role_arn.strip()),
+        "setupComplete": setup_complete,
+    }
+    revision = section.get("supplementRevision")
+    if role_arn and isinstance(revision, str) and re.fullmatch(r"[0-9a-f]{64}", revision):
+        result["supplementRevision"] = revision
+    return result
+
+
+def save_console_signin_role(
+    role_arn: str, *, setup_complete: bool = True, supplement_revision: str = ""
+) -> dict[str, Any]:
+    """Persist non-secret role metadata; temporary credentials always remain in memory."""
+    normalized = role_arn.strip()
+    if normalized and _CONSOLE_SIGNIN_ROLE_ARN.fullmatch(normalized) is None:
+        raise ValueError("resource_signin_role_arn_invalid")
+    if supplement_revision and re.fullmatch(r"[0-9a-f]{64}", supplement_revision) is None:
+        raise ValueError("resource_signin_role_policy_revision_invalid")
+    settings_path = get_settings_path()
+    settings = _load_yaml(settings_path)
+    if normalized:
+        section = settings.get(_CONSOLE_SIGNIN_ROLE_SETTINGS_KEY)
+        if not isinstance(section, dict):
+            section = {}
+        section["roleArn"] = normalized
+        section["setupComplete"] = bool(setup_complete)
+        section.pop("supplementRevision", None)
+        if supplement_revision and setup_complete:
+            section["supplementRevision"] = supplement_revision
+        settings[_CONSOLE_SIGNIN_ROLE_SETTINGS_KEY] = section
+    else:
+        settings.pop(_CONSOLE_SIGNIN_ROLE_SETTINGS_KEY, None)
+    _save_yaml(settings_path, settings)
+    result: dict[str, Any] = {
+        "roleArn": normalized,
+        "configured": bool(normalized),
+        "setupComplete": bool(normalized) and bool(setup_complete),
+    }
+    if normalized and supplement_revision and setup_complete:
+        result["supplementRevision"] = supplement_revision
+    return result
 
 
 def is_foreign_pipeline_visible() -> bool:

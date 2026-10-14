@@ -8,6 +8,38 @@ from iac_code.pipeline.engine.display_replay import (
 )
 
 
+def test_resource_locator_and_scope_changes_are_recorded_without_status_change(tmp_path):
+    recorder = PipelineDisplayRecorder(tmp_path / "display.jsonl")
+    recorder.record("step_started", step_id="deploy", payload={"index": 1, "total": 1})
+    row = {"name": "Role", "resource_type": "ALIYUN::RAM::Role", "status": "CREATE_COMPLETE"}
+    event = SimpleNamespace(
+        stack_id="stack-1",
+        stack_name="stack",
+        status="CREATE_IN_PROGRESS",
+        progress_percentage=50,
+        elapsed_seconds=10,
+        resources=[row],
+        region_id="cn-beijing",
+        tool_use_id="tool-1",
+        account_scope="account-one",
+        console_partition="aliyun",
+    )
+    recorder.record_stack_progress(event, step_id="deploy")
+    row["physical_resource_id"] = "DeployRole"
+    recorder.record_stack_progress(event, step_id="deploy")
+    row["attributes"] = {"RoleName": "DeployRole", "RoleId": "111111111111111111"}
+    recorder.record_stack_progress(event, step_id="deploy")
+    event.elapsed_seconds = 11
+    recorder.record_stack_progress(event, step_id="deploy")
+    events = load_display_events(recorder.path)
+    assert len([item for item in events if item["type"] == "stack_progress"]) == 3
+    progress = PipelineDisplayReducer().reduce(events).attempts[0].stack_progresses[0]
+    assert progress.resources[0]["physical_resource_id"] == "DeployRole"
+    assert progress.resources[0]["attributes"]["RoleName"] == "DeployRole"
+    assert progress.region_id == "cn-beijing"
+    assert progress.account_scope == "account-one"
+
+
 def test_recorder_and_reducer_preserve_repeated_attempts_after_rollback(tmp_path):
     path = tmp_path / "display.jsonl"
     recorder = PipelineDisplayRecorder(path)

@@ -834,7 +834,10 @@ class AgentLoop:
                 logger.debug("Failed to sync system prompt to tool {}: {}", getattr(tool, "name", ""), exc)
 
     def _system_prompt_for_current_turn(self) -> str:
-        return self.system_prompt
+        from iac_code.services.execution_policy import execution_instructions
+
+        instructions = execution_instructions(self._session_id, self._cwd)
+        return self.system_prompt + instructions
 
     def _prepare_provider_system_prompt(self) -> str:
         self._refresh_system_prompt()
@@ -845,9 +848,11 @@ class AgentLoop:
     def _get_tool_definitions(self, tools: list[Any] | None = None):
         """Convert tool registry to provider ToolDefinition format."""
         from iac_code.providers.base import ToolDefinition
+        from iac_code.services.execution_policy import filter_tools
 
         if tools is None:
             tools = list(self.tool_registry.list_tools())
+        tools = filter_tools(tools)
         tool_definitions = []
         for tool in tools:
             tool_definitions.append(
@@ -2216,6 +2221,17 @@ class AgentLoop:
                                     self.tool_registry.get(event.name),
                                 ),
                             )
+                        if (
+                            isinstance(event, MessageEndEvent)
+                            and event.stop_reason not in {"stream_error", "max_tokens"}
+                            and not any(chunk.strip() for chunk in text_chunks)
+                            and not any(
+                                tool_use.get("name") and "input" in tool_use
+                                for tool_use in pending_tool_uses_by_id.values()
+                            )
+                        ):
+                            yield ErrorEvent(error="provider_response_empty", is_retryable=False)
+                            event = replace(event, stop_reason="stream_error")
                         if not (isinstance(event, ThinkingDeltaEvent) and event.is_metadata_only):
                             yield event
 
@@ -2280,6 +2296,11 @@ class AgentLoop:
                     self._accepting_injected_user_messages = False
                     step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "error")
                     yield MessageEndEvent(stop_reason="stream_error", usage=Usage())
+                    break
+
+                if turn_stop_reason == "stream_error":
+                    self._accepting_injected_user_messages = False
+                    step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "error")
                     break
 
                 # Build assistant message for context
@@ -2485,6 +2506,16 @@ class AgentLoop:
                             state="deny",
                             source="input_error",
                             deniedResult=input_error,
+                        )
+                        continue
+                    from iac_code.services.execution_policy import deferred_call
+
+                    if deferred_result := deferred_call(request.name, request_index):
+                        denied_results.append((request, ToolResult.error(deferred_result)))
+                        continuation_decisions[request_index].update(
+                            state="deny",
+                            source="policy",
+                            deniedResult=deferred_result,
                         )
                         continue
                     tool = self.tool_registry.get(request.name)
@@ -3142,6 +3173,11 @@ class AgentLoop:
                 sanitize_aliyun_http_metadata,
             )
             from iac_code.tools.cloud.base_stack import persisted_stack_metadata
+            from iac_code.tools.cloud.resource_references import (
+                RESOURCE_REFERENCES_METADATA_KEY,
+                resource_reference_metadata,
+                resource_references_from_metadata,
+            )
 
             # Idempotent display calls retain the original batch across transcript recovery.
             candidate_set_id = result_metadata.get("candidate_set_id")
@@ -3151,6 +3187,8 @@ class AgentLoop:
             if aliyun_http is not None:
                 metadata[ALIYUN_HTTP_METADATA_KEY] = aliyun_http
             metadata.update(persisted_stack_metadata(result_metadata))
+            if references := resource_references_from_metadata(result_metadata):
+                metadata[RESOURCE_REFERENCES_METADATA_KEY] = resource_reference_metadata(references)
             render_metadata = result_metadata.get(TOOL_RENDER_METADATA_KEY)
             if isinstance(render_metadata, dict):
                 safe_render_metadata: dict[str, Any] = {}

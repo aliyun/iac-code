@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iac-code.local/schemas/resource-link-e2e-applicability-v1.json",
+  "title": "iac-code resource console link E2E applicability",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "catalogRevision", "scope", "sourceReport", "dimensions"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "catalogRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "components"],
+      "properties": {
+        "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "components": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "minProperties": 3
+        }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sites", "excludedSites"],
+      "properties": {
+        "sites": {"const": ["aliyun"]},
+        "excludedSites": {"const": ["alibabacloud"]}
+      }
+    },
+    "sourceReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provided", "schemaVersion", "completedAt", "digest"],
+      "properties": {
+        "provided": {"type": "boolean"},
+        "schemaVersion": {"type": ["integer", "null"]},
+        "completedAt": {"type": ["string", "null"]},
+        "digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "dimensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["route_catalog", "ros_stack", "query_api", "create_api"],
+      "properties": {
+        "route_catalog": {"$ref": "#/$defs/dimension"},
+        "ros_stack": {"$ref": "#/$defs/dimension"},
+        "query_api": {"$ref": "#/$defs/dimension"},
+        "create_api": {"$ref": "#/$defs/dimension"}
+      }
+    }
+  },
+  "$defs": {
+    "dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["denominator", "applicable", "notApplicable", "contracts"],
+      "properties": {
+        "denominator": {"type": "integer", "minimum": 0},
+        "applicable": {"type": "integer", "minimum": 0},
+        "notApplicable": {"type": "integer", "minimum": 0},
+        "contracts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": ["applicable", "status", "metadataEvidence"],
+            "properties": {
+              "sourceType": {"type": "string", "minLength": 1},
+              "resourceType": {"type": "string", "minLength": 1},
+              "applicable": {"type": "boolean"},
+              "status": {"enum": ["pending", "passed", "blocked", "not_applicable"]}
+            },
+            "anyOf": [
+              {"required": ["sourceType"]},
+              {"required": ["resourceType"]}
+            ]
+          }
+        }
+      }
+    }
+  }
+}

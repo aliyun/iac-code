@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import MappingProxyType
 
 import pytest
@@ -331,3 +332,42 @@ def test_renderer_keeps_diagnostics_composite_on_generic_line_summary() -> None:
     )
 
     assert summary == "Received response (3 lines)"
+
+
+@pytest.mark.parametrize(
+    "action,status,body",
+    [
+        ("DeleteBucket", 204, None),
+        ("ListBuckets", 200, {"buckets": [], "owner": {"id": "offline-account"}}),
+        ("ListBuckets", 200, {"buckets": [], "is_truncated": False}),
+        ("ListBuckets", 200, {"buckets": [], "is_truncated": True, "next_marker": "next"}),
+    ],
+)
+def test_oss_bucket_cleanup_result_retains_original_transport_and_coverage(action, status, body):
+    contract = replace(
+        _contract(transport="oss_v4_sdk"),
+        product="Oss",
+        action=action,
+        version="2019-05-17",
+    )
+    response = _response(
+        body,
+        status=status,
+        headers=MappingProxyType(
+            {
+                "x-oss-request-id": "offline-request",
+                "authorization": "fake-private",
+                "set-cookie": "fake-private",
+            }
+        ),
+    )
+    content, body_format = serialize_business_result(response, _request("xml"), contract)
+    assert json.loads(content) == {
+        "status": status,
+        "headers": {"x-oss-request-id": "offline-request"},
+        "body": body,
+    }
+    assert body_format == "json"
+    assert "fake-private" not in content
+    if action == "ListBuckets" and "is_truncated" not in body:
+        assert "is_truncated" not in json.loads(content)["body"]

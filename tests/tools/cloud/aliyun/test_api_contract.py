@@ -89,6 +89,78 @@ def shape(**changes: Any) -> ApiCallShape:
 
 
 @pytest.mark.asyncio
+async def test_tablestore_list_table_uses_the_reviewed_data_plane_contract() -> None:
+    class TablestoreProductResolver:
+        async def resolve(self, requested_product: str) -> ProductResolution:
+            return ProductResolution(
+                requested_product=requested_product,
+                normalized_product="Tablestore",
+                metadata=ProductMetadata("Tablestore", "2020-12-09", ("2020-12-09",), None),
+                strategy="builtin_alias" if requested_product == "ots" else "exact_code",
+                confidence="high",
+                source="fresh",
+                cache_status="memory_fresh",
+            )
+
+    openmeta = FakeOpenMeta(None, error="not_found")
+    resolver = ApiContractResolver(openmeta, product_resolver=TablestoreProductResolver())  # type: ignore[arg-type]
+
+    contract = await resolver.resolve(
+        shape(
+            product="ots",
+            version=None,
+            action="ListTable",
+            parameter_names_by_location=MappingProxyType({"query": ("InstanceName",)}),
+        ),
+        allow_fallback=False,
+    )
+
+    assert (contract.product, contract.version, contract.action) == ("Tablestore", "2015-12-31", "ListTable")
+    assert (contract.transport, contract.signature_scheme) == ("ots_sdk", "ots_v4")
+    assert contract.metadata_source == "explicit_fallback"
+    assert contract.executable is True
+    assert [(item.name, item.location, item.required) for item in contract.parameters] == [
+        ("InstanceName", "host", True)
+    ]
+    assert openmeta.calls == []
+
+
+@pytest.mark.asyncio
+async def test_tablestore_list_table_request_requires_instance_name() -> None:
+    from iac_code.tools.cloud.aliyun.ots_data_adapter import ots_list_table_metadata
+
+    metadata = ots_list_table_metadata()
+    contract = CanonicalWireContract(
+        metadata_source="explicit_fallback",
+        product=metadata.product,
+        version=metadata.version,
+        action=metadata.action,
+        style=metadata.style,
+        method=metadata.method,
+        pathname=metadata.pathname,
+        operation_type=None,
+        auth_type="AK",
+        signature_scheme="ots_v4",
+        transport="ots_sdk",
+        executable=True,
+        unsupported_reasons=(),
+        parameters=metadata.parameters,
+        consumes=(),
+        produces=("application/json",),
+        policy_digest="test",
+    )
+
+    with pytest.raises(ApiContractError, match="missing_required_parameters:InstanceName"):
+        await RequestBuilder().build(contract, {"params": {}, "region_id": "cn-hangzhou"})
+    request = await RequestBuilder().build(
+        contract,
+        {"params": {"InstanceName": "sample-instance"}, "region_id": "cn-hangzhou"},
+    )
+    assert request.host_values == {"InstanceName": "sample-instance"}
+    assert request.canonical_query == ()
+
+
+@pytest.mark.asyncio
 async def test_canonical_product_drives_the_builtin_version_fallback_after_alias_resolution() -> None:
     class AliasProductResolver:
         async def resolve(self, requested_product: str) -> ProductResolution:

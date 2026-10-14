@@ -469,6 +469,39 @@ async def test_doc_fetches_the_exact_version_selected_by_the_contract_resolver()
 
 
 @pytest.mark.asyncio
+async def test_doc_exposes_local_ots_list_table_contract_without_openmeta_api_lookup() -> None:
+    metadata = document_metadata(
+        raw_api(product="Tablestore", version="2020-12-09", action="ListInstances")
+    )
+    openmeta = FakeOpenMeta(metadata)
+    resolver = ApiContractResolver(openmeta)
+    tool = AliyunApiDoc(SimpleNamespace(openmeta=openmeta, contract_resolver=resolver))
+
+    result = await tool.execute(
+        tool_input={"product": "ots", "action": "ListTable"},
+        context=ToolContext(tool_use_id="ots-list-table-doc"),
+    )
+
+    assert result.is_error is False
+    document = json.loads(result.content)
+    assert (document["product"], document["version"], document["action"]) == (
+        "Tablestore",
+        "2015-12-31",
+        "ListTable",
+    )
+    assert document["operation_type"] is None
+    assert document["required_parameters"] == [
+        {
+            "name": "InstanceName",
+            "in": "host",
+            "type": "string",
+            "example": "my-instance",
+        }
+    ]
+    assert all(call[0] != "api" for call in openmeta.calls)
+
+
+@pytest.mark.asyncio
 async def test_summary_uses_required_document_fields_nested_in_official_parameter_schema() -> None:
     raw = raw_api()
     region_id = raw["parameters"][0]

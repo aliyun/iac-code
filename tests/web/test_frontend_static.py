@@ -19,6 +19,7 @@ PIPELINE_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components
 WORKSPACE_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components/workspace.js"
 TOOL_CARDS_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components/tool_cards.js"
 OUTPUT_PANEL_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/components/output_panel.js"
+RESOURCE_LINKIFY_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/resource_linkify.js"
 MERMAID_RENDER_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/mermaid_render.js"
 MERMAID_VENDOR_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/vendor/mermaid.min.js"
 ARCHITECTURE_DIAGRAM_JS = Path(__file__).parents[2] / "src/iac_code/web/static/js/architecture_diagram.js"
@@ -70,6 +71,7 @@ REQUIRED_WEB_EVENT_TYPES = [
     "mcp.status.updated",
     "task.notification",
     "resource.observed",
+    "resource.references",
     "plan.updated",
     "debug.stream_event",
     "local.shell.start",
@@ -978,6 +980,7 @@ def test_markdown_links_open_in_new_tab_without_opener(tmp_path) -> None:
             const renderer = { renderer: { rules: {} } };
             configureMarkdownLinkTargets(renderer);
             const token = {
+              markup: "linkify",
               attrSet(name, value) {
                 attributes[name] = value;
               },
@@ -995,7 +998,11 @@ def test_markdown_links_open_in_new_tab_without_opener(tmp_path) -> None:
     )
 
     assert output == {
-        "attributes": {"target": "_blank", "rel": "noopener noreferrer"},
+        "attributes": {
+            "target": "_blank",
+            "rel": "noopener noreferrer",
+            "data-resource-auto-link": "true",
+        },
         "rendered": "<a>",
     }
 
@@ -1925,25 +1932,46 @@ def test_composer_queues_input_while_compacting() -> None:
     assert 'composer?.setCompacting(state.compaction?.status === "running")' in app_source
 
 
+def test_resource_rule_cache_versions_propagate_through_all_importers() -> None:
+    sources = [
+        APP_JS,
+        RESOURCE_LINKIFY_JS,
+        RESOURCE_LINKIFY_JS.parent / "resource_occurrences.js",
+        RESOURCE_LINKIFY_JS.parent / "resource_sources.js",
+        TOOL_CARDS_JS,
+        OUTPUT_PANEL_JS,
+        RESOURCE_LINKIFY_JS.parent / "components/resource_link_popover.js",
+        RESOURCE_LINKIFY_JS.parent / "components/resource_link_preview.js",
+    ]
+    for path in sources:
+        source = _source(path)
+        assert "resource_link_rules.js?v=resource-links-v82" in source
+        assert "resource_link_rules.js?v=resource-links-v80" not in source
+    for path in [APP_JS, BLOCKING_JS, TOOL_CARDS_JS, OUTPUT_PANEL_JS]:
+        assert "resource_linkify.js?v=resource-links-v122" in _source(path)
+
+
 def test_static_asset_versions_reload_rename_api_changes() -> None:
     html = _source(INDEX_HTML)
     index_html = html
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-325" in html
-    assert "/static/js/app.js?v=web-repl-ui-385" in html
+    assert "/static/styles.css?v=web-repl-ui-327" in html
+    assert "/static/js/app.js?v=web-repl-ui-390" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-315" in app_source
+    assert "./api.js?v=web-repl-ui-316" in app_source
+    assert "api.createResourceConsoleSignin(resourceIndex.sessionId, payload)" in app_source
     assert "./components/composer.js?v=session-model-v24" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
-    assert "./components/tool_cards.js?v=live-inline-tools-v26" in app_source
-    assert "./components/blocking.js?v=blocking-keys-v13" in app_source
+    assert "./components/tool_cards.js?v=resource-links-v112" in app_source
+    assert "./components/resource_link_preview.js?v=resource-links-v95" in app_source
+    assert "./components/blocking.js?v=blocking-keys-v82" in app_source
     # events.js 承载队列/消息 reducer,历次修复都在此;它的 import 必须带版本位,
     # 否则回访浏览器会加载「新 app.js + 旧缓存 events.js」,让队列行为与当前代码不一致。
     assert 'from "./events.js?v=' in app_source
@@ -1966,11 +1994,11 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-385" in index_html
+    assert "web-repl-ui-390" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
-    assert "./events.js?v=web-repl-ui-324" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v61" in app_source
+    assert "./events.js?v=web-repl-ui-325" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v69" in app_source
     # ECS RAM Role 面板改动后旧 token 不得残留,否则回访浏览器仍加载旧缓存 workspace.js。
     assert "./components/workspace.js?v=cloud-creds-v57" not in app_source
     assert "workspace-cloud-vendors" in workspace_source
@@ -1994,6 +2022,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     assert "formatLocalEpoch" in workspace_source
     assert "Access token expiry" in workspace_source
     assert "actions.hidden" in workspace_source
+
     # 「加载凭证」按钮已移除:进入面板即自动加载当前选中凭证,该按钮无额外作用。
     assert "加载凭证" not in workspace_source
     assert "workspace-cloud-load" not in workspace_source
@@ -2007,6 +2036,34 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     assert "Unknown (STS credentials not yet obtained)" in workspace_source
 
 
+def test_resource_link_scheduler_round_robins_unfinished_message_roots() -> None:
+    source = _source(RESOURCE_LINKIFY_JS)
+
+    # Long historical answers can take several cooperative slices. Move an
+    # unfinished root behind the other queued roots so the newest answer gets
+    # a bounded opportunity to linkify instead of waiting for all history.
+    assert re.search(
+        r"if \(step\.done\) queue\.delete\(root\);\s*else \{\s*"
+        r"(?:\/\/[^\n]*\n\s*)+queue\.delete\(root\);\s*queue\.set\(root, work\);",
+        source,
+    )
+
+    # A newly created or streaming answer must receive the next cooperative
+    # slice before a large set of re-registered historical messages. It gets
+    # one priority slice only, then falls back to the fair queue above.
+    assert "const ordered = [...priority].reverse().filter((root) => queue.has(root));" in source
+    assert "priority.delete(root);" in source
+    assert "priority.add(root);" in source
+    assert "enqueue(root, true);" in source
+    # Keep a hovered resource-link node stable until its click handler has
+    # completed; otherwise a cooperative frame can swallow a real Shift-click.
+    assert 'addEventListener?.("pointerdown", pauseForResourceLinkPointer, true)' in source
+    assert 'for (const event of ["pointerup", "pointercancel", "click", "auxclick"])' in source
+    assert "if (timer !== null) {" in source
+    assert "resourceLinkPointerDown = false;" in source
+    assert 'removeEventListener?.("pointerdown", pauseForResourceLinkPointer, true)' in source
+
+
 def test_token_mode_frontend_uses_only_encrypted_transport_for_business_data() -> None:
     api_source = _source(API_JS)
     transport_source = _source(TOKEN_TRANSPORT_JS)
@@ -2014,7 +2071,7 @@ def test_token_mode_frontend_uses_only_encrypted_transport_for_business_data() -
     app_source = _source(APP_JS)
     composer_source = _source(COMPOSER_JS)
 
-    assert 'from "./token_transport.js?v=token-transport-v4"' in api_source
+    assert 'from "./token_transport.js?v=token-transport-v5"' in api_source
     assert 'fetch("/api/token/challenge"' in transport_source
     assert 'fetch("/api/token/ping"' in transport_source
     assert 'stream ? "/api/token/stream" : "/api/token/request"' in transport_source
@@ -2106,7 +2163,8 @@ def test_token_crypto_matches_python_interop_vectors(tmp_path) -> None:
     }
 
 
-def test_token_transport_rebuilds_bodyless_response(tmp_path) -> None:
+@pytest.mark.parametrize("from_url", [False, True])
+def test_token_transport_rebuilds_bodyless_response(tmp_path, from_url: bool) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node is not installed")
@@ -2133,10 +2191,14 @@ def test_token_transport_rebuilds_bodyless_response(tmp_path) -> None:
               64,
             );
             const responseKey = keys.slice(32);
-            const storage = new Map([["iac-code:web-access-token", token]]);
+            const storage = new Map({"[]" if from_url else '[["iac-code:web-access-token", token]]'});
             globalThis.window = {{
               __IAC_I18N__: {{ lang: "en", messages: {{}} }},
-              location: new URL("http://203.0.113.10:8766/"),
+              location: new URL("http://203.0.113.10:8766/" + ({str(from_url).lower()} ? `#web_token=${{token}}` : "")),
+              history: {{
+                state: null,
+                replaceState: (_state, _title, url) => {{ window.location = new URL(url, window.location.href); }},
+              }},
               sessionStorage: {{
                 getItem: (key) => storage.get(key) || null,
                 setItem: (key, value) => storage.set(key, value),
@@ -2185,7 +2247,12 @@ def test_token_transport_rebuilds_bodyless_response(tmp_path) -> None:
 
             const {{ tokenFetch }} = await import({json.dumps(TOKEN_TRANSPORT_JS.as_uri())});
             const response = await tokenFetch("/api/update/dismiss", {{ method: "POST" }});
-            process.stdout.write(JSON.stringify({{ status: response.status, body: await response.text() }}));
+            process.stdout.write(JSON.stringify({{
+              status: response.status,
+              body: await response.text(),
+              url: window.location.href,
+              tokenStored: storage.get("iac-code:web-access-token") === token,
+            }}));
             """
         ),
         encoding="utf-8",
@@ -2194,7 +2261,12 @@ def test_token_transport_rebuilds_bodyless_response(tmp_path) -> None:
     result = subprocess.run([node, str(script)], capture_output=True, text=True, encoding="utf-8", check=False)
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == {"status": 204, "body": ""}
+    assert json.loads(result.stdout) == {
+        "status": 204,
+        "body": "",
+        "url": "http://203.0.113.10:8766/",
+        "tokenStored": True,
+    }
 
 
 def test_oauth_manual_code_uses_inline_dialog_and_supports_abort(tmp_path) -> None:
@@ -2581,6 +2653,7 @@ def test_complete_step_tool_renders_conclusion_card() -> None:
     assert "function renderConclusionValue" in tool_cards
     assert "function completeStepConclusion" in tool_cards
     assert "tool.normalizedConclusion" in tool_cards
+    assert "renderConclusionValue(conclusion" in tool_cards
     conclusion_helper = tool_cards[tool_cards.index("export function completeStepConclusion") :]
     assert conclusion_helper.index("tool.normalizedConclusion") < conclusion_helper.index(
         "const input = inputObject(tool)"
@@ -2624,6 +2697,15 @@ def test_complete_step_tool_renders_conclusion_card() -> None:
     assert ".tool-complete-step-detail" in styles
     assert ".conclusion-object" in styles
     assert ".conclusion-field" in styles
+
+
+def test_nested_tool_result_fields_do_not_collapse_resource_link_targets() -> None:
+    styles = _source(STYLES_CSS)
+    nested = styles.split(".message-tool-cards .conclusion-value .conclusion-field {", 1)[1].split("}", 1)[0]
+    assert "grid-template-columns: minmax(0, 1fr);" in nested
+    assert "minmax(6.5rem, 9rem)" not in nested
+    key = styles.split(".message-tool-cards .conclusion-key {", 1)[1].split("}", 1)[0]
+    assert "overflow-wrap: anywhere;" in key
 
 
 def test_named_tools_get_chinese_action_labels() -> None:
@@ -2731,8 +2813,9 @@ def test_pipeline_tool_json_result_gets_structured_labels() -> None:
     # 结果分支必须先取结构化值,命中才走 renderConclusionValue,否则回退 appendValueBlock。
     results_branch = tool_cards.split("if (options.includeResults !== false) {", 1)[1].split("\n  }", 1)[0]
     assert "structuredResultValue(tool)" in results_branch
-    assert "renderConclusionValue(structured)" in results_branch
-    assert 'appendValueBlock(detail, "tool-card-results", t("Result"), tool.results)' in results_branch
+    assert "renderConclusionValue(structured, resourceToolContext(tool))" in results_branch
+    assert 'appendValueBlock(detail, "tool-card-results", t("Result"), visibleResults,' in results_branch
+    assert "const {resourceReferences, ...visible} = result" in results_branch
     # 新增字段的标签必须落在 CONCLUSION_LABELS 里。
     for key, label in (
         ("stack_name", "Stack name"),
@@ -2762,6 +2845,33 @@ def test_pipeline_tool_json_result_gets_structured_labels() -> None:
     scalar_body = tool_cards.split("function conclusionScalarText", 1)[1].split("\n}", 1)[0]
     assert "CONCLUSION_VALUE_LABELS" in scalar_body
     assert scalar_body.index("CONCLUSION_VALUE_LABELS") < scalar_body.index("return text(value)")
+
+
+def test_shift_resource_link_uses_fresh_signin_only_after_capability_confirmation() -> None:
+    linkify = _source(RESOURCE_LINKIFY_JS)
+    app = _source(APP_JS)
+    preview = _source(RESOURCE_LINKIFY_JS.parent / "components/resource_link_preview.js")
+
+    assert "Boolean(state.shouldSignExternal?.(active.occurrence, active.resolution)) &&" in linkify
+    assert "shouldSignExternal: () => resourceSigninEmbedded" in app
+    assert "resourceSigninEmbedded && supportsEmbeddedSignin(resolution)" in app
+    assert 'active.activate("external") === true' in linkify
+    assert "signed || openResourceTargetInNewTab(element, active.resolution.url)" in linkify
+    assert "return onActivate(element, occurrence, initial, {" in linkify
+    assert 'context.activationMode === "external"' in app
+    assert "return openResourceLinkExternal(anchor, resolution, {" in app
+    assert "destinations:{[partition]:target.href}" in preview
+    assert 'popup = anchor.ownerDocument.defaultView?.open?.("about:blank", "_blank")' in preview
+    assert "popup.opener = null" in preview
+    assert "const result = await createSigninUrl(request)" in preview
+    assert "if (current()) popup.location.replace(url)" in preview
+
+
+def test_resource_linkify_scopes_untyped_markdown_result_blocks() -> None:
+    source = _source(RESOURCE_LINKIFY_JS)
+    assert "function nearestProductScope" in source
+    assert "context.sectionProduct = sectionProduct" in source
+    assert "resource_occurrences.js?v=resource-links-v114" in source
 
 
 def test_pipeline_tool_json_result_renders_labeled_fields(tmp_path) -> None:
@@ -8696,7 +8806,7 @@ def test_general_panel_sections_have_chapter_spacing() -> None:
 
 
 def test_general_panel_section_order() -> None:
-    # 章节顺序:新会话默认 → 配色方案(含界面语言)→ 售卖流水线 → 外来会话可见性 → 开发者模式。
+    # 章节顺序:新会话默认 → 配色方案(含界面语言)→ 内嵌控制台角色 → 售卖流水线 → 外来会话可见性 → 开发者模式。
     # 重启服务已从常规面板移至「开发」分页;languageField 紧随 themeGrid,保证 field→head
     # 相邻关系仍命中现有章节间距选择器。
     workspace_source = _source(WORKSPACE_JS)
@@ -8710,6 +8820,8 @@ def test_general_panel_section_order() -> None:
         "    languageField,\n"
         "    architectureRendererField,\n"
         "    architecturePreviewRow,\n"
+        "    consoleRoleGroupHead,\n"
+        "    consoleRoleCard,\n"
         "    reviewStepGroupHead,\n"
         "    reviewStepCard,\n"
         "    groupHead,\n"
@@ -9240,6 +9352,50 @@ def test_api_exposes_workspace_operation_routes() -> None:
     assert "if (apiBase) {\n    payload.apiBase = apiBase;" in source
 
 
+def test_general_settings_expose_dedicated_console_signin_role() -> None:
+    api_source = _source(API_JS)
+    workspace_source = _source(WORKSPACE_JS)
+    styles = _source(STYLES_CSS)
+
+    for name in ("getConsoleSigninRole", "saveConsoleSigninRole", "createConsoleSigninRole", "repairConsoleSigninRole"):
+        assert f"export function {name}" in api_source
+    assert '"/api/settings/console-signin-role"' in api_source
+    assert '"/api/settings/console-signin-role/create"' in api_source
+    assert 't("Embedded console sign-in")' in workspace_source
+    assert 't("Create read-only role")' in workspace_source
+    assert 't("Open supported cloud resources here without signing in again.")' in workspace_source
+    assert (
+        't("With a role configured, supported resources open here; other resources open in a new tab.")'
+        in workspace_source
+    )
+    assert "STS credentials stay in memory" not in workspace_source
+    assert (
+        "consoleRoleCard.append(consoleRoleHelp, consoleRolePolicyDisclosure, consoleRoleStatus);" in workspace_source
+    )
+    assert 'const consoleRolePolicyDisclosure = makeElement("details", {' in workspace_source
+    assert 'const consoleRolePolicySummary = makeElement("summary", {' in workspace_source
+    assert "consoleRolePolicyDisclosure.append(consoleRolePolicySummary, consoleRolePolicyDetails);" in workspace_source
+    assert 'const consoleRolePolicyName = makeElement("h5",' in workspace_source
+    assert 'const consoleRolePolicyActions = makeElement("ul",' in workspace_source
+    assert "consoleRolePolicyDetails.append(consoleRolePolicyName, consoleRolePolicyActions);" in workspace_source
+    assert ".workspace-console-role-policy-actions" in styles
+    assert "border-inline-start: 1px solid var(--codex-border-strong);" in styles
+    assert "consoleRolePolicyDisclosure.open = true" not in workspace_source
+    assert ".workspace-console-role-policy > summary" in styles
+    assert ".workspace-console-role-policy[hidden]" in styles
+    assert '"/api/settings/console-signin-role/repair"' in api_source
+    assert 't("Repair read-only permissions")' in workspace_source
+    assert "if (!confirmConsoleRolePolicy()) return;" in workspace_source
+    assert "consoleRoleInput.value.trim() !== consoleRoleSavedArn" in workspace_source
+    assert "ReadOnlyAccess" in workspace_source
+    assert "sts:AssumeRole" in workspace_source
+    assert "payloadError?.diagnostic" in workspace_source
+    assert 't("Request ID")' in workspace_source
+    assert "white-space: pre-wrap;" in styles
+    assert "context.onCloudCredentialsChanged?.();" in workspace_source
+    assert ".workspace-console-role-status[hidden]" in styles
+
+
 def test_api_exposes_aliyun_oauth_login_and_field_hint() -> None:
     api_source = _source(API_JS)
     workspace_source = _source(WORKSPACE_JS)
@@ -9304,7 +9460,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v61";'
+    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v69";'
     assert workspace_import in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
@@ -11832,7 +11988,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-385" in html
+    assert "web-repl-ui-390" in html
     assert "web-repl-ui-343" not in html
 
 
@@ -11849,6 +12005,8 @@ def test_resource_selector_uses_compact_themed_controls() -> None:
     # Refresh stays beside the selector as an accessible icon; only the two answer
     # actions belong in the footer.
     assert "controlRow.append(mountPoint, refresh)" in blocking
+    # Resource link decoration must not rewrite the selector's React-owned DOM.
+    assert 'mountPoint.setAttribute("data-resource-ignore", "")' in blocking
     assert 'refresh.setAttribute("aria-label", refreshLabel)' in blocking
     assert 'refresh.setAttribute("aria-busy", "true")' in blocking
     assert "footer.append(confirm, cancel)" in blocking
@@ -12319,7 +12477,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-315" in source
+    assert "./api.js?v=web-repl-ui-316" in source
     assert "./api.js?v=web-repl-ui-311" not in source
     assert "./api.js?v=web-repl-ui-159" not in source
 
@@ -12339,7 +12497,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v39" in app_source
+    assert "output_panel.js?v=output-panel-v45" in app_source
 
 
 def test_desktop_resource_stack_links_use_native_external_opener() -> None:
@@ -12351,7 +12509,8 @@ def test_desktop_resource_stack_links_use_native_external_opener() -> None:
     assert 'row.target = "_blank"' in output_source
     assert 'typeof openExternal === "function"' in output_source
     assert "event.preventDefault();" in output_source
-    assert "openExternal(stack.consoleUrl)" in output_source
+    assert "openExternal(url)" in output_source
+    assert "const url = stackConsoleUrl(stack)" in output_source
     assert 'invokeDesktop("open_external_url", { url })' in app_source
 
 
@@ -12376,6 +12535,52 @@ def test_output_panel_resets_on_new_session_draft() -> None:
     assert "outputController?.reset();" in draft_body
     submit_body = app_source.split("async function createSessionForSubmit(", 1)[1].split("\n}", 1)[0]
     assert "outputController?.reset();" in submit_body
+
+
+def test_resource_index_resets_for_new_session_draft_and_materialized_session() -> None:
+    # 新会话不能继承上一会话的资源事实与 revision。否则新会话的首个 resource.references
+    # 增量可能被当成旧事件，正文里的完整资源 ID 也会误显示“补充资源上下文”。
+    app_source = _source(APP_JS)
+    draft_body = app_source.split("function startNewSessionDraft(", 1)[1].split("\n}", 1)[0]
+    assert "resourceIndex.reset(null);" in draft_body
+
+    submit_body = app_source.split("async function createSessionForSubmit(", 1)[1].split("\n}", 1)[0]
+    assert "const sessionId = displaySessionId(session);" in submit_body
+    reset_idx = submit_body.index("resourceIndex.reset(sessionId);")
+    stream_idx = submit_body.index("connectCurrentStream(generation);")
+    assert reset_idx < stream_idx
+
+
+def test_load_session_applies_validated_configured_account_context() -> None:
+    # 历史会话在服务重启后可能只剩 API 响应事实而没有当时的 credential scope。
+    # 会话加载时要从本机已配置凭证补齐账号/站点默认值，否则名称型资源会退化成补充上下文面板。
+    app_source = _source(APP_JS)
+    load_body = app_source.split("async function loadSession(", 1)[1].split("\nasync function ", 1)[0]
+    snapshot_idx = load_body.index("await resourceIndex.loadSnapshot(")
+    context_idx = load_body.index("await loadResourceAccountContext(resourceIndex, {")
+    state_idx = load_body.index("state = {")
+    assert snapshot_idx < context_idx < state_idx
+    assert "isCurrent: () => generation === sessionLoadGeneration" in load_body
+    assert "load: api.getResourceAccountContext" in load_body
+
+
+def test_resource_signin_capability_retries_one_transient_external_result() -> None:
+    app_source = _source(APP_JS)
+
+    assert "resourceSigninCapabilityPending" in app_source
+    assert "!resourceSigninEmbedded && !resourceSigninCapabilityRetried" in app_source
+    assert "void refreshResourceSigninCapability(sessionId, {force: true, retry: true});" in app_source
+    assert "if ((force && !retry) || resourceSigninCapabilitySession !== sessionId)" in app_source
+
+
+def test_resource_signin_capability_recovers_after_network_or_focus_change() -> None:
+    app_source = _source(APP_JS)
+
+    assert "function retryResourceSigninCapabilityForCurrentSession()" in app_source
+    assert "if (!sessionId || resourceSigninEmbedded || resourceSigninCapabilityPending) return;" in app_source
+    assert 'globalThis.addEventListener?.("online", retryResourceSigninCapabilityForCurrentSession);' in app_source
+    assert 'globalThis.addEventListener?.("focus", retryResourceSigninCapabilityForCurrentSession);' in app_source
+    assert "void refreshResourceSigninCapability(sessionId, {force: true});" in app_source
 
 
 def test_output_panel_reset_only_on_session_switch_in_load_session() -> None:
@@ -12423,7 +12628,7 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v39" in app_source
+    assert "output_panel.js?v=output-panel-v45" in app_source
     assert "output_panel.js?v=output-panel-v23" not in app_source
 
 
@@ -12780,6 +12985,41 @@ def test_output_panel_refresh_forwards_candidates_to_onpayload(tmp_path: Path) -
     assert result["candidateIndexes"] == [0, 1]
     # diagrams 仍原样透传(只有可渲染的 idx1),与 candidates 全量形成对照。
     assert result["diagramCount"] == 1
+
+
+def test_output_panel_uses_shared_verified_route_not_untrusted_console_url(tmp_path: Path) -> None:
+    source = """
+    import assert from 'node:assert/strict';
+    const {rosConsoleUrl, mergeStacksForDisplay} = await import(__OUTPUT_PANEL_MODULE__);
+    assert.equal(rosConsoleUrl('cn-hangzhou','id/child?x=1#part'),
+      'https://ros.console.aliyun.com/cn-hangzhou/stacks/id%2Fchild%3Fx%3D1%23part');
+    for (const [region,id,partition] of [
+      ['','stk-1'], ['cn-hangzhou',''], ['cn-hangzhou','..'], ['cn-hangzhou','https://evil.test'],
+      ['cn-hangzhou/path','stk-1'],
+    ]) assert.equal(rosConsoleUrl(region,id,partition),null);
+    assert.equal(rosConsoleUrl('ap-southeast-1','stk-1','alibabacloud'),
+      'https://ros-intl.console.alibabacloud.com/ap-southeast-1/stacks/stk-1');
+    const live = mergeStacksForDisplay([], [{stackId:'stk-1',regionId:'cn-hangzhou',consoleUrl:'javascript:alert(1)'}]);
+    assert.equal(live[0].consoleUrl,'https://ros.console.aliyun.com/cn-hangzhou/stacks/stk-1');
+    const unknown = mergeStacksForDisplay([], [{stackId:'stk-1',regionId:'cn-hangzhou',resourceRegionId:''}]);
+    assert.equal(unknown[0].consoleUrl,null,'configured fallback is not an observed region');
+    console.log(JSON.stringify({passed:true}));
+    """
+    assert _run_output_panel_script(tmp_path, source)["passed"]
+
+
+def test_live_progress_retains_account_and_site_like_history_projection(tmp_path: Path) -> None:
+    source = """
+    const {reduceEvent} = await import(__EVENTS_MODULE__);
+    const next=reduceEvent({}, {type:'pipeline.event', payload:{kind:'stack.progress',toolUseId:'deployment',
+      stackId:'stack-test',regionId:'cn-beijing',accountScope:'fake-progress-account',consolePartition:'alibabacloud',
+      resources:[{name:'RoleLogical',resource_type:'ALIYUN::RAM::Role',attributes:{RoleName:'DeployRole'}}]}});
+    console.log(JSON.stringify(next.tools.deployment.stackProgress));
+    """
+    result = _run_events_script(tmp_path, source)
+    assert result["accountScope"] == "fake-progress-account"
+    assert result["consolePartition"] == "alibabacloud"
+    assert result["resources"][0]["attributes"]["RoleName"] == "DeployRole"
 
 
 def test_output_panel_merges_live_inprogress_stacks(tmp_path: Path) -> None:
@@ -13266,7 +13506,8 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_for_desktop_external_links() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v39" in js
+    assert "./components/output_panel.js?v=output-panel-v45" in js
+    assert "output-panel-v23" not in js
     assert "output-panel-v24" not in js
 
 
@@ -13798,3 +14039,20 @@ def test_failed_tool_highlight_gated_under_body_class() -> None:
         "body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-status.is-error",
     ):
         assert rule in css
+
+
+def test_resource_console_preview_keeps_desktop_width_inside_the_viewport() -> None:
+    styles = _source(STYLES_CSS)
+    panel = _css_block(styles, ".resource-link-preview")
+    frame = _css_block(styles, ".resource-link-preview iframe")
+
+    assert "width: max(66.6667vw, 1200px);" in panel
+    assert "max-width: 100vw;" in panel
+    assert "box-sizing: border-box;" in panel
+    assert "min-width:" not in panel
+    assert "overflow: hidden;" in panel
+    assert "inset: 0 0 0 auto;" in panel
+    assert "width: 100%;" in frame
+    assert "height: 100%;" in frame
+    assert ".resource-link-preview { width: 100vw; }" in styles
+    assert "/static/styles.css?v=web-repl-ui-327" in _source(INDEX_HTML)

@@ -4,6 +4,18 @@ import os
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _isolate_execution_policy(monkeypatch):
+    """Explicit test-host injection; normal product entrypoints install no policy."""
+    from iac_code.services import execution_policy
+    from scripts.web.e2e.resource_link_workflow import execution_gate
+
+    monkeypatch.setattr(execution_policy, "_policy", execution_gate)
+    monkeypatch.delenv(execution_gate.ENV, raising=False)
+    monkeypatch.delenv(execution_gate.SLOT_ENV, raising=False)
+
+
 # Force English locale for tests so assertions match English strings
 os.environ["LANGUAGE"] = "en"
 os.environ["LC_ALL"] = "en_US.UTF-8"

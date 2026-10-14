@@ -688,6 +688,11 @@ export function reduceEvent(state = {}, event = {}) {
       next.lastError = {
         message: typeof payload.message === "string" ? payload.message : t("Unknown error"),
         payload,
+        // Use envelope identity, never an identity supplied by the error body.
+        resourceSource: Number.isSafeInteger(event.sequence) && event.sequence > 0 &&
+          typeof event.createdAt === "string" && event.createdAt ? {
+            sourceId: `session-error:${event.sequence}:${event.createdAt}`, sourcePath: "/message",
+          } : null,
       };
       break;
     }
@@ -726,6 +731,8 @@ export function reduceEvent(state = {}, event = {}) {
           stackId: payload.stackId,
           operationId: payload.operationId,
           regionId: payload.regionId,
+          accountScope: payload.accountScope,
+          consolePartition: payload.consolePartition,
           status: payload.status,
           progressPercentage: payload.progressPercentage ?? payload.progress,
           resources: payload.resources,

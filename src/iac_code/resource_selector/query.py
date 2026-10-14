@@ -1527,4 +1527,9 @@ async def call_aliyun_api(
         raise ResourceSelectorQueryError("selector_query_response_invalid") from exc
     if not isinstance(value, dict):
         raise ResourceSelectorQueryError("selector_query_response_invalid")
+    if product.casefold() == "oss" and action == "ListBuckets" and {"status", "headers", "body"} <= value.keys():
+        # The tool retains HTTP evidence; selectors consume the business body.
+        value = value["body"]
+        if not isinstance(value, dict):
+            raise ResourceSelectorQueryError("selector_query_response_invalid")
     return value

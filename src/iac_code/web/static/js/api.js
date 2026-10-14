@@ -3,7 +3,7 @@ import {
   isTokenMode,
   requestAuthorizationCode,
   tokenFetch,
-} from "./token_transport.js?v=token-transport-v4";
+} from "./token_transport.js?v=token-transport-v5";
 import { t } from "./i18n.js?v=web-repl-ui-277";
 
 export const WEB_EVENT_TYPES = [
@@ -43,6 +43,7 @@ export const WEB_EVENT_TYPES = [
   "mcp.status.updated",
   "task.notification",
   "resource.observed",
+  "resource.references",
   "plan.updated",
   "debug.stream_event",
   "local.shell.start",
@@ -151,8 +152,34 @@ export function getSession(sessionId) {
   return jsonFetch(sessionUrl(sessionId));
 }
 
+export function getResourceAccountContext(sessionId) {
+  return jsonFetch(sessionUrl(sessionId, "/resource-references/account-context"), {method:"POST"});
+}
+
 export function getMessages(sessionId) {
   return jsonFetch(sessionUrl(sessionId, "/messages"));
+}
+
+export function getResourceReferences(sessionId, cursor = null) {
+  const url = new URL(sessionUrl(sessionId, "/resource-references"), window.location.origin);
+  if (cursor) url.searchParams.set("cursor", cursor);
+  return jsonFetch(url.toString());
+}
+
+export function resolveResourceReference(sessionId, payload) {
+  return jsonFetch(sessionUrl(sessionId, "/resource-references/resolve"), {
+    method: "POST", body: JSON.stringify(payload),
+  });
+}
+
+export function createResourceConsoleSignin(sessionId, payload) {
+  return jsonFetch(sessionUrl(sessionId, "/resource-references/signin"), {
+    method: "POST", body: JSON.stringify(payload),
+  });
+}
+
+export function getResourceConsoleSigninCapability(sessionId) {
+  return jsonFetch(sessionUrl(sessionId, "/resource-references/signin-capability"));
 }
 
 export function getOutputs(sessionId) {
@@ -411,6 +438,32 @@ export function saveForeignSessionsVisibility({ showPipeline = false, showNormal
       showPipeline: Boolean(showPipeline),
       showNormal: Boolean(showNormal),
     }),
+  });
+}
+
+// 内嵌控制台专用 RAM 角色:仅持久化非敏感角色/策略版本信息;临时 STS 始终保留在后端内存。
+export function getConsoleSigninRole() {
+  return jsonFetch("/api/settings/console-signin-role");
+}
+
+export function saveConsoleSigninRole(roleArn = "") {
+  return jsonFetch("/api/settings/console-signin-role", {
+    method: "PUT",
+    body: JSON.stringify({ roleArn }),
+  });
+}
+
+export function createConsoleSigninRole() {
+  return jsonFetch("/api/settings/console-signin-role/create", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function repairConsoleSigninRole(roleArn, revision) {
+  return jsonFetch("/api/settings/console-signin-role/repair", {
+    method: "POST",
+    body: JSON.stringify({ roleArn, revision }),
   });
 }
 

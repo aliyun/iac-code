@@ -1,0 +1,5 @@
+{
+  "luna": {"model": "gpt-6-luna", "effort": "high"},
+  "sol": {"model": "gpt-6.1-sol", "effort": "high"},
+  "glm": {"model": "glm-5.3-prime", "effort": "xhigh"}
+}

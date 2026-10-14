@@ -60,6 +60,21 @@ def test_sidecar_staging_materializes_resources_and_desktop_helper_instructions(
     assert len(selector_manifest["selectors"]) == 116
     assert (selector_vendor / "ore-resource-selector.THIRD_PARTY_NOTICES").is_file()
     assert not list(selector_vendor.glob("ore-resource-selector*.map"))
+    for relative in (
+        Path("web/resource_link_catalog.py"),
+        Path("web/static/ros_resource_links.json"),
+    ):
+        assert (package / relative).read_bytes() == (module.SOURCE_PACKAGE / relative).read_bytes()
+    for module_name in (
+        "resource_index.js",
+        "resource_sources.js",
+        "resource_link_rules.js",
+        "resource_occurrences.js",
+        "resource_linkify.js",
+        "components/resource_link_popover.js",
+    ):
+        relative = Path("web/static/js") / module_name
+        assert (package / relative).read_bytes() == (module.SOURCE_PACKAGE / relative).read_bytes()
     markdown = list(package.rglob("*.md"))
     assert markdown
     assert all("tf2ros.py" not in path.read_text(encoding="utf-8") for path in markdown)

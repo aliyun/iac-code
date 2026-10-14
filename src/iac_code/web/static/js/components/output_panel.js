@@ -1,4 +1,6 @@
 import { t } from "../i18n.js?v=web-repl-ui-277";
+import { registerResourceText } from "../resource_linkify.js?v=resource-links-v122";
+import { buildLegacyRosStackConsoleUrl } from "../resource_link_rules.js?v=resource-links-v82";
 // 输出面板:悬浮抽屉汇总资源栈与模板文件;自持 DOM,不进 render 扇出。
 import {
   disposeArchitectureDiagram,
@@ -100,11 +102,14 @@ export function diagramStateBadge(stateStr) {
   return null;
 }
 
-// 资源栈控制台 URL(与后端 outputs.build_ros_console_url 一致):region 与 stackId 均非空才生成。
-// 前端 live 进行中栈(普通对话 ros_stack 创建期间)由此补出控制台链接,与服务端派生栈观感一致。
-export function rosConsoleUrl(regionId, stackId) {
-  if (!regionId || !stackId) return null;
-  return `https://ros.console.aliyun.com/${regionId}/stacks/${stackId}`;
+// Legacy output rows keep their existing navigation without inventing account
+// facts. The route itself is owned and validated by the shared rules module.
+export function rosConsoleUrl(regionId, stackId, consolePartition = "aliyun") {
+  return buildLegacyRosStackConsoleUrl(regionId, stackId, consolePartition);
+}
+
+function stackConsoleUrl(stack) {
+  return rosConsoleUrl(stack.resourceRegionId ?? stack.regionId, stack.stackId, stack.consolePartition);
 }
 
 // 资源栈去重键(与后端 outputs.add_stack 一致):有栈名用「region::栈名」,否则退回 stackId。
@@ -123,7 +128,9 @@ function normalizeLiveStack(stack) {
     statusReason: stack.statusReason || "",
     isSuccess: stack.isSuccess === true,
     regionId: stack.regionId || "",
-    consoleUrl: stack.consoleUrl || rosConsoleUrl(stack.regionId, stack.stackId),
+    resourceRegionId: stack.resourceRegionId ?? stack.regionId ?? "",
+    consolePartition: stack.consolePartition,
+    consoleUrl: stackConsoleUrl(stack),
   };
 }
 
@@ -171,7 +178,9 @@ export function mergeStacksForDisplay(serverStacks, liveStacks) {
     if (serverForId) {
       live.stackName = live.stackName || serverForId.stackName || "";
       live.regionId = live.regionId || serverForId.regionId || "";
-      live.consoleUrl = live.consoleUrl || serverForId.consoleUrl || rosConsoleUrl(live.regionId, live.stackId);
+      live.resourceRegionId = live.resourceRegionId || (serverForId.resourceRegionId ?? serverForId.regionId) || "";
+      live.consolePartition = live.consolePartition || serverForId.consolePartition;
+      live.consoleUrl = stackConsoleUrl(live);
     }
     const key = stackDedupKey(live);
     // 找出服务端同一物理栈:先按 dedup 键;无名 t0 则按 stackId 回找其(可能不同的)键。
@@ -198,6 +207,7 @@ export function createOutputController({
   getSessionId,
   api,
   onPayload = () => {},
+  onResourceSnapshot = async () => {},
   getDiagramState = () => "none",
   getLiveStacks = () => [],
   openExternal = null,
@@ -215,6 +225,7 @@ export function createOutputController({
   let autoOpenedOnce = false;
   let activePreviewPath = null;
   let activeDiagramCanvas = null;
+  let previewGeneration = 0;
 
   function clearDiagramPreview() {
     if (activeDiagramCanvas) disposeArchitectureDiagram(activeDiagramCanvas);
@@ -227,15 +238,22 @@ export function createOutputController({
   }
 
   function closePreview() {
+    previewGeneration++;
     clearDiagramPreview();
     resetPreviewLayout();
     activePreviewPath = null;
-    if (preview) preview.hidden = true;
+    if (preview) {
+      preview.hidden = true;
+      preview.replaceChildren();
+      // Schedule cleanup even when no other transcript source was rerendered.
+      registerResourceText(preview, {source:{sourceId:"output-preview-panel"},complete:true});
+    }
   }
 
   async function openPreview(path) {
     const id = getSessionId?.();
     if (!id || !preview) return;
+    const generation = ++previewGeneration;
     clearDiagramPreview();
     resetPreviewLayout();
     activePreviewPath = path;
@@ -245,13 +263,17 @@ export function createOutputController({
     try {
       data = await api.getOutputFile(id, path);
     } catch (err) {
+      if (generation !== previewGeneration || activePreviewPath !== path || getSessionId?.() !== id) return;
       preview.replaceChildren(previewHead(path), fallbackBody(t("File no longer exists")));
       return;
     }
-    if (activePreviewPath !== path) return; // 期间被切走
+    if (generation !== previewGeneration || activePreviewPath !== path || getSessionId?.() !== id) return;
+    if (data.resourceReferences) await onResourceSnapshot(data.resourceReferences, id);
+    if (generation !== previewGeneration || activePreviewPath !== path || getSessionId?.() !== id) return;
     const pre = document.createElement("pre");
     pre.className = "output-preview-code tok-root";
     pre.innerHTML = highlightTemplate(data.content, data.format);
+    registerResourceText(pre, {source:data.resourceSource || {sourceId:`output-file:${path}`}, bindingValue:data.content, complete:true});
     const bodyWrap = document.createElement("div");
     bodyWrap.className = "output-preview-body";
     bodyWrap.append(pre);
@@ -263,6 +285,7 @@ export function createOutputController({
   async function openDiagramPreview(item) {
     const id = getSessionId?.();
     if (!id || !preview) return;
+    const generation = ++previewGeneration;
     const title = diagramDisplayName(item);
     const st = getDiagramState(item);
     // 用唯一 diagramId 做陈旧性键(重名候选的 title 可能相同,无法区分)。
@@ -286,7 +309,7 @@ export function createOutputController({
         preview.style.setProperty("--architecture-preview-width", `${diagramPreviewWidth(width)}px`);
       },
     });
-    if (activePreviewPath !== key || getSessionId?.() !== id) {
+    if (generation !== previewGeneration || activePreviewPath !== key || getSessionId?.() !== id) {
       disposeArchitectureDiagram(canvas);
       if (activeDiagramCanvas === canvas) activeDiagramCanvas = null;
     }
@@ -397,17 +420,19 @@ export function createOutputController({
   }
 
   function renderStackRow(stack) {
-    const row = stack.consoleUrl ? document.createElement("a") : document.createElement("div");
+    // Never navigate to consoleUrl supplied by tool/MCP text or an API payload.
+    const url = stackConsoleUrl(stack);
+    const row = url ? document.createElement("a") : document.createElement("div");
     row.className = "output-row output-stack-row";
-    if (stack.consoleUrl) {
-      row.href = stack.consoleUrl;
+    if (url) {
+      row.href = url;
       row.target = "_blank";
       row.rel = "noopener noreferrer";
       if (typeof openExternal === "function") {
         row.addEventListener("click", (event) => {
           event.preventDefault();
-          Promise.resolve(openExternal(stack.consoleUrl)).catch((error) => {
-            console.warn("[outputs] open external URL failed", error);
+          Promise.resolve(openExternal(url)).catch(() => {
+            console.warn("[outputs] open external URL failed");
           });
         });
       }
@@ -417,6 +442,13 @@ export function createOutputController({
     const name = document.createElement("span");
     name.className = "output-row-name";
     name.textContent = stack.stackName || stack.stackId;
+    if (!url && name.textContent === stack.stackId) {
+      registerResourceText(name, {
+        source:{sourceId:`output-stack:${stack.stackId}`}, complete:true,
+        context:{resourceType:"ALIYUN::ROS::Stack",field:"StackId",
+          regionId:stack.resourceRegionId ?? stack.regionId, consolePartition:stack.consolePartition},
+      });
+    }
     const badge = document.createElement("span");
     badge.className = "output-badge " + (stack.isSuccess ? "is-success" : "is-pending");
     badge.textContent = stack.status || STATUS_LABELS[String(!!stack.isSuccess)];
