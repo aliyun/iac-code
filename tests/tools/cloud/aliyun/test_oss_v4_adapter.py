@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import copy
 import gc
 import hashlib
 import importlib
@@ -145,7 +146,12 @@ def test_catalog_has_exactly_one_deterministic_row_per_public_async_method() -> 
         if row["supported"]:
             assert row["unsupported_reasons"] == []
             assert row["response_mode"] in {"stream", "headers_only", "buffered"}
-            assert row["body_type"] in {"none", "byte"}
+            if row["body_type"] == "xml":
+                assert row["action"] == "PutBucket"
+                assert row["request_model"] == "alibabacloud_oss_v2.models.bucket_basic.PutBucketRequest"
+                assert row["method"] == "PUT" and row["response_mode"] == "headers_only"
+            else:
+                assert row["body_type"] in {"none", "byte"}
             assert isinstance(row["action"], str) and row["action"]
             assert isinstance(row["method"], str) and row["method"]
             assert isinstance(row["request_model"], str) and row["request_model"]
@@ -475,7 +481,7 @@ async def test_stream_mode_is_lazy_snapshots_policy_and_closes_connection() -> N
     response = await asyncio.wait_for(_send_with_policy(client, module, _policy(module, mode="stream")), 0.5)
 
     assert session_kwargs["auto_decompress"] is False
-    assert session_kwargs["skip_auto_headers"] == {"Accept-Encoding"}
+    assert session_kwargs["skip_auto_headers"] == {"Accept-Encoding", "Content-Type"}
     assert raw.content.read_calls == raw.content.iter_calls == 0
     assert response.policy == _policy(module, mode="stream")
     assert module._OSS_RESPONSE_POLICY.get() is None
@@ -763,6 +769,8 @@ async def _execute_real_runtime_oss(
     action: str,
     request_region: str,
     credential_region: str,
+    catalog: Any = None,
+    raw_response: FakeAioResponse | None = None,
 ) -> tuple[Any, FakeSession]:
     async def openmeta_handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/products.json"):
@@ -788,12 +796,17 @@ async def _execute_real_runtime_oss(
         ("X-Oss-Request-Id", "request-1"),
         ("X-Runtime-Declared", "visible"),
     ]
-    session = FakeSession(FakeAioResponse([payload] if payload else [], headers=response_headers))
+    if action == "PutBucket":
+        response_headers.append(("Location", "/demo-bucket"))
+    session = FakeSession(raw_response or FakeAioResponse([payload] if payload else [], headers=response_headers))
     http_client = _adapter_module().OssStreamingHttpClient(session_factory=lambda **_kwargs: session)
     services = create_aliyun_runtime_services(
         cache_dir=tmp_path / "openmeta",
         openmeta_transport=httpx.MockTransport(openmeta_handler),
     )
+    if catalog is not None:
+        services.oss_operation_catalog = catalog
+        services.contract_resolver = ApiContractResolver(services.openmeta, oss_catalog=catalog)
     host_binding = HostBindingResolver(("aliyuncs.com",))
     endpoint_resolver = _RuntimeOssEndpointResolver(host_binding)
     adapter = _adapter_module().OssV4Adapter(
@@ -817,6 +830,16 @@ async def _execute_real_runtime_oss(
         "region_id": request_region,
         "params": {"bucket": "demo-bucket", "key": "folder/demo.txt"},
     }
+    if action == "PutBucket":
+        tool_input["params"] = {
+            "bucket": "demo-bucket",
+            "x-oss-acl": "private",
+            "body": {
+                "CreateBucketConfiguration": {"StorageClass": "Standard", "DataRedundancyType": "LRS"},
+            },
+        }
+    if action in {"DeleteBucket", "GetBucketInfo"}:
+        tool_input["params"] = {"bucket": "demo-bucket"}
     if action == "PutObject":
         body_file = tmp_path / "object.bin"
         body_file.write_bytes(b"object")
@@ -1806,7 +1829,7 @@ async def test_every_supported_catalog_row_reaches_its_declared_adapter_branch()
     module = _adapter_module()
     catalog = module.OssOperationCatalog.load(CATALOG_PATH)
     supported = [operation for operation in catalog.operations if operation.supported]
-    assert len(supported) == 33
+    assert len(supported) == 34
     for operation in supported:
         host_fields = [field for field in operation.field_mapping if field.location == "host"]
         path_fields = [field for field in operation.field_mapping if field.location == "path"]
@@ -1831,6 +1854,9 @@ async def test_every_supported_catalog_row_reaches_its_declared_adapter_branch()
         }
         host_values = MappingProxyType({field.openmeta_name: "demo-bucket" for field in host_fields})
         body = b"body" if operation.body_type == "byte" else None
+        if operation.action == "PutBucket":
+            body = _put_bucket_request().body
+            headers.update({"x-oss-acl": "private", "content-type": "application/json"})
         if operation.response_mode == "stream":
             sdk_result = _sdk_result(
                 body=FakeStreamBody([]),
@@ -1848,7 +1874,9 @@ async def test_every_supported_catalog_row_reaches_its_declared_adapter_branch()
                 method=operation.method,
                 operation_type="read" if operation.method in {"GET", "HEAD", "OPTIONS"} else "write",
                 parameters=parameters,
-                request_body_type="byte" if body is not None else "none",
+                request_body_type=(
+                    "json" if operation.action == "PutBucket" else "byte" if body is not None else "none"
+                ),
                 response_body_type="binary" if operation.response_mode == "stream" else "json",
             ),
             request=_oss_request(
@@ -1996,3 +2024,1011 @@ def test_ci_tracks_and_regenerates_oss_catalog() -> None:
     assert "scripts/aliyun/generate_oss_operations.py wheel-hash --lockfile uv.lock" in workflow
     assert "--openmeta-fixture tests/tools/cloud/aliyun/fixtures/oss/openmeta_operations.json" in workflow
     assert 'cmp "$oss_catalog" src/iac_code/tools/cloud/aliyun/data/oss/operation_catalog.json' in workflow
+
+
+def _reviewed_put_bucket_catalog(module):
+    document = _catalog_document()
+    row = next(row for row in document["operations"] if row["action"] == "PutBucket")
+    assert row["supported"] is True and row["unsupported_reasons"] == []
+    assert row["response_mode"] == "headers_only"
+    assert [field for field in row["field_mapping"] if field["location"] == "body"] == [
+        {
+            "location": "body",
+            "openmeta_name": "body",
+            "required": False,
+            "sdk_field": "create_bucket_configuration",
+            "sdk_type": "xml",
+            "wire_name": "CreateBucketConfiguration",
+        }
+    ]
+    return module.OssOperationCatalog(document, policy_digest="offline-reviewed-put-bucket")
+
+
+def _put_bucket_request(body=None, acl="private"):
+    if body is None:
+        body = json.dumps(
+            {
+                "CreateBucketConfiguration": {"StorageClass": "Standard", "DataRedundancyType": "LRS"},
+            }
+        ).encode("utf-8")
+    return _oss_request(
+        method="PUT",
+        raw_path=b"/",
+        body=body,
+        headers=MappingProxyType({"x-oss-acl": acl, "content-type": "application/json"}),
+    )
+
+
+def _put_bucket_contract():
+    return _oss_contract(
+        action="PutBucket",
+        method="PUT",
+        operation_type="write",
+        parameters=(_parameter("bucket", "host", required=True), _parameter("body", "body", schema_type="object")),
+        request_body_type="json",
+        response_body_type="none",
+    )
+
+
+@pytest.mark.asyncio
+async def test_reviewed_put_bucket_uses_real_sdk_xml_and_original_headers_only_response():
+    module = _adapter_module()
+    raw = FakeAioResponse(
+        [],
+        headers=[
+            ("Location", "/demo-bucket"),
+            ("x-oss-request-id", "offline-put-request"),
+            ("Set-Cookie", "do-not-retain"),
+            ("x-oss-security-token", "do-not-retain"),
+        ],
+    )
+    session = FakeSession(raw)
+    adapter = module.OssV4Adapter(
+        catalog=_reviewed_put_bucket_catalog(module),
+        http_client=module.OssStreamingHttpClient(session_factory=lambda **_kwargs: session),
+    )
+    try:
+        response = await adapter.execute(
+            contract=_put_bucket_contract(),
+            request=_put_bucket_request(),
+            endpoint=_oss_endpoint(),
+            credential=_credential(),
+            context=ToolContext(tool_use_id="offline-put"),
+            budget=_budget(),
+        )
+        assert response.status == 200
+        assert response.body is None
+        assert response.headers["location"] == "/demo-bucket"
+        assert response.headers["x-oss-request-id"] == "offline-put-request"
+        assert "set-cookie" not in response.headers
+        assert "x-oss-security-token" not in response.headers
+        assert len(session.requests) == 1
+        sent = session.requests[0]
+        payload = sent["data"]
+        if isinstance(payload, str):
+            payload = payload.encode("utf-8")
+        assert b"<CreateBucketConfiguration>" in payload
+        assert b"<StorageClass>Standard</StorageClass>" in payload
+        assert b"<DataRedundancyType>LRS</DataRedundancyType>" in payload
+        assert sent["headers"]["Content-Type"] == "application/xml"
+        assert "demo-bucket.oss-cn-hangzhou.aliyuncs.com" in sent["url"]
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body,acl",
+    [
+        (b"<CreateBucketConfiguration/>", "private"),
+        (b'{"CreateBucketConfiguration":{"StorageClass":"Archive","DataRedundancyType":"LRS"}}', "private"),
+        (
+            b'{"CreateBucketConfiguration":{"StorageClass":"Standard","DataRedundancyType":"LRS","KMS":"paid"}}',
+            "private",
+        ),
+        (b'{"CreateBucketConfiguration":{},"Other":{}}', "private"),
+        (b'{"CreateBucketConfiguration":{},"CreateBucketConfiguration":{}}', "private"),
+        (b"null", "private"),
+        (b"{}", "public-read"),
+    ],
+)
+async def test_put_bucket_rejects_arbitrary_xml_configuration_and_acl_before_sdk(body, acl):
+    module = _adapter_module()
+    client = FakeSdkClient(module, [])
+    factory = FakeClientFactory(client)
+    adapter = module.OssV4Adapter(
+        catalog=_reviewed_put_bucket_catalog(module),
+        client_factory=factory,
+    )
+    try:
+        with pytest.raises(ValueError, match="unsupported_oss_bucket_configuration"):
+            await adapter.execute(
+                contract=_put_bucket_contract(),
+                request=_put_bucket_request(body, acl),
+                endpoint=_oss_endpoint(),
+                credential=_credential(),
+                context=ToolContext(),
+                budget=_budget(),
+            )
+        assert client.calls == factory.calls == []
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.asyncio
+async def test_put_bucket_unknown_transport_outcome_is_not_retried():
+    module = _adapter_module()
+    session = RaisingSession(aiohttp.ClientConnectionError("offline-lost-response"))
+    adapter = module.OssV4Adapter(
+        catalog=_reviewed_put_bucket_catalog(module),
+        http_client=module.OssStreamingHttpClient(session_factory=lambda **_kwargs: session),
+    )
+    try:
+        with pytest.raises(TransportFailure):
+            await adapter.execute(
+                contract=_put_bucket_contract(),
+                request=_put_bucket_request(),
+                endpoint=_oss_endpoint(),
+                credential=_credential(),
+                context=ToolContext(),
+                budget=_budget(),
+            )
+        assert len(session.requests) == 1
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.parametrize(
+    "status,body,headers,absent",
+    [
+        (
+            404,
+            {"Code": "NoSuchBucket", "BucketName": "demo-bucket", "RequestId": "offline-404"},
+            {"x-oss-request-id": "offline-404"},
+            True,
+        ),
+        (403, {"Code": "AccessDenied", "BucketName": "demo-bucket", "RequestId": "offline-403"}, {}, False),
+        (404, {"Code": "NoSuchBucket", "BucketName": "other-bucket", "RequestId": "offline-404"}, {}, False),
+        (404, {"Code": "NoSuchBucket", "BucketName": "demo-bucket"}, {}, False),
+        (
+            404,
+            {"Code": "NoSuchBucket", "BucketName": "demo-bucket", "RequestId": "offline-404"},
+            {"x-oss-request-id": "contradiction"},
+            False,
+        ),
+        (500, {"Code": "NoSuchBucket", "BucketName": "demo-bucket", "RequestId": "offline-500"}, {}, False),
+        (200, {"bucket_info": {"name": "demo-bucket"}}, {}, False),
+    ],
+)
+def test_bucket_absence_requires_exact_original_negative_response(status, body, headers, absent):
+    response = NormalizedApiResponse(
+        status=status,
+        headers=headers,
+        body=body,
+        content_type="application/xml",
+        content_encoding=None,
+        size=0,
+    )
+    assert _adapter_module().oss_bucket_not_found(response, "demo-bucket") is absent
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status,code", [(200, None), (404, "NoSuchBucket"), (403, "AccessDenied")])
+async def test_bucket_info_real_sdk_normalization_keeps_original_detail_or_negative_source(status, code):
+    module = _adapter_module()
+    if status == 200:
+        payload = (
+            b"<BucketInfo><Bucket><Name>demo-bucket</Name><Location>oss-cn-hangzhou</Location>"
+            b"<StorageClass>Standard</StorageClass><CreationDate>2026-10-07T01:02:03.000Z</CreationDate>"
+            b"<Owner><ID>123</ID></Owner><DataRedundancyType>LRS</DataRedundancyType>"
+            b"<AccessControlList><Grant>private</Grant></AccessControlList></Bucket></BucketInfo>"
+        )
+    else:
+        payload = (
+            f"<Error><Code>{code}</Code><BucketName>demo-bucket</BucketName><RequestId>offline-info</RequestId></Error>"
+        ).encode("utf-8")
+    raw = FakeAioResponse(
+        [payload],
+        status=status,
+        headers=[
+            ("Date", "Wed, 07 Oct 2026 01:02:03 GMT"),
+            ("Content-Type", "application/xml"),
+            ("x-oss-request-id", "offline-info"),
+        ],
+    )
+    session = FakeSession(raw)
+    adapter = module.OssV4Adapter(
+        catalog=module.OssOperationCatalog.load(CATALOG_PATH),
+        http_client=module.OssStreamingHttpClient(session_factory=lambda **_kwargs: session),
+    )
+    try:
+        response = await adapter.execute(
+            contract=_oss_contract(
+                action="GetBucketInfo",
+                parameters=(_parameter("bucket", "host", required=True),),
+                response_body_type="xml",
+            ),
+            request=_oss_request(raw_path=b"/", query=(("bucketInfo", ""),)),
+            endpoint=_oss_endpoint(),
+            credential=_credential(),
+            context=ToolContext(),
+            budget=_budget(),
+        )
+        assert response.status == status
+        assert len(session.requests) == 1
+        if status == 200:
+            assert response.body["bucket_info"]["name"] == "demo-bucket"
+            assert response.body["bucket_info"]["location"] == "oss-cn-hangzhou"
+            assert response.body["bucket_info"]["storage_class"] == "Standard"
+            assert response.body["bucket_info"]["data_redundancy_type"] == "LRS"
+            assert response.body["bucket_info"].get("acl") == "private", response.body["bucket_info"]
+            assert response.body["bucket_info"]["owner"]["id"] == "123"
+            assert response.body["bucket_info"]["creation_date"].startswith("2026-10-07T01:02:03")
+            assert "BucketName" not in response.body
+            assert not module.oss_bucket_not_found(response, "demo-bucket")
+        else:
+            assert response.body["Code"] == code
+            assert response.body["BucketName"] == "demo-bucket"
+            assert response.body["RequestId"] == "offline-info"
+            assert module.oss_bucket_not_found(response, "demo-bucket") is (status == 404)
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.parametrize(
+    "status,headers,request_id,bucket",
+    [
+        (404.0, {}, "offline-request", "demo-bucket"),
+        (404, {}, " ", "demo-bucket"),
+        (404, {}, "offline request", "demo-bucket"),
+        (404, {}, "request" * 100, "demo-bucket"),
+        (
+            404,
+            {"x-oss-request-id": "offline-request", "X-Oss-Request-Id": "offline-request"},
+            "offline-request",
+            "demo-bucket",
+        ),
+        (404, {}, "offline-request", True),
+        (404, None, "offline-request", "demo-bucket"),
+    ],
+)
+def test_bucket_absence_rejects_ambiguous_or_untyped_response(status, headers, request_id, bucket):
+    response = NormalizedApiResponse(
+        status=status,
+        headers=headers,
+        body={
+            "Code": "NoSuchBucket",
+            "BucketName": bucket,
+            "RequestId": request_id,
+        },
+        content_type=None,
+        content_encoding=None,
+        size=0,
+    )
+    assert not _adapter_module().oss_bucket_not_found(response, bucket)
+
+
+_OFFICIAL_PUT_BUCKET_METADATA = json.loads(
+    '{"schema_version":1,"kind":"ops_public_official_metadata_projection","task_id":"rolling-si'
+    'x-round2-20261007:R0033","product":"Oss","version":"2019-05-17","action":"PutBucket","prod'
+    'uct_style":"ROA","original_operation":{"changeSet":[{"createdAt":"2024-12-05T08:32:17.000Z'
+    '","description":"\\u8bf7\\u6c42\\u53c2\\u6570\\u53d1\\u751f\\u53d8\\u66f4"},{"createdAt":"2024-12-'
+    '04T06:51:34.000Z","description":"\\u8bf7\\u6c42\\u53c2\\u6570\\u53d1\\u751f\\u53d8\\u66f4"},{"crea'
+    'tedAt":"2024-11-28T14:34:37.000Z","description":"\\u8bf7\\u6c42\\u53c2\\u6570\\u53d1\\u751f\\u53d'
+    '8\\u66f4"},{"createdAt":"2024-02-21T14:29:29.000Z","description":"\\u8bf7\\u6c42\\u53c2\\u6570\\'
+    'u53d1\\u751f\\u53d8\\u66f4"}],"consumes":["application/xml"],"description":"- \\u540c\\u4e00\\u9'
+    "63f\\u91cc\\u4e91\\u8d26\\u53f7\\u5728\\u540c\\u4e00\\u5730\\u57df\\uff08Region\\uff09\\u5185\\u6700\\u5"
+    "91a\\u652f\\u6301\\u521b\\u5efa100\\u4e2aBucket\\u3002\\n- \\u6bcf\\u4e2a\\u5730\\u57df\\u90fd\\u6709\\u"
+    "5bf9\\u5e94\\u7684\\u8bbf\\u95ee\\u57df\\u540d\\uff08Endpoint\\uff09\\u3002\\u5173\\u4e8e\\u5730\\u57df"
+    "\\u4e0e\\u8bbf\\u95ee\\u57df\\u540d\\u5bf9\\u5e94\\u5173\\u7cfb\\u7684\\u66f4\\u591a\\u4fe1\\u606f\\uff0c"
+    "\\u8bf7\\u53c2\\u89c1[\\u8bbf\\u95ee\\u57df\\u540d\\u548c\\u6570\\u636e\\u4e2d\\u5fc3](~~31837~~)\\u300"
+    '2","extraInfo":"\\u6b64\\u63a5\\u53e3\\u6240\\u5bf9\\u5e94\\u7684\\u5404\\u8bed\\u8a00SDK\\u5982\\u4e0'
+    'b\\uff1a\\n- Java\\n- Python\\n- PHP\\n- Go\\n- C\\n- .NET\\n- Android\\n- iOS\\n- Node.js\\n- Ruby",'
+    '"flowControl":{"flowControlList":[]},"methods":["put"],"operationType":"write","parameters'
+    '":[{"in":"host","name":"bucket","schema":{"description":"Bucket\\u540d\\u79f0\\u3002\\u5b58'
+    "\\u50a8\\u7a7a\\u95f4\\u7684\\u547d\\u540d\\u89c4\\u8303\\u5982\\u4e0b\\uff1a\\n\\n- \\u53ea\\u80fd\\u5305"
+    "\\u62ec\\u5c0f\\u5199\\u5b57\\u6bcd\\u3001\\u6570\\u5b57\\u548c\\u77ed\\u5212\\u7ebf\\uff08-\\uff09\\u300"
+    "2\\n- \\u5fc5\\u987b\\u4ee5\\u5c0f\\u5199\\u5b57\\u6bcd\\u6216\\u8005\\u6570\\u5b57\\u5f00\\u5934\\u548c\\"
+    'u7ed3\\u5c3e\\u3002\\n- \\u957f\\u5ea6\\u5fc5\\u987b\\u57283~63\\u5b57\\u7b26\\u4e4b\\u95f4\\u3002","ex'
+    'ample":"examplebucket","required":true,"title":"Bucket \\u540d\\u79f0\\u3002\\u5b58\\u50a8\\u7a7'
+    "a\\u95f4\\u7684\\u547d\\u540d\\u89c4\\u8303\\u5982\\u4e0b\\uff1a\\n\\n\\u53ea\\u80fd\\u5305\\u62ec\\u5c0f"
+    "\\u5199\\u5b57\\u6bcd\\u3001\\u6570\\u5b57\\u548c\\u77ed\\u5212\\u7ebf\\uff08-\\uff09\\u3002\\n\\u5fc5\\u9"
+    "87b\\u4ee5\\u5c0f\\u5199\\u5b57\\u6bcd\\u6216\\u8005\\u6570\\u5b57\\u5f00\\u5934\\u548c\\u7ed3\\u5c3e\\u3"
+    '002\\n\\u957f\\u5ea6\\u5fc5\\u987b\\u5728 3~63 \\u5b57\\u7b26\\u4e4b\\u95f4\\u3002","type":"string"}}'
+    ',{"in":"header","name":"x-oss-acl","schema":{"$ref":"#/components/schemas/BucketACL","desc'
+    'ription":"\\u6307\\u5b9aBucket\\u7684\\u8bbf\\u95ee\\u6743\\u9650ACL\\u3002\\u5305\\u542b\\u5982\\u4e0'
+    "b\\u4e09\\u79cd\\u8bbf\\u95ee\\u6743\\u9650\\uff1a\\n\\n- public-read-write\\uff1a\\u516c\\u5171\\u8bfb"
+    "\\u5199\\n\\n- public-read\\uff1a\\u516c\\u5171\\u8bfb\\n\\n- private\\uff1a\\u79c1\\u6709\\uff08\\u9ed8"
+    "\\u8ba4\\u503c\\uff09\\n\\n\\u5173\\u4e8eBucket\\u8bbf\\u95ee\\u6743\\u9650ACL\\u7684\\u66f4\\u591a\\u4fe"
+    "1\\u606f\\uff0c\\u8bf7\\u53c2\\u89c1[\\u8bbe\\u7f6e\\u5b58\\u50a8\\u7a7a\\u95f4\\u8bbf\\u95ee\\u6743\\u96"
+    '50ACL](~~31843~~)\\u3002","enumValueTitles":{},"required":false,"title":"Bucket \\u7684\\u8bb'
+    "f\\u95ee\\u6743\\u9650 ACL\\u3002\\u53d6\\u503c\\u8303\\u56f4\\u5982\\u4e0b\\uff1a\\n\\npublic-read-wri"
+    "te\\uff1a\\u516c\\u5171\\u8bfb\\u5199\\npublic-read\\uff1a\\u516c\\u5171\\u8bfb\\nprivate\\uff08\\u9ed8"
+    '\\u8ba4\\uff09\\uff1a\\u79c1\\u6709"}},{"in":"header","name":"x-oss-resource-group-id","schema"'
+    ':{"$ref":"#/components/schemas/ResourceGroupId","description":"\\u6307\\u5b9a\\u8d44\\u6e90\\u7'
+    "ec4ID\\u3002\\n- \\u5982\\u679c\\u5728\\u8bf7\\u6c42\\u4e2d\\u643a\\u5e26\\u8be5\\u8bf7\\u6c42\\u5934\\u5"
+    "e76\\u6307\\u5b9a\\u8d44\\u6e90\\u7ec4ID\\uff0c\\u5219\\u521b\\u5efa\\u7684\\u5b58\\u50a8\\u7a7a\\u95f4\\"
+    "u5c5e\\u4e8e\\u8be5\\u8d44\\u6e90\\u7ec4\\u3002\\u5f53\\u6307\\u5b9a\\u7684\\u8d44\\u6e90\\u7ec4ID\\u4e3"
+    "arg-default-id\\u65f6\\uff0c\\u521b\\u5efa\\u7684\\u5b58\\u50a8\\u7a7a\\u95f4\\u5c5e\\u4e8e\\u9ed8\\u8b"
+    "a4\\u8d44\\u6e90\\u7ec4\\u3002\\n- \\u5982\\u679c\\u5728\\u8bf7\\u6c42\\u4e2d\\u672a\\u643a\\u5e26\\u8be5"
+    "\\u8bf7\\u6c42\\u5934\\uff0c\\u5219\\u521b\\u5efa\\u7684\\u5b58\\u50a8\\u7a7a\\u95f4\\u5c5e\\u4e8e\\u9ed8"
+    "\\u8ba4\\u8d44\\u6e90\\u7ec4\\u3002\\n\\n\\u60a8\\u53ef\\u4ee5\\u901a\\u8fc7\\u8d44\\u6e90\\u7ba1\\u7406\\"
+    "u7684\\u63a7\\u5236\\u53f0\\u6216ListResourceGroups\\u63a5\\u53e3\\u83b7\\u53d6\\u8d44\\u6e90\\u7ec4I"
+    "D\\u3002\\u5177\\u4f53\\u64cd\\u4f5c\\uff0c\\u8bf7\\u5206\\u522b\\u53c2\\u89c1[\\u67e5\\u770b\\u8d44\\u6e"
+    "90\\u7ec4\\u57fa\\u672c\\u4fe1\\u606f](~~151181~~)\\u548c[ListResourceGroups](~~158855~~)\\u3002\\"
+    "n> \\u521b\\u5efa\\u65e0\\u5730\\u57df\\u5c5e\\u6027Bucket\\u65f6\\u4e0d\\u652f\\u6301\\u914d\\u7f6e\\u8"
+    'd44\\u6e90\\u7ec4\\u3002","required":false,"title":"\\u6307\\u5b9a\\u8d44\\u6e90\\u7ec4 ID\\u3002\\n'
+    "\\n\\u5982\\u679c\\u5728\\u8bf7\\u6c42\\u4e2d\\u643a\\u5e26\\u8be5\\u8bf7\\u6c42\\u5934\\u5e76\\u6307\\u5b"
+    "9a\\u8d44\\u6e90\\u7ec4 ID\\uff0c\\u5219 OSS \\u4f1a\\u8fd4\\u56de\\u5c5e\\u4e8e\\u8be5\\u8d44\\u6e90\\u"
+    "7ec4\\u7684\\u6240\\u6709 Bucket\\u3002\\u5f53\\u6307\\u5b9a\\u7684\\u8d44\\u6e90\\u7ec4 ID \\u4e3a rg"
+    "-default-id \\u65f6\\uff0cOSS \\u4f1a\\u8fd4\\u56de\\u5c5e\\u4e8e\\u9ed8\\u8ba4\\u8d44\\u6e90\\u7ec4\\u"
+    "7684\\u6240\\u6709 Bucket\\u3002\\n\\u5982\\u679c\\u5728\\u8bf7\\u6c42\\u4e2d\\u643a\\u5e26\\u4e86\\u8be"
+    "5\\u8bf7\\u6c42\\u5934\\u4f46\\u672a\\u6307\\u5b9a\\u8d44\\u6e90\\u7ec4 ID\\uff0c\\u5219 OSS \\u4f1a\\u8"
+    "fd4\\u56de\\u5c5e\\u4e8e\\u9ed8\\u8ba4\\u8d44\\u6e90\\u7ec4\\u7684\\u6240\\u6709 Bucket\\u3002\\n\\u5982"
+    "\\u679c\\u5728\\u8bf7\\u6c42\\u4e2d\\u672a\\u643a\\u5e26\\u8be5\\u8bf7\\u6c42\\u5934\\uff0c\\u5219 OSS \\"
+    "u4f1a\\u8fd4\\u56de\\u8bf7\\u6c42\\u8005\\u62e5\\u6709\\u7684\\u6240\\u6709 Bucket\\u3002\\u60a8\\u53ef"
+    "\\u4ee5\\u901a\\u8fc7\\u8d44\\u6e90\\u7ba1\\u7406\\u7684\\u63a7\\u5236\\u53f0\\u6216 ListResourceGroup"
+    's \\u63a5\\u53e3\\u83b7\\u53d6\\u8d44\\u6e90\\u7ec4 ID\\u3002"}},{"in":"header","name":"x-oss-buck'
+    'et-tagging","schema":{"description":"\\u6307\\u5b9aBucket\\u6807\\u7b7e\\uff0c\\u5982 k1=v1&k2=v'
+    '2\\u3002","example":"k1=v1&k2=v2","required":false,"title":"\\u6307\\u5b9aBucket\\u6807\\u7b7e\\'
+    'uff0c\\u5982 k1=v1&k2=v2\\u3002","type":"string"}},{"in":"body","name":"body","schema":{"d'
+    'escription":"\\u5b58\\u50a8\\u521b\\u5efaBucket\\u4fe1\\u606f\\u7684\\u5bb9\\u5668\\u3002","properti'
+    'es":{"CreateBucketConfiguration":{"$ref":"#/components/schemas/CreateBucketConfiguration",'
+    '"description":"\\u521b\\u5efaBucket\\u65f6\\u4f7f\\u7528\\u7684\\u914d\\u7f6e\\u4fe1\\u606f\\u3002","'
+    'required":false,"title":"\\u5b58\\u50a8\\u521b\\u5efa Bucket \\u4fe1\\u606f\\u7684\\u5bb9\\u5668\\u3'
+    '002"}},"required":false,"title":"\\u63a5\\u53e3\\u8bf7\\u6c42\\u4f53","type":"object"},"style'
+    '":"xml"}],"path":"/","produces":["application/xml"],"ramActions":[{"additionalActions":[{"'
+    'action":"oss:PutBucketAcl"}],"operationType":"create","ramAction":{"action":"oss:PutBucket'
+    '","actionConditions":[{"conditionKey":"acs:UserAgent","validationType":"always"},{"conditi'
+    'onKey":"acs:AccessId","validationType":"always"},{"conditionKey":"oss:BucketTag","validati'
+    'onType":"always"},{"conditionKey":"oss:x-oss-acl"},{"conditionKey":"oss:x-oss-server-side-'
+    'data-encryption"},{"conditionKey":"oss:x-oss-server-side-encryption"},{"conditionKey":"oss'
+    ':x-oss-server-side-encryption-key-id"},{"conditionKey":"oss:TLSVersion"}],"authLevel":"res'
+    'ource","resources":[{"arn":"acs:oss:oss-{#regionId}:{#accountId}:{#BucketName}","product":'
+    '"OSS","resourceType":"Bucket","validationType":"always"}]}}],"responseDemo":"[{\\"type\\":'
+    '\\"xml\\",\\"example\\":\\"<?xml version=\\\\\\"1.0\\\\\\" encoding=\\\\\\"UTF-8\\\\\\" standalon'
+    'e=\\\\\\"yes\\\\\\"?>\\\\n<root/>\\",\\"errorExample\\":\\"\\"},{\\"type\\":\\"xml\\",\\"examp'
+    'le\\":\\"<?xml version=\\\\\\"1.0\\\\\\" encoding=\\\\\\"UTF-8\\\\\\" standalone=\\\\\\"yes\\\\\\"'
+    '?>\\\\n<root/>\\",\\"errorExample\\":\\"\\"}]","responses":{"200":{},"5XX":{}},"schemes":["'
+    'http","https"],"security":[{"AK":[]}],"staticInfo":{"returnType":"synchronous"},"summary":'
+    '"\\u521b\\u5efa\\u4e00\\u4e2a\\u5b58\\u50a8\\u7a7a\\u95f4\\uff08Bucket\\uff09\\u3002","systemTags":{"'
+    'abilityTreeCode":"9062","abilityTreeNodes":["FEATUREossAI8VDR","FEATUREoss4HN0W2"],"autoTe'
+    'st":true,"chargeType":"free","operationType":"create","riskType":"none","tenantRelevance":'
+    '"publicInformation"},"title":"\\u521b\\u5efa\\u5b58\\u50a8\\u7a7a\\u95f4"},"original_referenced_'
+    'components":{"schemas":{"BucketACL":{"default":"private","description":"Bucket\\u7684\\u8bbf'
+    "\\u95ee\\u6743\\u9650ACL\\u3002\\u53d6\\u503c\\u8303\\u56f4\\u5982\\u4e0b\\uff1a\\n- public-read-write"
+    "\\uff1a\\u516c\\u5171\\u8bfb\\u5199\\n- public-read\\uff1a\\u516c\\u5171\\u8bfb\\n- private\\uff08\\u9e"
+    "d8\\u8ba4\\uff09\\uff1a\\u79c1\\u6709\\n\\n\\u5173\\u4e8eBucket\\u8bbf\\u95ee\\u6743\\u9650ACL\\u7684\\u6"
+    "6f4\\u591a\\u4fe1\\u606f\\uff0c\\u8bf7\\u53c2\\u89c1[\\u8bbe\\u7f6e\\u5b58\\u50a8\\u7a7a\\u95f4\\u8bbf\\u"
+    '95ee\\u6743\\u9650ACL](~~31843~~)\\u3002","enum":["private","public-read","public-read-write"'
+    '],"example":"private","title":"The access control list (ACL) for a bucket.","type":"string'
+    '"},"ResourceGroupId":{"description":"\\u6307\\u5b9a\\u8d44\\u6e90\\u7ec4ID\\u3002\\n\\n- \\u5982\\u6'
+    "79c\\u5728\\u8bf7\\u6c42\\u4e2d\\u643a\\u5e26\\u8be5\\u8bf7\\u6c42\\u5934\\u5e76\\u6307\\u5b9a\\u8d44\\u6"
+    "e90\\u7ec4ID\\uff0c\\u5219OSS\\u4f1a\\u8fd4\\u56de\\u5c5e\\u4e8e\\u8be5\\u8d44\\u6e90\\u7ec4\\u7684\\u62"
+    "40\\u6709Bucket\\u3002\\u5f53\\u6307\\u5b9a\\u7684\\u8d44\\u6e90\\u7ec4ID\\u4e3arg-default-id\\u65f6\\"
+    "uff0cOSS\\u4f1a\\u8fd4\\u56de\\u5c5e\\u4e8e\\u9ed8\\u8ba4\\u8d44\\u6e90\\u7ec4\\u7684\\u6240\\u6709Buck"
+    "et\\u3002\\n- \\u5982\\u679c\\u5728\\u8bf7\\u6c42\\u4e2d\\u643a\\u5e26\\u4e86\\u8be5\\u8bf7\\u6c42\\u5934"
+    "\\u4f46\\u672a\\u6307\\u5b9a\\u8d44\\u6e90\\u7ec4ID\\uff0c\\u5219OSS\\u4f1a\\u8fd4\\u56de\\u5c5e\\u4e8e\\"
+    "u9ed8\\u8ba4\\u8d44\\u6e90\\u7ec4\\u7684\\u6240\\u6709Bucket\\u3002\\n- \\u5982\\u679c\\u5728\\u8bf7\\u6"
+    "c42\\u4e2d\\u672a\\u643a\\u5e26\\u8be5\\u8bf7\\u6c42\\u5934\\uff0c\\u5219OSS\\u4f1a\\u8fd4\\u56de\\u8bf7"
+    "\\u6c42\\u8005\\u62e5\\u6709\\u7684\\u6240\\u6709Bucket\\u3002\\u60a8\\u53ef\\u4ee5\\u901a\\u8fc7\\u8d44"
+    "\\u6e90\\u7ba1\\u7406\\u7684\\u63a7\\u5236\\u53f0\\u6216ListResourceGroups\\u63a5\\u53e3\\u83b7\\u53d6"
+    "\\u8d44\\u6e90\\u7ec4ID\\u3002\\n\\n\\u60a8\\u53ef\\u4ee5\\u901a\\u8fc7\\u8d44\\u6e90\\u7ba1\\u7406\\u7684"
+    "\\u63a7\\u5236\\u53f0\\u6216ListResourceGroups\\u63a5\\u53e3\\u83b7\\u53d6\\u8d44\\u6e90\\u7ec4ID\\u30"
+    "02\\u5177\\u4f53\\u64cd\\u4f5c\\uff0c\\u8bf7\\u5206\\u522b\\u53c2\\u89c1[\\u67e5\\u770b\\u8d44\\u6e90\\u7"
+    'ec4\\u57fa\\u672c\\u4fe1\\u606f](~~151181~~)\\u548c[ListResourceGroups](~~158855~~)\\u3002","exa'
+    'mple":"rg-aekz****","title":"Bucket\\u6240\\u5c5e\\u7684\\u8d44\\u6e90\\u7ec4ID","type":"string'
+    '"},"CreateBucketConfiguration":{"description":"Bucket\\u5b58\\u50a8\\u7c7b\\u578b\\u548c\\u6570\\'
+    'u636e\\u5bb9\\u707e\\u7c7b\\u578b\\u7684\\u914d\\u7f6e\\u4fe1\\u606f\\u3002","properties":{"DataRedu'
+    'ndancyType":{"$ref":"#/components/schemas/DataRedundancyType","description":"\\u6307\\u5b9aB'
+    "ucket\\u7684\\u6570\\u636e\\u5bb9\\u707e\\u7c7b\\u578b\\u3002\\n\\n- LRS\\uff08\\u9ed8\\u8ba4\\u503c\\uff"
+    "09\\n<br>\\u672c\\u5730\\u5197\\u4f59LRS\\uff0c\\u5c06\\u60a8\\u7684\\u6570\\u636e\\u5197\\u4f59\\u5b58\\"
+    "u50a8\\u5728\\u540c\\u4e00\\u4e2a\\u53ef\\u7528\\u533a\\u7684\\u4e0d\\u540c\\u5b58\\u50a8\\u8bbe\\u5907\\"
+    "u4e0a\\uff0c\\u53ef\\u652f\\u6301\\u4e24\\u4e2a\\u5b58\\u50a8\\u8bbe\\u5907\\u5e76\\u53d1\\u635f\\u574f\\"
+    "u65f6\\uff0c\\u4ecd\\u7ef4\\u6301\\u6570\\u636e\\u4e0d\\u4e22\\u5931\\uff0c\\u53ef\\u6b63\\u5e38\\u8bbf\\"
+    "u95ee\\u3002\\n\\n- ZRS\\n<br>\\u540c\\u57ce\\u5197\\u4f59ZRS\\u91c7\\u7528\\u591a\\u53ef\\u7528\\u533a\\"
+    "uff08AZ\\uff09\\u673a\\u5236\\uff0c\\u5c06\\u60a8\\u7684\\u6570\\u636e\\u5197\\u4f59\\u5b58\\u50a8\\u572"
+    "8\\u540c\\u4e00\\u5730\\u57df\\uff08Region\\uff09\\u76843\\u4e2a\\u53ef\\u7528\\u533a\\u3002\\u53ef\\u65"
+    "2f\\u6301\\u5355\\u4e2a\\u53ef\\u7528\\u533a\\uff08\\u673a\\u623f\\uff09\\u6574\\u4f53\\u6545\\u969c\\u65"
+    "f6\\uff08\\u4f8b\\u5982\\u65ad\\u7535\\u3001\\u706b\\u707e\\u7b49\\uff09\\uff0c\\u4ecd\\u7136\\u80fd\\u59"
+    "1f\\u4fdd\\u969c\\u6570\\u636e\\u7684\\u6b63\\u5e38\\u8bbf\\u95ee\\u3002\\n> \\u5f52\\u6863\\u7c7b\\u578b"
+    '\\u7684Bucket\\u4e0d\\u652f\\u6301\\u8bbe\\u7f6e\\u540c\\u57ce\\u5197\\u4f59\\u3002</props>","enumVal'
+    'ueTitles":{}},"StorageClass":{"$ref":"#/components/schemas/StorageClass","description":"Bu'
+    "cket\\u7684\\u5b58\\u50a8\\u7c7b\\u578b\\u3002 \\u53d6\\u503c\\u8303\\u56f4\\u5982\\u4e0b\\uff1a\\n\\n- S"
+    "tandard\\uff08\\u9ed8\\u8ba4\\uff09\\uff1a\\u6807\\u51c6\\u5b58\\u50a8\\n- IA\\uff1a\\u4f4e\\u9891\\u8bb"
+    "f\\u95ee\\n- Archive\\uff1a\\u5f52\\u6863\\u5b58\\u50a8\\n- ColdArchive\\uff1a\\u51b7\\u5f52\\u6863\\u5"
+    'b58\\u50a8","enumValueTitles":{}}},"title":"The configuration of a bucket.","type":"object"'
+    '},"DataRedundancyType":{"default":"LRS","description":"Bucket\\u7684\\u6570\\u636e\\u5bb9\\u707'
+    "e\\u7c7b\\u578b\\u3002\\u53d6\\u503c\\u8303\\u56f4\\u5982\\u4e0b\\uff1a\\n\\n- LRS\\uff08\\u9ed8\\u8ba4\\u"
+    "ff09 \\uff1a\\u672c\\u5730\\u5197\\u4f59LRS\\uff0c\\u5c06\\u60a8\\u7684\\u6570\\u636e\\u5197\\u4f59\\u5b"
+    "58\\u50a8\\u5728\\u540c\\u4e00\\u4e2a\\u53ef\\u7528\\u533a\\u7684\\u4e0d\\u540c\\u5b58\\u50a8\\u8bbe\\u59"
+    "07\\u4e0a\\uff0c\\u53ef\\u652f\\u6301\\u4e24\\u4e2a\\u5b58\\u50a8\\u8bbe\\u5907\\u5e76\\u53d1\\u635f\\u57"
+    "4f\\u65f6\\uff0c\\u4ecd\\u7ef4\\u6301\\u6570\\u636e\\u4e0d\\u4e22\\u5931\\uff0c\\u53ef\\u6b63\\u5e38\\u8b"
+    "bf\\u95ee\\u3002\\n- ZRS\\uff1a\\u540c\\u57ce\\u5197\\u4f59ZRS\\uff0c\\u91c7\\u7528\\u591a\\u53ef\\u7528"
+    "\\u533a\\uff08AZ\\uff09\\u673a\\u5236\\uff0c\\u5c06\\u60a8\\u7684\\u6570\\u636e\\u5197\\u4f59\\u5b58\\u50"
+    "a8\\u5728\\u540c\\u4e00\\u5730\\u57df\\uff08Region\\uff09\\u76843\\u4e2a\\u53ef\\u7528\\u533a\\u3002\\u5"
+    "3ef\\u652f\\u6301\\u5355\\u4e2a\\u53ef\\u7528\\u533a\\uff08\\u673a\\u623f\\uff09\\u6574\\u4f53\\u6545\\u9"
+    "69c\\u65f6\\uff08\\u4f8b\\u5982\\u65ad\\u7535\\u3001\\u706b\\u707e\\u7b49\\uff09\\uff0c\\u4ecd\\u7136\\u8"
+    "0fd\\u591f\\u4fdd\\u969c\\u6570\\u636e\\u7684\\u6b63\\u5e38\\u8bbf\\u95ee\\u3002\\n>\\u5f52\\u6863\\u7c7b"
+    '\\u578b\\u7684Bucket\\u4e0d\\u652f\\u6301\\u8bbe\\u7f6e\\u540c\\u57ce\\u5197\\u4f59\\u3002","enum":["L'
+    'RS","ZRS"],"example":"LRS","title":"The type of disaster recovery for a bucket.","type":"s'
+    'tring"},"StorageClass":{"default":"Standard","description":"Bucket\\u7684\\u5b58\\u50a8\\u7c7b'
+    "\\u578b\\u3002 \\u53d6\\u503c\\u8303\\u56f4\\u5982\\u4e0b\\uff1a\\n\\n- Standard\\uff08\\u9ed8\\u8ba4\\uf"
+    "f09\\uff1a\\u6807\\u51c6\\u5b58\\u50a8\\n- IA\\uff1a\\u4f4e\\u9891\\u8bbf\\u95ee\\n- Archive\\uff1a\\u5f"
+    "52\\u6863\\u5b58\\u50a8\\n- ColdArchive\\uff1a\\u51b7\\u5f52\\u6863\\u5b58\\u50a8\\n- DeepColdArchive"
+    '\\uff1a\\u6df1\\u5ea6\\u51b7\\u5f52\\u6863\\u5b58\\u50a8","enum":["Standard","IA","Archive","Col'
+    'dArchive","DeepColdArchive"],"enumValueTitles":{"Archive":"Archive","ColdArchive":"ColdArc'
+    'hive","IA":"IA","Standard":"Standard"},"example":"Standard","title":"The storage class of '
+    'a bucket.","type":"string"}}},"source":{"path":"slots/1/config/openmeta-cache/api-docs/Oss'
+    '/2019-05-17.json","sha256":"fa336bf3a2c725c514602da967e1b8677ceb7b3e44580a51fba8584803a50e'
+    'e9","official_source_url":"https://api.aliyun.com/meta/v1/products/Oss/versions/2019-05-17'
+    '/api-docs.json?language=ZH_CN","fetched_at":"2026-10-08T03:46:42.941650+00:00"},"projectio'
+    'n":"Only operation and transitive referenced schemas; every selected value is unchanged.",'
+    '"cloud_calls":0,"cloud_writes":0,"formal_test":false,"pass_added":false}'
+)
+
+
+def _official_put_bucket_document():
+    metadata = _OFFICIAL_PUT_BUCKET_METADATA
+    return {
+        "product": metadata["product"],
+        "version": metadata["version"],
+        "action": metadata["action"],
+        "style": metadata["product_style"],
+        **copy.deepcopy(metadata["original_operation"]),
+        "components": copy.deepcopy(metadata["original_referenced_components"]),
+    }
+
+
+@pytest.mark.asyncio
+async def test_put_bucket_runtime_uses_official_xml_metadata_and_typed_sdk_wire(tmp_path, monkeypatch):
+    original_document = _runtime_openmeta_document
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_runtime_openmeta_document",
+        lambda action: _official_put_bucket_document() if action == "PutBucket" else original_document(action),
+    )
+    from scripts.web.e2e.resource_link_workflow import execution_gate as gate
+
+    captured = []
+    original_finish = gate.finish
+
+    def record_finish(ticket, body, succeeded, *, status=None, headers=None):
+        captured.append((body, succeeded, status, headers))
+        original_finish(ticket, body, succeeded, status=status, headers=headers)
+
+    monkeypatch.setattr(gate, "finish", record_finish)
+    result, session = await _execute_real_runtime_oss(
+        tmp_path,
+        action="PutBucket",
+        request_region="cn-hangzhou",
+        credential_region="cn-hangzhou",
+        catalog=_reviewed_put_bucket_catalog(_adapter_module()),
+    )
+    assert result.is_error is False, result.content
+    assert len(session.requests) == 1
+    sent = session.requests[0]
+    assert sent["headers"]["Content-Type"] == "application/xml"
+    payload = sent["data"]
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8")
+    assert b"<CreateBucketConfiguration>" in payload
+    assert b"<StorageClass>Standard</StorageClass>" in payload
+    assert b"<DataRedundancyType>LRS</DataRedundancyType>" in payload
+    content = json.loads(result.content)
+    assert content["location"] == "/demo-bucket"
+    assert content["x-oss-request-id"] == "request-1"
+    assert "BucketName" not in content
+
+    assert len(captured) == 1
+    body, succeeded, status, headers = captured[0]
+    assert body is None and succeeded is True and status == 200
+    assert headers["location"] == "/demo-bucket"
+    assert headers["x-oss-request-id"] == "request-1"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("product", "ecs"),
+        ("version", "other"),
+        ("action", "PutBucketAcl"),
+        ("signature_scheme", "acs3"),
+        ("method", "POST"),
+        ("body_type", "byte"),
+        ("consumes", ("application/octet-stream",)),
+        ("consumes", ("application/xml", "text/xml")),
+    ],
+)
+def test_typed_xml_model_input_exception_is_exact_not_arbitrary_xml(field, value):
+    from iac_code.tools.cloud.aliyun.api_contract import _oss_put_bucket_model_input
+
+    values = {
+        "product": "Oss",
+        "version": "2019-05-17",
+        "action": "PutBucket",
+        "signature_scheme": "oss_v4",
+        "method": "PUT",
+        "body_type": "json",
+        "consumes": ("application/xml",),
+    }
+    assert _oss_put_bucket_model_input(**values)
+    values[field] = value
+    assert not _oss_put_bucket_model_input(**values)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ("location", "/other-bucket"),
+        ("location", "/demo-bucket"),
+        ("X-Oss-Request-Id", "other-request"),
+    ],
+)
+async def test_put_bucket_duplicate_raw_identity_headers_fail_before_lossy_sdk_mapping(extra):
+    module = _adapter_module()
+    raw = FakeAioResponse(
+        [],
+        headers=[
+            ("Location", "/demo-bucket"),
+            ("x-oss-request-id", "offline-create"),
+            extra,
+        ],
+    )
+    session = FakeSession(raw)
+    adapter = module.OssV4Adapter(
+        catalog=_reviewed_put_bucket_catalog(module),
+        http_client=module.OssStreamingHttpClient(session_factory=lambda **_kwargs: session),
+    )
+    try:
+        with pytest.raises((RuntimeError, oss_exceptions.OperationError), match="ambiguous_oss_create_header"):
+            await adapter.execute(
+                contract=_put_bucket_contract(),
+                request=_put_bucket_request(),
+                endpoint=_oss_endpoint(),
+                credential=_credential(),
+                context=ToolContext(),
+                budget=_budget(),
+            )
+        assert len(session.requests) == 1
+        assert raw.closed is True
+    finally:
+        await adapter.aclose()
+
+
+class FinalizingOssSession(FakeSession):
+    def __init__(self, response, **options):
+        super().__init__(response)
+        self.options = options
+        self.final_headers = None
+
+    async def request(self, method, url, **kwargs):
+        from yarl import URL
+
+        finalized = aiohttp.ClientRequest(
+            method,
+            URL(url),
+            headers=dict(kwargs["headers"]),
+            data=kwargs["data"],
+            skip_auto_headers=self.options.get("skip_auto_headers"),
+        )
+        self.final_headers = finalized.headers
+        return await super().request(method, url, **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_real_bucket_info_preserves_signed_content_type_through_aiohttp():
+    module = _adapter_module()
+    sessions = []
+
+    def factory(**options):
+        session = FinalizingOssSession(
+            FakeAioResponse(
+                [
+                    b"<BucketInfo><Bucket><Name>demo-bucket</Name>"
+                    b"<Location>oss-cn-hangzhou</Location></Bucket></BucketInfo>",
+                ],
+                headers=[("Content-Type", "application/xml")],
+            ),
+            **options,
+        )
+        sessions.append(session)
+        return session
+
+    adapter = module.OssV4Adapter(
+        http_client=module.OssStreamingHttpClient(session_factory=factory),
+    )
+    try:
+        await adapter.execute(
+            contract=_oss_contract(
+                action="GetBucketInfo",
+                parameters=(_parameter("bucket", "host", required=True),),
+                response_body_type="xml",
+            ),
+            request=_oss_request(raw_path=b"/", query=(("bucketInfo", ""),)),
+            endpoint=_oss_endpoint(),
+            credential=_credential(),
+            context=ToolContext(),
+            budget=_budget(),
+        )
+        session = sessions[0]
+        signed = session.requests[0]["headers"]
+        assert session.final_headers.get("Content-Type") == signed.get("Content-Type")
+        assert session.final_headers["Host"] == signed["Host"]
+        assert session.final_headers["Accept-Encoding"] == "identity"
+    finally:
+        await adapter.aclose()
+
+
+def test_oss_service_error_retains_identity_without_signing_diagnostics():
+    module = _adapter_module()
+    error = SimpleNamespace(
+        status_code=403,
+        headers={"x-oss-request-id": "offline-signature"},
+        error_fileds={
+            "Code": "SignatureDoesNotMatch",
+            "Message": "Signature mismatch.",
+            "RequestId": "offline-signature",
+            "HostId": "demo-bucket.oss-cn-hangzhou.aliyuncs.com",
+            "BucketName": "demo-bucket",
+            "CanonicalRequest": "fake-private-canonical",
+            "CanonicalRequestBytes": "fake-private-bytes",
+            "StringToSign": "fake-private-string",
+            "StringToSignBytes": "fake-private-string-bytes",
+            "SignatureProvided": "fake-private-signature",
+            "OSSAccessKeyId": "fake-private-key",
+            "SecurityToken": "fake-private-token",
+            "Nested": {"AccessKeySecret": "fake-private-secret"},
+        },
+        code="SignatureDoesNotMatch",
+        message="Signature mismatch.",
+        snapshot=b"private-error",
+    )
+    result = module._normalize_service_error(error, ())
+    assert result.body == {
+        "Code": "SignatureDoesNotMatch",
+        "Message": "Signature mismatch.",
+        "RequestId": "offline-signature",
+        "HostId": "demo-bucket.oss-cn-hangzhou.aliyuncs.com",
+        "BucketName": "demo-bucket",
+    }
+    assert "fake-private" not in json.dumps(result.body)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bucket_xml,truncated,expected",
+    [
+        (b"<Buckets/>", b"<IsTruncated>false</IsTruncated>", {"buckets": [], "is_truncated": False}),
+        (b"<Buckets/>", b"", {"buckets": []}),
+        (
+            b"<Buckets/>",
+            b"<IsTruncated>true</IsTruncated><NextMarker>offline-next</NextMarker>",
+            {"buckets": [], "is_truncated": True, "next_marker": "offline-next"},
+        ),
+        (b"", b"", {}),
+    ],
+)
+async def test_real_list_buckets_preserves_explicit_empty_list_without_inventing_coverage(
+    bucket_xml,
+    truncated,
+    expected,
+):
+    module = _adapter_module()
+    payload = (
+        b"<ListAllMyBucketsResult><Owner><ID>123</ID><DisplayName>123</DisplayName></Owner>"
+        + truncated
+        + bucket_xml
+        + b"</ListAllMyBucketsResult>"
+    )
+    session = FakeSession(FakeAioResponse([payload], headers=[("Content-Type", "application/xml")]))
+    adapter = module.OssV4Adapter(
+        http_client=module.OssStreamingHttpClient(session_factory=lambda **options: session),
+    )
+    try:
+        response = await adapter.execute(
+            contract=_oss_contract(
+                action="ListBuckets",
+                parameters=(),
+                response_body_type="xml",
+            ),
+            request=_oss_request(raw_path=b"/", host_values={}, query=(("prefix", "offline-new"), ("max-keys", "1"))),
+            endpoint=EndpointResolution(
+                endpoint="oss-cn-hangzhou.aliyuncs.com",
+                source="catalog_region",
+                host_template="{endpoint}",
+                region_id="cn-hangzhou",
+                expected_host="oss-cn-hangzhou.aliyuncs.com",
+            ),
+            credential=_credential(),
+            context=ToolContext(),
+            budget=_budget(),
+        )
+        assert response.body["owner"]["id"] == "123"
+        assert {name: value for name, value in response.body.items() if name != "owner"} == expected
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "CanonicalRequest: GET\\n/private\\nx-oss-security-token: fake-private-token",
+        "StringToSignBytes: fake-private-byte-dump",
+        "Authorization: fake-private-authorization",
+        "AccessKeyId=fake-private-key",
+        "Bearer fake-private-token",
+    ],
+)
+def test_oss_service_error_drops_signing_material_inside_message(message):
+    module = _adapter_module()
+    error = SimpleNamespace(
+        status_code=403,
+        headers={},
+        snapshot=b"private",
+        error_fileds={"Code": "SignatureDoesNotMatch", "Message": message, "RequestId": "offline-error"},
+        code="SignatureDoesNotMatch",
+        message=message,
+    )
+    response = module._normalize_service_error(error, ())
+    assert response.body == {"Code": "SignatureDoesNotMatch", "RequestId": "offline-error"}
+
+
+@pytest.mark.parametrize(
+    "payload,body,expected",
+    [
+        (b"<ListAllMyBucketsResult><Buckets/></ListAllMyBucketsResult>", {}, {"buckets": []}),
+        (b"<ListAllMyBucketsResult/>", {}, {}),
+        (
+            b"<ListAllMyBucketsResult><Buckets><Bucket><Name>demo-bucket</Name></Bucket></Buckets>"
+            b"</ListAllMyBucketsResult>",
+            {"buckets": [{"name": "demo-bucket"}]},
+            {"buckets": [{"name": "demo-bucket"}]},
+        ),
+    ],
+)
+def test_explicit_empty_bucket_list_does_not_invent_pagination_or_replace_present_resources(payload, body, expected):
+    module = _adapter_module()
+    original = NormalizedApiResponse(
+        status=200,
+        headers={},
+        body=body,
+        content_type="application/xml",
+        content_encoding=None,
+        size=len(payload),
+    )
+    result = module._preserve_empty_bucket_list(original, payload)
+    assert result.body == expected
+    assert original.body == body
+    assert "is_truncated" not in result.body
+
+
+@pytest.mark.parametrize(
+    "payload,body",
+    [
+        (b"<Other><Buckets/></Other>", {}),
+        (b"<ListAllMyBucketsResult><Buckets/><Buckets/></ListAllMyBucketsResult>", {}),
+        (b"<ListAllMyBucketsResult><Buckets/></ListAllMyBucketsResult>", {"buckets": [{"name": "demo-bucket"}]}),
+    ],
+)
+def test_empty_bucket_list_rejects_ambiguous_or_contradictory_original_xml(payload, body):
+    module = _adapter_module()
+    original = NormalizedApiResponse(
+        status=200,
+        headers={},
+        body=body,
+        content_type="application/xml",
+        content_encoding=None,
+        size=len(payload),
+    )
+    with pytest.raises(RuntimeError, match="invalid_response"):
+        module._preserve_empty_bucket_list(original, payload)
+
+
+@pytest.mark.asyncio
+async def test_aiohttp_keeps_explicit_signed_xml_content_type_for_put_bucket():
+    module = _adapter_module()
+    sessions = []
+
+    def factory(**options):
+        session = FinalizingOssSession(
+            FakeAioResponse(
+                [],
+                headers=[
+                    ("Location", "/demo-bucket"),
+                    ("x-oss-request-id", "offline-put"),
+                ],
+            ),
+            **options,
+        )
+        sessions.append(session)
+        return session
+
+    adapter = module.OssV4Adapter(
+        catalog=_reviewed_put_bucket_catalog(module),
+        http_client=module.OssStreamingHttpClient(session_factory=factory),
+    )
+    try:
+        await adapter.execute(
+            contract=_put_bucket_contract(),
+            request=_put_bucket_request(),
+            endpoint=_oss_endpoint(),
+            credential=_credential(),
+            context=ToolContext(),
+            budget=_budget(),
+        )
+        session = sessions[0]
+        assert session.final_headers["Content-Type"] == session.requests[0]["headers"]["Content-Type"]
+        assert session.final_headers["Content-Type"] == "application/xml"
+        assert len(session.requests) == 1
+    finally:
+        await adapter.aclose()
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("product", "Ecs"),
+        ("version", "2020-01-01"),
+        ("action", "PutBucketAcl"),
+        ("methods", ["post"]),
+        ("style", "RPC"),
+        ("path", "/other"),
+        ("consumes", ["application/xml", "text/xml"]),
+        ("parameter_name", "other"),
+        ("parameter_location", "query"),
+        ("parameter_type", "string"),
+        ("parameter_style", "yaml"),
+        ("header_style", "xml"),
+    ],
+)
+def test_official_put_bucket_xml_style_exception_remains_narrow(field, value):
+    document = _official_put_bucket_document()
+    body = next(parameter for parameter in document["parameters"] if parameter["in"] == "body")
+    if field == "parameter_name":
+        body["name"] = value
+    elif field == "parameter_location":
+        body["in"] = value
+    elif field == "parameter_type":
+        body["schema"]["type"] = value
+    elif field == "parameter_style":
+        body["style"] = value
+    elif field == "header_style":
+        document["parameters"][1]["style"] = value
+    else:
+        document[field] = value
+    metadata = normalize_api_metadata(document)
+    call = ApiCallShape(
+        product=document["product"],
+        version=document["version"],
+        action=document["action"],
+        region_id="cn-hangzhou",
+        explicit_overrides=(),
+        parameter_names_by_location={},
+        body_source="params_body",
+    )
+    contract = ApiContractResolver(SimpleNamespace())._merge_and_validate(call, metadata, "fresh", "disk_fresh")
+    assert contract.executable is False
+    assert "parameter_style_unsupported" in contract.unsupported_reasons
+
+
+@pytest.mark.asyncio
+async def test_runtime_bucket_absence_error_persists_original_sanitized_response(tmp_path, monkeypatch):
+    original_document = _runtime_openmeta_document
+
+    def document(action):
+        value = original_document(action)
+        value["responses"]["200"]["schema"] = {"type": "object"}
+        return value
+
+    monkeypatch.setattr(sys.modules[__name__], "_runtime_openmeta_document", document)
+    payload = (
+        b"<Error><Code>NoSuchBucket</Code><Message>The specified bucket does not exist.</Message>"
+        b"<RequestId>offline-absence</RequestId><BucketName>demo-bucket</BucketName>"
+        b"<HostId>demo-bucket.oss-cn-hangzhou.aliyuncs.com</HostId>"
+        b"<StringToSign>fake-private</StringToSign></Error>"
+    )
+    result, session = await _execute_real_runtime_oss(
+        tmp_path,
+        action="GetBucketInfo",
+        request_region="cn-hangzhou",
+        credential_region="cn-hangzhou",
+        raw_response=FakeAioResponse(
+            [payload],
+            status=404,
+            headers=[
+                ("Content-Type", "application/xml"),
+                ("X-Oss-Request-Id", "offline-absence"),
+                ("Date", "Wed, 07 Oct 2026 01:02:03 GMT"),
+                ("Set-Cookie", "fake-private"),
+            ],
+        ),
+    )
+    assert result.is_error is True
+    assert len(session.requests) == 1
+    evidence = json.loads(result.content.split("\n\n")[-1])
+    assert evidence["status"] == 404
+    assert evidence["headers"] == {"x-oss-request-id": "offline-absence"}
+    assert evidence["body"]["Code"] == "NoSuchBucket"
+    assert evidence["body"]["BucketName"] == "demo-bucket"
+    assert evidence["body"]["RequestId"] == "offline-absence"
+    assert "fake-private" not in result.content
+
+
+@pytest.mark.asyncio
+async def test_runtime_delete_bucket_retains_real_status_and_request_id(tmp_path):
+    from scripts.web.e2e.resource_link_workflow import execution_gate as gate
+
+    result, session = await _execute_real_runtime_oss(
+        tmp_path,
+        action="DeleteBucket",
+        request_region="cn-hangzhou",
+        credential_region="cn-hangzhou",
+        raw_response=FakeAioResponse([], status=204, headers=[("X-Oss-Request-Id", "offline-delete")]),
+    )
+    assert result.is_error is False, result.content
+    assert len(session.requests) == 1
+    assert json.loads(result.content) == {
+        "status": 204,
+        "headers": {"x-oss-request-id": "offline-delete"},
+        "body": None,
+    }
+    assert gate.nas_native_success(
+        {
+            "product": "oss",
+            "action": "DeleteBucket",
+            "version": "2019-05-17",
+            "region_id": "cn-hangzhou",
+            "params": {"bucket": "demo-bucket"},
+        },
+        json.loads(result.content),
+        "delete",
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_nas_empty_bucket_proof_uses_actual_sdk_fields():
+    from scripts.web.e2e.resource_link_workflow import execution_gate as gate
+
+    module = _adapter_module()
+    payload = (
+        b"<ListBucketResult><Name>demo-bucket</Name><MaxKeys>1</MaxKeys>"
+        b"<KeyCount>0</KeyCount><IsTruncated>false</IsTruncated></ListBucketResult>"
+    )
+    session = FakeSession(
+        FakeAioResponse(
+            [payload],
+            headers=[
+                ("Content-Type", "application/xml"),
+                ("x-oss-request-id", "offline-list"),
+            ],
+        )
+    )
+    adapter = module.OssV4Adapter(
+        http_client=module.OssStreamingHttpClient(session_factory=lambda **options: session),
+    )
+    try:
+        response = await adapter.execute(
+            contract=_oss_contract(
+                action="ListObjectsV2",
+                parameters=(
+                    _parameter("bucket", "host", required=True),
+                    _parameter("max-keys", "query", schema_type="integer"),
+                ),
+                response_body_type="xml",
+            ),
+            request=_oss_request(raw_path=b"/", query=(("list-type", "2"), ("max-keys", "1"))),
+            endpoint=_oss_endpoint(),
+            credential=_credential(),
+            context=ToolContext(),
+            budget=_budget(),
+        )
+        raw = {"body": response.body, "status": response.status, "headers": dict(response.headers)}
+        call = {"product": "oss", "action": "ListObjectsV2", "params": {"bucket": "demo-bucket"}}
+        assert gate.nas_native_ready("read-bucket-empty", call, raw)
+        assert response.body["name"] == "demo-bucket"
+        assert response.body["key_count"] == 0
+        assert response.body["is_truncated"] is False
+    finally:
+        await adapter.aclose()

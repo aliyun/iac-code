@@ -1,0 +1,284 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iac-code.local/schemas/resource-link-e2e-matrix-v1.json",
+  "title": "iac-code resource console link E2E matrix",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "catalogRevision", "counts", "entries"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "generatedAt": {"type": "string", "format": "date-time"},
+    "catalogRevision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["digest", "components"],
+      "properties": {
+        "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "components": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "minProperties": 3
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceTypes", "canonicalIdentities", "aliases", "officialRouteContracts", "sinRouteContracts",
+        "queryContracts", "createActions"
+      ],
+      "properties": {
+        "sourceTypes": {"type": "integer", "minimum": 0},
+        "canonicalIdentities": {"type": "integer", "minimum": 0},
+        "aliases": {"type": "integer", "minimum": 0},
+        "officialRouteContracts": {"type": "integer", "minimum": 0},
+        "sinRouteContracts": {"type": "integer", "minimum": 0},
+        "queryContracts": {"type": "integer", "minimum": 0},
+        "createActions": {"type": "integer", "minimum": 0}
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/entry"},
+      "minItems": 1,
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "status": {
+      "enum": ["pending", "running", "passed", "partial", "failed", "blocked", "not_applicable", "legacy-formal"]
+    },
+    "sourceStatus": {
+      "enum": ["pending", "running", "passed", "partial", "failed", "blocked", "not_applicable", "unknown"]
+    },
+    "locator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "kind", "scopeKind"],
+      "properties": {
+        "field": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["id", "name"]},
+        "scopeKind": {"enum": ["regional", "account"]}
+      }
+    },
+    "routeContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["site", "sourceType", "templateDigest", "status"],
+      "properties": {
+        "site": {"enum": ["aliyun", "alibabacloud"]},
+        "sourceType": {"type": "string", "minLength": 1},
+        "templateDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "status": {"$ref": "#/$defs/status"}
+      }
+    },
+    "queryContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractId", "product", "action", "responseIdentifierPath", "status"],
+      "properties": {
+        "contractId": {"type": "string", "minLength": 1},
+        "product": {"type": "string", "minLength": 1},
+        "action": {"type": "string", "minLength": 1},
+        "responseIdentifierPath": {"type": "string", "minLength": 1},
+        "regional": {"type": "boolean"},
+        "status": {"$ref": "#/$defs/status"}
+      }
+    },
+    "createAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contractId", "product", "action", "actualApiCalled", "responseProvenance", "status"],
+      "properties": {
+        "contractId": {"type": "string", "minLength": 1},
+        "product": {"type": "string", "minLength": 1},
+        "action": {"type": "string", "minLength": 1},
+        "resourceType": {"type": "string", "minLength": 1},
+        "actualApiCalled": {"type": "boolean"},
+        "responseProvenance": {"enum": ["synthetic-from-metadata", "api-response", "unknown"]},
+        "status": {"$ref": "#/$defs/status"}
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "receiptSchemaVersion", "evidenceId", "source", "contractId", "site", "navigation",
+        "sampleLevel", "actualApiCalled", "sourceChainStatus", "sourceEvidenceDigest",
+        "liveDestinationStatus", "cleanupStatus", "expectedNavigation", "expectedNavigationReason",
+        "actualUiClick", "actualNavigation", "newTabObserved", "landingKind", "routeMatched",
+        "loginPassed", "resourceMatched", "failureReason", "attemptCount", "browserAccessMode",
+        "sessionIdDigest", "accountScopeDigest", "regionId", "resourceIdentifierDigest",
+        "finalUrlDigest", "finalHost", "receiptPath", "receiptDigest", "artifacts",
+        "revision", "startedAt", "finishedAt"
+      ],
+      "properties": {
+        "receiptSchemaVersion": {"const": 2},
+        "evidenceId": {"type": "string", "minLength": 1},
+        "source": {"enum": ["route_catalog", "ros_stack", "query_api", "create_api"]},
+        "contractId": {"type": "string", "minLength": 1},
+        "site": {"const": "aliyun"},
+        "navigation": {"enum": ["normal", "shift"]},
+        "sampleLevel": {"enum": ["L0", "L1", "L2", "L3", "legacy-formal"]},
+        "actualApiCalled": {"type": "boolean"},
+        "sourceChainStatus": {"$ref": "#/$defs/sourceStatus"},
+        "liveDestinationStatus": {"$ref": "#/$defs/sourceStatus"},
+        "cleanupStatus": {"$ref": "#/$defs/sourceStatus"},
+        "sourceEvidenceDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "expectedNavigation": {"enum": ["iframe", "new_tab"]},
+        "expectedNavigationReason": {
+          "enum": [
+            "configured_signin_role", "credential_role", "external_default",
+            "product_external_only", "shift_override"
+          ]
+        },
+        "actualUiClick": {"type": "boolean"},
+        "actualNavigation": {"enum": ["iframe", "new_tab", "none"]},
+        "newTabObserved": {"type": "boolean"},
+        "landingKind": {
+          "enum": [
+            "exact_detail", "product_list", "parent_detail", "parent_list",
+            "shared_tab", "external_only", "unknown"
+          ]
+        },
+        "routeMatched": {"type": "boolean"},
+        "loginPassed": {"type": "boolean"},
+        "resourceMatched": {"type": "boolean"},
+        "failureReason": {
+          "type": ["string", "null"],
+          "enum": [
+            null, "route_error", "wrong_edition_or_variant", "login_error", "wrong_account",
+            "permission_denied", "network_or_gateway", "resource_absent", "parent_context_missing",
+            "new_tab_not_observed", "browser_auth_unavailable", "ui_link_missing", "navigation_timeout",
+            "source_not_ready", "inconclusive"
+          ]
+        },
+        "attemptCount": {"type": "integer", "minimum": 1, "maximum": 2},
+        "browserAccessMode": {"enum": ["existing-chrome", "dedicated-chrome-profile"]},
+        "sessionIdDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "accountScopeDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "regionId": {"type": ["string", "null"], "pattern": "^[a-z0-9-]+$"},
+        "resourceIdentifierDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "finalUrlDigest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+        "finalHost": {"type": ["string", "null"]},
+        "receiptPath": {"type": "string", "minLength": 1},
+        "receiptDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "artifacts": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "path", "digest"],
+            "properties": {
+              "kind": {"enum": ["observation", "screenshot", "dom_snapshot"]},
+              "path": {"type": "string", "minLength": 1},
+              "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        "revision": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["digest", "components"],
+          "properties": {
+            "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "components": {"type": "object", "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+          }
+        },
+        "scopeRebind": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["reason", "groupId", "oldSessionIdDigest", "newSessionIdDigest", "oldAccountScopeDigest", "newAccountScopeDigest"],
+          "properties": {
+            "reason": {"const": "production_semantic_change_targeted_normal_replay"},
+            "groupId": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "oldSessionIdDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "newSessionIdDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "oldAccountScopeDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "newAccountScopeDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+          }
+        },
+        "startedAt": {"type": "string", "format": "date-time"},
+        "finishedAt": {"type": "string", "format": "date-time"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"liveDestinationStatus": {"const": "passed"}}},
+          "then": {
+            "properties": {
+              "sourceChainStatus": {"const": "passed"},
+              "actualUiClick": {"const": true},
+              "actualNavigation": {"enum": ["iframe", "new_tab"]},
+              "landingKind": {"not": {"const": "unknown"}},
+              "routeMatched": {"const": true},
+              "loginPassed": {"const": true},
+              "resourceMatched": {"const": true},
+              "failureReason": {"type": "null"},
+              "finalUrlDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"navigation": {"const": "shift"}}, "required": ["navigation"]},
+          "then": {
+            "properties": {
+              "expectedNavigation": {"const": "new_tab"},
+              "expectedNavigationReason": {"const": "shift_override"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "navigation": {"const": "shift"},
+              "liveDestinationStatus": {"const": "passed"}
+            },
+            "required": ["navigation", "liveDestinationStatus"]
+          },
+          "then": {
+            "properties": {
+              "actualNavigation": {"const": "new_tab"},
+              "newTabObserved": {"const": true}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"sampleLevel": {"const": "L3"}}},
+          "then": {
+            "properties": {
+              "actualApiCalled": {"const": true},
+              "sourceChainStatus": {"const": "passed"},
+              "liveDestinationStatus": {"const": "passed"},
+              "cleanupStatus": {"const": "passed"}
+            }
+          }
+        }
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceType", "canonicalResourceType", "relation", "family", "linkLocator", "scopeKind",
+        "routeContracts", "queryApis", "createApis", "status", "executions"
+      ],
+      "properties": {
+        "sourceType": {"type": "string", "minLength": 1},
+        "canonicalResourceType": {"type": "string", "minLength": 1},
+        "relation": {"enum": ["canonical", "alias"]},
+        "family": {"enum": ["ALIYUN", "Terraform"]},
+        "aliases": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "linkLocator": {"$ref": "#/$defs/locator"},
+        "scopeKind": {"enum": ["regional", "account"]},
+        "parentFields": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "attributeFields": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "stableField": {"type": ["string", "null"]},
+        "routeContracts": {"type": "array", "items": {"$ref": "#/$defs/routeContract"}, "minItems": 2},
+        "queryApis": {"type": "array", "items": {"$ref": "#/$defs/queryContract"}},
+        "createApis": {"type": "array", "items": {"$ref": "#/$defs/createAction"}},
+        "status": {"$ref": "#/$defs/status"},
+        "executions": {"type": "array", "items": {"$ref": "#/$defs/execution"}}
+      }
+    }
+  }
+}

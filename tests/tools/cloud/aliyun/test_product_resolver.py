@@ -310,7 +310,7 @@ def test_all_short_names_and_builtin_aliases_from_the_frozen_catalog_are_exhaust
         alias_targets[alias.alias.casefold()].add(alias.product)
 
     assert sum(_safe_alias(metadata.short_name) is not None for metadata in products) == 211
-    assert len(aliases) == 6
+    assert len(aliases) == 7
     counts = Counter()
     ambiguous: dict[str, tuple[str, ...]] = {}
     for alias, targets in alias_targets.items():
@@ -329,8 +329,8 @@ def test_all_short_names_and_builtin_aliases_from_the_frozen_catalog_are_exhaust
             assert match.strategy == "alias_ambiguous"
             assert match.metadata is None
 
-    assert len(alias_targets) == 209
-    assert counts == {"exact_code_wins": 128, "unique": 79, "ambiguous": 2}
+    assert len(alias_targets) == 210
+    assert counts == {"exact_code_wins": 128, "unique": 80, "ambiguous": 2}
     assert ambiguous == {
         "iep": ("AIMath", "EduInterpreting"),
         "pai": ("PAICopilot", "PaiStudio"),

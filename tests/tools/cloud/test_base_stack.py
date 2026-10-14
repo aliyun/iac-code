@@ -154,6 +154,43 @@ class RaisingTerminalHookCloudStack(MockCloudStack):
         raise RuntimeError("hook failed")
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("last_response", ["error", "empty", "replacement"])
+async def test_resource_observations_survive_terminal_gaps_and_replacement(last_response):
+    stack = MockCloudStack()
+    queue = asyncio.Queue()
+
+    async def resources(stack_id, region):
+        if stack._poll_count > 1:
+            if last_response == "error":
+                raise RuntimeError("temporary query failure")
+            if last_response == "empty":
+                return []
+        physical_id = "i-new111111" if stack._poll_count > 1 else "i-old111111"
+        return [ResourceStatus("VM", "ALIYUN::ECS::Instance", "CREATE_COMPLETE", "", physical_id)]
+
+    stack.get_stack_resources = resources
+    result = await stack.execute(
+        tool_input={"action": "CreateStack", "region_id": "cn-beijing"},
+        context=ToolContext(event_queue=queue, tool_use_id="tool-1"),
+    )
+    data = json.loads(result.content)
+    assert data["region_id"] == "cn-beijing"
+    assert data["resource_observations"][0]["physical_resource_id"] == "i-old111111"
+    assert data["resource_observations"][0]["observed_at"] > 0
+    assert data["resources_fresh"] is (last_response != "error")
+    if last_response == "replacement":
+        assert len(data["resource_observations"]) == 2
+        assert data["resources"][0]["physical_resource_id"] == "i-new111111"
+    else:
+        assert data["resources"] == []
+    events = []
+    while not queue.empty():
+        events.append(queue.get_nowait())
+    progress = [event for event in events if isinstance(event, StackProgressEvent)]
+    assert progress[0].resources[0]["physical_resource_id"] == "i-old111111"
+
+
 @pytest.fixture
 def stack() -> MockCloudStack:
     return MockCloudStack()

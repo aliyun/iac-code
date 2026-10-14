@@ -1,0 +1,426 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iac-code.local/schemas/resource-link-browser-batch-v1.json",
+  "title": "Browser-produced resource-link batch observations",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "catalogRevisionDigest", "planId", "browserAccessMode", "sessionIdDigest",
+    "accountScopeDigest", "items"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "catalogRevisionDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "planId": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "browserAccessMode": {"enum": ["existing-chrome", "dedicated-chrome-profile"]},
+    "sessionIdDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "accountScopeDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capturedAt", "sourceType", "source", "contractId", "navigation", "resourceIdentifier",
+          "regionId", "expectedNavigation", "expectedNavigationReason", "actualUiClick",
+          "actualNavigation", "newTabObserved", "landingKind", "routeMatched", "loginPassed",
+          "resourceMatched", "failureReason", "attemptCount", "finalUrl", "artifacts"
+        ],
+        "properties": {
+          "capturedAt": {"type": "string", "format": "date-time"},
+          "sourceType": {"type": "string", "minLength": 1},
+          "source": {"enum": ["route_catalog", "ros_stack", "query_api", "create_api"]},
+          "contractId": {"type": "string", "minLength": 1},
+          "navigation": {"enum": ["normal", "shift"]},
+          "resourceIdentifier": {"type": "string", "minLength": 1},
+          "querySource": {"type": "object", "additionalProperties": {"type": "string"}},
+          "resourceParentAttributes": {
+            "type": "object", "minProperties": 1,
+            "additionalProperties": {"type": "string", "minLength": 1}
+          },
+          "regionId": {"type": ["string", "null"]},
+          "expectedNavigation": {"enum": ["iframe", "new_tab"]},
+          "expectedNavigationReason": {
+            "enum": [
+              "configured_signin_role", "credential_role", "external_default",
+              "product_external_only", "shift_override"
+            ]
+          },
+          "actualUiClick": {"type": "boolean"},
+          "actualNavigation": {"enum": ["iframe", "new_tab", "none"]},
+          "newTabObserved": {"type": "boolean"},
+          "landingKind": {
+            "enum": [
+              "exact_detail", "product_list", "parent_detail", "parent_list",
+              "shared_tab", "external_only", "unknown"
+            ]
+          },
+          "routeMatched": {"type": "boolean"},
+          "loginPassed": {"type": "boolean"},
+          "resourceMatched": {"type": "boolean"},
+          "failureReason": {
+            "type": ["string", "null"],
+            "enum": [
+              null, "route_error", "wrong_edition_or_variant", "login_error", "wrong_account",
+              "permission_denied", "network_or_gateway", "resource_absent", "parent_context_missing",
+              "new_tab_not_observed", "browser_auth_unavailable", "ui_link_missing", "navigation_timeout",
+              "source_not_ready", "cms_masking_restore_failed", "inconclusive"
+            ]
+          },
+          "attemptCount": {"type": "integer", "minimum": 1, "maximum": 2},
+          "finalUrl": {"type": ["string", "null"], "format": "uri"},
+          "diagnostics": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["expectedUrl", "pageTitle", "bodyExcerpt", "signals", "search"],
+            "properties": {
+              "expectedUrl": {"type": ["string", "null"], "format": "uri"},
+              "pageTitle": {"type": "string"},
+              "bodyExcerpt": {"type": "string"},
+              "contentReady": {"type": "boolean"},
+              "polardbEndpoint": {"$ref": "#/$defs/polardbEndpointDiagnostics"},
+              "accountResource": {"$ref": "#/$defs/accountResourceDiagnostics"},
+              "routerInterface": {"$ref": "#/$defs/routerInterfaceDiagnostics"},
+              "slbListener": {"$ref": "#/$defs/slbListenerDiagnostics"},
+              "nasRule": {
+                "type": "object", "additionalProperties": false,
+                "required": ["parentRouteMatched", "matched", "rows"],
+                "properties": {
+                  "parentRouteMatched": {"type": "boolean"}, "matched": {"type": "boolean"},
+                  "rows": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": false,
+                    "required": ["key", "text", "cells"],
+                    "properties": {
+                      "key": {"type": ["string", "null"]}, "text": {"type": "string"},
+                      "cells": {"type": "array", "items": {"type": "string"}}
+                    }
+                  }}
+                }
+              },
+              "polardbAccount": {
+                "type": "object", "additionalProperties": false,
+                "required": ["matched", "parentRouteMatched", "rowIndex", "rows", "readOnly", "searchFallbackSuppressed"],
+                "properties": {
+                  "matched": {"type": "boolean"}, "parentRouteMatched": {"type": "boolean"},
+                  "rowIndex": {"type": ["integer", "null"], "minimum": 0},
+                  "rows": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
+                  "readOnly": {"const": true}, "searchFallbackSuppressed": {"const": true}
+                }
+              },
+              "nasMount": {
+                "type": "object", "additionalProperties": false,
+                "required": ["matched", "parentRouteMatched", "rowIndex", "cellIndex", "rows", "searchFallbackSuppressed", "readOnly"],
+                "properties": {
+                  "matched": {"type": "boolean"}, "parentRouteMatched": {"type": "boolean"},
+                  "rowIndex": {"type": ["integer", "null"], "minimum": 0},
+                  "cellIndex": {"type": ["integer", "null"], "minimum": 0},
+                  "searchFallbackSuppressed": {"const": true}, "readOnly": {"const": true},
+                  "rows": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": false, "required": ["cells"],
+                    "properties": {"cells": {"type": "array", "items": {
+                      "type": "object", "additionalProperties": false, "required": ["values"],
+                      "properties": {"values": {"type": "array", "items": {"type": "string"}}}
+                    }}}
+                  }}
+                }
+              },
+              "childList": {
+                "type": "object", "additionalProperties": false,
+                "required": ["matched", "parentRouteMatched", "rowIndex", "tableVisible", "visibleLoading", "headers", "rows", "readOnly", "searchFallbackSuppressed"],
+                "properties": {
+                  "matched": {"type": "boolean"}, "parentRouteMatched": {"type": "boolean"},
+                  "rowIndex": {"type": ["integer", "null"], "minimum": 0},
+                  "tableVisible": {"type": "boolean"}, "visibleLoading": {"type": "boolean"},
+                  "headers": {"type": "array", "items": {"type": "string"}},
+                  "readOnly": {"const": true}, "searchFallbackSuppressed": {"const": true},
+                  "rows": {"type": "array", "items": {
+                    "type": "object", "additionalProperties": false, "required": ["cells"],
+                    "properties": {"cells": {"type": "array", "items": {"type": "string"}}}
+                  }}
+                }
+              },
+              "signals": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["login", "wrongAccount", "wrongVariant", "permission", "missing", "gateway", "routeError"],
+                "properties": {
+                  "login": {"type": "boolean"},
+                  "wrongAccount": {"type": "boolean"},
+                  "wrongVariant": {"type": "boolean"},
+                  "permission": {"type": "boolean"},
+                  "missing": {"type": "boolean"},
+                  "gateway": {"type": "boolean"},
+                  "routeError": {"type": "boolean"}
+                }
+              },
+              "search": {"$ref": "#/$defs/search"},
+              "screenshotOmitted": {"type": ["string", "null"]},
+              "cms": {
+                "type": ["object", "null"],
+                "additionalProperties": false,
+                "required": ["flow", "tabClick", "masking", "rowMatch", "rowSettle"],
+                "properties": {
+                  "flow": {"enum": ["contact_group_tab", "contact_masking_switch"]},
+                  "tabClick": {"type": ["object", "null"]},
+                  "masking": {"type": ["object", "null"]},
+                  "rowMatch": {"$ref": "#/$defs/cmsRowMatch"},
+                  "rowSettle": {
+                    "oneOf": [
+                      {"type": "null"},
+                      {"$ref": "#/$defs/cmsRowSettle"}
+                    ]
+                  }
+                }
+              },
+              "cr": {"$ref": "#/$defs/crDiagnostics"}
+            }
+          },
+          "artifacts": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["kind", "path", "digest"],
+              "properties": {
+                "kind": {"enum": ["observation", "screenshot", "dom_snapshot"]},
+                "path": {"type": "string", "minLength": 1},
+                "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "slbListenerDiagnostics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["matched", "parentRouteMatched", "searchFallbackSuppressed", "rows", "visibleLoading", "finalUrl", "bodyTextAfter"],
+      "properties": {
+        "matched": {"type": "boolean"}, "parentRouteMatched": {"type": "boolean"},
+        "searchFallbackSuppressed": {"const": true}, "visibleLoading": {"type": "boolean"},
+        "rows": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+          "required": ["headers", "cells"], "properties": {
+            "headers": {"type": "array", "items": {"type": "string"}},
+            "cells": {"type": "array", "items": {"type": "string"}}
+          }}},
+        "finalUrl": {"type": ["string", "null"], "format": "uri"}, "bodyTextAfter": {"type": "string"}
+      }
+    },
+    "routerInterfaceDiagnostics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["matched", "parentRouteMatched", "searchFallbackSuppressed", "tabClicked", "tabSelected",
+        "visibleLoading", "rows", "finalUrl", "bodyTextAfter"],
+      "properties": {
+        "matched": {"type": "boolean"}, "parentRouteMatched": {"type": "boolean"},
+        "searchFallbackSuppressed": {"const": true}, "tabClicked": {"type": "boolean"},
+        "tabSelected": {"type": "boolean"}, "visibleLoading": {"type": "boolean"},
+        "rows": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+          "required": ["cells"], "properties": {"cells": {"type": "array", "items": {"type": "string"}}}}},
+        "finalUrl": {"type": ["string", "null"], "format": "uri"},
+        "bodyTextAfter": {"type": "string"}
+      }
+    },
+    "accountResourceDiagnostics": {
+      "type": "object", "additionalProperties": false,
+      "required": ["matched", "searchFallbackSuppressed"],
+      "properties": {
+        "matched": {"type": "boolean"}, "parentRouteMatched": {"type": "boolean"},
+        "searchFallbackSuppressed": {"const": true}, "readOnly": {"const": true},
+        "matchCount": {"type": "integer", "minimum": 0},
+        "identity": {"type": "object", "additionalProperties": false, "properties": {
+          "Rr": {"type": "string"}, "Type": {"type": "string"}, "Value": {"type": "string"},
+          "GroupName": {"type": "string"}, "displayedGroupId": {"type": ["string", "null"]}
+        }},
+        "evidence": {"type": "object", "additionalProperties": false,
+          "properties": {
+            "rows": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+              "required": ["cells"], "properties": {
+                "cells": {"type": "array", "items": {"type": "string"}}
+              }}},
+            "groupNames": {"type": "array", "items": {"type": "string"}},
+            "groupIds": {"type": "array", "items": {"type": "string"}},
+            "unreadable": {"const": true}
+          }
+        }
+      }
+    },
+    "polardbEndpointDiagnostics": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["matched", "cards", "hoverTargets", "section", "connectionContent", "labelCandidates", "readOnly", "searchFallbackSuppressed"],
+      "properties": {
+        "matched": {"type": "boolean"},
+        "parentRouteMatched": {"type": "boolean"},
+        "matchedCards": {"type": "integer", "minimum": 0},
+        "cards": {"type": "array", "items": {
+          "type": "object",
+          "required": ["visible", "text"],
+          "properties": {
+            "visible": {"type": "boolean"},
+            "text": {"type": "string"},
+            "connectionScoped": {"type": "boolean"},
+            "identityLabel": {"type": "string"}
+          }
+        }},
+        "hoverTargets": {"type": "array", "items": {"type": "string"}},
+        "section": {"type": "object"},
+        "connectionContent": {"type": "object"},
+        "labelCandidates": {"type": "array", "items": {
+          "type": "object", "additionalProperties": false,
+          "required": ["label", "count"],
+          "properties": {"label": {"type": "string"}, "count": {"type": "integer", "minimum": 0}}
+        }},
+        "readOnly": {"const": true},
+        "searchFallbackSuppressed": {"const": true},
+        "listView": {"type": "object"},
+        "canvas": {"type": "object"},
+        "bodyTail": {"type": "string"},
+        "graphEvidence": {"type": "array", "items": {"type": "object"}},
+        "readError": {"type": "string"},
+        "bodyReadError": {"type": "string"},
+        "graphReadError": {"type": "string"}
+      }
+    },
+    "cmsRowMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matched", "matchedRows", "rowCount"],
+      "properties": {
+        "matched": {"type": "boolean"},
+        "matchedRows": {"type": "array", "items": {"type": "string"}},
+        "rowCount": {"type": "integer", "minimum": 0},
+        "ambiguous": {"type": "boolean"},
+        "hiddenExcluded": {"type": "integer", "minimum": 0},
+        "paneScoped": {"type": "boolean"},
+        "paneScopeReason": {
+          "enum": ["single_visible_pane", "no_visible_pane", "ambiguous_visible_panes"]
+        },
+        "paneCount": {"type": "integer", "minimum": 0},
+        "visiblePaneCount": {"type": "integer", "minimum": 0},
+        "readFailed": {"type": "boolean"}
+      }
+    },
+    "cmsRowSettle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempts", "waitedMs", "matched", "finalRowCount", "capMs", "intervalMs", "timedOut"],
+      "properties": {
+        "attempts": {"type": "integer", "minimum": 1},
+        "waitedMs": {"type": "integer", "minimum": 0},
+        "matched": {"type": "boolean"},
+        "finalRowCount": {"type": "integer", "minimum": 0},
+        "capMs": {"type": "integer", "minimum": 0},
+        "intervalMs": {"type": "integer", "minimum": 1},
+        "timedOut": {"type": "boolean"}
+      }
+    },
+    "crDiagnostics": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "flow", "matched", "signalsClear", "searchFallbackSuppressed", "exactName", "context",
+        "rowMatch", "rowSettle", "note", "reason", "error"
+      ],
+      "properties": {
+        "flow": {"enum": ["namespace_parent_list", "repository_detail"]},
+        "matched": {"type": "boolean"},
+        "signalsClear": {"type": "boolean"},
+        "searchFallbackSuppressed": {"type": "boolean"},
+        "exactName": {"type": ["string", "null"]},
+        "context": {"$ref": "#/$defs/crContext"},
+        "rowMatch": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/crRowMatch"}
+          ]
+        },
+        "rowSettle": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/cmsRowSettle"}
+          ]
+        },
+        "note": {"type": ["string", "null"]},
+        "reason": {"type": ["string", "null"]},
+        "error": {"type": ["string", "null"]}
+      }
+    },
+    "crContext": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["hostOk", "shapeRecognized", "matched", "route", "fields", "reason"],
+      "properties": {
+        "hostOk": {"type": "boolean"},
+        "shapeRecognized": {"type": "boolean"},
+        "matched": {"type": "boolean"},
+        "route": {"type": ["string", "null"]},
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "ok", "expected", "observed"],
+            "properties": {
+              "name": {
+                "enum": ["region", "instanceId", "repoNamespaceName", "repoName"]
+              },
+              "ok": {"type": "boolean"},
+              "expected": {"type": ["string", "null"]},
+              "observed": {"type": ["string", "null"]}
+            }
+          }
+        },
+        "reason": {"type": ["string", "null"]}
+      }
+    },
+    "crRowMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "matched", "matchedRows", "candidateMatches", "distinctMatches", "rowCount", "ambiguous",
+        "hiddenExcluded", "chromeExcluded", "wrapperCandidates"
+      ],
+      "properties": {
+        "matched": {"type": "boolean"},
+        "matchedRows": {"type": "array", "items": {"type": "string"}},
+        "candidateMatches": {"type": "integer", "minimum": 0},
+        "distinctMatches": {"type": "integer", "minimum": 0},
+        "rowCount": {"type": "integer", "minimum": 0},
+        "ambiguous": {"type": "boolean"},
+        "hiddenExcluded": {"type": "integer", "minimum": 0},
+        "chromeExcluded": {"type": "integer", "minimum": 0},
+        "wrapperCandidates": {"type": "integer", "minimum": 0},
+        "readFailed": {"type": "boolean"}
+      }
+    },
+    "search": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attempted", "performed", "control", "query", "resultText", "resourceMatched", "finalUrl"],
+      "properties": {
+        "attempted": {"type": "boolean"},
+        "performed": {"type": "boolean"},
+        "control": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["aria", "name", "placeholder", "title", "type"],
+          "properties": {
+            "aria": {"type": "string"},
+            "name": {"type": "string"},
+            "placeholder": {"type": "string"},
+            "title": {"type": "string"},
+            "type": {"type": "string"}
+          }
+        },
+        "query": {"type": ["string", "null"]},
+        "resultText": {"type": ["string", "null"]},
+        "resourceMatched": {"type": "boolean"},
+        "finalUrl": {"type": ["string", "null"], "format": "uri"}
+      }
+    }
+  }
+}

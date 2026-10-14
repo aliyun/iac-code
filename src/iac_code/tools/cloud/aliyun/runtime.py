@@ -35,6 +35,7 @@ from iac_code.tools.cloud.aliyun.oss_v4_adapter import (
     OssStreamingHttpClient,
     OssV4Adapter,
 )
+from iac_code.tools.cloud.aliyun.ots_data_adapter import OtsDataAdapter
 from iac_code.tools.cloud.aliyun.product_resolver import ProductResolution, ProductResolver
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
 from iac_code.types.permissions import InvocationBinding, PermissionResult, ToolPermissionContext
@@ -51,8 +52,8 @@ _DELEGATED_ACTIONS = {
 _METADATA_SOURCES = frozenset({"fresh", "cache", "stale_cache", "explicit_fallback"})
 _API_STYLES = frozenset({"RPC", "ROA"})
 _HTTP_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
-_TRANSPORTS = frozenset({"tea", "acs1", "acs3_streaming", "oss_v4_sdk"})
-_SIGNATURE_SCHEMES = frozenset({"acs1", "acs3", "oss_v4"})
+_TRANSPORTS = frozenset({"tea", "acs1", "acs3_streaming", "oss_v4_sdk", "ots_sdk"})
+_SIGNATURE_SCHEMES = frozenset({"acs1", "acs3", "oss_v4", "ots_v4"})
 _ENDPOINT_SOURCES = frozenset(
     {"explicit", "override", "location", "catalog_region", "catalog_global", "override_pattern", "error"}
 )
@@ -555,12 +556,14 @@ def create_aliyun_runtime_services(
         http_client=oss_http_client,
         host_binding_resolver=endpoint_resolver.host_binding_resolver,
     )
+    ots_adapter = OtsDataAdapter()
     transport_router = TransportRouter(
         {
             "tea": TeaTransportAdapter(),
             "acs1": Acs1Transport(),
             "acs3_streaming": Acs3StreamingTransport(),
             "oss_v4_sdk": oss_adapter,
+            "ots_sdk": ots_adapter,
         }
     )
     return AliyunRuntimeServices(

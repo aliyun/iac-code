@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from hashlib import blake2b
@@ -16,6 +17,7 @@ DEFAULT_MAX_INLINE_CHARS = 50_000
 DEFAULT_PREVIEW_CHARS = 2_000
 EXTERNALIZED_RESULT_PATH_METADATA_KEY = "_iac_code_externalized_result_path"
 _SAFE_TOOL_USE_ID_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
+_JSON_STRING_OR_WHITESPACE_RE = re.compile(r'"(?:[^"\\]|\\.)*"|[ \t\r\n]+')
 
 
 def _result_filename(tool_use_id: str) -> str:
@@ -67,6 +69,17 @@ class ResultStorage:
         file_path = storage_dir / _result_filename(tool_use_id)
         write_text_no_follow(file_path, content, encoding="utf-8")
         ensure_private_file(file_path)
+        if content.lstrip().startswith(("{", "[")):
+            try:
+                json.loads(content)
+            except (ValueError, RecursionError):
+                pass
+            else:
+                compact = _JSON_STRING_OR_WHITESPACE_RE.sub(
+                    lambda match: match[0] if match[0].startswith('"') else "", content
+                )
+                if len(compact) <= self._max_inline_chars:
+                    return ProcessedResult(content=compact, is_externalized=True, file_path=str(file_path))
         preview = content[: self._preview_chars]
         preview += f"\n\n... [truncated — full output ({len(content)} chars) saved to {file_path}]"
         return ProcessedResult(content=preview, is_externalized=True, file_path=str(file_path))

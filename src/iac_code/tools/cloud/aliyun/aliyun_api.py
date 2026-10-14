@@ -60,10 +60,14 @@ from iac_code.tools.cloud.aliyun.contract_store import (
 )
 from iac_code.tools.cloud.aliyun.ecs_credential_errors import ecs_credential_error_code
 from iac_code.tools.cloud.aliyun.public_errors import normalize_api_identity, public_aliyun_error
+from iac_code.tools.cloud.aliyun.resource_reference_extractors import (
+    collect_api_resource_references,
+)
 from iac_code.tools.cloud.aliyun.result_contract import (
     ALIYUN_HTTP_METADATA_KEY,
     build_aliyun_http_metadata,
     serialize_business_result,
+    serialize_oss_bucket_response,
 )
 from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, TransportFailure
 from iac_code.tools.cloud.aliyun.runtime import (
@@ -82,6 +86,7 @@ from iac_code.tools.cloud.aliyun.template_source import (
 )
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.tools.cloud.base_api import BaseCloudApi
+from iac_code.tools.cloud.resource_references import RESOURCE_REFERENCES_METADATA_KEY, resource_reference_metadata
 from iac_code.tools.path_safety import check_read_path_with_resolution
 from iac_code.types.permissions import (
     MAX_PERMISSION_AUDIT_ITEMS,
@@ -1033,6 +1038,22 @@ def _runtime_is_read_only(
                 and shape.body_source == "none"
             )
         return contract.metadata_source in {"fresh", "cache", "stale_cache"}
+    if contract.transport == "ots_sdk":
+        from iac_code.tools.cloud.aliyun.ots_data_adapter import is_ots_list_table
+
+        return (
+            contract.metadata_source == "explicit_fallback"
+            and contract.signature_scheme == "ots_v4"
+            and is_ots_list_table(contract.product, contract.action, contract.version)
+            and contract.style == "ROA"
+            and contract.method == "POST"
+            and contract.pathname == "/ListTable"
+            and contract.operation_type is None
+            and not shape.explicit_overrides
+            and shape.endpoint is None
+            and shape.body_source == "none"
+            and dict(shape.parameter_names_by_location) == {"host": ("InstanceName",)}
+        )
     if contract.metadata_source == "explicit_fallback":
         if contract.operation_type is not None:
             return False
@@ -1892,7 +1913,7 @@ class AliyunApi(BaseCloudApi):
         default_region = self._get_default_region()
         if default_region:
             region_desc += f" Defaults to '{default_region}'."
-        return {
+        schema = {
             "type": "object",
             "properties": {
                 "product": {
@@ -1968,6 +1989,10 @@ class AliyunApi(BaseCloudApi):
             "required": ["product", "action"],
             "additionalProperties": False,
         }
+
+        from iac_code.services.execution_policy import input_schema
+
+        return input_schema(self.name, schema)
 
     def _resolve_version(self, input: dict) -> str:
         """Resolve the API version from input or built-in map."""
@@ -2122,6 +2147,13 @@ class AliyunApi(BaseCloudApi):
         return _("Call succeeded")
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        from iac_code.services.execution_policy import check, require_runtime
+
+        binding = context.invocation_binding
+        if error := check(self.name, tool_input, binding.session_id if binding else "", cwd=context.cwd):
+            return ToolResult.error(error)
+        if error := require_runtime(self._runtime_services is not None):
+            return ToolResult.error(error)
         context.ros_preflight_outcome = None
         runtime_input = tool_input
         if self._runtime_services is not None:
@@ -2362,6 +2394,11 @@ class AliyunApi(BaseCloudApi):
         trust_path: str,
         ros_preflight_completed: bool = False,
     ) -> ToolResult:
+        from iac_code.services.execution_policy import check
+
+        binding = context.invocation_binding
+        if error := check("aliyun_api", dict(api_input), binding.session_id if binding else "", cwd=context.cwd):
+            return ToolResult.error(error)
         result = await self._execute_runtime_unattached(
             api_input=api_input,
             binding_input=binding_input,
@@ -2632,6 +2669,19 @@ class AliyunApi(BaseCloudApi):
                 context=context,
             )
 
+            from iac_code.services.execution_policy import enabled, finish, reserve_when_ready
+
+            binding = context.invocation_binding
+            gate_ticket = None
+            if enabled():
+                gate_ticket = await reserve_when_ready(
+                    dict(api_input),
+                    binding.session_id if binding else "",
+                    credential,
+                    read_only=_runtime_is_read_only(contract, final_shape, recovery_metadata_contract or contract),
+                    cwd=context.cwd,
+                    tool_use_id=context.tool_use_id or "",
+                )
             observe("target")
             context.request_started = True
             target_started = time.monotonic()
@@ -2655,6 +2705,13 @@ class AliyunApi(BaseCloudApi):
             ) as api_span:
                 try:
                     response = await prepared_transport.execute(budget=budget)
+                    finish(
+                        gate_ticket,
+                        response.body,
+                        200 <= response.status < 300,
+                        status=response.status,
+                        headers=dict(response.headers),
+                    )
                     if not 200 <= response.status < 300:
                         target_outcome = "http_error"
                         target_error_message = _target_http_error_message(response)
@@ -2717,8 +2774,25 @@ class AliyunApi(BaseCloudApi):
                 )
                 if target_error_detail is not None:
                     public_error = f"{public_error} Response: {target_error_detail}"
+                if (
+                    response is not None
+                    and contract.transport == "oss_v4_sdk"
+                    and contract.product.casefold() == "oss"
+                    and contract.version == "2019-05-17"
+                    and contract.action in {"GetBucketInfo", "DeleteBucket", "ListBuckets"}
+                ):
+                    public_error += "\n\n" + serialize_oss_bucket_response(response)
                 return ToolResult.error(public_error)
             assert response is not None
+            resource_references = collect_api_resource_references(
+                credential=credential,
+                product=contract.product,
+                action=contract.action,
+                params=params,
+                body=response.body,
+                region_id=final_shape.region_id,
+                tool_use_id=context.tool_use_id or "",
+            )
             business_response = response
             if trust_path == "public" and context.pipeline_mode:
                 from iac_code.tools.cloud.aliyun.api_hooks import project_step_result
@@ -2759,7 +2833,14 @@ class AliyunApi(BaseCloudApi):
             self._last_result = response.body
             return ToolResult(
                 content=business_content,
-                metadata={ALIYUN_HTTP_METADATA_KEY: aliyun_http},
+                metadata={
+                    ALIYUN_HTTP_METADATA_KEY: aliyun_http,
+                    **(
+                        {RESOURCE_REFERENCES_METADATA_KEY: resource_reference_metadata(resource_references)}
+                        if resource_references
+                        else {}
+                    ),
+                },
             )
         except asyncio.CancelledError:
             if trust_path != "internal":
@@ -2774,6 +2855,12 @@ class AliyunApi(BaseCloudApi):
                     runtime.contract_store.reject_recovery(context.snapshot_id, recovery_claim.claim_id)
                 else:
                     self._reject_runtime_handoff(context)
+            from iac_code.services.execution_policy import ExecutionPolicyDeniedError
+
+            if isinstance(error, ExecutionPolicyDeniedError):
+                # Keep this stable, non-secret capability failure actionable;
+                # do not disguise it as a generic API preparation failure.
+                return ToolResult.error(str(error))
             if isinstance(error, ApiContractError):
                 stage = _runtime_contract_error_stage(error)
                 if stage is not None:
@@ -2964,11 +3051,27 @@ class AliyunApi(BaseCloudApi):
                         )
                     )
 
+            resource_references = collect_api_resource_references(
+                credential=credential,
+                product=product,
+                action=action,
+                params=params,
+                body=body,
+                region_id=region,
+                tool_use_id=context.tool_use_id or "",
+            )
             if context.pipeline_mode:
                 from iac_code.tools.cloud.aliyun.api_hooks import project_step_result
 
                 body = project_step_result(product, action, params, body)
-            return ToolResult.success(json.dumps(body, ensure_ascii=False, indent=2))
+            return ToolResult(
+                content=json.dumps(body, ensure_ascii=False, indent=2),
+                metadata=(
+                    {RESOURCE_REFERENCES_METADATA_KEY: resource_reference_metadata(resource_references)}
+                    if resource_references
+                    else None
+                ),
+            )
         except Exception as e:
             self._last_action = ""
             self._last_result = None

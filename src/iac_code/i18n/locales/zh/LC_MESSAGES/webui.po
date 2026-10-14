@@ -335,6 +335,8 @@ msgid "Search chats or run a command"
 msgstr "搜索聊天或运行命令"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 msgid "Close"
 msgstr "关闭"
 
@@ -389,6 +391,7 @@ msgstr "Git Bash 已可用。"
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Loading…"
 msgstr "加载中…"
@@ -467,9 +470,18 @@ msgid "Copied"
 msgstr "已复制"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Copy failed"
 msgstr "复制失败"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show less"
+msgstr "折叠显示"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show more"
+msgstr "展开显示"
 
 #: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
@@ -697,14 +709,6 @@ msgstr "在 {label} 新建对话"
 #: src/iac_code/web/static/js/app.js
 msgid "Loading..."
 msgstr "加载中..."
-
-#: src/iac_code/web/static/js/app.js
-msgid "Show less"
-msgstr "折叠显示"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Show more"
-msgstr "展开显示"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Expand all sessions"
@@ -1003,6 +1007,7 @@ msgid "Update failed: {error}"
 msgstr "更新失败:{error}"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 msgid "Retry"
 msgstr "重试"
 
@@ -1026,6 +1031,10 @@ msgstr "无法开始更新。请打开诊断目录查看详情。"
 #, python-brace-format
 msgid "Failed to start update: {error}"
 msgstr "更新启动失败:{error}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not open the link. Please try again."
+msgstr "无法打开链接，请重试。"
 
 #: src/iac_code/web/static/js/architecture_diagram.js
 #: src/iac_code/web/static/js/components/output_panel.js
@@ -1223,6 +1232,7 @@ msgid "Additional details"
 msgstr "补充说明"
 
 #: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 msgid "Select"
 msgstr "选择"
 
@@ -1241,6 +1251,7 @@ msgstr "拒绝"
 
 #: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 #: src/iac_code/web/static/js/components/tool_cards.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Region"
@@ -1706,6 +1717,101 @@ msgstr "结果"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No pipeline data."
 msgstr "没有流水线数据。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Cloud credentials for this resource are unavailable or have changed."
+msgstr "此资源对应的云凭证不可用或已变更。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid ""
+"Resource lookup needs permission. Review the permission settings, then "
+"retry."
+msgstr "资源查询需要权限，请检查权限设置后重试。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Resource information changed. Reopen the link and try again."
+msgstr "资源信息已变更，请重新打开链接后重试。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Resource lookup failed. Retry or enter the missing information."
+msgstr "资源查询失败，请重试或手动补充缺少的信息。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Resource link"
+msgstr "资源链接"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid ""
+"This name belonged to a deleted resource. Confirm the current object "
+"before opening it."
+msgstr "该名称曾属于已删除的资源。打开前请确认当前对象。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Complete resource context"
+msgstr "补充资源上下文"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Choose a resource"
+msgstr "选择资源"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Account"
+msgstr "账号"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Configured credentials (account not verified)"
+msgstr "已配置凭证（账号未经验证）"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Use configured cloud credentials"
+msgstr "使用已配置的云凭证"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Open console"
+msgstr "打开控制台"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Load missing resource attributes"
+msgstr "查询缺少的资源属性"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Copy name"
+msgstr "复制名称"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Copy ID"
+msgstr "复制 ID"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "This choice is not saved yet."
+msgstr "此选择尚未保存。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "This console route has not been verified."
+msgstr "此控制台路由尚未核验。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Loading credential context..."
+msgstr "正在读取凭证上下文..."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Loading resource attributes..."
+msgstr "正在查询资源属性…"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Resource attributes loaded. Choose a link to open the console."
+msgstr "资源属性已补齐，请点击链接打开控制台。"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid ""
+"No cloud credential context is available. Configure credentials, then "
+"retry."
+msgstr "没有可用的云凭证上下文。请配置凭证后重试。"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Alibaba Cloud API"
@@ -2571,8 +2677,8 @@ msgid "Stack: {name}"
 msgstr "栈: {name}"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Account"
-msgstr "账号"
+msgid "Resource identifier"
+msgstr "资源标识"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Developer"
@@ -3979,6 +4085,137 @@ msgid "The permission mode preset for new sessions."
 msgstr "新建会话时预置的权限模式。"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Embedded console sign-in"
+msgstr "内嵌控制台免登"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Open supported cloud resources here without signing in again."
+msgstr "无需重复登录即可在当前页面打开支持内嵌的云资源。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save role"
+msgstr "保存角色"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Create read-only role"
+msgstr "创建只读角色"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Repair read-only permissions"
+msgstr "修复只读权限"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Additional read-only permissions (all resources):"
+msgstr "补充只读权限（全部资源）："
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "RAM role ARN"
+msgstr "RAM 角色 ARN"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"With a role configured, supported resources open here; other resources "
+"open in a new tab."
+msgstr "配置角色后，支持内嵌的资源在当前页面打开，其他资源在新标签页打开。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"One-click creation requires RAM write and sts:AssumeRole permissions; "
+"root accounts are not supported."
+msgstr "一键创建需要 RAM 写权限和 sts:AssumeRole 权限；主账号不支持。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"This creates or updates the supplemental policy and attaches it with "
+"ReadOnlyAccess. Existing non-default policy versions may rotate. "
+"Continue?"
+msgstr "此操作会创建或更新补充策略，并与 ReadOnlyAccess 一起绑定到角色；必要时会轮转旧的非默认策略版本。是否继续？"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The RAM role ARN is invalid."
+msgstr "RAM 角色 ARN 无效。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configure Alibaba Cloud credentials first."
+msgstr "请先配置阿里云凭证。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Alibaba Cloud root accounts cannot assume roles. Use a RAM user or RAM "
+"role credential."
+msgstr "阿里云主账号不能扮演角色。请使用 RAM 用户或 RAM 角色凭证。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"A role named IacCodeConsoleSigninRole already exists and was not "
+"modified. Enter its ARN manually."
+msgstr "名为 IacCodeConsoleSigninRole 的角色已存在，未对其进行修改。请手动输入其 ARN。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The current identity cannot create the RAM role."
+msgstr "当前身份无权创建 RAM 角色。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The role was created, but ReadOnlyAccess could not be attached."
+msgstr "角色已创建，但无法绑定 ReadOnlyAccess。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The current identity cannot assume the configured role."
+msgstr "当前身份无法扮演已配置的角色。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"RAM role setup timed out. Check the role in the Alibaba Cloud console "
+"before retrying."
+msgstr "RAM 角色配置超时。重试前请先在阿里云控制台中检查该角色。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The role or supplemental policy was modified outside iac-code. No "
+"conflicting permissions were overwritten."
+msgstr "角色或补充策略已在 iac-code 之外被修改，未覆盖有冲突的权限。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Supplemental policy setup failed. Check RAM policy-management permissions"
+" and retry."
+msgstr "补充策略配置失败，请检查 RAM 策略管理权限后重试。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Could not configure the console sign-in role."
+msgstr "无法配置控制台免登角色。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Role saved. Embedded sign-in will be used when AssumeRole succeeds."
+msgstr "角色已保存。AssumeRole 成功时将使用内嵌免登。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Role configuration cleared. Resource links will use the normal new-tab "
+"behavior."
+msgstr "角色配置已清除。资源链接将恢复为普通的新标签页打开方式。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Creating and verifying the read-only RAM role…"
+msgstr "正在创建并验证只读 RAM 角色…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only role created and verified."
+msgstr "只读角色已创建并验证。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save the role before repairing its permissions."
+msgstr "请先保存角色，再修复其权限。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Updating and verifying read-only permissions…"
+msgstr "正在更新并验证只读权限…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only permissions updated. Reopen the resource preview to use them."
+msgstr "只读权限已更新，请重新打开资源预览以使用新权限。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Color scheme"
 msgstr "配色方案"
 
@@ -4065,6 +4302,14 @@ msgid "Install failed: {error}"
 msgstr "安装失败:{error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only permissions need an update. Use the repair button."
+msgstr "只读权限需要更新，请点击修复按钮。"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Could not load the console sign-in role."
+msgstr "无法加载控制台免登角色。"
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Debug options"
 msgstr "调试选项"
 
@@ -4122,6 +4367,12 @@ msgstr "重启中,服务恢复后会自动刷新…"
 msgid "The local runtime could not restart. Open diagnostics for details."
 msgstr "本地运行时无法重新启动。请打开诊断目录查看详情。"
 
+msgid "Max output tokens"
+msgstr "最大输出 tokens"
+
+msgid "Max output tokens per reply; leave blank to use model default"
+msgstr "单次回复的输出上限,留空使用模型默认"
+
 #~ msgid "Completing step: {step}"
 #~ msgstr "正在完成步骤：{step}"
 
@@ -4168,3 +4419,35 @@ msgstr "无法打开链接，请重试。"
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated cost"
 msgstr "费用估算"
+
+#~ msgid "Leave blank and save to keep the normal new-tab behavior."
+#~ msgstr "留空并保存，将继续使用普通的新标签页打开方式。"
+
+#~ msgid ""
+#~ "One-click creation creates "
+#~ "IacCodeConsoleSigninRole and attaches "
+#~ "ReadOnlyAccess. The current RAM user or"
+#~ " role must have RAM write and "
+#~ "sts:AssumeRole permissions. Alibaba Cloud root"
+#~ " accounts cannot assume roles."
+#~ msgstr ""
+#~ "一键创建会创建 IacCodeConsoleSigninRole 并绑定 "
+#~ "ReadOnlyAccess。当前 RAM 用户或角色必须具有 RAM 写权限和 "
+#~ "sts:AssumeRole 权限。阿里云主账号不能扮演角色。"
+
+#~ msgid "Use a dedicated RAM role for embedded sign-in."
+#~ msgstr "使用专用 RAM 角色进行内嵌免登。"
+
+#~ msgid ""
+#~ "Only the ARN is saved. STS "
+#~ "credentials stay in memory and refresh"
+#~ " automatically."
+#~ msgstr "仅保存 ARN；STS 凭证只缓存在内存中并自动刷新。"
+
+#~ msgid "Leave blank to open in a new tab."
+#~ msgstr "留空时在新标签页打开。"
+
+#~ msgid ""
+#~ "Role created, but the current identity"
+#~ " still needs sts:AssumeRole permission."
+#~ msgstr "角色已创建，但当前身份仍需 sts:AssumeRole 权限。"

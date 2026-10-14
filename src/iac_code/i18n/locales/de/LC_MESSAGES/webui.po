@@ -341,6 +341,8 @@ msgid "Search chats or run a command"
 msgstr "Chats durchsuchen oder einen Befehl ausführen"
 
 #: src/iac_code/web/static/index.html src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 msgid "Close"
 msgstr "Schließen"
 
@@ -397,6 +399,7 @@ msgstr "Git Bash ist bereit."
 
 #: src/iac_code/web/static/js/app.js
 #: src/iac_code/web/static/js/components/output_panel.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Loading…"
 msgstr "Wird geladen…"
@@ -481,9 +484,18 @@ msgid "Copied"
 msgstr "Kopiert"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Copy failed"
 msgstr "Kopieren fehlgeschlagen"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show less"
+msgstr "Weniger anzeigen"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Show more"
+msgstr "Mehr anzeigen"
 
 #: src/iac_code/web/static/js/app.js
 msgid "No context usage recorded yet"
@@ -713,14 +725,6 @@ msgstr "Neuer Chat in {label}"
 #: src/iac_code/web/static/js/app.js
 msgid "Loading..."
 msgstr "Wird geladen..."
-
-#: src/iac_code/web/static/js/app.js
-msgid "Show less"
-msgstr "Weniger anzeigen"
-
-#: src/iac_code/web/static/js/app.js
-msgid "Show more"
-msgstr "Mehr anzeigen"
 
 #: src/iac_code/web/static/js/app.js
 msgid "Expand all sessions"
@@ -1024,6 +1028,7 @@ msgid "Update failed: {error}"
 msgstr "Update fehlgeschlagen: {error}"
 
 #: src/iac_code/web/static/js/app.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
 msgid "Retry"
 msgstr "Wiederholen"
 
@@ -1049,6 +1054,10 @@ msgstr ""
 #, python-brace-format
 msgid "Failed to start update: {error}"
 msgstr "Update konnte nicht gestartet werden: {error}"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Could not open the link. Please try again."
+msgstr "Der Link konnte nicht geöffnet werden. Bitte erneut versuchen."
 
 #: src/iac_code/web/static/js/architecture_diagram.js
 #: src/iac_code/web/static/js/components/output_panel.js
@@ -1252,6 +1261,7 @@ msgid "Additional details"
 msgstr "Weitere Details"
 
 #: src/iac_code/web/static/js/components/blocking.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 msgid "Select"
 msgstr "Auswählen"
 
@@ -1270,6 +1280,7 @@ msgstr "Ablehnen"
 
 #: src/iac_code/web/static/js/components/blocking.js
 #: src/iac_code/web/static/js/components/pipeline.js
+#: src/iac_code/web/static/js/components/resource_link_popover.js
 #: src/iac_code/web/static/js/components/tool_cards.js
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Region"
@@ -1745,6 +1756,115 @@ msgstr "Ergebnis"
 #: src/iac_code/web/static/js/components/pipeline.js
 msgid "No pipeline data."
 msgstr "Keine Pipeline-Daten."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Cloud credentials for this resource are unavailable or have changed."
+msgstr ""
+"Die Cloud-Zugangsdaten für diese Ressource sind nicht verfügbar oder "
+"wurden geändert."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid ""
+"Resource lookup needs permission. Review the permission settings, then "
+"retry."
+msgstr ""
+"Die Ressourcenabfrage erfordert eine Berechtigung. Prüfen Sie die "
+"Berechtigungseinstellungen und versuchen Sie es erneut."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Resource information changed. Reopen the link and try again."
+msgstr ""
+"Die Ressourceninformationen haben sich geändert. Öffnen Sie den Link "
+"erneut und versuchen Sie es noch einmal."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Resource lookup failed. Retry or enter the missing information."
+msgstr ""
+"Die Ressourcenabfrage ist fehlgeschlagen. Versuchen Sie es erneut oder "
+"geben Sie die fehlenden Informationen ein."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid "Resource link"
+msgstr "Ressourcenlink"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid ""
+"This name belonged to a deleted resource. Confirm the current object "
+"before opening it."
+msgstr ""
+"Dieser Name gehörte zu einer gelöschten Ressource. Prüfen Sie das "
+"aktuelle Objekt, bevor Sie es öffnen."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Complete resource context"
+msgstr "Ressourcenkontext ergänzen"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Choose a resource"
+msgstr "Ressource auswählen"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/tool_cards.js
+msgid "Account"
+msgstr "Konto"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Configured credentials (account not verified)"
+msgstr "Konfigurierte Anmeldedaten (Konto nicht verifiziert)"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Use configured cloud credentials"
+msgstr "Konfigurierte Cloud-Anmeldedaten verwenden"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Open console"
+msgstr "Konsole öffnen"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Load missing resource attributes"
+msgstr "Fehlende Ressourcenattribute laden"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Copy name"
+msgstr "Namen kopieren"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Copy ID"
+msgstr "ID kopieren"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "This choice is not saved yet."
+msgstr "Diese Auswahl wurde noch nicht gespeichert."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "This console route has not been verified."
+msgstr "Dieser Konsolenpfad wurde noch nicht überprüft."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Loading credential context..."
+msgstr "Anmeldedatenkontext wird geladen..."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Loading resource attributes..."
+msgstr "Ressourcenattribute werden geladen…"
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+msgid "Resource attributes loaded. Choose a link to open the console."
+msgstr ""
+"Ressourcenattribute geladen. Wählen Sie einen Link, um die Konsole zu "
+"öffnen."
+
+#: src/iac_code/web/static/js/components/resource_link_popover.js
+#: src/iac_code/web/static/js/components/resource_link_preview.js
+msgid ""
+"No cloud credential context is available. Configure credentials, then "
+"retry."
+msgstr ""
+"Kein Cloud-Anmeldedatenkontext verfügbar. Konfigurieren Sie die "
+"Anmeldedaten und versuchen Sie es erneut."
 
 #: src/iac_code/web/static/js/components/tool_cards.js
 msgid "Alibaba Cloud API"
@@ -2610,8 +2730,8 @@ msgid "Stack: {name}"
 msgstr "Stack: {name}"
 
 #: src/iac_code/web/static/js/components/tool_cards.js
-msgid "Account"
-msgstr "Konto"
+msgid "Resource identifier"
+msgstr "Ressourcenkennung"
 
 #: src/iac_code/web/static/js/components/workspace.js
 msgid "Developer"
@@ -4109,6 +4229,163 @@ msgid "The permission mode preset for new sessions."
 msgstr "Der für neue Sitzungen voreingestellte Berechtigungsmodus."
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Embedded console sign-in"
+msgstr "Anmeldung an der eingebetteten Konsole"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Open supported cloud resources here without signing in again."
+msgstr "Unterstützte Cloud-Ressourcen hier ohne erneute Anmeldung öffnen."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save role"
+msgstr "Rolle speichern"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Create read-only role"
+msgstr "Schreibgeschützte Rolle erstellen"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Repair read-only permissions"
+msgstr "Leseberechtigungen reparieren"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Additional read-only permissions (all resources):"
+msgstr "Zusätzliche Leseberechtigungen (alle Ressourcen):"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "RAM role ARN"
+msgstr "ARN der RAM-Rolle"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"With a role configured, supported resources open here; other resources "
+"open in a new tab."
+msgstr ""
+"Mit einer konfigurierten Rolle werden unterstützte Ressourcen hier und "
+"andere in einem neuen Tab geöffnet."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"One-click creation requires RAM write and sts:AssumeRole permissions; "
+"root accounts are not supported."
+msgstr ""
+"Die Ein-Klick-Erstellung erfordert RAM-Schreibberechtigungen und "
+"sts:AssumeRole; Root-Konten werden nicht unterstützt."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"This creates or updates the supplemental policy and attaches it with "
+"ReadOnlyAccess. Existing non-default policy versions may rotate. "
+"Continue?"
+msgstr ""
+"Die ergänzende Richtlinie wird erstellt oder aktualisiert und zusammen "
+"mit ReadOnlyAccess angehängt. Ältere Richtlinienversionen, die nicht als "
+"Standard festgelegt sind, können rotiert werden. Fortfahren?"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The RAM role ARN is invalid."
+msgstr "Die ARN der RAM-Rolle ist ungültig."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Configure Alibaba Cloud credentials first."
+msgstr "Konfigurieren Sie zuerst Alibaba-Cloud-Anmeldedaten."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Alibaba Cloud root accounts cannot assume roles. Use a RAM user or RAM "
+"role credential."
+msgstr ""
+"Alibaba-Cloud-Root-Konten können keine Rollen übernehmen. Verwenden Sie "
+"Anmeldedaten eines RAM-Benutzers oder einer RAM-Rolle."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"A role named IacCodeConsoleSigninRole already exists and was not "
+"modified. Enter its ARN manually."
+msgstr ""
+"Eine Rolle namens IacCodeConsoleSigninRole ist bereits vorhanden und "
+"wurde nicht geändert. Geben Sie ihre ARN manuell ein."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The current identity cannot create the RAM role."
+msgstr "Die aktuelle Identität kann die RAM-Rolle nicht erstellen."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The role was created, but ReadOnlyAccess could not be attached."
+msgstr ""
+"Die Rolle wurde erstellt, ReadOnlyAccess konnte jedoch nicht zugewiesen "
+"werden."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "The current identity cannot assume the configured role."
+msgstr "Die aktuelle Identität kann die konfigurierte Rolle nicht übernehmen."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"RAM role setup timed out. Check the role in the Alibaba Cloud console "
+"before retrying."
+msgstr ""
+"Die Einrichtung der RAM-Rolle hat das Zeitlimit überschritten. Prüfen Sie"
+" die Rolle vor einem erneuten Versuch in der Alibaba-Cloud-Konsole."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"The role or supplemental policy was modified outside iac-code. No "
+"conflicting permissions were overwritten."
+msgstr ""
+"Die Rolle oder ergänzende Richtlinie wurde außerhalb von iac-code "
+"geändert. Widersprüchliche Berechtigungen wurden nicht überschrieben."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Supplemental policy setup failed. Check RAM policy-management permissions"
+" and retry."
+msgstr ""
+"Die ergänzende Richtlinie konnte nicht eingerichtet werden. Prüfen Sie "
+"die Berechtigungen zur Verwaltung von RAM-Richtlinien und versuchen Sie "
+"es erneut."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Could not configure the console sign-in role."
+msgstr "Die Rolle für die Konsolenanmeldung konnte nicht konfiguriert werden."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Role saved. Embedded sign-in will be used when AssumeRole succeeds."
+msgstr ""
+"Rolle gespeichert. Bei erfolgreichem AssumeRole wird die eingebettete "
+"Anmeldung verwendet."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid ""
+"Role configuration cleared. Resource links will use the normal new-tab "
+"behavior."
+msgstr ""
+"Die Rollenkonfiguration wurde gelöscht. Ressourcenlinks werden wieder "
+"normal in einem neuen Tab geöffnet."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Creating and verifying the read-only RAM role…"
+msgstr "Schreibgeschützte RAM-Rolle wird erstellt und geprüft…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only role created and verified."
+msgstr "Schreibgeschützte Rolle wurde erstellt und geprüft."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Save the role before repairing its permissions."
+msgstr "Speichern Sie die Rolle, bevor Sie ihre Berechtigungen reparieren."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Updating and verifying read-only permissions…"
+msgstr "Leseberechtigungen werden aktualisiert und überprüft…"
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only permissions updated. Reopen the resource preview to use them."
+msgstr ""
+"Leseberechtigungen aktualisiert. Öffnen Sie die Ressourcenvorschau "
+"erneut, um sie zu verwenden."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Color scheme"
 msgstr "Farbschema"
 
@@ -4208,6 +4485,16 @@ msgid "Install failed: {error}"
 msgstr "Installation fehlgeschlagen: {error}"
 
 #: src/iac_code/web/static/js/components/workspace.js
+msgid "Read-only permissions need an update. Use the repair button."
+msgstr ""
+"Die Leseberechtigungen müssen aktualisiert werden. Verwenden Sie die "
+"Schaltfläche zum Reparieren."
+
+#: src/iac_code/web/static/js/components/workspace.js
+msgid "Could not load the console sign-in role."
+msgstr "Die Rolle für die Konsolenanmeldung konnte nicht geladen werden."
+
+#: src/iac_code/web/static/js/components/workspace.js
 msgid "Debug options"
 msgstr "Debug-Optionen"
 
@@ -4277,6 +4564,12 @@ msgstr ""
 "Die lokale Laufzeit konnte nicht neu gestartet werden. Öffnen Sie die "
 "Diagnose, um Details anzuzeigen."
 
+msgid "Max output tokens"
+msgstr "Maximale Ausgabe-Tokens"
+
+msgid "Max output tokens per reply; leave blank to use model default"
+msgstr "Maximale Ausgabe-Tokens pro Antwort; leer lassen, um den Modellstandard zu verwenden"
+
 #~ msgid "Completing step: {step}"
 #~ msgstr "Schritt wird abgeschlossen: {step}"
 
@@ -4336,3 +4629,48 @@ msgstr "Der Link konnte nicht geöffnet werden. Bitte erneut versuchen."
 #: src/iac_code/web/static/js/mermaid_render.js
 msgid "Estimated cost"
 msgstr "Geschätzte Kosten"
+
+#~ msgid "Leave blank and save to keep the normal new-tab behavior."
+#~ msgstr ""
+#~ "Leer lassen und speichern, um weiterhin"
+#~ " normal in einem neuen Tab zu "
+#~ "öffnen."
+
+#~ msgid ""
+#~ "One-click creation creates "
+#~ "IacCodeConsoleSigninRole and attaches "
+#~ "ReadOnlyAccess. The current RAM user or"
+#~ " role must have RAM write and "
+#~ "sts:AssumeRole permissions. Alibaba Cloud root"
+#~ " accounts cannot assume roles."
+#~ msgstr ""
+#~ "Die Ein-Klick-Erstellung legt "
+#~ "IacCodeConsoleSigninRole an und weist "
+#~ "ReadOnlyAccess zu. Der aktuelle RAM-"
+#~ "Benutzer bzw. die aktuelle RAM-Rolle "
+#~ "benötigt RAM-Schreibrechte und sts:AssumeRole."
+#~ " Alibaba-Cloud-Root-Konten können "
+#~ "keine Rollen übernehmen."
+
+#~ msgid "Use a dedicated RAM role for embedded sign-in."
+#~ msgstr "Verwenden Sie eine eigene RAM-Rolle für die eingebettete Anmeldung."
+
+#~ msgid ""
+#~ "Only the ARN is saved. STS "
+#~ "credentials stay in memory and refresh"
+#~ " automatically."
+#~ msgstr ""
+#~ "Nur die ARN wird gespeichert. STS-"
+#~ "Anmeldedaten bleiben im Arbeitsspeicher und"
+#~ " werden automatisch erneuert."
+
+#~ msgid "Leave blank to open in a new tab."
+#~ msgstr "Leer lassen, um in einem neuen Tab zu öffnen."
+
+#~ msgid ""
+#~ "Role created, but the current identity"
+#~ " still needs sts:AssumeRole permission."
+#~ msgstr ""
+#~ "Die Rolle wurde erstellt, aber die "
+#~ "aktuelle Identität benötigt noch die "
+#~ "Berechtigung sts:AssumeRole."

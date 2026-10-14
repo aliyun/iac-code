@@ -39,8 +39,8 @@ _ALIYUN_API_CALLED_FINITE_FIELDS = {
     "metadata_source": frozenset({"fresh", "cache", "stale_cache", "explicit_fallback"}),
     "api_style": frozenset({"RPC", "ROA"}),
     "http_method": frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}),
-    "transport": frozenset({"tea", "acs1", "acs3_streaming", "oss_v4_sdk"}),
-    "signature_scheme": frozenset({"acs1", "acs3", "oss_v4"}),
+    "transport": frozenset({"tea", "acs1", "acs3_streaming", "oss_v4_sdk", "ots_sdk"}),
+    "signature_scheme": frozenset({"acs1", "acs3", "oss_v4", "ots_v4"}),
     "endpoint_source": frozenset(
         {"explicit", "override", "location", "catalog_region", "catalog_global", "override_pattern", "error"}
     ),

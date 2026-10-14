@@ -108,6 +108,13 @@ def serialize_business_result(
 ) -> tuple[str, str]:
     """Project a normalized transport response into the reviewed business result."""
     mode = request.response_policy.mode
+    if (
+        contract.transport == "oss_v4_sdk"
+        and contract.product.casefold() == "oss"
+        and contract.version == "2019-05-17"
+        and contract.action in {"DeleteBucket", "ListBuckets"}
+    ):
+        return serialize_oss_bucket_response(response), "json"
     if request.method == "HEAD" or mode == "headers_only":
         return _serialize_headers_only(response.headers), "headers_only_json"
     if response.status == 204:
@@ -125,6 +132,29 @@ def serialize_business_result(
     if mode == "binary":
         return _serialize_binary(body), "binary_base64_json"
     raise ApiContractError("aliyun_response_body_invalid")
+
+
+def serialize_oss_bucket_response(response: NormalizedApiResponse) -> str:
+    headers = {
+        name.casefold(): value for name, value in response.headers.items() if name.casefold() == "x-oss-request-id"
+    }
+    body = response.body
+    if response.status >= 400:
+        body = (
+            {
+                name: value
+                for name, value in body.items()
+                if name in {"Code", "Message", "RequestId", "HostId", "BucketName", "EC"}
+            }
+            if isinstance(body, Mapping)
+            else None
+        )
+    return json.dumps(
+        {"status": response.status, "headers": headers, "body": body},
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    )
 
 
 def build_aliyun_http_metadata(

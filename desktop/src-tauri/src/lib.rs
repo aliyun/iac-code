@@ -563,6 +563,18 @@ pub fn is_bundled_origin(url: &url::Url) -> bool {
             && url.host_str() == Some("tauri.localhost"))
 }
 
+fn is_console_signin_bootstrap_window(url: &url::Url, size: Option<(f64, f64)>) -> bool {
+    let Some((width, height)) = size else {
+        return false;
+    };
+    url.scheme() == "about"
+        && url.path() == "blank"
+        && url.query().is_none()
+        && url.fragment().is_none()
+        && (width - 420.0).abs() <= 1.0
+        && (height - 160.0).abs() <= 1.0
+}
+
 fn monitor_work_areas(app: &tauri::App) -> Vec<MonitorWorkArea> {
     app.available_monitors()
         .unwrap_or_default()
@@ -729,7 +741,13 @@ fn build_main_window(
                 }
                 allowed
             })
-            .on_new_window(move |url, _features| {
+            .on_new_window(move |url, features| {
+                let size = features.size().map(|size| (size.width, size.height));
+                if is_console_signin_bootstrap_window(&url, size) {
+                    // The resource preview opens this short-lived first-party window so the
+                    // federation cookie is established at top level before loading its iframe.
+                    return NewWindowResponse::Allow;
+                }
                 if matches!(url.scheme(), "http" | "https") {
                     let _ = new_window_app.opener().open_url(url.as_str(), None::<&str>);
                 }
@@ -1082,6 +1100,28 @@ mod tests {
             Some("zh".to_string())
         );
         assert_eq!(language_from_values(["C", "POSIX"]), None);
+    }
+
+    #[test]
+    fn desktop_allows_only_the_expected_console_signin_bootstrap_window() {
+        let bootstrap = url::Url::parse("about:blank").expect("parse bootstrap URL");
+        assert!(is_console_signin_bootstrap_window(
+            &bootstrap,
+            Some((420.0, 160.0))
+        ));
+        assert!(!is_console_signin_bootstrap_window(&bootstrap, None));
+        assert!(!is_console_signin_bootstrap_window(
+            &bootstrap,
+            Some((800.0, 600.0))
+        ));
+        assert!(!is_console_signin_bootstrap_window(
+            &url::Url::parse("https://example.com/").expect("parse external URL"),
+            Some((420.0, 160.0))
+        ));
+        assert!(!is_console_signin_bootstrap_window(
+            &url::Url::parse("about:blank#unexpected").expect("parse fragment URL"),
+            Some((420.0, 160.0))
+        ));
     }
 
     #[test]

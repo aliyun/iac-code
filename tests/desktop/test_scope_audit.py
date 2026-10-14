@@ -164,3 +164,20 @@ def test_scope_allowlist_covers_canonical_version_and_packaging_contract() -> No
         "src/iac_code/__init__.py",
         "tests/test_setup_packaging.py",
     } <= allowlist
+
+
+def test_resource_link_shared_paths_are_explicit_and_do_not_admit_neighbor_files():
+    module = _scope_module()
+    entries = [line.strip() for line in module.ALLOWLIST.read_text(encoding="utf-8").splitlines()
+               if line.strip() and not line.startswith("#")]
+    for path in (
+        "src/iac_code/web/resource_signin.py", "src/iac_code/web/static/js/components/resource_link_preview.js",
+        "scripts/web/e2e/resource_link_workflow/runtime.py", "tests/web/test_resource_link_e2e_runner.py",
+    ):
+        assert path in entries
+        assert module._allowed(path, entries)
+    for path in (
+        "src/iac_code/web/unreviewed_feature.py", "scripts/web/e2e/resource_link_workflow/unreviewed.py",
+        "tests/web/test_unreviewed.py",
+    ):
+        assert not module._allowed(path, entries)
