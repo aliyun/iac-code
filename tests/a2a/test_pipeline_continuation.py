@@ -1550,7 +1550,7 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
             event_queue = FakeEventQueue()
             resumed = asyncio.create_task(public_executor.execute(request, event_queue))
             if fault == "seed-identity-change":
-                await asyncio.wait_for(resumed, timeout=10)
+                await resumed
                 runner = case.successor_runner
                 assert model.calls == 2
                 assert runner._execution["active_attempt_id"] == "att_0001"
@@ -1559,9 +1559,9 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
                 return
             model_started = asyncio.create_task(model.entered.wait())
             try:
-                done, _pending = await asyncio.wait(
-                    (resumed, model_started), timeout=10, return_when=asyncio.FIRST_COMPLETED
-                )
+                # Recovery starts a real process and commits durable state;
+                # pytest bounds the IO while an early executor exit still fails.
+                done, _pending = await asyncio.wait((resumed, model_started), return_when=asyncio.FIRST_COMPLETED)
                 assert model_started in done, (
                     _store(pipeline_dir).load().phase,
                     _store(pipeline_dir).load().unsafe_reason,

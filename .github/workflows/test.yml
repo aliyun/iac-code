@@ -194,8 +194,8 @@ jobs:
       - name: Run A2A lifecycle and execution-control tests serially
         # These async lifecycle tests can terminate an xdist worker without a
         # Python traceback on Windows. Execution-control tests also gate real
-        # durable writes, backups, timers, and subprocesses, so run both groups
-        # in the pytest coordinator process.
+        # durable writes, backups, timers, and subprocesses. Permission restart
+        # and pipeline recovery share that IO; run them in the coordinator too.
         run: >-
           uv run pytest
           tests/a2a/test_app.py
@@ -203,6 +203,8 @@ jobs:
           tests/a2a/test_execution_control_regressions.py
           tests/a2a/test_execution_control_review_regressions.py
           tests/a2a/test_permission_execution_control.py
+          tests/a2a/test_permission_prompt_e2e.py
+          tests/a2a/test_pipeline_continuation.py
           -v --no-header
 
       - name: Run A2A execution-control process tests serially
@@ -216,4 +218,6 @@ jobs:
           --ignore=tests/a2a/test_execution_control_regressions.py
           --ignore=tests/a2a/test_execution_control_review_regressions.py
           --ignore=tests/a2a/test_permission_execution_control.py
+          --ignore=tests/a2a/test_permission_prompt_e2e.py
+          --ignore=tests/a2a/test_pipeline_continuation.py
           --ignore=tests/a2a_e2e/test_execution_control_scenarios.py

@@ -17,6 +17,10 @@ from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.services.permission_wait import PermissionWaitCheckpointStore
 from iac_code.services.session_storage import SessionStorage
 
+# Each case starts/restarts real servers and sends several permission replies.
+# Keep one overall watchdog without treating their combined IO as a 30s SLA.
+pytestmark = pytest.mark.timeout(120)
+
 
 def _serve(root: str, port: int) -> None:
     """Only the model and tool are fake; restart kills the actual server process."""

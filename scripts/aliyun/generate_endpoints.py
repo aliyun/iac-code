@@ -83,9 +83,15 @@ def generate(
     unavailable: list[dict[str, str]] = []
     check_date = _fixture_date(openmeta)
     covered = _usable_product_identities(catalog_products, override_products)
+    retired_products = {product.casefold() for product in overrides.get("retired_products", {})}
     for product in sorted(openmeta_products_by_name, key=str.casefold):
         version = openmeta_products_by_name[product]
-        if version is None:
+        if product.casefold() in retired_products:
+            evidence = next(
+                entry for name, entry in overrides["retired_products"].items() if name.casefold() == product.casefold()
+            )
+            unavailable.append({"product": product, "checked_on": evidence["checked_on"], "reason": "service_retired"})
+        elif version is None:
             unavailable.append({"product": product, "checked_on": check_date, "reason": "invalid_default_version"})
         elif product.casefold() not in covered:
             unavailable.append(
@@ -151,6 +157,23 @@ def _load_overrides() -> tuple[Mapping[str, Any], str]:
 
 
 def _validate_overrides(overrides: Mapping[str, Any]) -> tuple[tuple[str, ...], Mapping[str, Any]]:
+    for field, pattern, error in (
+        ("unavailable_regions", _REGION, "invalid unavailable region"),
+        ("retired_products", _IDENTIFIER, "invalid retired product"),
+    ):
+        policies = overrides.get(field, {})
+        if not isinstance(policies, Mapping):
+            raise ValueError(error)
+        identities: set[str] = set()
+        for identity, evidence in policies.items():
+            if not isinstance(identity, str) or pattern.fullmatch(identity) is None:
+                raise ValueError(error)
+            if identity.casefold() in identities:
+                raise ValueError(error)
+            identities.add(identity.casefold())
+            if not isinstance(evidence, Mapping):
+                raise ValueError("missing override evidence")
+            _validate_override_evidence(evidence)
     raw_trusted = overrides.get("trusted_endpoint_suffixes")
     if not isinstance(raw_trusted, list | tuple) or not raw_trusted:
         raise ValueError("invalid trusted endpoint suffix")

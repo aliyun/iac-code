@@ -803,7 +803,7 @@ async def test_config_default_version_endpoint_override_uses_global_public_endpo
     )
 
     assert result.source == "catalog_global"
-    assert result.wire_endpoint == "config.aliyuncs.com"
+    assert result.wire_endpoint == "config.cn-shanghai.aliyuncs.com"
 
 
 @pytest.mark.asyncio
@@ -817,7 +817,23 @@ async def test_config_legacy_version_endpoint_override_uses_global_public_endpoi
     )
 
     assert result.source == "catalog_global"
-    assert result.wire_endpoint == "config.aliyuncs.com"
+    assert result.wire_endpoint == "config.cn-shanghai.aliyuncs.com"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("version", ["2019-01-08", "2020-09-07"])
+async def test_config_client_region_does_not_select_another_account_site(tmp_path: Path, version: str) -> None:
+    resolver = EndpointResolver(cache_dir=tmp_path, location=FakeLocation([]))
+    contract = api_contract(product="Config", version=version, action="ListConfigRules")
+
+    default = await resolver.resolve(contract, "ap-southeast-1", None)
+    international = await resolver.resolve(
+        contract, "ap-southeast-1", None, explicit_endpoint="config.ap-southeast-1.aliyuncs.com"
+    )
+
+    assert default.endpoint == "config.cn-shanghai.aliyuncs.com"
+    assert international.endpoint == "config.ap-southeast-1.aliyuncs.com"
+    assert international.source == "explicit"
 
 
 @pytest.mark.asyncio
@@ -844,8 +860,8 @@ async def test_sls_location_override_uses_lowercase_service_code_and_project_hos
         host_values={"project": "ali-test-project"},
     )
 
-    assert location.calls == [("Sls", "2020-12-30", "cn-hangzhou", "sls", "credential")]
-    assert result.source == "location"
+    assert location.calls == []
+    assert result.source == "override"
     assert result.endpoint == "cn-hangzhou.log.aliyuncs.com"
     assert result.host_template == "{project}.{endpoint}"
     assert (
@@ -874,8 +890,8 @@ async def test_sls_project_level_api_does_not_inherit_project_host_template(tmp_
 
     result = await resolver.resolve(contract, "cn-hangzhou", credential="credential")
 
-    assert location.calls == [("Sls", "2020-12-30", "cn-hangzhou", "sls", "credential")]
-    assert result.source == "location"
+    assert location.calls == []
+    assert result.source == "override"
     assert result.endpoint == "cn-hangzhou.log.aliyuncs.com"
     assert result.host_template is None
     assert HostBindingResolver(("aliyuncs.com",)).bind(contract, result.endpoint, result.host_template, {}) == (
@@ -969,7 +985,7 @@ def test_openmeta_product_snapshot_is_complete_unique_and_fully_audited() -> Non
         override_versions = overrides.get(product, {})
         for version in set(catalog_versions) | set(override_versions):
             effective = merge_endpoint_record(catalog_versions.get(version), override_versions.get(version))
-            if (
+            if product not in {name.casefold() for name in endpoint_overrides.get("retired_products", {})} and (
                 effective.location_service_code
                 or effective.region_overrides
                 or effective.regional
@@ -986,12 +1002,17 @@ def test_openmeta_product_snapshot_is_complete_unique_and_fully_audited() -> Non
     invalid_default_versions = set(identities) - set(valid_default_versions)
     for entry in unavailable:
         assert set(entry) == {"product", "checked_on", "reason"}
-        assert entry["checked_on"] == fixture["fetched_at"].split("T", 1)[0]
-        expected_reason = (
-            "invalid_default_version"
-            if entry["product"].casefold() in invalid_default_versions
-            else "upstream_metadata_unavailable"
-        )
+        retired = endpoint_overrides.get("retired_products", {}).get(entry["product"])
+        if retired is not None:
+            assert entry["checked_on"] == retired["checked_on"]
+            expected_reason = "service_retired"
+        else:
+            assert entry["checked_on"] == fixture["fetched_at"].split("T", 1)[0]
+            expected_reason = (
+                "invalid_default_version"
+                if entry["product"].casefold() in invalid_default_versions
+                else "upstream_metadata_unavailable"
+            )
         assert entry["reason"] == expected_reason
 
     assert report["openmeta_source_url"] == fixture["source_url"]
@@ -1460,7 +1481,9 @@ products:
 @pytest.mark.asyncio
 async def test_location_uses_catalog_service_code_when_it_differs_from_product(tmp_path: Path) -> None:
     location = FakeLocation(["sae.cn-hangzhou.aliyuncs.com"])
-    resolver = EndpointResolver(cache_dir=tmp_path, location=location)
+    overrides = tmp_path / "overrides.yml"
+    overrides.write_text("trusted_endpoint_suffixes: [aliyuncs.com]\nproducts: {}\n", encoding="utf-8")
+    resolver = EndpointResolver(cache_dir=tmp_path, location=location, overrides_path=overrides)
 
     result = await resolver.resolve(
         api_contract(product="sae", version="2019-05-06"),
@@ -1490,8 +1513,8 @@ async def test_empty_location_service_code_skips_location_and_uses_catalog(tmp_p
 @pytest.mark.asyncio
 async def test_endpoint_resolution_falls_back_regional_then_global_and_stable_error(tmp_path: Path) -> None:
     resolver = EndpointResolver(cache_dir=tmp_path, location=FakeLocation([None, None]))
-    regional = await resolver.resolve(api_contract(), "cn-hangzhou", object())
-    assert (regional.endpoint, regional.source) == ("ecs-cn-hangzhou.aliyuncs.com", "catalog_region")
+    regional = await resolver.resolve(api_contract(), "cn-beijing", object())
+    assert (regional.endpoint, regional.source) == ("ecs.cn-beijing.aliyuncs.com", "catalog_region")
     global_result = await resolver.resolve(api_contract(product="ROS", version="2019-09-10"), "cn-test", object())
     assert (global_result.endpoint, global_result.source) == ("ros.aliyuncs.com", "catalog_global")
     with pytest.raises(EndpointResolutionError, match="endpoint_unavailable"):
@@ -1544,11 +1567,11 @@ async def test_location_cache_key_ttls_and_revalidates_hostname_policy(tmp_path:
     assert len(location.calls) == 2
 
     empty_contract = replace(contract, version="2016-04-28")
-    await resolver.resolve(empty_contract, "cn-hangzhou", object())
-    await resolver.resolve(empty_contract, "cn-hangzhou", object())
+    await resolver.resolve(empty_contract, "cn-shanghai", object())
+    await resolver.resolve(empty_contract, "cn-shanghai", object())
     assert len(location.calls) == 3
     clock_value[0] += timedelta(minutes=11)
-    await resolver.resolve(empty_contract, "cn-hangzhou", object())
+    await resolver.resolve(empty_contract, "cn-shanghai", object())
     assert len(location.calls) == 4
 
     resolver._trusted_suffixes = ("aliyunpds.com",)

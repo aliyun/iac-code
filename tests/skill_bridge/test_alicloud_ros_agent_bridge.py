@@ -6110,8 +6110,15 @@ else:
         live_context.with_suffix(".disconnect-again" if again else ".disconnect").touch()
         root = bridge._remote_cli_root(job_id)
         deadline = time.monotonic() + 5
-        while not any(bridge._load_state_json(path).get("ownerPid") is None
-                      for path in root.glob("remote-cli-*.request.json") if path.exists()):
+        while True:
+            # The parser retires old mailboxes under this same lock.
+            with bridge.StateLock(root / ".remote-cli.lock"):
+                reconnect_queued = any(
+                    bridge._load_state_json(path).get("ownerPid") is None
+                    for path in root.glob("remote-cli-*.request.json")
+                )
+            if reconnect_queued:
+                break
             assert time.monotonic() < deadline, "The parser did not queue a reconnect after disconnection."
             time.sleep(0.02)
 
