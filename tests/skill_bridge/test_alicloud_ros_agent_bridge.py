@@ -6135,7 +6135,7 @@ else:
             shutil.copyfile(source, scripts / source.name)
         (scripts.parent / 'config.json').write_text(json.dumps({
             'transport': 'aliyun_cli', 'aliyunCLIExecutionMode': 'remote', 'allowedAgentModes': ['normal'],
-            'managerIdleSeconds': 1, 'enableThinking': True, 'aliyunCLIForwardEnv': ['STAROPS_HIL'], 'debug': True,
+            'managerIdleSeconds': 60, 'enableThinking': True, 'aliyunCLIForwardEnv': ['STAROPS_HIL'], 'debug': True,
         }), encoding='utf-8')
         prompt = workspace / 'prompt.md'
         prompt.write_text('no-anchor', encoding='utf-8')
@@ -6343,6 +6343,11 @@ def test_remote_public_start_command_finishes_without_a_second_follow_command(re
     if foreground.poll() is not None:
         pytest.fail('Start exited before CLI admission: {!r}'.format(foreground.communicate(timeout=1)))
     manager = bridge._load_state_json(bridge._manager_record_path())
+    # Shorten idle expiry only after CLI admission. A loaded Windows caller
+    # can otherwise exceed one second between startup health and /start.
+    # Keep the original busy-work and post-completion shutdown assertions.
+    manager['idleSeconds'] = 1
+    bridge._atomic_json(bridge._manager_record_path(), manager)
     time.sleep(1.3)  # Exceeds both configured manager idle and the foreground observation window.
     assert foreground.poll() is None
     assert bridge._pid_alive(manager['pid'])
