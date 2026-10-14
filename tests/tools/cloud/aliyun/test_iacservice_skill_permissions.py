@@ -2,7 +2,8 @@
 
 The API fixture is the public OpenMeta document retrieved on 2026-10-08 from
 https://api.aliyun.com/meta/v1/products/IaCService/versions/2021-08-06/apis/GetResourceType/api.json?language=ZH_CN.
-Only metadata HTTP is mocked; contract resolution, permission checks and wire encoding are real.
+Metadata HTTP and the final cloud response are mocked; production endpoint resolution,
+contract resolution, permission checks and wire encoding are real.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from iac_code.tools.cloud.aliyun.acs3_transport import NormalizedApiResponse
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi, _runtime_call_shape, _runtime_is_read_only
 from iac_code.tools.cloud.aliyun.api_contract import ApiContractResolver, RequestBuilder
 from iac_code.tools.cloud.aliyun.contract_store import ResolvedContractStore, canonical_input_sha256
-from iac_code.tools.cloud.aliyun.endpoint_resolver import EndpointResolution
+from iac_code.tools.cloud.aliyun.endpoint_resolver import EndpointResolver
 from iac_code.tools.cloud.aliyun.openmeta import OpenMetaClient
 from iac_code.types.permissions import InvocationBinding, PermissionResult, ToolPermissionContext
 
@@ -37,21 +38,15 @@ DOCS_PATH = "/meta/v1/products/IaCService/versions/2021-08-06/api-docs.json"
 class OfflineApiTransport:
     def __init__(self) -> None:
         self.requests = []
+        self.endpoints = []
 
     def prepare(self, **kwargs: Any) -> OfflineApiTransport:
         self.requests.append(kwargs["request"])
+        self.endpoints.append(kwargs["endpoint"])
         return self
 
     async def execute(self, *, budget: Any) -> NormalizedApiResponse:
         return NormalizedApiResponse(200, {}, {"resourceType": "alicloud_vpc"}, "application/json", None, 30)
-
-
-class OfflineEndpointResolver:
-    async def resolve(self, *args: Any, **kwargs: Any) -> EndpointResolution:
-        return EndpointResolution("iac.aliyuncs.com", "catalog_global", None)
-
-    def bind(self, contract: Any, endpoint: str, host_template: Any, host_values: Any) -> str:
-        return endpoint
 
 
 class IacServiceSkillRuntime:
@@ -69,13 +64,14 @@ class IacServiceSkillRuntime:
         self.openmeta = OpenMetaClient(cache_dir=cache_dir, transport=httpx.MockTransport(self.metadata_response))
         self.resolver = ApiContractResolver(self.openmeta)
         self.builder = RequestBuilder()
+        self.endpoint_resolver = EndpointResolver(cache_dir=cache_dir)
         self.clock_value = 100.0
         self.services = SimpleNamespace(
             contract_resolver=self.resolver,
             contract_store=ResolvedContractStore(ttl_seconds=1.0, clock=self.clock),
             request_builder=self.builder,
-            endpoint_resolver=OfflineEndpointResolver(),
-            host_binding_resolver=OfflineEndpointResolver(),
+            endpoint_resolver=self.endpoint_resolver,
+            host_binding_resolver=self.endpoint_resolver.host_binding_resolver,
             transport_router=OfflineApiTransport(),
         )
         self.tool = AliyunApi(services=self.services)
@@ -154,6 +150,36 @@ class IacServiceSkillRuntime:
             "region_id": "cn-hangzhou",
             **changes,
         }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["GetResourceType", "ListProducts", "ListResourceTypes"])
+@pytest.mark.parametrize("region_id", ["cn-hangzhou", "cn-beijing", "ap-southeast-1", "cn-zhangjiakou"])
+async def test_information_queries_use_production_endpoint_in_common_regions(
+    tmp_path: Path, action: str, region_id: str
+) -> None:
+    runtime = IacServiceSkillRuntime(tmp_path / "metadata")
+    tool_input = {
+        "product": "IaCService",
+        "version": "2021-08-06",
+        "action": action,
+        "region_id": region_id,
+        "params": {"resourceType": "alicloud_vpc"} if action == "GetResourceType" else {},
+    }
+    try:
+        permission = await check_tool_permission(runtime.tool, tool_input, runtime.permission_context(tool_input))
+        assert permission.behavior == "allow"
+        context = runtime.execution_context(permission)
+        result = await runtime.tool.execute(tool_input=tool_input, context=context)
+
+        assert not result.is_error, result.content
+        assert context.request_started
+        transport = runtime.services.transport_router
+        assert len(transport.requests) == 1
+        assert transport.endpoints[0].wire_endpoint == "iac.cn-zhangjiakou.aliyuncs.com"
+        assert transport.requests[0].method == "GET"
+    finally:
+        await runtime.openmeta.aclose()
 
 
 @pytest.mark.parametrize("relative_path", SKILL_EXAMPLES)

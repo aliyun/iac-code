@@ -2,6 +2,30 @@ trusted_endpoint_suffixes:
   - aliyuncs.com
   - aliyunpds.com
   - btripopen.alibtrip.com
+unavailable_regions:
+  ap-south-1:
+    source: https://www.alibabacloud.com/zh/notice/notice_on_the_ceasing_operation_of_alibaba_cloud_data_centers_in_australia_and_india_351;
+      https://www.alibabacloud.com/help/en/kms/key-management-service/product-overview/announcement-end-of-service-for-kms-in-the-australia-sydney-and-india-mumbai-regions
+    reason: Alibaba Cloud retired the India Mumbai region on 2024-07-15. Automatic regional discovery and host patterns must
+      not reuse its stale endpoints.
+    checked_on: '2026-10-14'
+  ap-southeast-2:
+    source: https://www.alibabacloud.com/zh/notice/notice_on_the_ceasing_operation_of_alibaba_cloud_data_centers_in_australia_and_india_351;
+      https://www.alibabacloud.com/help/en/kms/key-management-service/product-overview/announcement-end-of-service-for-kms-in-the-australia-sydney-and-india-mumbai-regions
+    reason: Alibaba Cloud retired the Australia Sydney region on 2024-09-30. Automatic regional discovery and host patterns
+      must not reuse its stale endpoints.
+    checked_on: '2026-10-14'
+retired_products:
+  Ddi:
+    source: https://cn.aliyun.com/notice/114731
+    reason: The official Databricks DataInsight discontinuation notice retires this product; its old API endpoint records
+      cannot establish service availability.
+    checked_on: '2026-10-14'
+  openanalytics-open:
+    source: https://help.aliyun.com/zh/analyticdb/analyticdb-for-mysql/user-guide/cloud-native-data-lake-analysis-dla
+    reason: The official DLA product page announces service retirement on 2025-10-31. Historical endpoint metadata must not
+      be selected automatically.
+    checked_on: '2026-10-14'
 products:
   AccessAnalyzer:
     "2024-02-01":
@@ -201,21 +225,25 @@ products:
       global: null
       host_template: null
   Config:
-    "2019-01-08":
-      source: "official global OpenAPI endpoint compatibility review"
-      reason: Product uses a global endpoint and should skip Location/regional guessing.
-      checked_on: "2026-07-15"
+    '2019-01-08':
+      source: official global OpenAPI endpoint compatibility review; https://api.aliyun.com/meta/v1/products/Config/versions/2019-01-08/api-docs.json;
+        https://help.aliyun.com/en/document_detail/2402069.html; https://help.aliyun.com/document_detail/169572.html
+      reason: Official integration documentation selects endpoints by the account site, independently of the client or resource
+        region. Preserve the China-site default through the documented Shanghai endpoint; International-site callers provide
+        their documented Singapore endpoint explicitly.
+      checked_on: '2026-10-14'
       location_service_code: null
-      regions: {}
-      global: config.aliyuncs.com
+      global: config.cn-shanghai.aliyuncs.com
       host_template: null
-    "2020-09-07":
-      source: "official global OpenAPI endpoint compatibility review"
-      reason: Product uses a global endpoint and should skip Location/regional guessing.
-      checked_on: "2026-07-15"
+    '2020-09-07':
+      source: official global OpenAPI endpoint compatibility review; https://api.aliyun.com/meta/v1/products/Config/versions/2020-09-07/api-docs.json;
+        https://help.aliyun.com/en/document_detail/2402069.html; https://help.aliyun.com/document_detail/169572.html
+      reason: Official integration documentation selects endpoints by the account site, independently of the client or resource
+        region. Preserve the China-site default through the documented Shanghai endpoint; International-site callers provide
+        their documented Singapore endpoint explicitly.
+      checked_on: '2026-10-14'
       location_service_code: null
-      regions: {}
-      global: config.aliyuncs.com
+      global: config.cn-shanghai.aliyuncs.com
       host_template: null
   Chatbot:
     "2022-04-08":
@@ -320,22 +348,60 @@ products:
       global: null
       host_template: null
   Sls:
-    "2019-10-23":
-      source: "official aliyun-python-sdk-sls 1.1.2 endpoint policy and live CommonRequest validation on 2026-07-18"
-      reason: This historical SLS RPC surface uses the central sls.aliyuncs.com endpoint; it must not inherit the project-bound SLS 2020 endpoint contract.
-      checked_on: "2026-07-18"
+    '2019-10-23':
+      source: official aliyun-python-sdk-sls 1.1.2 endpoint policy and live CommonRequest validation on 2026-07-18
+      reason: This historical SLS RPC surface uses the central sls.aliyuncs.com endpoint; it must not inherit the project-bound
+        SLS 2020 endpoint contract.
+      checked_on: '2026-07-18'
       location_service_code: null
       regions: {}
       global: sls.aliyuncs.com
       host_template: null
-    "2020-12-30":
-      source: "official SLS endpoint contract compatibility review"
-      reason: SLS project-level APIs require Location service resolution plus project host binding.
-      checked_on: "2026-07-15"
+    '2020-12-30':
+      source: official SLS endpoint contract compatibility review; https://api.aliyun.com/meta/v1/products/Sls/versions/2020-12-30/api-docs.json?language=ZH_CN
+      reason: SLS project-level APIs require Location service resolution plus project host binding. Reviewed exact-version official
+        public endpoint metadata and DNS correct stale regional routes and supply documented regional fallback when Location
+        discovery is unavailable.
+      checked_on: '2026-10-14'
       location_service_code: sls
-      regions: {}
+      regions:
+        ap-southeast-8: ap-southeast-8.log.aliyuncs.com
+        cn-qingdao: cn-qingdao.log.aliyuncs.com
+        cn-beijing: cn-beijing.log.aliyuncs.com
+        cn-zhangjiakou: cn-zhangjiakou.log.aliyuncs.com
+        cn-huhehaote: cn-huhehaote.log.aliyuncs.com
+        cn-wulanchabu: cn-wulanchabu.log.aliyuncs.com
+        cn-hangzhou: cn-hangzhou.log.aliyuncs.com
+        cn-shanghai: cn-shanghai.log.aliyuncs.com
+        cn-nanjing: cn-nanjing.log.aliyuncs.com
+        cn-fuzhou: cn-fuzhou.log.aliyuncs.com
+        cn-shenzhen: cn-shenzhen.log.aliyuncs.com
+        cn-heyuan: cn-heyuan.log.aliyuncs.com
+        cn-guangzhou: cn-guangzhou.log.aliyuncs.com
+        cn-chengdu: cn-chengdu.log.aliyuncs.com
+        cn-hongkong: cn-hongkong.log.aliyuncs.com
+        ap-northeast-1: ap-northeast-1.log.aliyuncs.com
+        ap-northeast-2: ap-northeast-2.log.aliyuncs.com
+        ap-southeast-1: ap-southeast-1.log.aliyuncs.com
+        ap-southeast-3: ap-southeast-3.log.aliyuncs.com
+        ap-southeast-5: ap-southeast-5.log.aliyuncs.com
+        ap-southeast-6: ap-southeast-6.log.aliyuncs.com
+        ap-southeast-7: ap-southeast-7.log.aliyuncs.com
+        us-east-1: us-east-1.log.aliyuncs.com
+        us-west-1: us-west-1.log.aliyuncs.com
+        eu-west-1: eu-west-1.log.aliyuncs.com
+        eu-central-1: eu-central-1.log.aliyuncs.com
+        us-southeast-1: us-southeast-1.log.aliyuncs.com
+        sa-east-1: sa-east-1.log.aliyuncs.com
+        me-east-1: me-east-1.log.aliyuncs.com
+        me-central-1: me-central-1.log.aliyuncs.com
+        cn-hangzhou-finance: cn-hangzhou-finance.log.aliyuncs.com
+        cn-shanghai-finance-1: cn-shanghai-finance-1.log.aliyuncs.com
+        cn-shenzhen-finance-1: cn-shenzhen-finance-1.log.aliyuncs.com
+        cn-beijing-finance-1: cn-beijing-finance-1.log.aliyuncs.com
+        cn-heyuan-acdr-1: cn-heyuan-acdr-1-intranet.log.aliyuncs.com
       global: null
-      host_template: "{project}.{endpoint}"
+      host_template: '{project}.{endpoint}'
   SMQProxy:
     "2026-04-09":
       source: "official MNS endpoint contract and live account-scoped MNS validation on 2026-07-18"
@@ -447,3 +513,1538 @@ products:
       reason: OSS APIs require bucket host binding and the regional OSS endpoint form.
       checked_on: "2026-07-15"
       host_template: "{bucket}.{endpoint}"
+  acc:
+    '2024-04-02':
+      source: https://api.aliyun.com/meta/v1/products/acc/versions/2024-04-02/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-qingdao: acc.cn-qingdao.aliyuncs.com
+        cn-zhangjiakou: acc.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-1: acc.ap-northeast-1.aliyuncs.com
+        ap-southeast-8: acc.ap-southeast-8.aliyuncs.com
+  ADBAI:
+    '2025-08-12':
+      source: https://api.aliyun.com/meta/v1/products/ADBAI/versions/2025-08-12/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-northeast-1: adbai.ap-northeast-1.aliyuncs.com
+        ap-southeast-1: adbai.ap-southeast-1.aliyuncs.com
+        cn-guangzhou: adbai.cn-guangzhou.aliyuncs.com
+        cn-wulanchabu: adbai.cn-wulanchabu.aliyuncs.com
+        cn-hongkong: adbai.cn-hongkong.aliyuncs.com
+        us-west-1: adbai.us-west-1.aliyuncs.com
+  AIWorkSpace:
+    '2021-02-04':
+      source: https://api.aliyun.com/meta/v1/products/AIWorkSpace/versions/2021-02-04/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-shanghai: aiworkspace.cn-shanghai.aliyuncs.com
+        cn-guangzhou: aiworkspace.cn-guangzhou.aliyuncs.com
+        ap-southeast-8: aiworkspace.ap-southeast-8.aliyuncs.com
+        ap-southeast-7: aiworkspace.ap-southeast-7.aliyuncs.com
+        ap-northeast-2: aiworkspace.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: aiworkspace.ap-northeast-1.aliyuncs.com
+        eu-central-1: aiworkspace.eu-central-1.aliyuncs.com
+        na-south-1: aiworkspace.na-south-1.aliyuncs.com
+        us-east-1: aiworkspace.us-east-1.aliyuncs.com
+        us-southeast-1: aiworkspace.us-southeast-1.aliyuncs.com
+        us-west-1: aiworkspace.us-west-1.aliyuncs.com
+        me-east-1: aiworkspace.me-east-1.aliyuncs.com
+        cn-shanghai-finance-1: aiworkspace.cn-shanghai-finance-1.aliyuncs.com
+  antiddos-public:
+    '2017-05-18':
+      source: https://api.aliyun.com/meta/v1/products/antiddos-public/versions/2017-05-18/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-7: antiddos-openapi.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: antiddos-openapi.ap-southeast-8.aliyuncs.com
+        cn-fuzhou: antiddos-openapi.cn-hangzhou-cloudstone.aliyuncs.com
+        cn-wuhan-lr: antiddos-openapi.cn-hangzhou-cloudstone.aliyuncs.com
+        cn-zhengzhou-jva: antiddos-openapi.cn-zhengzhou-jva.aliyuncs.com
+        cn-zhongwei: antiddos-openapi.cn-zhongwei.aliyuncs.com
+        us-southeast-1: antiddos-openapi.us-southeast-1.aliyuncs.com
+        sa-east-1: antiddos-openapi.sa-east-1.aliyuncs.com
+        na-south-1: antiddos-openapi.na-south-1.aliyuncs.com
+        eu-west-3: antiddos-openapi.eu-west-3.aliyuncs.com
+        eu-west-2: antiddos-openapi.eu-west-2.aliyuncs.com
+        me-central-1: antiddos-openapi.me-central-1.aliyuncs.com
+  ARMS:
+    '2019-08-08':
+      source: https://api.aliyun.com/meta/v1/products/ARMS/versions/2019-08-08/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: arms.cn-wulanchabu.aliyuncs.com
+        cn-zhengzhou-jva: arms.cn-zhengzhou-jva.aliyuncs.com
+        cn-heyuan: arms.cn-heyuan.aliyuncs.com
+        cn-zhangjiakou: arms.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-2: arms.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: arms.ap-northeast-1.aliyuncs.com
+        cn-chengdu: arms.cn-chengdu.aliyuncs.com
+        cn-guangzhou: arms.cn-guangzhou.aliyuncs.com
+        ap-southeast-3: arms.ap-southeast-3.aliyuncs.com
+        cn-huhehaote: arms.cn-huhehaote.aliyuncs.com
+        ap-southeast-5: arms.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: arms.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: arms.ap-southeast-7.aliyuncs.com
+        us-east-1: arms.us-east-1.aliyuncs.com
+        eu-west-1: arms.eu-west-1.aliyuncs.com
+        eu-central-1: arms.eu-central-1.aliyuncs.com
+        us-west-1: arms.us-west-1.aliyuncs.com
+        me-east-1: arms.aliyuncs.com
+        me-central-1: arms.me-central-1.aliyuncs.com
+        cn-hangzhou-finance: arms.cn-hangzhou-finance.aliyuncs.com
+        cn-heyuan-acdr-1: arms.cn-heyuan-acdr-1.aliyuncs.com
+        cn-shenzhen-finance-1: arms.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: arms.aliyuncs.com
+        cn-shanghai-finance-1: arms.cn-shanghai-finance-1.aliyuncs.com
+  clickhouse:
+    '2023-05-22':
+      source: https://api.aliyun.com/meta/v1/products/clickhouse/versions/2023-05-22/api-docs.json; https://help.aliyun.com/zh/clickhouse/developer-reference/api-clickhouse-2023-05-22-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-3: clickhouse.aliyuncs.com
+        cn-wulanchabu: clickhouse.cn-wulanchabu.aliyuncs.com
+        cn-beijing: clickhouse.cn-beijing.aliyuncs.com
+        cn-qingdao: clickhouse.cn-qingdao.aliyuncs.com
+        cn-shanghai: clickhouse.cn-shanghai.aliyuncs.com
+        cn-hongkong: clickhouse.cn-hongkong.aliyuncs.com
+        cn-shenzhen: clickhouse.cn-shenzhen.aliyuncs.com
+        cn-guangzhou: clickhouse.cn-guangzhou.aliyuncs.com
+        ap-southeast-1: clickhouse.ap-southeast-1.aliyuncs.com
+        ap-southeast-6: clickhouse.ap-southeast-6.aliyuncs.com
+        ap-southeast-8: clickhouse.ap-southeast-8.aliyuncs.com
+        us-southeast-1: clickhouse.us-southeast-1.aliyuncs.com
+        na-south-1: clickhouse.na-south-1.aliyuncs.com
+        us-west-1: clickhouse.us-west-1.aliyuncs.com
+        us-east-1: clickhouse.us-east-1.aliyuncs.com
+        me-central-1: clickhouse.me-central-1.aliyuncs.com
+        cn-wulanchabu-gic-1: clickhouse.cn-wulanchabu-gic-1.aliyuncs.com
+        cn-shanghai-finance-1: clickhouse.cn-shanghai-finance-1.aliyuncs.com
+  Cloudfw:
+    '2017-12-07':
+      source: https://api.aliyun.com/meta/v1/products/Cloudfw/versions/2017-12-07/api-docs.json; https://help.aliyun.com/en/cloud-firewall/cloudfirewall/developer-reference/api-cloudfw-2017-12-07-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-3: cloudfw.ap-southeast-1.aliyuncs.com
+  DAS:
+    '2020-01-16':
+      source: https://api.aliyun.com/meta/v1/products/DAS/versions/2020-01-16/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-north-2-gov-1: das.aliyuncs.com
+  dataworks-public:
+    '2024-05-18':
+      source: https://api.aliyun.com/meta/v1/products/dataworks-public/versions/2024-05-18/api-docs.json; https://help.aliyun.com/zh/dataworks/developer-reference/api-dataworks-public-2024-05-18-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: dataworks.cn-wulanchabu.aliyuncs.com
+        ap-northeast-2: dataworks.ap-northeast-2.aliyuncs.com
+        cn-hangzhou-finance: dataworks.cn-hangzhou-finance.aliyuncs.com
+  Dbs:
+    '2019-03-06':
+      source: https://api.aliyun.com/meta/v1/products/Dbs/versions/2019-03-06/api-docs.json; https://help.aliyun.com/zh/dms/developer-reference/api-dbs-2019-03-06-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: dbs-api.cn-wulanchabu.aliyuncs.com
+        cn-guangzhou: dbs-api.cn-guangzhou.aliyuncs.com
+  ddosbgp:
+    '2018-07-20':
+      source: https://api.aliyun.com/meta/v1/products/ddosbgp/versions/2018-07-20/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhangjiakou: ddosbgp.aliyuncs.com
+        cn-shenzhen: ddosbgp.aliyuncs.com
+        cn-shanghai: ddosbgp.aliyuncs.com
+        cn-qingdao: ddosbgp.aliyuncs.com
+        cn-huhehaote: ddosbgp.aliyuncs.com
+        cn-chengdu: ddosbgp.aliyuncs.com
+        cn-beijing: ddosbgp.aliyuncs.com
+        ap-southeast-5: ddosbgp.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: ddosbgp.ap-southeast-1.aliyuncs.com
+        ap-northeast-1: ddosbgp.ap-southeast-1.aliyuncs.com
+        eu-central-1: ddosbgp.ap-southeast-1.aliyuncs.com
+        eu-west-1: ddosbgp.ap-southeast-1.aliyuncs.com
+        me-east-1: ddosbgp.ap-southeast-1.aliyuncs.com
+        cn-hangzhou-finance: ddosbgp.aliyuncs.com
+        cn-north-2-gov-1: ddosbgp.aliyuncs.com
+        cn-shanghai-finance-1: ddosbgp.aliyuncs.com
+        cn-shenzhen-finance-1: ddosbgp.aliyuncs.com
+  Dds:
+    '2015-12-01':
+      source: https://api.aliyun.com/meta/v1/products/Dds/versions/2015-12-01/api-docs.json; https://help.aliyun.com/zh/mongodb/developer-reference/api-dds-2015-12-01-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhongwei: mongodb.cn-zhongwei.aliyuncs.com
+        cn-wulanchabu: mongodb.cn-wulanchabu.aliyuncs.com
+        cn-beijing: mongodb.cn-beijing.aliyuncs.com
+        cn-zhengzhou-jva: mongodb.cn-zhengzhou-jva.aliyuncs.com
+        cn-qingdao: mongodb.cn-qingdao.aliyuncs.com
+        cn-wuhan-lr: mongodb.cn-wuhan-lr.aliyuncs.com
+        cn-shanghai: mongodb.cn-shanghai.aliyuncs.com
+        cn-hongkong: mongodb.cn-hongkong.aliyuncs.com
+        cn-heyuan: mongodb.cn-heyuan.aliyuncs.com
+        cn-zhangjiakou: mongodb.cn-zhangjiakou.aliyuncs.com
+        cn-shenzhen: mongodb.cn-shenzhen.aliyuncs.com
+        cn-nanjing: mongodb.cn-nanjing.aliyuncs.com
+        ap-northeast-2: mongodb.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: mongodb.ap-northeast-1.aliyuncs.com
+        cn-fuzhou: mongodb.cn-fuzhou.aliyuncs.com
+        cn-chengdu: mongodb.cn-chengdu.aliyuncs.com
+        cn-guangzhou: mongodb.cn-guangzhou.aliyuncs.com
+        ap-southeast-1: mongodb.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: mongodb.ap-southeast-3.aliyuncs.com
+        cn-huhehaote: mongodb.cn-huhehaote.aliyuncs.com
+        ap-southeast-5: mongodb.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: mongodb.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: mongodb.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: mongodb.ap-southeast-8.aliyuncs.com
+        us-east-1: mongodb.us-east-1.aliyuncs.com
+        us-southeast-1: mongodb.us-southeast-1.aliyuncs.com
+        eu-west-1: mongodb.eu-west-1.aliyuncs.com
+        us-west-1: mongodb.us-west-1.aliyuncs.com
+        eu-central-1: mongodb.eu-central-1.aliyuncs.com
+        na-south-1: mongodb.na-south-1.aliyuncs.com
+        me-east-1: mongodb.me-east-1.aliyuncs.com
+        me-central-1: mongodb.me-central-1.aliyuncs.com
+        cn-shenzhen-finance-1: mongodb.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: mongodb.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: mongodb.cn-shanghai-finance-1.aliyuncs.com
+        cn-wulanchabu-gic-1: mongodb.cn-wulanchabu-gic-1.aliyuncs.com
+        cn-north-2-gov-1: mongodb.cn-north-2-gov-1.aliyuncs.com
+  DlfNext:
+    '2025-03-10':
+      source: https://api.aliyun.com/meta/v1/products/DlfNext/versions/2025-03-10/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-3: dlfnext.ap-southeast-3.aliyuncs.com
+  Dm:
+    '2015-11-23':
+      source: https://api.aliyun.com/meta/v1/products/Dm/versions/2015-11-23/api-docs.json; https://help.aliyun.com/zh/direct-mail/api-endpoints
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        us-east-1: dm.us-east-1.aliyuncs.com
+        eu-central-1: dm.eu-central-1.aliyuncs.com
+  Dms:
+    '2025-04-14':
+      source: https://api.aliyun.com/meta/v1/products/Dms/versions/2025-04-14/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        us-west-1: dms.us-west-1.aliyuncs.com
+        us-east-1: dms.us-east-1.aliyuncs.com
+  DocumentParseService:
+    '2026-04-14':
+      source: https://api.aliyun.com/meta/v1/products/DocumentParseService/versions/2026-04-14/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: documentparseservice.cn-beijing.aliyuncs.com
+  Drds:
+    '2019-01-23':
+      source: https://api.aliyun.com/meta/v1/products/Drds/versions/2019-01-23/api-docs.json; https://help.aliyun.com/zh/polardb/api-drds-2019-01-23-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: drds.cn-beijing.aliyuncs.com
+        cn-qingdao: drds.cn-qingdao.aliyuncs.com
+        cn-shanghai: drds.cn-shanghai.aliyuncs.com
+        cn-hongkong: drds.cn-hongkong.aliyuncs.com
+        cn-zhangjiakou: drds.cn-zhangjiakou.aliyuncs.com
+        cn-shenzhen: drds.cn-shenzhen.aliyuncs.com
+        ap-northeast-1: drds.ap-southeast-1.aliyuncs.com
+        ap-southeast-1: drds.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: drds.ap-southeast-1.aliyuncs.com
+        cn-huhehaote: drds.cn-huhehaote.aliyuncs.com
+        ap-southeast-5: drds.ap-southeast-1.aliyuncs.com
+        cn-hangzhou: drds.cn-hangzhou.aliyuncs.com
+        us-east-1: drds.us-east-1.aliyuncs.com
+        eu-west-1: drds.ap-southeast-1.aliyuncs.com
+        us-west-1: drds.ap-southeast-1.aliyuncs.com
+        eu-central-1: drds.ap-southeast-1.aliyuncs.com
+        me-east-1: drds.ap-southeast-1.aliyuncs.com
+        cn-shenzhen-finance-1: drds.cn-shenzhen-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: drds.cn-shanghai-finance-1.aliyuncs.com
+        cn-north-2-gov-1: drds.cn-north-2-gov-1.aliyuncs.com
+  eas:
+    '2021-07-01':
+      source: https://api.aliyun.com/meta/v1/products/eas/versions/2021-07-01/api-docs.json; https://help.aliyun.com/zh/pai/developer-reference/api-eas-2021-07-01-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhongwei: pai-eas.cn-zhongwei.aliyuncs.com
+        ap-northeast-2: pai-eas.ap-northeast-2.aliyuncs.com
+        ap-southeast-3: pai-eas.ap-southeast-3.aliyuncs.com
+        ap-southeast-7: pai-eas.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: pai-eas.ap-southeast-8.aliyuncs.com
+        us-southeast-1: pai-eas.us-southeast-1.aliyuncs.com
+        na-south-1: pai-eas.na-south-1.aliyuncs.com
+        me-east-1: pai-eas.me-east-1.aliyuncs.com
+        me-central-1: pai-eas.me-central-1.aliyuncs.com
+        cn-shanghai-finance-1: pai-eas.cn-shanghai-finance-1.aliyuncs.com
+  ebs:
+    '2021-07-30':
+      source: https://api.aliyun.com/meta/v1/products/ebs/versions/2021-07-30/api-docs.json; https://help.aliyun.com/zh/ecs/developer-reference/api-ebs-2021-07-30-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhengzhou-jva: ebs.cn-zhengzhou-jva.aliyuncs.com
+        cn-wuhan-lr: ebs.cn-wuhan-lr.aliyuncs.com
+        us-southeast-1: ebs.us-southeast-1.aliyuncs.com
+        na-south-1: ebs.na-south-1.aliyuncs.com
+        me-east-1: ebs.me-east-1.aliyuncs.com
+        cn-hangzhou-finance: ebs.cn-hangzhou-finance.aliyuncs.com
+        cn-shenzhen-finance-1: ebs.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: ebs.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: ebs.cn-shanghai-finance-1.aliyuncs.com
+  ecd:
+    '2020-09-30':
+      source: https://api.aliyun.com/meta/v1/products/ecd/versions/2020-09-30/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        us-east-1: ecd.us-east-1.aliyuncs.com
+  Ecs:
+    '2014-05-26':
+      source: https://api.aliyun.com/meta/v1/products/Ecs/versions/2014-05-26/api-docs.json; https://help.aliyun.com/en/ecs/developer-reference/api-ecs-2014-05-26-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-hangzhou: ecs.cn-hangzhou.aliyuncs.com
+        us-east-1: ecs.us-east-1.aliyuncs.com
+        us-west-1: ecs.us-west-1.aliyuncs.com
+  Edas:
+    '2017-08-01':
+      source: https://api.aliyun.com/meta/v1/products/Edas/versions/2017-08-01/api-docs.json; https://help.aliyun.com/zh/edas/developer-reference/api-edas-2017-08-01-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-northeast-1: edas.ap-northeast-1.aliyuncs.com
+        ap-southeast-1: edas.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: edas.ap-northeast-1.aliyuncs.com
+        ap-southeast-5: edas.ap-northeast-1.aliyuncs.com
+        cn-beijing: edas.cn-beijing.aliyuncs.com
+        cn-hangzhou: edas.cn-hangzhou.aliyuncs.com
+        cn-hongkong: edas.cn-hongkong.aliyuncs.com
+        cn-qingdao: edas.cn-qingdao.aliyuncs.com
+        cn-shanghai: edas.cn-shanghai.aliyuncs.com
+        cn-shenzhen: edas.cn-shenzhen.aliyuncs.com
+        cn-zhangjiakou: edas.cn-zhangjiakou.aliyuncs.com
+        us-west-1: edas.ap-northeast-1.aliyuncs.com
+        us-east-1: edas.us-east-1.aliyuncs.com
+        eu-west-1: edas.ap-northeast-1.aliyuncs.com
+        eu-central-1: edas.eu-central-1.aliyuncs.com
+        me-east-1: edas.ap-northeast-1.aliyuncs.com
+        cn-north-2-gov-1: edas.cn-north-2-gov-1.aliyuncs.com
+  eflo:
+    '2022-05-30':
+      source: https://api.aliyun.com/meta/v1/products/eflo/versions/2022-05-30/api-docs.json; https://help.aliyun.com/zh/intelligent-computing-lingjun/api-eflo-2022-05-30-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhongwei: eflo.cn-zhongwei.aliyuncs.com
+        cn-beijing: eflo.cn-beijing.aliyuncs.com
+        cn-hongkong: eflo.cn-hongkong.aliyuncs.com
+        cn-zhangjiakou: eflo.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-1: eflo.ap-northeast-1.aliyuncs.com
+        cn-guangzhou: eflo.cn-guangzhou.aliyuncs.com
+        ap-southeast-3: eflo.ap-southeast-3.aliyuncs.com
+        cn-huhehaote: eflo.cn-huhehaote.aliyuncs.com
+        ap-southeast-7: eflo.ap-southeast-7.aliyuncs.com
+        cn-hangzhou: eflo.cn-hangzhou.aliyuncs.com
+        ap-southeast-8: eflo.ap-southeast-8.aliyuncs.com
+        us-southeast-1: eflo.us-southeast-1.aliyuncs.com
+        eu-central-1: eflo.eu-central-1.aliyuncs.com
+        me-east-1: eflo.me-east-1.aliyuncs.com
+        cn-shanghai-finance-1: eflo.cn-shanghai-finance-1.aliyuncs.com
+        cn-north-2-gov-1: eflo.cn-north-2-gov-1.aliyuncs.com
+  eflo-controller:
+    '2022-12-15':
+      source: https://api.aliyun.com/meta/v1/products/eflo-controller/versions/2022-12-15/api-docs.json; https://help.aliyun.com/zh/intelligent-computing-lingjun/api-eflo-controller-2022-12-15-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: eflo-controller.cn-beijing.aliyuncs.com
+        cn-hongkong: eflo-controller.cn-hongkong.aliyuncs.com
+        cn-zhangjiakou: eflo-controller.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-1: eflo-controller.ap-northeast-1.aliyuncs.com
+        cn-guangzhou: eflo-controller.cn-guangzhou.aliyuncs.com
+        ap-southeast-3: eflo-controller.ap-southeast-3.aliyuncs.com
+        cn-huhehaote: eflo-controller.cn-huhehaote.aliyuncs.com
+        ap-southeast-7: eflo-controller.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: eflo-controller.ap-southeast-8.aliyuncs.com
+        eu-central-1: eflo-controller.eu-central-1.aliyuncs.com
+        me-east-1: eflo-controller.me-east-1.aliyuncs.com
+  eventbridge:
+    '2020-04-01':
+      source: https://api.aliyun.com/meta/v1/products/eventbridge/versions/2020-04-01/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-shenzhen-finance-1: eventbridge-console.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: eventbridge-console.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: eventbridge-console.cn-shanghai-finance-1.aliyuncs.com
+  FC:
+    '2023-03-30':
+      source: https://api.aliyun.com/meta/v1/products/FC/versions/2023-03-30/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-northeast-2: fcv3.ap-northeast-2.aliyuncs.com
+        cn-wulanchabu: fcv3.cn-wulanchabu.aliyuncs.com
+  FC-Open:
+    '2021-04-06':
+      source: https://api.aliyun.com/meta/v1/products/FC-Open/versions/2021-04-06/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-northeast-2: fc.ap-northeast-2.aliyuncs.com
+        ap-southeast-7: fc.ap-southeast-7.aliyuncs.com
+        cn-hangzhou-finance: account-id.cn-hangzhou-finance.fc.aliyuncs.com
+  fnf:
+    '2019-03-15':
+      source: https://api.aliyun.com/meta/v1/products/fnf/versions/2019-03-15/api-docs.json; https://help.aliyun.com/zh/document_detail/2782151.html
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-1: ap-southeast-1.fnf.aliyuncs.com
+        cn-beijing: cn-beijing.fnf.aliyuncs.com
+        cn-hangzhou: cn-hangzhou.fnf.aliyuncs.com
+        cn-qingdao: cn-qingdao.fnf.aliyuncs.com
+        cn-shanghai: cn-shanghai.fnf.aliyuncs.com
+        cn-shenzhen: cn-shenzhen.fnf.aliyuncs.com
+        us-west-1: us-west-1.fnf.aliyuncs.com
+  foasconsole:
+    '2021-10-28':
+      source: https://api.aliyun.com/meta/v1/products/foasconsole/versions/2021-10-28/api-docs.json; https://help.aliyun.com/zh/flink/realtime-flink/developer-reference/api-foasconsole-2021-10-28-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: foasconsole.cn-wulanchabu.aliyuncs.com
+        cn-beijing: foasconsole.cn-beijing.aliyuncs.com
+        cn-qingdao: foasconsole.cn-qingdao.aliyuncs.com
+        cn-shanghai: foasconsole.cn-shanghai.aliyuncs.com
+        cn-hongkong: foasconsole.cn-hongkong.aliyuncs.com
+        cn-zhangjiakou: foasconsole.cn-zhangjiakou.aliyuncs.com
+        cn-shenzhen: foasconsole.cn-shenzhen.aliyuncs.com
+        ap-northeast-1: foasconsole.ap-northeast-1.aliyuncs.com
+        ap-southeast-1: foasconsole.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: foasconsole.ap-southeast-3.aliyuncs.com
+        ap-southeast-5: foasconsole.ap-southeast-5.aliyuncs.com
+        cn-hangzhou: foasconsole.cn-hangzhou.aliyuncs.com
+        us-east-1: foasconsole.us-east-1.aliyuncs.com
+        eu-west-1: foasconsole.eu-west-1.aliyuncs.com
+        us-west-1: foasconsole.us-west-1.aliyuncs.com
+        eu-central-1: foasconsole.eu-central-1.aliyuncs.com
+        cn-shenzhen-finance-1: foasconsole.cn-shenzhen-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: foasconsole.cn-shanghai-finance-1.aliyuncs.com
+  GEMP:
+    '2021-04-13':
+      source: https://api.aliyun.com/meta/v1/products/GEMP/versions/2021-04-13/api-docs.json; https://help.aliyun.com/zh/oic/call-method;
+        https://help.aliyun.com/zh/oic/common-request-and-response-headers
+      reason: Official call-method documentation requires the Shanghai endpoint for every client region because the service
+        is only deployed in Shanghai.
+      checked_on: '2026-10-14'
+      global: gemp.cn-shanghai.aliyuncs.com
+  gpdb:
+    '2016-05-03':
+      source: https://api.aliyun.com/meta/v1/products/gpdb/versions/2016-05-03/api-docs.json; https://help.aliyun.com/zh/analyticdb/analyticdb-for-postgresql/developer-reference/api-gpdb-2016-05-03-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: gpdb.cn-wulanchabu.aliyuncs.com
+        cn-beijing: gpdb.cn-beijing.aliyuncs.com
+        cn-qingdao: gpdb.cn-qingdao.aliyuncs.com
+        cn-shanghai: gpdb.cn-shanghai.aliyuncs.com
+        cn-hongkong: gpdb.cn-hongkong.aliyuncs.com
+        cn-shenzhen: gpdb.cn-shenzhen.aliyuncs.com
+        ap-southeast-1: gpdb.ap-southeast-1.aliyuncs.com
+        cn-huhehaote: gpdb.cn-huhehaote.aliyuncs.com
+        cn-shenzhen-finance-1: gpdb.cn-shenzhen-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: gpdb.cn-shanghai-finance-1.aliyuncs.com
+        cn-north-2-gov-1: gpdb.cn-north-2-gov-1.aliyuncs.com
+  Green:
+    '2022-03-02':
+      source: https://api.aliyun.com/meta/v1/products/Green/versions/2022-03-02/api-docs.json; https://help.aliyun.com/en/document_detail/3059951.html
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-hongkong: green-cip.cn-hongkong.aliyuncs.com
+        cn-hangzhou: green-cip.cn-hangzhou.aliyuncs.com
+        us-east-1: green-cip.us-east-1.aliyuncs.com
+        eu-central-1: green-cip.eu-central-1.aliyuncs.com
+  hitsdb:
+    '2020-06-15':
+      source: https://api.aliyun.com/meta/v1/products/hitsdb/versions/2020-06-15/api-docs.json
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-7: hitsdb.ap-southeast-7.aliyuncs.com
+        cn-zhengzhou-jva: hitsdb.cn-zhengzhou-jva.aliyuncs.com
+        cn-zhongwei: hitsdb.cn-zhongwei.aliyuncs.com
+        cn-heyuan: hitsdb.cn-heyuan.aliyuncs.com
+        ap-northeast-2: hitsdb.ap-northeast-2.aliyuncs.com
+        cn-guangzhou: hitsdb.cn-guangzhou.aliyuncs.com
+        ap-southeast-6: hitsdb.ap-southeast-6.aliyuncs.com
+        ap-southeast-8: hitsdb.ap-southeast-8.aliyuncs.com
+        us-southeast-1: hitsdb.us-southeast-1.aliyuncs.com
+        sa-east-1: hitsdb.sa-east-1.aliyuncs.com
+        eu-west-2: hitsdb.eu-west-2.aliyuncs.com
+        na-south-1: hitsdb.na-south-1.aliyuncs.com
+        me-east-1: hitsdb.me-east-1.aliyuncs.com
+        me-central-1: hitsdb.me-central-1.aliyuncs.com
+        cn-heyuan-acdr-1: hitsdb.cn-heyuan-acdr-1.aliyuncs.com
+        cn-wulanchabu-gic-1: hitsdb.cn-wulanchabu-gic-1.aliyuncs.com
+        cn-north-2-gov-1: hitsdb.cn-north-2-gov-1.aliyuncs.com
+  Httpdns:
+    '2016-02-01':
+      source: https://api.aliyun.com/meta/v1/products/Httpdns/versions/2016-02-01/api-docs.json; https://help.aliyun.com/zh/document_detail/435297.html
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-1: httpdns.ap-southeast-1.aliyuncs.com
+  IaCService:
+    '2021-08-06':
+      source: https://api.aliyun.com/meta/v1/products/IaCService/versions/2021-08-06/api-docs.json
+      location_service_code: null
+      reason: The service is centrally hosted in Zhangjiakou. Anonymous GetResourceType, ListProducts and ListResourceTypes
+        returned HTTP 200 through the production transport from a Hangzhou client region; use its documented public endpoint
+        for other client regions.
+      checked_on: '2026-10-14'
+      global: iac.cn-zhangjiakou.aliyuncs.com
+  Kms:
+    '2016-01-20':
+      source: https://api.aliyun.com/meta/v1/products/Kms/versions/2016-01-20/api-docs.json; https://help.aliyun.com/document_detail/69006.html
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-5: kms.ap-southeast-5.aliyuncs.com
+  MaxCompute:
+    '2022-01-04':
+      source: https://api.aliyun.com/meta/v1/products/MaxCompute/versions/2022-01-04/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: maxcompute.cn-wulanchabu.aliyuncs.com
+        me-east-1: maxcompute.aliyuncs.com
+        me-central-1: maxcompute.me-central-1.aliyuncs.com
+        cn-hangzhou-finance: maxcompute.cn-hangzhou-finance.aliyuncs.com
+  Mns-open:
+    '2022-01-19':
+      source: https://api.aliyun.com/meta/v1/products/Mns-open/versions/2022-01-19/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        sa-east-1: mns-open.sa-east-1.aliyuncs.com
+        eu-west-2: mns-open.eu-west-2.aliyuncs.com
+  ModelStudio:
+    '2026-02-10':
+      source: https://api.aliyun.com/meta/v1/products/ModelStudio/versions/2026-02-10/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-hongkong: modelstudio.cn-hongkong.aliyuncs.com
+        us-east-1: modelstudio.us-east-1.aliyuncs.com
+        eu-central-1: modelstudio.eu-central-1.aliyuncs.com
+  mse:
+    '2019-05-31':
+      source: https://api.aliyun.com/meta/v1/products/mse/versions/2019-05-31/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wuhan-lr: mse.cn-wuhan-lr.aliyuncs.com
+        cn-fuzhou: mse.cn-fuzhou.aliyuncs.com
+        me-east-1: mse.me-east-1.aliyuncs.com
+  Mts:
+    '2014-06-18':
+      source: https://api.aliyun.com/meta/v1/products/Mts/versions/2014-06-18/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-shenzhen: mts.cn-shenzhen.aliyuncs.com
+        cn-beijing: mts.cn-beijing.aliyuncs.com
+        ap-northeast-1: mts.ap-northeast-1.aliyuncs.com
+        cn-qingdao: mts.cn-qingdao.aliyuncs.com
+        cn-shanghai: mts.cn-shanghai.aliyuncs.com
+        cn-hongkong: mts.cn-hongkong.aliyuncs.com
+        ap-southeast-1: mts.ap-southeast-1.aliyuncs.com
+        ap-southeast-5: mts.ap-southeast-5.aliyuncs.com
+        cn-zhangjiakou: mts.cn-zhangjiakou.aliyuncs.com
+        cn-hangzhou: mts.cn-hangzhou.aliyuncs.com
+        us-west-1: mts.us-west-1.aliyuncs.com
+        eu-central-1: mts.eu-central-1.aliyuncs.com
+        eu-west-1: mts.eu-west-1.aliyuncs.com
+  NAS:
+    '2017-06-26':
+      source: https://api.aliyun.com/meta/v1/products/NAS/versions/2017-06-26/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhongwei: nas.cn-zhongwei.aliyuncs.com
+        ap-southeast-8: nas.ap-southeast-8.aliyuncs.com
+        us-southeast-1: nas.us-southeast-1.aliyuncs.com
+        sa-east-1: nas.sa-east-1.aliyuncs.com
+        eu-west-2: nas.eu-west-2.aliyuncs.com
+        na-south-1: nas.na-south-1.aliyuncs.com
+  Nlb:
+    '2022-04-30':
+      source: https://api.aliyun.com/meta/v1/products/Nlb/versions/2022-04-30/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhongwei: nlb.cn-zhongwei.aliyuncs.com
+        cn-wulanchabu: nlb.cn-wulanchabu.aliyuncs.com
+        cn-zhengzhou-jva: nlb.cn-zhengzhou-jva.aliyuncs.com
+        cn-wuhan-lr: nlb.cn-wuhan-lr.aliyuncs.com
+        cn-heyuan: nlb.cn-heyuan.aliyuncs.com
+        cn-nanjing: nlb.cn-nanjing.aliyuncs.com
+        ap-northeast-2: nlb.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: nlb.ap-northeast-1.aliyuncs.com
+        cn-fuzhou: nlb.cn-fuzhou.aliyuncs.com
+        cn-guangzhou: nlb.cn-guangzhou.aliyuncs.com
+        ap-southeast-3: nlb.ap-southeast-3.aliyuncs.com
+        ap-southeast-5: nlb.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: nlb.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: nlb.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: nlb.ap-southeast-8.aliyuncs.com
+        us-east-1: nlb.us-east-1.aliyuncs.com
+        us-southeast-1: nlb.us-southeast-1.aliyuncs.com
+        sa-east-1: nlb.sa-east-1.aliyuncs.com
+        eu-west-2: nlb.eu-west-2.aliyuncs.com
+        eu-west-3: nlb.eu-west-3.aliyuncs.com
+        us-west-1: nlb.us-west-1.aliyuncs.com
+        na-south-1: nlb.na-south-1.aliyuncs.com
+        me-east-1: nlb.me-east-1.aliyuncs.com
+        me-central-1: nlb.me-central-1.aliyuncs.com
+        cn-heyuan-acdr-1: nlb.cn-heyuan-acdr-1.aliyuncs.com
+        cn-shenzhen-finance-1: nlb.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: nlb.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: nlb.cn-shanghai-finance-1.aliyuncs.com
+  nls-filetrans:
+    '2018-08-17':
+      source: https://help.aliyun.com/zh/isi/user-guide/api-reference-2; https://help.aliyun.com/zh/isi/user-guide/sdk-for-python-3
+      reason: Official API reference and Python SDK document filetrans regional domains for API version 2018-08-17; the pinned
+        nls-filetrans regional domains do not resolve.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: filetrans.cn-beijing.aliyuncs.com
+        cn-shanghai: filetrans.cn-shanghai.aliyuncs.com
+        cn-shenzhen: filetrans.cn-shenzhen.aliyuncs.com
+  OceanBasePro:
+    '2019-09-01':
+      source: https://api.aliyun.com/meta/v1/products/OceanBasePro/versions/2019-09-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-3: oceanbasepro.ap-southeast-3.aliyuncs.com
+        ap-southeast-5: oceanbasepro.ap-southeast-5.aliyuncs.com
+        cn-qingdao: oceanbasepro.cn-qingdao.aliyuncs.com
+        us-east-1: oceanbasepro.us-east-1.aliyuncs.com
+        eu-central-1: oceanbasepro.eu-central-1.aliyuncs.com
+        me-central-1: oceanbasepro.me-central-1.aliyuncs.com
+        cn-shenzhen-finance-1: oceanbasepro.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: oceanbasepro.cn-beijing-finance-1.aliyuncs.com
+  ocr:
+    '2019-12-30':
+      source: https://api.aliyun.com/meta/v1/products/ocr/versions/2019-12-30/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-shanghai: ocr.cn-shanghai.aliyuncs.com
+  Ons:
+    '2019-02-14':
+      source: https://api.aliyun.com/meta/v1/products/Ons/versions/2019-02-14/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        mq-internet-access: ons.mq-internet-access.aliyuncs.com
+        cn-zhangjiakou: ons.cn-zhangjiakou.aliyuncs.com
+        cn-shenzhen: ons.cn-shenzhen.aliyuncs.com
+        cn-shanghai: ons.cn-shanghai.aliyuncs.com
+        cn-qingdao: ons.cn-qingdao.aliyuncs.com
+        cn-huhehaote: ons.cn-huhehaote.aliyuncs.com
+        cn-hongkong: ons.cn-hongkong.aliyuncs.com
+        cn-hangzhou: ons.cn-hangzhou.aliyuncs.com
+        cn-chengdu: ons.cn-chengdu.aliyuncs.com
+        cn-beijing: ons.cn-beijing.aliyuncs.com
+        ap-southeast-6: ons.ap-southeast-6.aliyuncs.com
+        ap-southeast-5: ons.ap-southeast-5.aliyuncs.com
+        ap-southeast-3: ons.ap-southeast-3.aliyuncs.com
+        ap-southeast-1: ons.ap-southeast-1.aliyuncs.com
+        ap-northeast-1: ons.ap-northeast-1.aliyuncs.com
+        eu-central-1: ons.eu-central-1.aliyuncs.com
+        eu-west-1: ons.eu-west-1.aliyuncs.com
+        us-east-1: ons.us-east-1.aliyuncs.com
+        us-west-1: ons.us-west-1.aliyuncs.com
+        me-central-1: ons.me-central-1.aliyuncs.com
+        me-east-1: ons.me-east-1.aliyuncs.com
+        cn-beijing-finance-1: ons.cn-beijing-finance-1.aliyuncs.com
+        cn-hangzhou-finance: ons.cn-hangzhou-finance.aliyuncs.com
+        cn-north-2-gov-1: ons.cn-north-2-gov-1.aliyuncs.com
+        cn-shanghai-finance-1: ons.cn-shanghai-finance-1.aliyuncs.com
+        cn-shenzhen-finance-1: ons.cn-shenzhen-finance-1.aliyuncs.com
+  OnsMqtt:
+    '2020-04-20':
+      source: https://api.aliyun.com/meta/v1/products/OnsMqtt/versions/2020-04-20/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        mq-internet-access: onsmqtt.mq-internet-access.aliyuncs.com
+        cn-wulanchabu: onsmqtt.cn-wulanchabu.aliyuncs.com
+        cn-chengdu: onsmqtt.cn-chengdu.aliyuncs.com
+        cn-guangzhou: onsmqtt.cn-guangzhou.aliyuncs.com
+        ap-southeast-6: onsmqtt.ap-southeast-6.aliyuncs.com
+        us-east-1: onsmqtt.us-east-1.aliyuncs.com
+        eu-west-1: onsmqtt.eu-west-1.aliyuncs.com
+        me-central-1: onsmqtt.me-central-1.aliyuncs.com
+        cn-heyuan-acdr-1: onsmqtt.cn-heyuan-acdr-1.aliyuncs.com
+  oos:
+    '2019-06-01':
+      source: https://api.aliyun.com/meta/v1/products/oos/versions/2019-06-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: oos.cn-beijing.aliyuncs.com
+        cn-zhengzhou-jva: oos.cn-zhengzhou-jva.aliyuncs.com
+        cn-heyuan: oos.cn-heyuan.aliyuncs.com
+        cn-zhangjiakou: oos.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-2: oos.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: oos.ap-northeast-1.aliyuncs.com
+        ap-southeast-1: oos.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: oos.ap-southeast-3.aliyuncs.com
+        ap-southeast-5: oos.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: oos.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: oos.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: oos.ap-southeast-8.aliyuncs.com
+        cn-wulanchabu: oos.cn-wulanchabu.aliyuncs.com
+        cn-qingdao: oos.cn-qingdao.aliyuncs.com
+        cn-wuhan-lr: oos.cn-wuhan-lr.aliyuncs.com
+        cn-shanghai: oos.cn-shanghai.aliyuncs.com
+        cn-hongkong: oos.cn-hongkong.aliyuncs.com
+        cn-shenzhen: oos.cn-shenzhen.aliyuncs.com
+        cn-nanjing: oos.cn-nanjing.aliyuncs.com
+        cn-fuzhou: oos.cn-fuzhou.aliyuncs.com
+        cn-chengdu: oos.cn-chengdu.aliyuncs.com
+        cn-guangzhou: oos.cn-guangzhou.aliyuncs.com
+        cn-huhehaote: oos.cn-huhehaote.aliyuncs.com
+        cn-hangzhou: oos.cn-hangzhou.aliyuncs.com
+        us-southeast-1: oos.us-southeast-1.aliyuncs.com
+        eu-west-1: oos.eu-west-1.aliyuncs.com
+        eu-central-1: oos.eu-central-1.aliyuncs.com
+        us-east-1: oos.us-east-1.aliyuncs.com
+        us-west-1: oos.us-west-1.aliyuncs.com
+        na-south-1: oos.na-south-1.aliyuncs.com
+        me-east-1: oos.me-east-1.aliyuncs.com
+        me-central-1: oos.me-central-1.aliyuncs.com
+        cn-hangzhou-finance: oos.cn-hangzhou-finance.aliyuncs.com
+        cn-shenzhen-finance-1: oos.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: oos.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: oos.cn-shanghai-finance-1.aliyuncs.com
+        cn-wulanchabu-gic-1: oos.cn-wulanchabu-gic-1.aliyuncs.com
+        cn-heyuan-acdr-1: oos.cn-heyuan-acdr-1.aliyuncs.com
+  OpenAPIExplorer:
+    '2024-11-30':
+      source: https://api.aliyun.com/meta/v1/products/OpenAPIExplorer/versions/2024-11-30/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-hangzhou: openapi-mcp.cn-hangzhou.aliyuncs.com
+        ap-southeast-1: openapi-mcp.ap-southeast-1.aliyuncs.com
+        public: openapiexplorer.aliyuncs.com
+  pai-dlc:
+    '2020-12-03':
+      source: https://api.aliyun.com/meta/v1/products/pai-dlc/versions/2020-12-03/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-7: pai-dlc.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: pai-dlc.ap-southeast-8.aliyuncs.com
+        us-southeast-1: pai-dlc.us-southeast-1.aliyuncs.com
+        us-west-1: pai-dlc.us-west-1.aliyuncs.com
+        me-east-1: pai-dlc.me-east-1.aliyuncs.com
+  pai-dsw:
+    '2022-01-01':
+      source: https://api.aliyun.com/meta/v1/products/pai-dsw/versions/2022-01-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-northeast-2: pai-dsw.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: pai-dsw.ap-northeast-1.aliyuncs.com
+        cn-guangzhou: pai-dsw.cn-guangzhou.aliyuncs.com
+        ap-southeast-7: pai-dsw.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: pai-dsw.ap-southeast-8.aliyuncs.com
+        us-east-1: pai-dsw.us-east-1.aliyuncs.com
+        us-southeast-1: pai-dsw.us-southeast-1.aliyuncs.com
+        us-west-1: pai-dsw.us-west-1.aliyuncs.com
+        me-east-1: pai-dsw.me-east-1.aliyuncs.com
+        me-central-1: pai-dsw.me-central-1.aliyuncs.com
+  paiAutoML:
+    '2022-08-28':
+      source: https://api.aliyun.com/meta/v1/products/paiAutoML/versions/2022-08-28/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: paiautoml.cn-wulanchabu.aliyuncs.com
+  PaiFeatureStore:
+    '2023-06-21':
+      source: https://api.aliyun.com/meta/v1/products/PaiFeatureStore/versions/2023-06-21/api-docs.json?language=ZH_CN; https://help.aliyun.com/zh/pai/developer-reference/api-paifeaturestore-2023-06-21-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-5: paifeaturestore.ap-southeast-5.aliyuncs.com
+        us-west-1: paifeaturestore.us-west-1.aliyuncs.com
+        us-east-1: paifeaturestore.us-east-1.aliyuncs.com
+        eu-central-1: paifeaturestore.eu-central-1.aliyuncs.com
+        cn-hongkong: paifeaturestore.cn-hongkong.aliyuncs.com
+  PAIFlow:
+    '2021-02-02':
+      source: https://api.aliyun.com/meta/v1/products/PAIFlow/versions/2021-02-02/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        us-west-1: paiflow.us-west-1.aliyuncs.com
+        us-east-1: paiflow.us-east-1.aliyuncs.com
+        eu-central-1: paiflow.eu-central-1.aliyuncs.com
+  PaiStudio:
+    '2022-01-12':
+      source: https://api.aliyun.com/meta/v1/products/PaiStudio/versions/2022-01-12/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhongwei: pai.cn-zhongwei.aliyuncs.com
+        ap-northeast-2: pai.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: pai.ap-northeast-1.aliyuncs.com
+        cn-guangzhou: pai.cn-guangzhou.aliyuncs.com
+        ap-southeast-8: pai.ap-southeast-8.aliyuncs.com
+        us-east-1: pai.us-east-1.aliyuncs.com
+        us-southeast-1: pai.us-southeast-1.aliyuncs.com
+        us-west-1: pai.us-west-1.aliyuncs.com
+        me-east-1: pai.me-east-1.aliyuncs.com
+        cn-shanghai-finance-1: pai.cn-shanghai-finance-1.aliyuncs.com
+  polardb:
+    '2017-08-01':
+      source: https://api.aliyun.com/meta/v1/products/polardb/versions/2017-08-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: polardb.aliyuncs.com
+        cn-beijing: polardb.aliyuncs.com
+        cn-qingdao: polardb.cn-qingdao.aliyuncs.com
+        cn-shanghai: polardb.aliyuncs.com
+        cn-hongkong: polardb.cn-hongkong.aliyuncs.com
+        cn-heyuan: polardb.aliyuncs.com
+        cn-zhangjiakou: polardb.cn-zhangjiakou.aliyuncs.com
+        cn-shenzhen: polardb.cn-shenzhen.aliyuncs.com
+        ap-northeast-2: polardb.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: polardb.ap-northeast-1.aliyuncs.com
+        cn-chengdu: polardb.cn-chengdu.aliyuncs.com
+        cn-guangzhou: polardb.cn-guangzhou.aliyuncs.com
+        ap-southeast-1: polardb.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: polardb.ap-southeast-3.aliyuncs.com
+        cn-huhehaote: polardb.cn-huhehaote.aliyuncs.com
+        ap-southeast-6: polardb.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: polardb.ap-southeast-7.aliyuncs.com
+        cn-hangzhou: polardb.aliyuncs.com
+        ap-southeast-8: polardb.ap-southeast-8.aliyuncs.com
+        na-south-1: polardb.na-south-1.aliyuncs.com
+        eu-central-1: polardb.eu-central-1.aliyuncs.com
+        us-west-1: polardb.us-west-1.aliyuncs.com
+        eu-west-1: polardb.eu-west-1.aliyuncs.com
+        us-east-1: polardb.us-east-1.aliyuncs.com
+        me-east-1: polardb.me-east-1.aliyuncs.com
+        cn-beijing-finance-1: polardb.aliyuncs.com
+        cn-shanghai-finance-1: polardb.cn-shanghai-finance-1.aliyuncs.com
+        cn-shenzhen-finance-1: polardb.cn-shenzhen-finance-1.aliyuncs.com
+        cn-hangzhou-finance: polardb.aliyuncs.com
+  polardbx:
+    '2020-02-02':
+      source: https://api.aliyun.com/meta/v1/products/polardbx/versions/2020-02-02/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-north-2-gov-1: polardbx.aliyuncs.com
+  Privatelink:
+    '2020-04-15':
+      source: https://api.aliyun.com/meta/v1/products/Privatelink/versions/2020-04-15/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: privatelink.cn-beijing.aliyuncs.com
+        cn-zhengzhou-jva: privatelink.cn-zhengzhou-jva.aliyuncs.com
+        cn-heyuan: privatelink.cn-heyuan.aliyuncs.com
+        cn-zhangjiakou: privatelink.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-2: privatelink.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: privatelink.ap-northeast-1.aliyuncs.com
+        ap-southeast-1: privatelink.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: privatelink.ap-southeast-3.aliyuncs.com
+        ap-southeast-5: privatelink.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: privatelink.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: privatelink.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: privatelink.ap-southeast-8.aliyuncs.com
+        cn-zhongwei: privatelink.cn-zhongwei.aliyuncs.com
+        cn-wulanchabu: privatelink.cn-wulanchabu.aliyuncs.com
+        cn-qingdao: privatelink.cn-qingdao.aliyuncs.com
+        cn-wuhan-lr: privatelink.cn-wuhan-lr.aliyuncs.com
+        cn-shanghai: privatelink.cn-shanghai.aliyuncs.com
+        cn-hongkong: privatelink.cn-hongkong.aliyuncs.com
+        cn-shenzhen: privatelink.cn-shenzhen.aliyuncs.com
+        cn-nanjing: privatelink.cn-nanjing.aliyuncs.com
+        cn-fuzhou: privatelink.cn-fuzhou.aliyuncs.com
+        cn-chengdu: privatelink.cn-chengdu.aliyuncs.com
+        cn-guangzhou: privatelink.cn-guangzhou.aliyuncs.com
+        cn-huhehaote: privatelink.cn-huhehaote.aliyuncs.com
+        cn-hangzhou: privatelink.cn-hangzhou.aliyuncs.com
+        us-southeast-1: privatelink.us-southeast-1.aliyuncs.com
+        eu-west-1: privatelink.eu-west-1.aliyuncs.com
+        eu-west-2: privatelink.eu-west-2.aliyuncs.com
+        eu-central-1: privatelink.eu-central-1.aliyuncs.com
+        us-east-1: privatelink.us-east-1.aliyuncs.com
+        sa-east-1: privatelink.sa-east-1.aliyuncs.com
+        us-west-1: privatelink.us-west-1.aliyuncs.com
+        na-south-1: privatelink.na-south-1.aliyuncs.com
+        me-east-1: privatelink.me-east-1.aliyuncs.com
+        me-central-1: privatelink.me-central-1.aliyuncs.com
+        cn-shenzhen-finance-1: privatelink.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: privatelink.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: privatelink.cn-shanghai-finance-1.aliyuncs.com
+        cn-wulanchabu-gic-1: privatelink.cn-wulanchabu-gic-1.aliyuncs.com
+        cn-heyuan-acdr-1: privatelink.cn-heyuan-acdr-1.aliyuncs.com
+        cn-north-2-gov-1: privatelink.cn-north-2-gov-1.aliyuncs.com
+  pvtz:
+    '2018-01-01':
+      source: https://api.aliyun.com/meta/v1/products/pvtz/versions/2018-01-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-northeast-1: pvtz.aliyuncs.com
+        cn-hangzhou: pvtz.aliyuncs.com
+        cn-qingdao: pvtz.aliyuncs.com
+        cn-zhangjiakou: pvtz.aliyuncs.com
+        eu-west-1: pvtz.aliyuncs.com
+        us-east-1: pvtz.aliyuncs.com
+        us-west-1: pvtz.aliyuncs.com
+        me-east-1: pvtz.aliyuncs.com
+        cn-beijing-finance-1: pvtz.aliyuncs.com
+        cn-hangzhou-finance: pvtz.aliyuncs.com
+        cn-north-2-gov-1: pvtz.aliyuncs.com
+        cn-shanghai-finance-1: pvtz.aliyuncs.com
+        cn-shenzhen-finance-1: pvtz.aliyuncs.com
+  R-kvstore:
+    '2015-01-01':
+      source: https://api.aliyun.com/meta/v1/products/R-kvstore/versions/2015-01-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-wulanchabu: r-kvstore.cn-wulanchabu.aliyuncs.com
+        cn-beijing: r-kvstore.cn-beijing.aliyuncs.com
+        cn-zhengzhou-jva: r-kvstore.cn-zhengzhou-jva.aliyuncs.com
+        cn-qingdao: r-kvstore.cn-qingdao.aliyuncs.com
+        cn-wuhan-lr: r-kvstore.cn-wuhan-lr.aliyuncs.com
+        cn-shanghai: r-kvstore.cn-shanghai.aliyuncs.com
+        cn-hongkong: r-kvstore.cn-hongkong.aliyuncs.com
+        cn-heyuan: r-kvstore.cn-heyuan.aliyuncs.com
+        cn-zhangjiakou: r-kvstore.cn-zhangjiakou.aliyuncs.com
+        cn-shenzhen: r-kvstore.cn-shenzhen.aliyuncs.com
+        cn-nanjing: r-kvstore.cn-nanjing.aliyuncs.com
+        ap-northeast-2: r-kvstore.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: r-kvstore.ap-northeast-1.aliyuncs.com
+        cn-fuzhou: r-kvstore.cn-fuzhou.aliyuncs.com
+        cn-chengdu: r-kvstore.cn-chengdu.aliyuncs.com
+        cn-guangzhou: r-kvstore.cn-guangzhou.aliyuncs.com
+        ap-southeast-1: r-kvstore.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: r-kvstore.ap-southeast-3.aliyuncs.com
+        cn-huhehaote: r-kvstore.cn-huhehaote.aliyuncs.com
+        ap-southeast-5: r-kvstore.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: r-kvstore.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: r-kvstore.ap-southeast-7.aliyuncs.com
+        cn-hangzhou: r-kvstore.aliyuncs.com
+        us-east-1: r-kvstore.us-east-1.aliyuncs.com
+        us-southeast-1: r-kvstore.us-southeast-1.aliyuncs.com
+        eu-west-1: r-kvstore.eu-west-1.aliyuncs.com
+        us-west-1: r-kvstore.us-west-1.aliyuncs.com
+        eu-central-1: r-kvstore.eu-central-1.aliyuncs.com
+        na-south-1: r-kvstore.na-south-1.aliyuncs.com
+        me-east-1: r-kvstore.me-east-1.aliyuncs.com
+        me-central-1: r-kvstore.me-central-1.aliyuncs.com
+        cn-hangzhou-finance: r-kvstore.aliyuncs.com
+        cn-heyuan-acdr-1: r-kvstore.cn-heyuan-acdr-1.aliyuncs.com
+        cn-shenzhen-finance-1: r-kvstore.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: r-kvstore.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: r-kvstore.cn-shanghai-finance-1.aliyuncs.com
+        cn-wulanchabu-gic-1: r-kvstore.cn-wulanchabu-gic-1.aliyuncs.com
+  Rds:
+    '2014-08-15':
+      source: https://api.aliyun.com/meta/v1/products/Rds/versions/2014-08-15/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-nanjing: rds.cn-nanjing.aliyuncs.com
+        cn-beijing: rds.cn-beijing.aliyuncs.com
+        cn-zhengzhou-jva: rds.cn-zhengzhou-jva.aliyuncs.com
+        cn-heyuan: rds.cn-heyuan.aliyuncs.com
+        cn-zhangjiakou: rds.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-2: rds.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: rds.ap-northeast-1.aliyuncs.com
+        ap-southeast-1: rds.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: rds.ap-southeast-3.aliyuncs.com
+        ap-southeast-5: rds.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: rds.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: rds.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: rds.ap-southeast-8.aliyuncs.com
+        cn-zhongwei: rds.cn-zhongwei.aliyuncs.com
+        cn-wulanchabu: rds.cn-wulanchabu.aliyuncs.com
+        cn-qingdao: rds.cn-qingdao.aliyuncs.com
+        cn-wuhan-lr: rds.cn-wuhan-lr.aliyuncs.com
+        cn-shanghai: rds.cn-shanghai.aliyuncs.com
+        cn-hongkong: rds.cn-hongkong.aliyuncs.com
+        cn-shenzhen: rds.cn-shenzhen.aliyuncs.com
+        cn-fuzhou: rds.cn-fuzhou.aliyuncs.com
+        cn-chengdu: rds.cn-chengdu.aliyuncs.com
+        cn-guangzhou: rds.cn-guangzhou.aliyuncs.com
+        cn-huhehaote: rds.cn-huhehaote.aliyuncs.com
+        cn-hangzhou: rds.aliyuncs.com
+        us-southeast-1: rds.us-southeast-1.aliyuncs.com
+        eu-west-1: rds.eu-west-1.aliyuncs.com
+        eu-west-2: rds.eu-west-2.aliyuncs.com
+        eu-central-1: rds.eu-central-1.aliyuncs.com
+        us-east-1: rds.us-east-1.aliyuncs.com
+        us-west-1: rds.us-west-1.aliyuncs.com
+        na-south-1: rds.na-south-1.aliyuncs.com
+        me-east-1: rds.me-east-1.aliyuncs.com
+        me-central-1: rds.me-central-1.aliyuncs.com
+        cn-hangzhou-finance: rds.aliyuncs.com
+        cn-shenzhen-finance-1: rds.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: rds.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: rds.cn-shanghai-finance-1.aliyuncs.com
+        cn-wulanchabu-gic-1: rds.cn-wulanchabu-gic-1.aliyuncs.com
+        cn-heyuan-acdr-1: rds.cn-heyuan-acdr-1.aliyuncs.com
+        cn-north-2-gov-1: rds.cn-north-2-gov-1.aliyuncs.com
+  ResourceManager:
+    '2020-03-31':
+      source: https://api.aliyun.com/meta/v1/products/ResourceManager/versions/2020-03-31/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: resourcemanager.aliyuncs.com
+        cn-zhangjiakou: resourcemanager.aliyuncs.com
+        ap-northeast-1: resourcemanager.aliyuncs.com
+        ap-southeast-1: resourcemanager.aliyuncs.com
+        ap-southeast-3: resourcemanager.aliyuncs.com
+        ap-southeast-5: resourcemanager.aliyuncs.com
+        cn-wulanchabu: resourcemanager.aliyuncs.com
+        cn-qingdao: resourcemanager.aliyuncs.com
+        cn-shanghai: resourcemanager.aliyuncs.com
+        cn-hongkong: resourcemanager.aliyuncs.com
+        cn-shenzhen: resourcemanager.aliyuncs.com
+        cn-chengdu: resourcemanager.aliyuncs.com
+        cn-huhehaote: resourcemanager.aliyuncs.com
+        cn-hangzhou: resourcemanager.aliyuncs.com
+        eu-west-1: resourcemanager.aliyuncs.com
+        eu-central-1: resourcemanager.aliyuncs.com
+        us-east-1: resourcemanager.aliyuncs.com
+        us-west-1: resourcemanager.aliyuncs.com
+        me-east-1: resourcemanager.aliyuncs.com
+        cn-hangzhou-finance: resourcemanager.aliyuncs.com
+        cn-shenzhen-finance-1: resourcemanager.aliyuncs.com
+        cn-beijing-finance-1: resourcemanager.aliyuncs.com
+        cn-shanghai-finance-1: resourcemanager.aliyuncs.com
+  RocketMQ:
+    '2022-08-01':
+      source: https://api.aliyun.com/meta/v1/products/RocketMQ/versions/2022-08-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhengzhou-jva: rocketmq.cn-zhengzhou-jva.aliyuncs.com
+        ap-northeast-2: rocketmq.ap-northeast-2.aliyuncs.com
+        cn-fuzhou: rocketmq.cn-fuzhou.aliyuncs.com
+        ap-southeast-6: rocketmq.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: rocketmq.ap-southeast-7.aliyuncs.com
+        na-south-1: rocketmq.na-south-1.aliyuncs.com
+        me-east-1: rocketmq.me-east-1.aliyuncs.com
+        me-central-1: rocketmq.me-central-1.aliyuncs.com
+        cn-hangzhou-finance: rocketmq.cn-hangzhou-finance.aliyuncs.com
+        cn-beijing-finance-1: rocketmq.cn-beijing-finance-1.aliyuncs.com
+  sae:
+    '2019-05-06':
+      source: https://api.aliyun.com/meta/v1/products/sae/versions/2019-05-06/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-shenzhen: sae.cn-shenzhen.aliyuncs.com
+        cn-wulanchabu: sae.cn-wulanchabu.aliyuncs.com
+        cn-beijing: sae.cn-beijing.aliyuncs.com
+        ap-northeast-1: sae.ap-northeast-1.aliyuncs.com
+        cn-chengdu: sae.cn-chengdu.aliyuncs.com
+        cn-shanghai: sae.cn-shanghai.aliyuncs.com
+        cn-guangzhou: sae.cn-guangzhou.aliyuncs.com
+        cn-hongkong: sae.cn-hongkong.aliyuncs.com
+        cn-heyuan: sae.cn-heyuan.aliyuncs.com
+        ap-southeast-1: sae.ap-southeast-1.aliyuncs.com
+        cn-zhangjiakou: sae.cn-zhangjiakou.aliyuncs.com
+        cn-hangzhou: sae.cn-hangzhou.aliyuncs.com
+        us-west-1: sae.us-west-1.aliyuncs.com
+        us-east-1: sae.us-east-1.aliyuncs.com
+        eu-central-1: sae.eu-central-1.aliyuncs.com
+  Sas:
+    '2018-12-03':
+      source: https://api.aliyun.com/meta/v1/products/Sas/versions/2018-12-03/api-docs.json?language=ZH_CN; https://help.aliyun.com/zh/security-center/developer-reference/api-sas-2018-12-03-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-nanjing: tds.cn-shanghai.aliyuncs.com
+        cn-fuzhou: tds.cn-shanghai.aliyuncs.com
+        cn-beijing: tds.cn-shanghai.aliyuncs.com
+        cn-wulanchabu: tds.cn-shanghai.aliyuncs.com
+        cn-shanghai: tds.cn-shanghai.aliyuncs.com
+        cn-hongkong: tds.ap-southeast-1.aliyuncs.com
+        cn-heyuan: tds.cn-shanghai.aliyuncs.com
+        cn-zhangjiakou: tds.cn-shanghai.aliyuncs.com
+        cn-shenzhen: tds.cn-shanghai.aliyuncs.com
+        cn-chengdu: tds.cn-shanghai.aliyuncs.com
+        cn-guangzhou: tds.cn-shanghai.aliyuncs.com
+        cn-huhehaote: tds.cn-shanghai.aliyuncs.com
+        cn-hangzhou: tds.cn-shanghai.aliyuncs.com
+        cn-heyuan-acdr-1: tds.cn-shanghai.aliyuncs.com
+        cn-beijing-finance-1: tds.cn-shanghai.aliyuncs.com
+        cn-hangzhou-finance: tds.cn-shanghai.aliyuncs.com
+        cn-shanghai-finance-1: tds.cn-shanghai.aliyuncs.com
+        cn-shenzhen-finance-1: tds.cn-shanghai.aliyuncs.com
+  Sddp:
+    '2019-01-03':
+      source: https://api.aliyun.com/meta/v1/products/Sddp/versions/2019-01-03/api-docs.json?language=ZH_CN; https://help.aliyun.com/zh/dsc/data-security-center/developer-reference/api-sddp-2019-01-03-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-5: sddp.ap-southeast-5.aliyuncs.com
+        cn-hangzhou: sddp.cn-hangzhou.aliyuncs.com
+        cn-shanghai: sddp.cn-shanghai.aliyuncs.com
+        cn-hongkong: sddp.cn-hongkong.aliyuncs.com
+  searchengine:
+    '2021-10-25':
+      source: https://api.aliyun.com/meta/v1/products/searchengine/versions/2021-10-25/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-hongkong: searchengine.cn-hongkong.aliyuncs.com
+        cn-zhangjiakou: searchengine.cn-zhangjiakou.aliyuncs.com
+        eu-central-1: searchengine.eu-central-1.aliyuncs.com
+  selectdb:
+    '2023-05-22':
+      source: https://api.aliyun.com/meta/v1/products/selectdb/versions/2023-05-22/api-docs.json?language=ZH_CN; https://help.aliyun.com/zh/selectdb/api-selectdb-2023-05-22-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        na-south-1: selectdb.na-south-1.aliyuncs.com
+        me-east-1: selectdb.me-east-1.aliyuncs.com
+        cn-shanghai-finance-1: selectdb.cn-shanghai-finance-1.aliyuncs.com
+        cn-beijing: selectdb.cn-beijing.aliyuncs.com
+        cn-guangzhou: selectdb.cn-guangzhou.aliyuncs.com
+        cn-qingdao: selectdb.cn-qingdao.aliyuncs.com
+        cn-shanghai: selectdb.cn-shanghai.aliyuncs.com
+        cn-shenzhen: selectdb.cn-shenzhen.aliyuncs.com
+        cn-wulanchabu: selectdb.cn-wulanchabu.aliyuncs.com
+  servicemesh:
+    '2020-01-11':
+      source: https://api.aliyun.com/meta/v1/products/servicemesh/versions/2020-01-11/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-northeast-1: servicemesh.aliyuncs.com
+        ap-southeast-3: servicemesh.aliyuncs.com
+        cn-huhehaote: servicemesh.aliyuncs.com
+        cn-qingdao: servicemesh.aliyuncs.com
+        cn-wulanchabu: servicemesh.aliyuncs.com
+        cn-shenzhen: servicemesh.aliyuncs.com
+        cn-beijing: servicemesh.aliyuncs.com
+        cn-shanghai: servicemesh.aliyuncs.com
+        cn-hongkong: servicemesh.aliyuncs.com
+        ap-southeast-1: servicemesh.aliyuncs.com
+        ap-southeast-5: servicemesh.aliyuncs.com
+        cn-zhangjiakou: servicemesh.aliyuncs.com
+        cn-hangzhou: servicemesh.aliyuncs.com
+        cn-chengdu: servicemesh.aliyuncs.com
+        us-west-1: servicemesh.us-west-1.aliyuncs.com
+        us-east-1: servicemesh.us-east-1.aliyuncs.com
+        eu-central-1: servicemesh.aliyuncs.com
+        eu-west-1: servicemesh.aliyuncs.com
+        me-east-1: servicemesh.aliyuncs.com
+        cn-beijing-finance-1: servicemesh.aliyuncs.com
+        cn-hangzhou-finance: servicemesh.aliyuncs.com
+        cn-shanghai-finance-1: servicemesh.aliyuncs.com
+        cn-shenzhen-finance-1: servicemesh.aliyuncs.com
+  sgw:
+    '2018-05-11':
+      source: https://api.aliyun.com/meta/v1/products/sgw/versions/2018-05-11/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-north-2-gov-1: sgw.cn-north-2-gov-1.aliyuncs.com
+  Slb:
+    '2014-05-15':
+      source: https://api.aliyun.com/meta/v1/products/Slb/versions/2014-05-15/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhongwei: slb.cn-zhongwei.aliyuncs.com
+        cn-zhengzhou-jva: slb.cn-zhengzhou-jva.aliyuncs.com
+        cn-zhangjiakou: slb.cn-zhangjiakou.aliyuncs.com
+        cn-wulanchabu: slb.cn-wulanchabu.aliyuncs.com
+        cn-wuhan-lr: slb.cn-wuhan-lr.aliyuncs.com
+        cn-shenzhen: slb.cn-shenzhen.aliyuncs.com
+        cn-shanghai: slb.cn-shanghai.aliyuncs.com
+        cn-qingdao: slb.cn-qingdao.aliyuncs.com
+        cn-nanjing: slb.cn-nanjing.aliyuncs.com
+        cn-huhehaote: slb.cn-huhehaote.aliyuncs.com
+        cn-hongkong: slb.cn-hongkong.aliyuncs.com
+        cn-heyuan: slb.cn-heyuan.aliyuncs.com
+        cn-hangzhou: slb.aliyuncs.com
+        cn-guangzhou: slb.cn-guangzhou.aliyuncs.com
+        cn-fuzhou: slb.cn-fuzhou.aliyuncs.com
+        cn-chengdu: slb.cn-chengdu.aliyuncs.com
+        cn-beijing: slb.cn-beijing.aliyuncs.com
+        ap-southeast-8: slb.ap-southeast-8.aliyuncs.com
+        ap-southeast-7: slb.ap-southeast-7.aliyuncs.com
+        ap-southeast-6: slb.ap-southeast-6.aliyuncs.com
+        ap-southeast-5: slb.ap-southeast-5.aliyuncs.com
+        ap-southeast-3: slb.ap-southeast-3.aliyuncs.com
+        ap-southeast-1: slb.ap-southeast-1.aliyuncs.com
+        ap-northeast-2: slb.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: slb.ap-northeast-1.aliyuncs.com
+        eu-central-1: slb.eu-central-1.aliyuncs.com
+        eu-west-1: slb.eu-west-1.aliyuncs.com
+        eu-west-2: slb.eu-west-2.aliyuncs.com
+        na-south-1: slb.na-south-1.aliyuncs.com
+        us-east-1: slb.us-east-1.aliyuncs.com
+        us-southeast-1: slb.us-southeast-1.aliyuncs.com
+        us-west-1: slb.us-west-1.aliyuncs.com
+        me-central-1: slb.me-central-1.aliyuncs.com
+        me-east-1: slb.me-east-1.aliyuncs.com
+        cn-beijing-finance-1: slb.cn-beijing-finance-1.aliyuncs.com
+        cn-hangzhou-finance: slb.aliyuncs.com
+        cn-heyuan-acdr-1: slb.cn-heyuan-acdr-1.aliyuncs.com
+        cn-shanghai-finance-1: slb.cn-shanghai-finance-1.aliyuncs.com
+        cn-shenzhen-finance-1: slb.cn-shenzhen-finance-1.aliyuncs.com
+        cn-wulanchabu-gic-1: slb.cn-wulanchabu-gic-1.aliyuncs.com
+  smc:
+    '2019-06-01':
+      source: https://api.aliyun.com/meta/v1/products/smc/versions/2019-06-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-northeast-1: smc.aliyuncs.com
+        ap-southeast-1: smc.aliyuncs.com
+        ap-southeast-3: smc.aliyuncs.com
+        ap-southeast-5: smc.aliyuncs.com
+        cn-beijing: smc.aliyuncs.com
+        cn-chengdu: smc.aliyuncs.com
+        cn-hangzhou: smc.aliyuncs.com
+        cn-hongkong: smc.aliyuncs.com
+        cn-huhehaote: smc.aliyuncs.com
+        cn-shanghai: smc.aliyuncs.com
+        cn-shenzhen: smc.aliyuncs.com
+        cn-zhangjiakou: smc.aliyuncs.com
+        us-west-1: smc.aliyuncs.com
+        us-east-1: smc.aliyuncs.com
+        eu-west-1: smc.aliyuncs.com
+        eu-central-1: smc.aliyuncs.com
+        me-east-1: smc.aliyuncs.com
+        cn-shenzhen-finance-1: smc.aliyuncs.com
+        cn-shanghai-finance-1: smc.aliyuncs.com
+        cn-north-2-gov-1: smc.aliyuncs.com
+        cn-hangzhou-finance: smc.aliyuncs.com
+        cn-beijing-finance-1: smc.aliyuncs.com
+  Sts:
+    '2015-04-01':
+      source: https://api.aliyun.com/meta/v1/products/Sts/versions/2015-04-01/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: sts.cn-beijing.aliyuncs.com
+        cn-heyuan: sts.cn-heyuan.aliyuncs.com
+        cn-zhangjiakou: sts.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-2: sts.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: sts.ap-northeast-1.aliyuncs.com
+        ap-southeast-1: sts.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: sts.ap-southeast-3.aliyuncs.com
+        ap-southeast-5: sts.ap-southeast-5.aliyuncs.com
+        ap-southeast-7: sts.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: sts.ap-southeast-8.aliyuncs.com
+        cn-zhongwei: sts.cn-zhongwei.aliyuncs.com
+        cn-wulanchabu: sts.cn-wulanchabu.aliyuncs.com
+        cn-qingdao: sts.cn-qingdao.aliyuncs.com
+        cn-wuhan-lr: sts.cn-wuhan-lr.aliyuncs.com
+        cn-shanghai: sts.cn-shanghai.aliyuncs.com
+        cn-hongkong: sts.cn-hongkong.aliyuncs.com
+        cn-shenzhen: sts.cn-shenzhen.aliyuncs.com
+        cn-nanjing: sts.cn-nanjing.aliyuncs.com
+        cn-fuzhou: sts.cn-fuzhou.aliyuncs.com
+        cn-chengdu: sts.cn-chengdu.aliyuncs.com
+        cn-guangzhou: sts.cn-guangzhou.aliyuncs.com
+        cn-huhehaote: sts.cn-huhehaote.aliyuncs.com
+        cn-hangzhou: sts.cn-hangzhou.aliyuncs.com
+        eu-west-1: sts.eu-west-1.aliyuncs.com
+        eu-west-2: sts.eu-west-2.aliyuncs.com
+        eu-central-1: sts.eu-central-1.aliyuncs.com
+        us-east-1: sts.us-east-1.aliyuncs.com
+        sa-east-1: sts.sa-east-1.aliyuncs.com
+        us-west-1: sts.us-west-1.aliyuncs.com
+        na-south-1: sts.na-south-1.aliyuncs.com
+        me-east-1: sts.me-east-1.aliyuncs.com
+        me-central-1: sts.me-central-1.aliyuncs.com
+        cn-shenzhen-finance-1: sts.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: sts.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: sts.cn-shanghai-finance-1.aliyuncs.com
+        cn-hangzhou-finance: sts.cn-hangzhou-finance.aliyuncs.com
+  Tag:
+    '2018-08-28':
+      source: https://api.aliyun.com/meta/v1/products/Tag/versions/2018-08-28/api-docs.json?language=ZH_CN; https://help.aliyun.com/zh/resource-management/tag/developer-reference/api-tag-2018-08-28-endpoint
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-zhengzhou-jva: tag.cn-zhengzhou-jva.aliyuncs.com
+        ap-northeast-2: tag.ap-northeast-2.aliyuncs.com
+        ap-southeast-6: tag.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: tag.ap-southeast-7.aliyuncs.com
+        me-central-1: tag.me-central-1.aliyuncs.com
+        cn-shenzhen-finance-1: tag.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: tag.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: tag.cn-shanghai-finance-1.aliyuncs.com
+        cn-hangzhou-finance: tag.aliyuncs.com
+        ap-southeast-1: tag.ap-southeast-1.aliyuncs.com
+        cn-beijing: tag.cn-beijing.aliyuncs.com
+        cn-hangzhou: tag.cn-hangzhou.aliyuncs.com
+        cn-hongkong: tag.cn-hongkong.aliyuncs.com
+        cn-qingdao: tag.cn-qingdao.aliyuncs.com
+        cn-shanghai: tag.cn-shanghai.aliyuncs.com
+        cn-shenzhen: tag.cn-shenzhen.aliyuncs.com
+        us-east-1: tag.us-east-1.aliyuncs.com
+        us-west-1: tag.us-west-1.aliyuncs.com
+  ververica:
+    '2022-07-18':
+      source: https://api.aliyun.com/meta/v1/products/ververica/versions/2022-07-18/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-qingdao: ververica.cn-qingdao.aliyuncs.com
+        ap-northeast-1: ververica.ap-northeast-1.aliyuncs.com
+        cn-chengdu: ververica.cn-chengdu.aliyuncs.com
+  vod:
+    '2017-03-21':
+      source: https://api.aliyun.com/meta/v1/products/vod/versions/2017-03-21/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-shenzhen: vod.cn-shenzhen.aliyuncs.com
+        cn-beijing: vod.cn-beijing.aliyuncs.com
+        cn-shanghai: vod.cn-shanghai.aliyuncs.com
+        cn-hongkong: vod.cn-hongkong.aliyuncs.com
+        ap-southeast-1: vod.ap-southeast-1.aliyuncs.com
+        ap-northeast-1: vod.ap-northeast-1.aliyuncs.com
+        ap-southeast-5: vod.ap-southeast-5.aliyuncs.com
+        us-west-1: vod.us-west-1.aliyuncs.com
+        eu-central-1: vod.eu-central-1.aliyuncs.com
+        me-central-1: vod.me-central-1.aliyuncs.com
+        cn-north-2-gov-1: vod.cn-north-2-gov-1.aliyuncs.com
+  Vpc:
+    '2016-04-28':
+      source: https://api.aliyun.com/meta/v1/products/Vpc/versions/2016-04-28/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: vpc.cn-beijing.aliyuncs.com
+        cn-heyuan: vpc.cn-heyuan.aliyuncs.com
+        cn-zhangjiakou: vpc.cn-zhangjiakou.aliyuncs.com
+        ap-northeast-2: vpc.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: vpc.ap-northeast-1.aliyuncs.com
+        ap-southeast-1: vpc.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: vpc.ap-southeast-3.aliyuncs.com
+        ap-southeast-5: vpc.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: vpc.ap-southeast-6.aliyuncs.com
+        ap-southeast-7: vpc.ap-southeast-7.aliyuncs.com
+        ap-southeast-8: vpc.ap-southeast-8.aliyuncs.com
+        cn-zhongwei: vpc.cn-zhongwei.aliyuncs.com
+        cn-wulanchabu: vpc.cn-wulanchabu.aliyuncs.com
+        cn-qingdao: vpc.cn-qingdao.aliyuncs.com
+        cn-wuhan-lr: vpc.cn-wuhan-lr.aliyuncs.com
+        cn-shanghai: vpc.cn-shanghai.aliyuncs.com
+        cn-hongkong: vpc.cn-hongkong.aliyuncs.com
+        cn-shenzhen: vpc.cn-shenzhen.aliyuncs.com
+        cn-nanjing: vpc.cn-nanjing.aliyuncs.com
+        cn-fuzhou: vpc.cn-fuzhou.aliyuncs.com
+        cn-chengdu: vpc.cn-chengdu.aliyuncs.com
+        cn-guangzhou: vpc.cn-guangzhou.aliyuncs.com
+        cn-huhehaote: vpc.cn-huhehaote.aliyuncs.com
+        cn-hangzhou: vpc.cn-hangzhou.aliyuncs.com
+        us-southeast-1: vpc.us-southeast-1.aliyuncs.com
+        eu-west-1: vpc.eu-west-1.aliyuncs.com
+        eu-west-2: vpc.eu-west-2.aliyuncs.com
+        eu-west-3: vpc.eu-west-3.aliyuncs.com
+        eu-central-1: vpc.eu-central-1.aliyuncs.com
+        us-east-1: vpc.us-east-1.aliyuncs.com
+        sa-east-1: vpc.sa-east-1.aliyuncs.com
+        us-west-1: vpc.us-west-1.aliyuncs.com
+        na-south-1: vpc.na-south-1.aliyuncs.com
+        me-east-1: vpc.me-east-1.aliyuncs.com
+        me-central-1: vpc.me-central-1.aliyuncs.com
+        cn-shenzhen-finance-1: vpc.cn-shenzhen-finance-1.aliyuncs.com
+        cn-beijing-finance-1: vpc.cn-beijing-finance-1.aliyuncs.com
+        cn-shanghai-finance-1: vpc.cn-shanghai-finance-1.aliyuncs.com
+        cn-wulanchabu-gic-1: vpc.cn-wulanchabu-gic-1.aliyuncs.com
+        cn-heyuan-acdr-1: vpc.cn-heyuan-acdr-1.aliyuncs.com
+        cn-north-2-gov-1: vpc.cn-north-2-gov-1.aliyuncs.com
+  VpcIpam:
+    '2023-02-28':
+      source: https://api.aliyun.com/meta/v1/products/VpcIpam/versions/2023-02-28/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-heyuan-acdr-1: vpcipam.cn-heyuan-acdr-1.aliyuncs.com
+  WebsiteBuild:
+    '2025-04-29':
+      source: https://api.aliyun.com/meta/v1/products/WebsiteBuild/versions/2025-04-29/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-1: websitebuild-intl.aliyuncs.com
+  Yundun-bastionhost:
+    '2019-12-09':
+      source: https://api.aliyun.com/meta/v1/products/Yundun-bastionhost/versions/2019-12-09/api-docs.json?language=ZH_CN
+      reason: Reviewed exact-version official public endpoint metadata and DNS correct stale regional routes and supply documented
+        regional fallback when Location discovery is unavailable.
+      checked_on: '2026-10-14'
+      regions:
+        cn-beijing: yundun-bastionhost.aliyuncs.com
+        cn-chengdu: yundun-bastionhost.aliyuncs.com
+        cn-guangzhou: yundun-bastionhost.aliyuncs.com
+        cn-hangzhou: yundun-bastionhost.aliyuncs.com
+        cn-heyuan: yundun-bastionhost.aliyuncs.com
+        cn-shenzhen: yundun-bastionhost.aliyuncs.com
+        cn-wulanchabu: yundun-bastionhost.aliyuncs.com
+        cn-zhengzhou-jva: yundun-bastionhost.aliyuncs.com
+        ap-northeast-2: bastionhost.ap-northeast-2.aliyuncs.com
+        ap-northeast-1: bastionhost.ap-northeast-1.aliyuncs.com
+        cn-qingdao: yundun-bastionhost.aliyuncs.com
+        cn-shanghai: yundun-bastionhost.aliyuncs.com
+        cn-hongkong: bastionhost.cn-hongkong.aliyuncs.com
+        ap-southeast-1: bastionhost.ap-southeast-1.aliyuncs.com
+        ap-southeast-3: bastionhost.ap-southeast-3.aliyuncs.com
+        cn-huhehaote: bastionhost.cn-huhehaote.aliyuncs.com
+        ap-southeast-5: bastionhost.ap-southeast-5.aliyuncs.com
+        ap-southeast-6: bastionhost.ap-southeast-6.aliyuncs.com
+        cn-zhangjiakou: bastionhost.cn-zhangjiakou.aliyuncs.com
+        ap-southeast-7: bastionhost.ap-southeast-7.aliyuncs.com
+        na-south-1: bastionhost.na-south-1.aliyuncs.com
+        eu-west-1: bastionhost.eu-west-1.aliyuncs.com
+        eu-central-1: bastionhost.eu-central-1.aliyuncs.com
+        us-east-1: bastionhost.us-east-1.aliyuncs.com
+        us-west-1: bastionhost.us-west-1.aliyuncs.com
+        me-east-1: yundun-bastionhost.aliyuncs.com
+        cn-shenzhen-finance-1: yundun-bastionhost.aliyuncs.com
+        cn-shanghai-finance-1: yundun-bastionhost.aliyuncs.com
+        cn-north-2-gov-1: yundun-bastionhost.aliyuncs.com
+        cn-beijing-finance-1: yundun-bastionhost.aliyuncs.com
+  linkedmall:
+    '2022-05-31':
+      source: https://raw.githubusercontent.com/aliyun/alibabacloud-python-sdk/master/linkedmall-20220531/alibabacloud_linkedmall20220531/client.py
+      reason: The official versioned SDK maps Hangzhou to linkedmall.aliyuncs.com; the metadata regional hostname does not resolve.
+      checked_on: '2026-10-14'
+      regions:
+        cn-hangzhou: linkedmall.aliyuncs.com
+  cas:
+    '2020-04-07':
+      source: https://raw.githubusercontent.com/aliyun/alibabacloud-python-sdk/master/cas-20200407/alibabacloud_cas20200407/client.py
+      reason: The official versioned SDK maps Jakarta to the central certificate service endpoint; the metadata regional hostname
+        does not resolve.
+      checked_on: '2026-10-14'
+      regions:
+        ap-southeast-5: cas.aliyuncs.com

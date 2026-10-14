@@ -8,6 +8,7 @@ import os
 import re
 import tempfile
 from collections.abc import Awaitable, Callable, Mapping
+from copy import copy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,7 +24,7 @@ from iac_code.tools.cloud.aliyun.api_contract import (
     validate_host_parameter_values,
 )
 from iac_code.utils.file_security import ensure_private_dir
-from iac_code.utils.state_io import fsync_parent_dir
+from iac_code.utils.state_io import cross_process_file_lock, fsync_parent_dir
 
 _ENDPOINT_DATA_DIR = Path(__file__).parent / "data" / "endpoints"
 _CATALOG_PATH = _ENDPOINT_DATA_DIR / "catalog.json"
@@ -89,11 +90,14 @@ class AccountIdentityResolver:
 
     def __init__(self, request: Callable[[str, Any], Awaitable[Mapping[str, Any]]] | None = None) -> None:
         self._request = request or _call_identity_api
-        self._account_id: str | None = None
+        self._account_id_cache: tuple[str, str] | None = None
 
     async def resolve(self, credential: Any, region_id: str) -> str:
-        if self._account_id is not None:
-            return self._account_id
+        credential = copy(credential)
+        cache_key = self._credential_cache_key(credential)
+        cached = self._account_id_cache
+        if cache_key is not None and cached is not None and cached[0] == cache_key:
+            return cached[1]
         response = await self._request(
             "sts.aliyuncs.com",
             {
@@ -106,8 +110,30 @@ class AccountIdentityResolver:
         account_id = response.get("AccountId")
         if not isinstance(account_id, str) or _ACCOUNT_ID.fullmatch(account_id) is None:
             raise EndpointResolutionError("account_id_discovery_failed")
-        self._account_id = account_id
+        if cache_key is not None:
+            # Keep identity and cache key together even when concurrent requests finish out of order.
+            self._account_id_cache = (cache_key, account_id)
         return account_id
+
+    @staticmethod
+    def _credential_cache_key(credential: Any) -> str | None:
+        if isinstance(credential, str):
+            values = ["token", credential]
+        else:
+            mode = getattr(credential, "mode", "AK")
+            if mode not in {"AK", "StsToken", "OAuth"}:
+                # Dynamic sources may change their underlying caller without changing their configuration.
+                return None
+            access_key_id = getattr(credential, "access_key_id", "")
+            access_key_secret = getattr(credential, "access_key_secret", "")
+            security_token = getattr(credential, "sts_token", "")
+            if not all(isinstance(value, str) for value in (access_key_id, access_key_secret, security_token)):
+                return None
+            if not access_key_id or not access_key_secret:
+                return None
+            values = [mode, access_key_id, access_key_secret, security_token]
+        encoded = json.dumps(values, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+        return hashlib.sha256(encoded).hexdigest()
 
 
 class LocationResolver:
@@ -234,6 +260,8 @@ class EndpointResolver:
             raise EndpointResolutionError("invalid_endpoint_overrides")
         self._catalog = catalog
         self._override_products = endpoint_overrides.get("products", {})
+        self._unavailable_regions = frozenset(endpoint_overrides.get("unavailable_regions", {}))
+        self._retired_products = frozenset(name.casefold() for name in endpoint_overrides.get("retired_products", {}))
         self._trusted_suffixes = tuple(endpoint_overrides.get("trusted_endpoint_suffixes", ()))
         self._unavailable = {
             str(item.get("product", "")).casefold(): str(item.get("reason", "endpoint_unavailable"))
@@ -275,8 +303,14 @@ class EndpointResolver:
         host_template = _host_template_for_contract(contract, effective.host_template)
         if explicit_endpoint is not None:
             return EndpointResolution(self._validated(explicit_endpoint), "explicit", host_template)
+        if product.casefold() in self._retired_products:
+            raise self._unavailable_error(product)
         if catalog_record is None and override_record is None:
             raise self._unavailable_error(contract.product)
+        if region_id in self._unavailable_regions:
+            if effective.global_endpoint:
+                return EndpointResolution(self._validated(effective.global_endpoint), "catalog_global", host_template)
+            raise self._unavailable_error(product)
         if endpoint := effective.region_overrides.get(region_id):
             return EndpointResolution(self._validated(endpoint), "override", host_template)
         if effective.account_id_host_template:
@@ -299,7 +333,11 @@ class EndpointResolver:
         raise self._unavailable_error(contract.product)
 
     def _unavailable_error(self, product: str) -> EndpointResolutionError:
-        reason = self._unavailable.get(product.casefold())
+        reason = (
+            "service_retired"
+            if product.casefold() in self._retired_products
+            else self._unavailable.get(product.casefold())
+        )
         suffix = f":{reason}" if reason is not None else ""
         return EndpointResolutionError("endpoint_unavailable" + suffix)
 
@@ -337,6 +375,7 @@ class EndpointResolver:
         self, product: str, version: str, region_id: str, service_code: str, credential: Any
     ) -> str | None:
         key = (product, version, region_id, service_code)
+        self._refresh_location_cache()
         cached = self._location_cache.get(key)
         now = self._clock()
         if cached is not None:
@@ -348,17 +387,39 @@ class EndpointResolver:
             endpoint = await self._location.resolve(product, version, region_id, service_code, credential)
             endpoint = self._validated_or_none(endpoint)
         except Exception:
-            if cached is not None and cached.endpoint is not None and _age(now, cached.fetched_at) <= _STALE_TTL:
+            self._refresh_location_cache()
+            cached = self._location_cache.get(key)
+            if (
+                cached is not None
+                and cached.endpoint is not None
+                and _age(self._clock(), cached.fetched_at) <= _STALE_TTL
+            ):
                 return self._validated_or_none(cached.endpoint)
             return None
-        prospective = dict(self._location_cache)
-        prospective[key] = _LocationCacheEntry(endpoint=endpoint, fetched_at=now)
+        prospective = self._merge_location_cache(
+            self._location_cache, {key: _LocationCacheEntry(endpoint=endpoint, fetched_at=now)}
+        )
         try:
-            self._write_cache(prospective)
+            committed = self._write_cache(prospective)
         except OSError as error:
             raise EndpointResolutionError("location_cache_write_failed") from error
-        self._location_cache = prospective
-        return endpoint
+        self._location_cache = committed
+        return self._validated_or_none(committed[key].endpoint)
+
+    def _refresh_location_cache(self) -> None:
+        self._location_cache = self._merge_location_cache(self._read_cache(), self._location_cache)
+
+    @staticmethod
+    def _merge_location_cache(
+        existing: Mapping[tuple[str, str, str, str], _LocationCacheEntry],
+        incoming: Mapping[tuple[str, str, str, str], _LocationCacheEntry],
+    ) -> dict[tuple[str, str, str, str], _LocationCacheEntry]:
+        merged = dict(existing)
+        for key, entry in incoming.items():
+            previous = merged.get(key)
+            if previous is None or entry.fetched_at > previous.fetched_at:
+                merged[key] = entry
+        return merged
 
     def _validated(self, endpoint: str) -> str:
         if not _is_trusted_hostname(endpoint, self._trusted_suffixes):
@@ -408,20 +469,26 @@ class EndpointResolver:
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return {}
 
-    def _write_cache(self, cache: Mapping[tuple[str, str, str, str], _LocationCacheEntry]) -> None:
-        entries = [
-            {"key": list(key), "endpoint": value.endpoint, "fetched_at": value.fetched_at.isoformat()}
-            for key, value in sorted(cache.items())
-        ]
-        payload = {"entries": entries}
-        document = {
-            "schema_version": _CACHE_SCHEMA,
-            "fetched_at": self._clock().isoformat(),
-            "source_url": _LOCATION_SOURCE_URL,
-            "payload_sha256": _payload_checksum(payload),
-            "payload": payload,
-        }
-        self._cache_writer(self._cache_path, document)
+    def _write_cache(
+        self, cache: Mapping[tuple[str, str, str, str], _LocationCacheEntry]
+    ) -> dict[tuple[str, str, str, str], _LocationCacheEntry]:
+        lock_path = self._cache_path.with_name(self._cache_path.name + ".lock")
+        with cross_process_file_lock(lock_path):
+            committed = self._merge_location_cache(self._read_cache(), cache)
+            entries = [
+                {"key": list(key), "endpoint": value.endpoint, "fetched_at": value.fetched_at.isoformat()}
+                for key, value in sorted(committed.items())
+            ]
+            payload = {"entries": entries}
+            document = {
+                "schema_version": _CACHE_SCHEMA,
+                "fetched_at": self._clock().isoformat(),
+                "source_url": _LOCATION_SOURCE_URL,
+                "payload_sha256": _payload_checksum(payload),
+                "payload": payload,
+            }
+            self._cache_writer(self._cache_path, document)
+            return committed
 
 
 class HostBindingResolver:
