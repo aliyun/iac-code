@@ -232,5 +232,5 @@ async def test_generation_skill_file_step_reproduces_old_smoke_failure(monkeypat
         assert smoke.OUTPUT_DIAGNOSTICS[output_format]["permission_denial_count"] == 20
     else:
         assert code == 0 and provider.calls == 2
-        assert target.read_text() == template and passed is True
+        assert target.read_text(encoding="utf-8") == template and passed is True
         assert smoke.OUTPUT_DIAGNOSTICS[output_format]["permission_denial_count"] == 0
