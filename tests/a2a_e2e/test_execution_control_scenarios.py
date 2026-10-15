@@ -5,12 +5,15 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 
+from iac_code.services.session_backup import SessionBackupService
+from iac_code.services.session_storage import SessionStorage
 from scripts.a2a.e2e.execution_control import run_execution_control_scenarios as runner
 
 # A scenario includes process startup, control round trips (including real
@@ -45,6 +48,127 @@ CASES = (
     ("stack-instances-terminate-inflight", "normal"),
     ("recovery-during-normal-rollover", "normal"),
 )
+
+
+class _SharedPublication:
+    def __init__(self, root: Path) -> None:
+        self.root = root / "shared-backup"
+        self.session = self.root / "projects" / "fixture-project" / "fixture-session"
+        self.session.mkdir(parents=True)
+        self.commit_id = "fixture-target-commit"
+        (self.session / "payload.json").write_text(
+            json.dumps({"commit": self.commit_id, "result": "complete fixture payload"}), encoding="utf-8"
+        )
+
+    def write_state(self, *, commit_id: str | None = None, session_id: str = "fixture-session") -> None:
+        state = {
+            "schema_version": 2,
+            "session_id": session_id,
+            "generation": 2,
+            "parent_generation": 1,
+            "commit_id": commit_id or self.commit_id,
+            "status": "succeeded",
+            "reason": "input_required",
+            "updated_at": "2026-10-15T00:00:00Z",
+            "writer_id": "fixture-writer",
+            "publication_proofs": {},
+        }
+        (self.session / ".backup-state.json").write_text(json.dumps(state), encoding="utf-8")
+
+    def write_marker(self) -> None:
+        (self.session / ".backup-publication.json").write_text(
+            json.dumps({"version": 1, "sessionId": "fixture-session", "generation": 2, "commitId": self.commit_id}),
+            encoding="utf-8",
+        )
+
+    @staticmethod
+    def scenario(root: Path) -> runner._Scenario:
+        return runner._Scenario(
+            run_dir=root,
+            server=SimpleNamespace(assert_running=lambda: None),
+            scenario="disconnect-timeout-after-operation-id",
+            mode="normal",
+            timeout=0.05,
+        )
+
+
+@pytest.mark.parametrize(
+    "publication", ["marker_only", "old_state", "wrong_session", "failed_state", "state_with_marker"]
+)
+def test_shared_publication_wait_rejects_uncommitted_capture(tmp_path: Path, publication: str) -> None:
+    shared = _SharedPublication(tmp_path)
+    if publication == "old_state":
+        shared.write_state(commit_id="fixture-old-commit")
+    elif publication == "wrong_session":
+        shared.write_state(session_id="another-session")
+    elif publication in {"failed_state", "state_with_marker"}:
+        shared.write_state()
+        if publication == "failed_state":
+            state_path = shared.session / ".backup-state.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state.update(
+                status="failed",
+                attempt_commit_id="another-attempt",
+                attempt_publication_proofs={},
+                error="injected failure",
+                attempt=1,
+                retry_count=0,
+                exhausted=True,
+            )
+            state_path.write_text(json.dumps(state), encoding="utf-8")
+    if publication in {"marker_only", "state_with_marker"}:
+        shared.write_marker()
+
+    with pytest.raises(TimeoutError, match="staged snapshot publication"):
+        shared.scenario(tmp_path)._wait_shared_publication(shared.commit_id)
+
+
+def test_shared_publication_wait_returns_complete_matching_capture(tmp_path: Path) -> None:
+    shared = _SharedPublication(tmp_path)
+    shared.write_state()
+
+    joined = shared.scenario(tmp_path)._wait_shared_publication(shared.commit_id)
+
+    assert "complete fixture payload" in joined
+    assert shared.commit_id in joined
+
+
+def test_shared_publication_wait_locks_the_payload_read_window(tmp_path: Path, monkeypatch) -> None:
+    shared = _SharedPublication(tmp_path)
+    shared.write_state()
+    scenario = shared.scenario(tmp_path)
+    read_payload = scenario._shared_backup_text
+    reading = threading.Event()
+    publishing = threading.Event()
+    acquired = threading.Event()
+
+    def publish_next_capture() -> None:
+        reading.wait()
+        publishing.set()
+        service = SessionBackupService(SessionStorage(projects_dir=tmp_path / "config" / "projects"))
+        with service._shared_session_lock(
+            shared.root, project="fixture-project", session_id="fixture-session"
+        ):
+            acquired.set()
+            shared.write_marker()
+
+    def read_while_publishing(*args) -> str:
+        reading.set()
+        assert publishing.wait(1), "publisher did not attempt its shared lock"
+        assert not acquired.wait(0.05), "publisher changed the capture during the payload read"
+        return read_payload(*args)
+
+    monkeypatch.setattr(scenario, "_shared_backup_text", read_while_publishing)
+    publisher = threading.Thread(target=publish_next_capture)
+    publisher.start()
+    try:
+        joined = scenario._wait_shared_publication(shared.commit_id)
+        assert "complete fixture payload" in joined
+    finally:
+        reading.set()
+        publisher.join(2)
+    assert not publisher.is_alive()
+    assert acquired.is_set()
 
 
 def test_legacy_cancel_waits_for_drain_before_validating_idle_exit(monkeypatch, tmp_path: Path) -> None:

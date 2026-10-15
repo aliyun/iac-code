@@ -84,6 +84,7 @@ class A2ATaskStore(TaskStore):
         self._cleanup_task: asyncio.Task[None] | None = None
         self._mutation_lock = asyncio.Lock()
         self._context_runtime_tasks: dict[str, asyncio.Task[Any]] = {}
+        self._input_handoff_runtime_close_tasks: dict[str, asyncio.Task[None]] = {}
         self._context_runtime_waiters: dict[str, int] = {}
         self._discarded_context_runtime_tasks: set[asyncio.Task[Any]] = set()
         self._discarded_context_runtime_task_waiters: dict[asyncio.Task[Any], int] = {}
@@ -710,6 +711,8 @@ class A2ATaskStore(TaskStore):
         context_id = validate_protocol_id(context_id)
         create_task: asyncio.Task[Any] | None = None
         async with self._mutation_lock:
+            if context_id in self._input_handoff_runtime_close_tasks:
+                raise RuntimeError("A2A context runtime is closing for permission handoff")
             if context_id in self._contexts:
                 record = self._contexts[context_id]
                 pending_channel = self._pending_context_telemetry_channels.get(context_id)
@@ -981,25 +984,61 @@ class A2ATaskStore(TaskStore):
         runtime: Any | None = None
         context_id = validate_protocol_id(context_id)
         async with self._mutation_lock:
-            record = self._contexts.get(context_id)
-            if record is None or record.runtime is None:
-                return
-            runtime = record.runtime
-            record.runtime = None
-            record.touch()
-            # Runtime is memory-only. Termination commits the durable task and
-            # context together later, outside the global lock and event loop.
-            # Permission cancellation can also reach here through its suspend
-            # callback before the termination cleanup calls us directly.
-            control = (
-                self._execution_control_snapshot_provider(context_id)
-                if self._execution_control_snapshot_provider is not None
-                else None
-            )
-            terminating = control is not None and control.get("phase") in {"terminating", "terminated"}
-            if persist_context and not terminating:
-                self._mirror_context(record)
+            closing_for_handoff = context_id in self._input_handoff_runtime_close_tasks
+            if not closing_for_handoff:
+                record = self._contexts.get(context_id)
+                if record is None or record.runtime is None:
+                    return
+                runtime = record.runtime
+                record.runtime = None
+                record.touch()
+                # Runtime is memory-only. Termination commits the durable task and
+                # context together later, outside the global lock and event loop.
+                # Permission cancellation can also reach here through its suspend
+                # callback before the termination cleanup calls us directly.
+                control = (
+                    self._execution_control_snapshot_provider(context_id)
+                    if self._execution_control_snapshot_provider is not None
+                    else None
+                )
+                terminating = control is not None and control.get("phase") in {"terminating", "terminated"}
+                if persist_context and not terminating:
+                    self._mirror_context(record)
+        if closing_for_handoff:
+            await self.discard_context_runtime_for_input_handoff(context_id)
+            return
         await _close_runtime(runtime)
+
+    async def discard_context_runtime_for_input_handoff(self, context_id: str) -> None:
+        """Confirm one teardown before publishing permission ownership handoff.
+
+        Keep the runtime and original close task fenced until teardown succeeds.
+        A timeout or canceled request leaves that task running for a later retry;
+        an unsuccessful teardown remains fenced rather than reusing the runtime.
+        """
+
+        context_id = validate_protocol_id(context_id)
+        async with self._mutation_lock:
+            if context_id in self._context_runtime_tasks:
+                raise RuntimeError("A2A context runtime is initializing during permission handoff")
+            close_task = self._input_handoff_runtime_close_tasks.get(context_id)
+            if close_task is None:
+                record = self._contexts.get(context_id)
+                if record is None or record.runtime is None:
+                    return
+                close_task = asyncio.create_task(_close_runtime_unbounded(record.runtime))
+                close_task.add_done_callback(_consume_runtime_close_result)
+                self._input_handoff_runtime_close_tasks[context_id] = close_task
+        await asyncio.wait_for(asyncio.shield(close_task), timeout=_RUNTIME_CLOSE_TIMEOUT_SECONDS)
+        async with self._mutation_lock:
+            if self._input_handoff_runtime_close_tasks.get(context_id) is not close_task:
+                return
+            record = self._contexts.get(context_id)
+            if record is not None:
+                record.runtime = None
+                record.touch()
+                self._mirror_context(record)
+            self._input_handoff_runtime_close_tasks.pop(context_id, None)
 
     def reconciliation_lock(self, context_id: str) -> asyncio.Lock:
         context_id = validate_protocol_id(context_id)
@@ -1010,6 +1049,7 @@ class A2ATaskStore(TaskStore):
         async with self._mutation_lock:
             return (
                 bool(self._context_execution_starts.get(context_id))
+                or context_id in self._input_handoff_runtime_close_tasks
                 or context_id in self._context_runtime_tasks
                 or any(
                     task.context_id == context_id and task.active_task is not None and not task.active_task.done()
@@ -1199,6 +1239,8 @@ class A2ATaskStore(TaskStore):
     async def ensure_context_reconciliation_safe(self, context_id: str) -> None:
         context_id = validate_protocol_id(context_id)
         async with self._mutation_lock:
+            if context_id in self._input_handoff_runtime_close_tasks:
+                raise RuntimeError("A2A context runtime is closing for permission handoff")
             if self._context_execution_starts.get(context_id):
                 raise ValueError(_("A2A context not found"))
             if context_id in self._context_runtime_tasks:
@@ -1225,6 +1267,8 @@ class A2ATaskStore(TaskStore):
 
         runtime: Any | None = None
         async with self._mutation_lock:
+            if context_id in self._input_handoff_runtime_close_tasks:
+                raise RuntimeError("A2A context runtime is closing for permission handoff")
             create_task = self._context_runtime_tasks.get(context_id)
             if create_task is not None:
                 raise ValueError(_("A2A context not found"))
@@ -1692,6 +1736,7 @@ class A2ATaskStore(TaskStore):
                 if context.active_task_id is None
                 and now - context.last_active > self._idle_timeout_seconds
                 and context_id not in self._context_runtime_tasks
+                and context_id not in self._input_handoff_runtime_close_tasks
                 and not self._context_reconciliation_waiters.get(context_id)
                 and not self._context_execution_starts.get(context_id)
                 and context_id not in active_context_ids
@@ -1759,7 +1804,11 @@ class A2ATaskStore(TaskStore):
             for task, waiters in runtime_tasks:
                 self._mark_discarded_context_runtime_task_locked(task, waiters=waiters)
         for record in records:
-            await _close_runtime(record.runtime)
+            closing = self._input_handoff_runtime_close_tasks.get(record.context_id)
+            if closing is not None:
+                await asyncio.wait({closing}, timeout=_RUNTIME_CLOSE_TIMEOUT_SECONDS)
+            else:
+                await _close_runtime(record.runtime)
         for task, _waiters in runtime_tasks:
             _close_runtime_task_when_done(
                 task,

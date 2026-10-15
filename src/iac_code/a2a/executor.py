@@ -9,6 +9,7 @@ import re
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import Any, TypeAlias
 
@@ -201,8 +202,26 @@ class SessionBackupNotReadyInvalidParamsError(InvalidParamsError):
     jsonrpc_error_data_passthrough = True
 
 
-class InputResponseExecutionControlConflictError(ExecutionControlConflictError):
+class InputResponseExecutionControlConflictError(ExecutionControlConflictError, InvalidParamsError):
     """An input response raced the previous turn's execution-control release."""
+
+    code = -32602
+    jsonrpc_error_data_passthrough = True
+
+    def __init__(
+        self, message: str, *, reason: str = "EXECUTION_CONTROL_CONFLICT", decision_recorded: bool = False
+    ) -> None:
+        InvalidParamsError.__init__(
+            self,
+            message,
+            data={
+                "kind": "permission_recovery_conflict",
+                "reason": reason,
+                "recoverable": reason in {"HANDOFF_NOT_COMMITTED", "STALE_REVISION", "ADMISSION_BUSY"},
+                "decisionRecorded": decision_recorded,
+                "executionResumed": False,
+            },
+        )
 
 
 def _format_exception(exc: BaseException) -> str:
@@ -1683,11 +1702,19 @@ class IacCodeA2AExecutor(AgentExecutor):
                 owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
                 current_task = asyncio.current_task()
                 recovery_admission = RecoverableInputAdmissionCarrier.read(context)
+                if permission_response is not None and existing is not None and existing.owner == owner:
+                    try:
+                        await existing.wait_for_permission_suspension_settlement()
+                    except ExecutionControlConflictError as exc:
+                        raise InputResponseExecutionControlConflictError(
+                            str(exc), reason="HANDOFF_NOT_COMMITTED"
+                        ) from exc
                 if (
                     recovery_admission is None
                     and existing is not None
                     and existing.owner == owner
                     and current_task is not None
+                    and (permission_response is None or not existing.permission_handoff_requires_admission())
                     # A naturally finalized permission turn may still receive
                     # a duplicate answer. Let the validated RESOLVED checkpoint
                     # acknowledge it; attaching would reopen settled ownership.
@@ -2892,6 +2919,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                                 )
                                 detached_permission = pending
                                 pending.continuation = resume_detached_normal
+                                permission_execution_control = current_execution_control()
 
                                 async def suspend_detached(pending_permission: Any = pending) -> None:
                                     pending_permission.continuation = None
@@ -2900,7 +2928,17 @@ class IacCodeA2AExecutor(AgentExecutor):
                                         with contextlib.suppress(RuntimeError):
                                             await close_stream()
                                     try:
-                                        await self._task_store.discard_context_runtime(context_id)
+                                        control = permission_execution_control
+                                        if control is not None:
+                                            control.set_permission_runtime_close_confirmation(
+                                                partial(
+                                                    self._task_store.discard_context_runtime_for_input_handoff,
+                                                    context_id,
+                                                )
+                                            )
+                                            await control.confirm_permission_runtime_closed()
+                                        else:
+                                            await self._task_store.discard_context_runtime_for_input_handoff(context_id)
                                     finally:
                                         await self._permission_input_registry.complete(pending_permission)
 
@@ -4097,9 +4135,16 @@ class IacCodeA2AExecutor(AgentExecutor):
                 admission = RecoverableInputAdmissionCarrier.read(context)
                 reserved_admission = None
                 if admission is None:
-                    reserved_admission = await self._execution_control_service.reserve_recoverable_input_continuation(
+                    reservation = await self._execution_control_service.reserve_recoverable_input_continuation_result(
                         context_id=response.context_id, task_id=response.task_id, owner=owner
                     )
+                    if not reservation.admitted:
+                        raise InputResponseExecutionControlConflictError(
+                            "Permission recovery execution ownership unavailable: " + reservation.reason,
+                            reason=reservation.reason,
+                            decision_recorded=True,
+                        )
+                    reserved_admission = reservation.token
                 try:
                     control = await self._execution_control_service.begin_execution(
                         context_id=response.context_id,
@@ -4111,7 +4156,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                         recoverable_input_admission=admission or reserved_admission,
                     )
                 except ExecutionControlConflictError as exc:
-                    raise InputResponseExecutionControlConflictError(str(exc)) from exc
+                    raise InputResponseExecutionControlConflictError(
+                        str(exc), reason="STALE_REVISION", decision_recorded=True
+                    ) from exc
                 finally:
                     if reserved_admission is not None:
                         await self._execution_control_service.release_recoverable_input_continuation(reserved_admission)
