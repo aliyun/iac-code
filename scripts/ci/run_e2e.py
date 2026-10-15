@@ -1666,6 +1666,8 @@ def _run_case_attempts(
     attempts = []
     case_dir = args.run_dir / "runs" / case.name
     (case_dir / "ci-result.json").unlink(missing_ok=True)
+    # Every retry runs the same case; cleanup from every attempt remains
+    # part of the final result below.
     for index in range(args.retries + 1):
         retry = index == 1
         print("{} {} · {}".format("RETRY" if retry else "START", case.name,
