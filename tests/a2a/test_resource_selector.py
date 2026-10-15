@@ -847,8 +847,10 @@ async def test_resource_selection_resume_binds_execution_before_first_event(
         original.revision += 1
         await original._persist_snapshot(original.snapshot())
     elif recovery != "live":
-        # A persisted selector wait can outlive its publisher without a release marker.
+        # Exercise legacy records using local PID liveness, without the new process identity.
+        # This does not assert that a PID probe can prove another container's owner dead.
         snapshot = original.snapshot()
+        snapshot.pop("ownerIdentity", None)
         snapshot["ownerPid"] = os.getpid() + 1
         if recovery == "unsettled":
             snapshot["revision"] += 1

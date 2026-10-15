@@ -21,6 +21,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from iac_code.services.session_backup import SessionBackupError, SessionBackupService
+from iac_code.services.session_storage import SessionStorage
+
 TOKEN = "execution-control-e2e-token"
 NATURAL_HANDOFF_VERSION = "natural-handoff-v2"
 STACK_ID = "stack-execution-control-e2e-0001"
@@ -1241,9 +1244,9 @@ class _Scenario:
             )
             assert expected_operation in joined
 
-    def _shared_backup_text(self) -> str:
+    def _shared_backup_text(self, root: Path | None = None) -> str:
         texts = []
-        for path in (self.run_dir / "shared-backup").rglob("*"):
+        for path in (root if root is not None else self.run_dir / "shared-backup").rglob("*"):
             if not path.is_file():
                 continue
             try:
@@ -1253,10 +1256,24 @@ class _Scenario:
         return "\n".join(texts)
 
     def _wait_shared_publication(self, commit_id: str) -> str:
+        backup_root = self.run_dir / "shared-backup"
+        service = SessionBackupService(SessionStorage(projects_dir=self.run_dir / "config" / "projects"))
+
         def published() -> str | None:
             self.server.assert_running()
-            joined = self._shared_backup_text()
-            return joined if commit_id in joined else None
+            for session in sorted(backup_root.glob("projects/*/*")):
+                if not session.is_dir():
+                    continue
+                with service._shared_session_lock(backup_root, project=session.parent.name, session_id=session.name):
+                    try:
+                        state = service._read_state(session, session_id=session.name, shared=True, missing_ok=True)
+                    except SessionBackupError:
+                        continue
+                    if state is not None and state.commit_id == commit_id:
+                        # Validate the receipt and read its payload under the
+                        # publisher's lock so a newer capture cannot interleave.
+                        return self._shared_backup_text(session)
+            return None
 
         return _wait_until(published, timeout=self.timeout, description="staged snapshot publication")
 

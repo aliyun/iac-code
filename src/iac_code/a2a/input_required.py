@@ -1266,6 +1266,8 @@ class PermissionInputRegistry:
                     await result
 
         control = current_execution_control()
+        if control is not None and current.get("permissionClass") == "normal":
+            control.bind_recoverable_permission_boundary(store, str(current["boundaryId"]))
         coordinator.register_live(
             record=current,
             store=store,

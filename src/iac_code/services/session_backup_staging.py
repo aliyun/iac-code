@@ -128,6 +128,49 @@ class StagedSessionBackupService(SessionBackupService):
     def staging_root(self) -> Path:
         return self._staging_root
 
+    def backup_recoverable_input_handoff(self, cwd: str, session_id: str, *, operation_commit_id: str) -> BackupResult:
+        """Publish this exact permission capture rather than admitting from local staging."""
+        result = self.backup_session(
+            cwd,
+            session_id,
+            reason=BackupReason.INPUT_REQUIRED,
+            critical=True,
+            operation_commit_id=operation_commit_id,
+        )
+        if not result.enabled:
+            return result
+        try:
+            backup_root = self._backup_root()
+            if (
+                not result.succeeded
+                or not result.staged_committed
+                or result.source is None
+                or result.destination is None
+                or result.generation is None
+                or result.commit_id != operation_commit_id
+                or backup_root is None
+            ):
+                raise SessionBackupError("permission handoff has no committed staged capture")
+            snapshot = StagedSessionSnapshot(
+                path=result.destination,
+                project=result.source.parent.name,
+                session_id=session_id,
+                generation=result.generation,
+            )
+            worker = SessionBackupStagingWorker(self._staging_root, backup_root)
+            worker.publish_snapshot(snapshot)
+            destination = backup_root / "projects" / snapshot.project / session_id
+            with self._shared_session_lock(backup_root, project=snapshot.project, session_id=session_id):
+                shared = self._read_state(destination, session_id=session_id, shared=True, missing_ok=True)
+                if shared is None or shared.generation != result.generation or shared.commit_id != result.commit_id:
+                    raise SessionBackupError("permission handoff shared backup receipt does not match its capture")
+            return replace(result, destination=destination, shared_committed=True)
+        except Exception as exc:
+            failed = replace(result, succeeded=False, shared_committed=False, requires_reconcile=True)
+            raise SessionBackupBlocked(
+                self._public_error_text(exc), retry_count=result.retry_count, result=failed
+            ) from None
+
     @_log_backup_session_elapsed
     def backup_session(
         self,
@@ -430,7 +473,7 @@ class StagedSessionBackupService(SessionBackupService):
             return SessionReconcileResult(enabled=False, action="disabled")
         self._validate_session_id(session_id)
         local = self._source_for_backup(cwd, session_id)
-        if local is None:
+        if local is None or self._has_incomplete_restore(local):
             return super().reconcile_session(
                 cwd,
                 session_id,
@@ -819,6 +862,7 @@ class SessionBackupStagingWorker:
             session_id=snapshot.session_id,
             shared=True,
             missing_ok=True,
+            allow_incomplete_publication=True,
         )
         if shared_state is not None:
             if shared_state.generation > state.generation:
@@ -831,6 +875,7 @@ class SessionBackupStagingWorker:
                         local_generation=state.generation,
                         shared_generation=shared_state.generation,
                     )
+                self._service._complete_shared_publication(destination, state)
                 self._retire_snapshot(snapshot, state)
                 return
 
@@ -840,8 +885,7 @@ class SessionBackupStagingWorker:
             snapshot.generation,
         )
         started_at = time.perf_counter()
-        self._service._mirror(snapshot.path, destination)
-        self._service._write_state(destination, state)
+        self._service._publish_shared_snapshot(snapshot.path, destination, state)
         committed = self._service._read_state(destination, session_id=snapshot.session_id, shared=True)
         if committed is None or not committed.same_lineage(state):
             raise SessionBackupError("shared session backup state did not commit the staged snapshot")
