@@ -7,6 +7,34 @@ from pathlib import Path
 
 import pytest
 
+from scripts.a2a.e2e.permission_wait.run_permission_wait_restart import _BackgroundStream
+
+
+def test_background_stream_observes_permission_published_with_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    stream = _BackgroundStream("http://unused.invalid", {}, timeout=1)
+    permission = {"kind": "permission", "inputId": "input-final"}
+    snapshot = stream.snapshot
+
+    def publish_after_snapshot():
+        observed = snapshot()
+        if not stream.done.is_set():
+            with stream._lock:
+                stream.events.append({"metadata": {"iac_code": {"input": permission}}})
+            stream.done.set()
+        return observed
+
+    # The producer publishes its final event and completion between the
+    # consumer's snapshot and its completion check.
+    monkeypatch.setattr(stream, "snapshot", publish_after_snapshot)
+    assert stream.wait_for_permission(1) == permission
+
+
+def test_background_stream_still_rejects_completion_without_permission() -> None:
+    stream = _BackgroundStream("http://unused.invalid", {}, timeout=1)
+    stream.done.set()
+    with pytest.raises(RuntimeError, match="ended before permission boundary"):
+        stream.wait_for_permission(1)
+
 
 @pytest.mark.integration
 @pytest.mark.timeout(120)

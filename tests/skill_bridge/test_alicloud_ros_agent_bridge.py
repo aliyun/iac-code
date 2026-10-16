@@ -4301,7 +4301,22 @@ except (OSError, urllib.error.URLError) as exc:
         assert result["state"] == "turn-completed"
         assert result["finalText"] == "remote route refreshed"
         debug_path = workspace / ".ros-agent-debug" / "remote-aliyun-results.jsonl"
-        debug_records = [json.loads(line) for line in debug_path.read_text(encoding="utf-8").splitlines()]
+        # CLI results precede asynchronous bulk diagnostics. Wait for their
+        # documented completion marker before asserting the complete JSONL.
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                debug_records = [json.loads(line) for line in debug_path.read_text(encoding="utf-8").splitlines()]
+            except (OSError, json.JSONDecodeError):
+                if time.monotonic() >= deadline:
+                    raise
+            else:
+                if any(item["kind"] == "debug-complete" for item in debug_records) and any(
+                    item["kind"] == "parsed-event" for item in debug_records
+                ):
+                    break
+                assert time.monotonic() < deadline, debug_records
+            time.sleep(0.02)
         assert debug_records[0]["jobId"] == started["jobId"]
         assert debug_records[0]["requestSeq"] == 1
         assert any(item["kind"] == "parsed-event" and item["idPresent"] for item in debug_records)
