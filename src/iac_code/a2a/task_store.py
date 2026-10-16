@@ -716,6 +716,7 @@ class A2ATaskStore(TaskStore):
         context_id = validate_protocol_id(context_id)
         create_task: asyncio.Task[Any] | None = None
         async with self._mutation_lock:
+            self._finish_completed_input_handoff_runtime_close_locked(context_id)
             if context_id in self._input_handoff_runtime_close_tasks:
                 raise RuntimeError("A2A context runtime is closing for permission handoff")
             if context_id in self._contexts:
@@ -1049,9 +1050,21 @@ class A2ATaskStore(TaskStore):
         context_id = validate_protocol_id(context_id)
         return self._reconciliation_locks.setdefault(context_id, asyncio.Lock())
 
+    def _finish_completed_input_handoff_runtime_close_locked(self, context_id: str) -> None:
+        closing = self._input_handoff_runtime_close_tasks.get(context_id)
+        if closing is None or not closing.done() or closing.cancelled() or closing.exception() is not None:
+            return
+        record = self._contexts.get(context_id)
+        if record is not None:
+            record.runtime = None
+            record.touch()
+            self._mirror_context(record)
+        self._input_handoff_runtime_close_tasks.pop(context_id, None)
+
     async def context_reconciliation_is_blocked(self, context_id: str) -> bool:
         context_id = validate_protocol_id(context_id)
         async with self._mutation_lock:
+            self._finish_completed_input_handoff_runtime_close_locked(context_id)
             return (
                 bool(self._context_execution_starts.get(context_id))
                 or context_id in self._input_handoff_runtime_close_tasks
@@ -1244,6 +1257,7 @@ class A2ATaskStore(TaskStore):
     async def ensure_context_reconciliation_safe(self, context_id: str) -> None:
         context_id = validate_protocol_id(context_id)
         async with self._mutation_lock:
+            self._finish_completed_input_handoff_runtime_close_locked(context_id)
             if context_id in self._input_handoff_runtime_close_tasks:
                 raise RuntimeError("A2A context runtime is closing for permission handoff")
             if self._context_execution_starts.get(context_id):
@@ -1272,6 +1286,7 @@ class A2ATaskStore(TaskStore):
 
         runtime: Any | None = None
         async with self._mutation_lock:
+            self._finish_completed_input_handoff_runtime_close_locked(context_id)
             if context_id in self._input_handoff_runtime_close_tasks:
                 raise RuntimeError("A2A context runtime is closing for permission handoff")
             create_task = self._context_runtime_tasks.get(context_id)

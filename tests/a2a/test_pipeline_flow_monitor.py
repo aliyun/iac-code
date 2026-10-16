@@ -206,7 +206,10 @@ async def test_pending_backlog_keeps_downstream_classification_at_ack_boundary(t
 
 
 @pytest.mark.asyncio
-async def test_flow_logs_are_isolated_by_session_path(tmp_path: Path) -> None:
+async def test_flow_logs_are_isolated_by_session_path(tmp_path: Path, monkeypatch) -> None:
+    # This checks session routing. Give real Windows ACL/file I/O its own
+    # budget; the production best-effort close deadline is tested separately.
+    monkeypatch.setattr(pipeline_flow_monitor_module, "FLOW_LOG_CLOSE_TIMEOUT_SECONDS", 5.0)
     first_clock = FakeClock()
     second_clock = FakeClock()
     first_path = tmp_path / "session-1" / "logs" / "a2a-pipeline-flow.jsonl"

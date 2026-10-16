@@ -1,5 +1,6 @@
 """Real HTTP/SDK/AgentLoop coverage for prompts and replies at permission waits."""
 
+import asyncio
 import json
 import multiprocessing
 import os
@@ -179,6 +180,22 @@ def _serve(
 
     with ExitStack() as patches:
         patches.enter_context(patch("iac_code.a2a.executor.create_agent_runtime", runtime))
+        if fault == "runtime-close":
+            from iac_code.a2a.task_store import A2ATaskStore
+
+            close_for_handoff = A2ATaskStore.discard_context_runtime_for_input_handoff
+
+            async def observed_close(self, context_id):
+                try:
+                    await close_for_handoff(self, context_id)
+                except asyncio.TimeoutError:
+                    (observation_path / "runtime-close-wait-expired").touch()
+                    raise
+
+            patches.enter_context(patch("iac_code.a2a.task_store._RUNTIME_CLOSE_TIMEOUT_SECONDS", 0.1))
+            patches.enter_context(
+                patch.object(A2ATaskStore, "discard_context_runtime_for_input_handoff", observed_close)
+            )
         if pipeline_dir:
             pipelines = {"permission-engine-fixture": Path(pipeline_dir)}
             patches.enter_context(patch("iac_code.pipeline.discover_pipelines", return_value=pipelines))
