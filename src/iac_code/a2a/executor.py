@@ -158,6 +158,7 @@ from iac_code.services.permission_wait import (
     resolve_permission_execution_identity,
 )
 from iac_code.services.permissions.audit import emit_permission_boundary_audit
+from iac_code.services.pipeline_handoff_context import pipeline_handoff_message
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, AliyunCredentials
 from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityUnavailableError
 from iac_code.services.session_backup import (
@@ -5128,9 +5129,28 @@ class IacCodeA2AExecutor(AgentExecutor):
 
         session_storage = SessionStorage()
         messages = session_storage.load(cwd, ctx.session_id)
-        if isinstance(summary, str) and summary and not _session_has_user_message(messages, content=summary):
-            session_storage.append(cwd, ctx.session_id, AgentMessage(role="user", content=summary))
-            messages.append(AgentMessage(role="user", content=summary))
+        if isinstance(summary, str) and summary:
+            handoff_message = pipeline_handoff_message(summary, messages)
+            existing = next(
+                (
+                    message
+                    for message in messages
+                    if message.role == "user" and message.content in (summary, handoff_message.content)
+                ),
+                None,
+            )
+            if existing is None:
+                session_storage.append(cwd, ctx.session_id, handoff_message)
+                messages.append(handoff_message)
+            elif existing.content != handoff_message.content or any(
+                existing.metadata.get(key) != value for key, value in handoff_message.metadata.items()
+            ):
+                # Backfill legacy handoffs while retaining the original inputs
+                # and every other public history row in the root session.
+                existing.content = handoff_message.content
+                existing.metadata.update(handoff_message.metadata)
+                existing.token_count = 0
+                session_storage.save(cwd, ctx.session_id, messages)
         if cleanup_prompt is not None and not _session_has_active_cleanup_prompt_content(
             messages,
             content=cleanup_prompt,

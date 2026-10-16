@@ -79,7 +79,6 @@ from iac_code.a2a.types import (
     TASK_STATE_INPUT_REQUIRED,
     TASK_STATE_WORKING,
 )
-from iac_code.agent.message import Message as AgentMessage
 from iac_code.i18n import _
 from iac_code.pipeline import create_pipeline, discover_pipelines
 from iac_code.pipeline.config import get_pipeline_name, is_selling_review_step_enabled
@@ -98,6 +97,7 @@ from iac_code.pipeline.engine.user_input import (
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary, canonical_digest
+from iac_code.services.pipeline_handoff_context import include_original_user_request, pipeline_handoff_message
 from iac_code.services.providers.aliyun import AliyunCredential
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
@@ -4004,6 +4004,9 @@ class IacCodeA2APipelineExecutor:
             if not bool(should_switch_to_normal(event_data)):
                 return None
             summary = pipeline.build_normal_handoff_summary(event_data)
+            storage = getattr(pipeline, "_session_storage", None)
+            if storage is not None:
+                summary = include_original_user_request(summary, storage.load(pipeline._cwd, pipeline._session_id))
             outcome = terminal_outcome_from_completed_event(event_data)
         except _PipelineBackupBlockedTransitionError:
             raise
@@ -5497,6 +5500,7 @@ def _waiting_input_cancel_handoff_event(
         context_snapshot=context_snapshot,
         include_fields=include_fields,
     )
+    summary = include_original_user_request(summary, SessionStorage().load(cwd, session_id))
     data: dict[str, Any] = {
         "action": "switch_to_normal",
         "targetMode": "normal",
@@ -5806,10 +5810,11 @@ def _persist_normal_handoff_summary(pipeline: Any, summary: str) -> None:
     cwd = getattr(pipeline, "_cwd", None)
     session_id = getattr(pipeline, "_session_id", None)
     append = getattr(session_storage, "append", None)
-    if not callable(append) or not isinstance(cwd, str) or not isinstance(session_id, str):
+    load = getattr(session_storage, "load", None)
+    if not callable(append) or not callable(load) or not isinstance(cwd, str) or not isinstance(session_id, str):
         return
     try:
-        append(cwd, session_id, AgentMessage(role="user", content=summary))
+        append(cwd, session_id, pipeline_handoff_message(summary, load(cwd, session_id)))
     except Exception:
         logger.warning("Failed to persist A2A pipeline normal handoff summary", exc_info=True)
 

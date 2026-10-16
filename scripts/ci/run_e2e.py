@@ -875,6 +875,8 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "selector_next_turn_wire_last_message_has_marker", "selector_next_turn_wire_step_prompt_present",
             "selector_next_turn_wire_forced_tool",
             "selector_next_turn_wire_selector_tools_available", "selector_next_turn_wire_adjacent_user_messages",
+            "selector_next_turn_wire_original_request_in_handoff",
+            "selector_next_turn_wire_original_request_standalone",
             "final_target_step_security_group", "final_target_step_vswitch",
             "final_target_intent_security_group", "final_target_intent_vswitch",
             "final_target_architecture_security_group", "final_target_architecture_vswitch",

@@ -334,6 +334,15 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             config_dir=source,
             previous_input_id=pending["inputId"],
         )
+        if args.mode == "pipeline":
+            facts = first_wire_facts()
+            if not facts.get("selector_next_turn_wire_original_request_in_handoff") or facts.get(
+                "selector_next_turn_wire_original_request_standalone"
+            ):
+                raise AssertionError(
+                    "Normal model context did not fold the completed Pipeline request into its handoff"
+                )
+            next_turn_checks["completed Pipeline request is folded into handoff on the model wire"] = True
         failure_stage = "lifecycle-logs"
         forbidden = [
             marker

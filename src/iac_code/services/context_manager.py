@@ -19,6 +19,7 @@ from iac_code.agent.message import (
     is_compaction_summary_message,
     is_recalled_memory_message,
 )
+from iac_code.services.pipeline_handoff_context import fold_pipeline_user_history
 from iac_code.services.token_counter import TokenCounter
 
 
@@ -283,9 +284,8 @@ class ContextManager:
     def get_context_messages(self) -> list[Message]:
         """有效上下文：最后一个压缩标记起到末尾；无标记则完整历史。"""
         idx = self._last_compaction_index()
-        if idx is None:
-            return self._conversation.messages
-        return self._conversation.messages[idx:]
+        messages = self._conversation.messages if idx is None else self._conversation.messages[idx:]
+        return fold_pipeline_user_history(messages)
 
     def remove_cleanup_prompt_messages(self) -> int:
         from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message

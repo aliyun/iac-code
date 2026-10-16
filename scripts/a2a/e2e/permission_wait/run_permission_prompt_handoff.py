@@ -18,6 +18,11 @@ SCENARIOS = {
 }
 EXTRA_NODES = {
     **{
+        "pipeline-handoff-context-" + mode: "tests/a2a/test_permission_pipeline_engine_e2e.py::"
+        "test_pipeline_handoff_folds_original_request_without_losing_history[{}]".format(mode)
+        for mode in ("same-process", "cold-recovery")
+    },
+    **{
         "protocol-" + protocol: "tests/a2a/test_permission_protocol_e2e.py::"
         "test_real_provider_sends_canceled_results_before_new_prompt[{}]".format(protocol)
         for protocol in ("chat", "responses", "anthropic")
