@@ -854,6 +854,40 @@ def test_expect_any_auto_approves_permission_prompt(tmp_path: Path) -> None:
     assert any(event["type"] == "permission-prompt-response" for event in pty.events)
 
 
+@pytest.mark.parametrize("elapsed,expected_diagnoses", [(1.0, []), (121.0, [121.0])])
+def test_expect_any_legacy_contract_args_use_default_diagnosis_threshold(
+    tmp_path: Path, monkeypatch, elapsed: float, expected_diagnoses: list[float]
+) -> None:
+    runner = _load_runner()
+    args = runner.parse_args(["--allow-real-cloud"])
+    del args.wait_diagnosis_after
+    clock = [0.0]
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    pty = _repl_pty_unit_instance(runner, args=args, run_dir=tmp_path, cwd=tmp_path, env={})
+    diagnoses = []
+    monkeypatch.setattr(
+        pty, "_diagnose_wait", lambda _description, _offset, duration: diagnoses.append(duration) or True
+    )
+
+    class Child:
+        before = ""
+        after = ""
+        calls = 0
+
+        def expect(self, _patterns, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                clock[0] = elapsed
+                raise runner.pexpect.TIMEOUT("waiting")
+            self.after = "Pipeline completed"
+            return 0
+
+    pty.child = Child()
+    matched = pty.expect_any(("Pipeline completed",), description="pipeline completed", timeout=300)
+    assert matched == "Pipeline completed"
+    assert diagnoses == expected_diagnoses
+
+
 def test_expect_any_diagnoses_and_aborts_unexpected_input(tmp_path: Path, monkeypatch) -> None:
     runner = _load_runner()
     args = runner.parse_args(["--allow-real-cloud", "--wait-diagnosis-after", "0"])
