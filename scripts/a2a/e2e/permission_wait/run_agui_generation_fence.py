@@ -213,6 +213,7 @@ class _AguiServer:
 
 
 def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
+    from iac_code.a2a.backup import PENDING_JOBS_DIRNAME
     from iac_code.services.session_backup import BACKUP_ENV_VAR, BACKUP_STATE_FILENAME, SessionBackupService
     from iac_code.services.session_backup_staging import SessionBackupStagingWorker
     from iac_code.services.session_storage import SessionStorage
@@ -422,6 +423,26 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
             raise AssertionError("AG-UI next ordinary prompt was not persisted exactly once")
         for run_id in ("stale-before-restart", "stale-after-restart"):
             if run_id == "stale-after-restart":
+                # RUN_FINISHED can precede the backend's durable natural handoff.
+                # This is a completed-turn restart, not a crash during capture;
+                # terminate() would forcibly interrupt that capture on Windows.
+                deadline = time.monotonic() + timeout
+                while True:
+                    _control_path, control = _single_json("execution-control/*.json", persistence_dir)
+                    handoff = control.get("naturalHandoff") or {}
+                    backup = control.get("backup") or {}
+                    if (
+                        control.get("phase") == "terminated"
+                        and control.get("releaseReady") is True
+                        and handoff.get("stagedCommitted") is True
+                        and handoff.get("snapshotCommitId")
+                        and handoff.get("snapshotCommitId") == backup.get("commitId")
+                        and not list((a2a.staging_dir / PENDING_JOBS_DIRNAME).glob("*.json"))
+                    ):
+                        break
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("AG-UI completed turn did not commit its durable handoff before restart")
+                    time.sleep(0.02)
                 agui.stop()
                 a2a.stop()
                 a2a.start(3)
