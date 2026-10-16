@@ -5971,7 +5971,36 @@ if os.environ.get('STAROPS_HIL') != context.read_text(encoding='utf-8'):
 if args[:2] == ['ros', 'stop-chat']:
     print(json.dumps({'Status': 'Stopped', 'SessionId': 'session-1'}), flush=True)
     raise SystemExit(0)
+if args[:2] == ['ros', 'list-chat-sessions']:
+    assert args[args.index('--agent-version') + 1] == 'V2'
+    assert args[args.index('--biz-mode') + 1] in ('IaCCodeNormal', 'IaCCodePipeline')
+    assert args[args.index('--max-results') + 1] == '20'
+    assert json.loads(args[args.index('--body') + 1]) == {'SessionScopeOption': 'CurrentCaller'}
+    response = context.with_suffix('.session-list.json')
+    print(response.read_text(encoding='utf-8') if response.exists() else json.dumps({'Sessions': []}), flush=True)
+    raise SystemExit(0)
 query = args[args.index('--query') + 1] if '--query' in args else None
+if query and query.startswith('IAC_CODE_PERMISSION:') and context.with_suffix('.permission-loss').exists():
+    context.with_suffix('.permission-loss').unlink()
+    context.with_suffix('.permission-response').write_text(query.split(':', 1)[1], encoding='utf-8')
+    print('Aliyun CLI call failed: failed to call tool: SSE connection lost', file=sys.stderr, flush=True)
+    raise SystemExit(1)
+body = json.loads(args[args.index('--body') + 1]) if '--body' in args else {}
+if query is None and body.get('StreamOptions.Cursor') == 'v1.permission.0':
+    response = json.loads(context.with_suffix('.permission-response').read_text(encoding='utf-8'))
+    ack = dict(response, kind='permission_ack', accepted=True)
+    event = {'result': {'message': {'contextId': 'session-1', 'parts': [
+        {'mediaType': 'application/json', 'data': ack}]}}}
+    print(json.dumps({'id': 'v1.permission.1', 'data': event}), flush=True)
+    terminal = {'result': {'statusUpdate': {'contextId': 'session-1', 'taskId': 'task-1',
+        'status': {'state': 'TASK_STATE_COMPLETED', 'message': {'role': 'ROLE_AGENT', 'parts': [
+            {'text': 'authoritative final'}]}},
+        'metadata': {'iac_code': {'assistantFinal': {'complete': True}}}}}}
+    print(json.dumps({'id': 'v1.permission.2', 'data': terminal}), flush=True)
+    raise SystemExit(0)
+if query is None and body.get('StreamOptions.Cursor') == 'v1.lifecycle.0':
+    print(json.dumps({'id': 'v1.lifecycle.1', 'data': {'result': {'statusUpdate': {
+        'taskId': 'task-1', 'contextId': 'session-1', 'status': {'state': 'TASK_STATE_WORKING'}}}}}), flush=True)
 if query in ('sse-lost', 'sse-lost-no-anchor'):
     if query == 'sse-lost':
         print(json.dumps({'id': 'v1.lifecycle.1', 'data': {'result': {'statusUpdate': {
@@ -6177,8 +6206,8 @@ else:
             assert time.monotonic() < deadline, "Timed out waiting for the remote lifecycle checkpoint."
             time.sleep(0.02)
 
-    def finish_drive(process):
-        output, errors = process.communicate(timeout=8)
+    def finish_drive(process, timeout=8):
+        output, errors = process.communicate(timeout=timeout)
         assert process.returncode == 0, (output, errors)
 
     yield SimpleNamespace(start=start, refresh=refresh, calls=read_calls, workspace=workspace,
@@ -6394,13 +6423,14 @@ def test_remote_real_disconnect_before_anchor_fails_without_retrying_query(remot
     foreground = env.drive(started["jobId"])
     env.wait_for(lambda: len(env.calls()) == 1)
     env.context.with_suffix(".disconnect").touch()
-    env.finish_drive(foreground)
+    env.finish_drive(foreground, timeout=20)
     result = bridge._follow_job_local(started["jobId"], 0, 5)
     assert result["state"] == "failed"
     assert result["error"]["code"] == "missing_recovery_anchor"
     env.refresh()
     bridge._drive_foreground_cli(started["jobId"], result["cursor"], 0.1)
-    assert len(env.calls()) == 1
+    assert len(env.calls()) == 1 + bridge.MAX_SESSION_LOOKUP_SCANS
+    assert sum('--query' in call['args'] for call in env.calls()) == 1
     assert "stop-chat" not in env.calls()[0]["args"]
 
 
@@ -6412,9 +6442,9 @@ def test_remote_real_sse_tool_failure_uses_foreground_reconnect_only_with_curren
     bridge._drive_foreground_cli(job_id, 0, 5)
     final = bridge._follow_job_local(job_id, 0, 5)
     calls = env.calls()
-    assert len(calls) == (2 if has_anchor else 1)
+    assert len(calls) == (2 if has_anchor else 1 + bridge.MAX_SESSION_LOOKUP_SCANS)
     assert all(item["hil"] == "fake-context-one" for item in calls)
-    assert all(item["args"][:2] == ["ros", "start-chat"] for item in calls)
+    assert all(item["args"][:2] in (["ros", "start-chat"], ["ros", "list-chat-sessions"]) for item in calls)
     if has_anchor:
         assert final["state"] == "turn-completed", final
         assert final["finalText"] == "authoritative final"
@@ -6428,7 +6458,7 @@ def test_remote_real_sse_tool_failure_uses_foreground_reconnect_only_with_curren
         assert "outcome is unknown" in final["error"]["message"]
         env.refresh()
         bridge._drive_foreground_cli(job_id, final["cursor"], 0.1)
-        assert len(env.calls()) == 1
+        assert len(env.calls()) == 1 + bridge.MAX_SESSION_LOOKUP_SCANS
 
 
 def test_remote_abandoned_foreground_before_anchor_closes_cli_without_new_query(remote_lifecycle):
@@ -6438,10 +6468,13 @@ def test_remote_abandoned_foreground_before_anchor_closes_cli_without_new_query(
     env.wait_for(lambda: len(env.calls()) == 1)
     foreground.terminate()
     foreground.communicate(timeout=5)
+    env.refresh()
+    bridge._drive_foreground_cli(started["jobId"], 0, 5)
     result = bridge._follow_job_local(started["jobId"], 0, 5)
     assert result["error"]["code"] == "missing_recovery_anchor"
     env.wait_for(lambda: not list(bridge._remote_cli_root(started["jobId"]).glob("remote-cli-*")))
-    assert len(env.calls()) == 1
+    assert len(env.calls()) == 1 + bridge.MAX_SESSION_LOOKUP_SCANS
+    assert all(call['hil'] == 'fake-context-two' for call in env.calls()[1:])
     assert env.calls()[0]["args"][:2] == ["ros", "start-chat"]
 
 
@@ -6723,7 +6756,9 @@ def test_remote_answer_sse_loss_uses_only_current_request_anchor(remote_lifecycl
     reply = bridge._continue_job_local({"jobId": job_id, "prompt": answer})
     cursor = reply["cursor"]
     for _ in range(3):
-        env.finish_drive(env.drive(job_id, cursor, seconds=1))
+        # Missing-anchor recovery adds up to three real CLI list invocations.
+        # Leave the idle window unchanged; only scale this test's wall watchdog.
+        env.finish_drive(env.drive(job_id, cursor, seconds=1), timeout=8 if has_anchor else 20)
         final = bridge._follow_job_local(job_id, cursor, 0)
         if final["state"] in {"failed", "completed", "turn-completed"}:
             break
@@ -6731,9 +6766,11 @@ def test_remote_answer_sse_loss_uses_only_current_request_anchor(remote_lifecycl
     assert final["jobId"] == job_id
     assert final["sessionId"] == "session-1"
     calls = env.calls()
-    assert len(calls) == (3 if has_anchor else 2)
-    assert all(call["args"][:2] == ["ros", "start-chat"] for call in calls)
-    assert ["--query" in call["args"] for call in calls] == ([True, True, False] if has_anchor else [True, True])
+    assert len(calls) == (3 if has_anchor else 2 + bridge.MAX_SESSION_LOOKUP_SCANS)
+    assert all(call["args"][:2] in (["ros", "start-chat"], ["ros", "list-chat-sessions"]) for call in calls)
+    assert ["--query" in call["args"] for call in calls] == (
+        [True, True, False] if has_anchor else [True, True] + [False] * bridge.MAX_SESSION_LOOKUP_SCANS
+    )
     assert calls[1]["args"][calls[1]["args"].index("--query") + 1] == answer
     assert calls[1]["args"][calls[1]["args"].index("--session-id") + 1] == "session-1"
     assert all(call["hil"] == "fake-context-two" for call in calls[1:])
@@ -6750,6 +6787,93 @@ def test_remote_answer_sse_loss_uses_only_current_request_anchor(remote_lifecycl
     env.refresh("fake-context-three")
     bridge._drive_foreground_cli(job_id, final["cursor"], 0.1)
     assert len(env.calls()) == len(calls)
+
+
+@pytest.mark.parametrize("kind", ["initial", "ask_user_question", "candidate_selection", "allow_once", "deny"])
+def test_remote_first_cursor_recovers_initial_question_and_permission_loss(remote_lifecycle, kind):
+    env = remote_lifecycle
+    permission = kind in {"allow_once", "deny"}
+    started = env.start("sse-lost-no-anchor" if kind == "initial" else (
+        "input-permission" if permission else "input-" + kind
+    ))
+    job_id = started["jobId"]
+    job_path = bridge._job_paths(job_id)[1]
+    job = bridge._load_state_json(job_path)
+    assert job["clientReferenceId"] == job_id
+    env.context.with_suffix('.session-list.json').write_text(json.dumps({"Sessions": [
+        {"SessionId": "unrelated", "ClientReferenceId": "other", "Description": "lookup-private-other-session"},
+        {"SessionId": "session-1", "ClientReferenceId": job_id,
+         "FirstCursor": "v1.permission.0" if permission else "v1.lifecycle.0"},
+    ]}), encoding="utf-8")
+    if kind != "initial":
+        env.finish_drive(env.drive(job_id))
+        env.refresh()
+        if permission:
+            env.context.with_suffix('.permission-loss').touch()
+            response = bridge._respond_job_local({"jobId": job_id, "decision": kind})
+        else:
+            response = bridge._continue_job_local({"jobId": job_id, "prompt": "sse-lost-no-anchor"})
+        cursor = response["cursor"]
+    else:
+        cursor = 0
+    env.finish_drive(env.drive(job_id, cursor, seconds=5), timeout=20)
+    final = bridge._follow_job_local(job_id, cursor, 1)
+    assert final["state"] == "turn-completed", final
+    assert final["sessionId"] == "session-1"
+    assert final["finalText"] == "authoritative final"
+    if permission:
+        assert final["permissionAck"]["accepted"] is True
+        assert final["permissionAck"]["decision"] == kind
+    calls = env.calls()
+    assert [call["args"][1] for call in calls[-2:]] == ["list-chat-sessions", "start-chat"]
+    assert sum("--query" in call["args"] for call in calls) == (1 if kind == "initial" else 2)
+    assert _command_body(calls[-1]["args"])["StreamOptions.Cursor"] == (
+        "v1.permission.0" if permission else "v1.lifecycle.0"
+    )
+    assert all(call["hil"] == ("fake-context-one" if kind == "initial" else "fake-context-two")
+               for call in calls[-3:])
+    assert all("stop-chat" not in call["args"] for call in calls)
+    assert bridge._load_state_json(job_path)["streamCursor"] == (
+        "v1.permission.2" if permission else "v1.lifecycle.2"
+    )
+    log_path = env.workspace / ".ros-agent-debug/remote-aliyun-results.jsonl"
+    assert "lookup-private-other-session" not in log_path.read_text(encoding="utf-8")
+
+
+def test_agenthub_packaged_first_cursor_recovery_across_independent_foregrounds(remote_lifecycle, monkeypatch):
+    env = remote_lifecycle
+    installed = env.workspace.parent / "agenthub-skill"
+    subprocess.run([
+        sys.executable, str(ROOT / "skill-runtime/skill_profiles.py"),
+        "--profile", "alibabacloud-ros-agent", "--output", str(installed),
+    ], check=True, capture_output=True)
+    script = installed / "scripts/ros_agent.py"
+    monkeypatch.setattr(sys.modules[__name__], "BRIDGE_PATH", script)
+    monkeypatch.setattr(bridge, "__file__", str(script))
+    # Each independent host command may have a fresh telemetry session ID.
+    # Inherited host/user configuration must not hide that process boundary.
+    monkeypatch.delenv("SKILL_SESSION_ID", raising=False)
+    started = env.start("sse-lost-no-anchor")
+    job_id = started["jobId"]
+    env.context.with_suffix(".session-list.json").write_text(json.dumps({"Sessions": [
+        {"SessionId": "session-1", "ClientReferenceId": job_id, "FirstCursor": "v1.lifecycle.0"},
+    ]}), encoding="utf-8")
+    env.finish_drive(env.drive(job_id, seconds=5), timeout=20)
+    first = bridge._follow_job_local(job_id, 0, 1)
+    assert first["state"] == "turn-completed", first
+    env.refresh()
+    reply = bridge._continue_job_local({"jobId": job_id, "prompt": "sse-lost-no-anchor"})
+    env.finish_drive(env.drive(job_id, reply["cursor"], seconds=5), timeout=20)
+    final = bridge._follow_job_local(job_id, reply["cursor"], 1)
+    assert final["state"] == "turn-completed", final
+    assert final["sessionId"] == first["sessionId"] == "session-1"
+    calls = env.calls()
+    assert [call["args"][1] for call in calls] == ["start-chat", "list-chat-sessions", "start-chat"] * 2
+    assert sum("--query" in call["args"] for call in calls) == 2
+    headers = [call["args"][call["args"].index("--user-agent") + 1] for call in calls]
+    assert all(header.startswith("AlibabaCloud-Agent-Skills/alibabacloud-ros-agent/") for header in headers)
+    assert headers[0] != headers[3]
+    assert all(call["hil"] == "fake-context-two" for call in calls[3:])
 
 
 def test_remote_answer_receipt_does_not_retire_reader_before_second_question(remote_lifecycle):

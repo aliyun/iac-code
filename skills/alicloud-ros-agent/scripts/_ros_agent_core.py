@@ -58,11 +58,15 @@ def _secure_directory(path: pathlib.Path) -> None:
 
 
 def _atomic_json(path: pathlib.Path, value: Dict[str, Any], mode: int = 0o600) -> None:
+    _atomic_bytes(path, _json_bytes(value), mode)
+
+
+def _atomic_bytes(path: pathlib.Path, value: bytes, mode: int = 0o600) -> None:
     _secure_directory(path.parent)
     descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(value)
             handle.flush()
             os.fsync(handle.fileno())
         if os.name != "nt":
@@ -764,6 +768,8 @@ def build_command(
     )
     if args.session_id:
         command.extend(["--session-id", args.session_id])
+    elif execution_mode == "remote" and getattr(args, "client_reference_id", None):
+        command.extend(["--body", _json_bytes({"ClientReferenceId": args.client_reference_id}).decode("utf-8")])
     if args.region_id:
         command.extend(["--biz-region-id", args.region_id])
     for attachment in attachments:
@@ -773,6 +779,38 @@ def build_command(
                 values.append("{}={}".format(field, attachment[field]))
         command.extend(["--attachments", *values])
     return command
+
+
+def build_session_list_command(args: argparse.Namespace, next_token: Optional[str] = None) -> List[str]:
+    # V2 routing and pagination must use the ROS plugin's published CLI flags.
+    # Putting them only in --body can silently return the legacy V1 list.
+    command = [
+        resolve_aliyun(args.aliyun_path), "ros", "list-chat-sessions",
+        "--endpoint", args.endpoint,
+        "--connect-timeout", str(min(int(args.connect_timeout), 10)),
+        "--read-timeout", str(min(int(args.read_timeout), 30)),
+        "--user-agent", USER_AGENT,
+        "--agent-version", "V2",
+        "--biz-mode", "IaCCodePipeline" if args.mode == "pipeline" else "IaCCodeNormal",
+        "--max-results", "20",
+        "--body", _json_bytes({"SessionScopeOption": "CurrentCaller"}).decode("utf-8"),
+    ]
+    if next_token:
+        command.extend(["--next-token", next_token])
+    if args.region_id:
+        command.extend(["--region", args.region_id])
+    return command
+
+
+def parse_first_cursor(value: Any) -> str:
+    # A server-provided replay origin is not a business event ID. Keep .0
+    # separate from parse_stream_event_id's strictly positive event sequences.
+    if not isinstance(value, str) or len(value) > 4096:
+        raise BridgeError("invalid_first_cursor", "ROS returned an invalid FirstCursor.")
+    identity, separator, sequence = value.rpartition(".")
+    if not separator or sequence != "0" or not identity.startswith("v1.") or len(identity) <= 3:
+        raise BridgeError("invalid_first_cursor", "ROS returned an invalid FirstCursor.")
+    return identity
 
 
 def build_reconnect_command(args: argparse.Namespace, session_id: str, cursor: str) -> List[str]:
