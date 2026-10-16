@@ -66,6 +66,8 @@ def test_incomplete_handoff_rejects_cold_worker_and_local_reply_can_retry(tmp_pa
         original.start()
         permission = _permission(original.send("original"))
         wait_for(lambda: (tmp_path / "shared" / marker).exists())
+        if fault == "runtime-close":
+            wait_for(lambda: (tmp_path / "shared/runtime-close-wait-expired").exists())
         before = document(tmp_path)
         assert before["inputHandoffReady"] is False
         assert (before.get("inputHandoff") or {}).get("phase") != "COMMITTED"

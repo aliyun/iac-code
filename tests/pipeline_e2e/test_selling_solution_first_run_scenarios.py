@@ -6231,7 +6231,9 @@ asyncio.run(main())
             runner._repl_submit_image_fixture(pty, "ask-first-answer", label="initial-image-ask-enter-1",
                                               line_input=True)
         child.expect("NATIVE_IMAGE_ANSWER=")
-        child.expect(pexpect.EOF)
+        # The answer already arrived; coverage teardown needs a separate,
+        # bounded shutdown budget instead of the two-second input deadline.
+        child.expect(pexpect.EOF, timeout=10)
         answer = json.loads(child.before.strip())
         path = next(e["path"] for e in pty.events if e.get("type") == "paste-image-fixture")
         assert Path(path).is_file()
