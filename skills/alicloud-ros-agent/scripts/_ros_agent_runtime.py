@@ -9,7 +9,32 @@ def _is_remote_cli(job: Dict[str, Any]) -> bool:
 def _valid_foreground_command(command: Any, job: Dict[str, Any]) -> bool:
     if not isinstance(command, list) or not all(isinstance(value, str) for value in command):
         return False
-    return command[:3] == [job["aliyunPath"], "ros", "start-chat"]
+    if command[:3] == [job["aliyunPath"], "ros", "start-chat"]:
+        return True
+    if command[:3] != [job["aliyunPath"], "ros", "list-chat-sessions"]:
+        return False
+    try:
+        token = command[command.index("--next-token") + 1] if "--next-token" in command else None
+        if token is not None and (not isinstance(token, str) or not token):
+            return False
+        args = argparse.Namespace(
+            aliyun_path=job["aliyunPath"], endpoint=job["endpoint"], mode=job["mode"],
+            connect_timeout=job.get("connectTimeout", 10),
+            read_timeout=job.get("readTimeout", DEFAULT_READ_TIMEOUT_SECONDS), region_id=job.get("regionId"),
+        )
+        expected = build_session_list_command(args, token)
+        if SKILL_DISTRIBUTION == "agenthub":
+            # Independent foreground commands generate different telemetry IDs.
+            # Accept only this distribution's exact header shape, not arbitrary
+            # headers; all authorization/routing arguments remain exact matches.
+            index = expected.index("--user-agent") + 1
+            pattern = re.escape(USER_AGENT_TEMPLATE).replace(re.escape("{session-id}"), "[0-9a-f]{32}")
+            if len(command) <= index or re.fullmatch(pattern, command[index]) is None:
+                return False
+            expected[index] = command[index]
+        return command == expected
+    except (ValueError, IndexError, AttributeError, KeyError, BridgeError):
+        return False
 
 
 def _remote_cli_root(job_id: str) -> pathlib.Path:
@@ -37,7 +62,7 @@ class _ForegroundCLIProcess:
 
     def __init__(
         self, job_id: str, command: List[str], environment: Dict[str, str], stderr: Any, worker_role: str,
-        debug: bool = False,
+        debug: bool = False, maximum_output_bytes: Optional[int] = None,
     ) -> None:
         root = _remote_cli_root(job_id)
         self.job_id = job_id
@@ -54,6 +79,7 @@ class _ForegroundCLIProcess:
         self.final_result = None  # type: Optional[Dict[str, Any]]
         self.next_job_check = 0.0
         self.on_idle = None
+        self.maximum_output_bytes = MAX_CLI_BATCH_BYTES if maximum_output_bytes is None else maximum_output_bytes
         for path in (self.output, self.errors):
             with path.open("wb"):
                 pass
@@ -98,10 +124,10 @@ class _ForegroundCLIProcess:
         with self.output.open("rb") as handle:
             self.output_handle = handle
             while True:
-                chunk = handle.readline(MAX_CLI_BATCH_BYTES + 1)
+                chunk = handle.readline(self.maximum_output_bytes + 1)
                 if chunk:
                     pending += chunk
-                    if len(pending) > MAX_CLI_BATCH_BYTES:
+                    if len(pending) > self.maximum_output_bytes:
                         raise BridgeError("stream_failed", "Alibaba Cloud CLI output exceeded its batch limit.")
                     if pending.endswith(b"\n"):
                         yield pending.decode("utf-8", "replace")
@@ -247,7 +273,10 @@ def run_remote_cli(job_id: str, invocation_id: str) -> int:
             captured = []
             if debug_log is not None:
                 with contextlib.suppress(Exception):
-                    limits = ((".stdout", debug_log.MAX_STDOUT_BYTES + 1), (".stderr", MAX_DIAGNOSTIC_BYTES))
+                    # Retain session-list byte counts and sanitized stderr,
+                    # never the metadata of unrelated sessions in its body.
+                    stdout_limit = 0 if command[2] == "list-chat-sessions" else debug_log.MAX_STDOUT_BYTES + 1
+                    limits = ((".stdout", stdout_limit), (".stderr", MAX_DIAGNOSTIC_BYTES))
                     for suffix, limit in limits:
                         # A writer's read view can be stale on a mounted file
                         # system. Read the bounded snapshot through a fresh FD.
@@ -263,7 +292,8 @@ def run_remote_cli(job_id: str, invocation_id: str) -> int:
             if debug_log is not None:
                 with contextlib.suppress(Exception):
                     with debug_log.batch():
-                        debug_log.record("start", operation="start-chat", reconnect="--query" not in command,
+                        debug_log.record("start", operation=command[2], reconnect=(
+                            command[2] == "start-chat" and "--query" not in command),
                                          hasQuery="--query" in command, timeUTC=started_utc)
                         debug_log.record(
                             "cli-result", returnCode=return_code, interrupted=interrupted,
@@ -412,6 +442,96 @@ def _run_start_chat(
     return _consume_start_chat(args, workspace, prompt, client_context, attachments)
 
 
+def _read_session_list_page(args, workspace, next_token, worker_role, can_reconnect):
+    command = build_session_list_command(args, next_token)
+    process = None
+    with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+        try:
+            if getattr(args, "managed_job_id", None):
+                process = _ForegroundCLIProcess(
+                    args.managed_job_id, command, {REMOTE_BOOTSTRAP_INVOCATION_ENV: uuid.uuid4().hex},
+                    stderr_file, worker_role, getattr(args, "debug", False), MAX_SESSION_LIST_BYTES,
+                )
+            else:
+                process = subprocess.Popen(
+                    command, cwd=str(workspace), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=stderr_file, text=True, encoding="utf-8", errors="replace",
+                )
+            output = bytearray()
+            for line in process.stdout:
+                if can_reconnect is not None and can_reconnect() is False:
+                    raise BridgeError("session_lookup_stopped", "The session lookup was stopped.")
+                output.extend(line.encode("utf-8"))
+                if len(output) > MAX_SESSION_LIST_BYTES:
+                    raise BridgeError("session_lookup_failed", "The session list exceeded its response limit.")
+            if process.wait() != 0:
+                raise BridgeError("session_lookup_failed", "ROS ListChatSessions failed; the cloud outcome is unknown.")
+            page = json.loads(output.decode("utf-8"))
+            for _ in range(4):
+                if isinstance(page, dict) and isinstance(page.get("Sessions"), list):
+                    return page
+                if not isinstance(page, dict):
+                    break
+                page = page.get("body", page.get("data", page.get("Data")))
+                if isinstance(page, str):
+                    page = json.loads(page)
+            raise BridgeError("session_lookup_failed", "ROS did not return a complete session list.")
+        except (OSError, ValueError) as exc:
+            raise BridgeError("session_lookup_failed", "ROS did not return a complete session list.") from exc
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    _stop_process(process)
+                process.stdout.close()
+
+
+def _lookup_first_cursor(args, workspace, session_id, worker_role, can_reconnect):
+    reference = getattr(args, "client_reference_id", None)
+    if not session_id and not reference:
+        return None
+    resolved_session_id = None
+    for scan in range(MAX_SESSION_LOOKUP_SCANS):
+        token = None
+        seen_tokens = set()
+        matches = {}  # type: Dict[str, Dict[str, Any]]
+        for _ in range(MAX_SESSION_LOOKUP_PAGES):
+            if can_reconnect is not None and can_reconnect() is False:
+                return None
+            page = _read_session_list_page(args, workspace, token, worker_role, can_reconnect)
+            for item in page["Sessions"]:
+                if not isinstance(item, dict):
+                    raise BridgeError("session_lookup_failed", "ROS returned an invalid session list item.")
+                candidate = item.get("SessionId")
+                if (candidate == session_id if session_id else item.get("ClientReferenceId") == reference):
+                    if not isinstance(candidate, str) or not candidate:
+                        raise BridgeError("session_lookup_failed", "ROS returned an invalid SessionId.")
+                    matches[candidate] = item
+            if len(matches) > 1:
+                raise BridgeError("ambiguous_session_reference", "Multiple ROS sessions match the ClientReferenceId.")
+            token = page.get("NextToken")
+            if token is not None and not isinstance(token, str):
+                raise BridgeError("session_lookup_failed", "ROS returned an invalid session page token.")
+            # SessionId is already the server's unique identity. Reference-based
+            # lookup must finish pagination before treating a match as unique.
+            if not token or (session_id and matches):
+                break
+            if token in seen_tokens:
+                raise BridgeError("session_lookup_failed", "ROS session pagination made no progress.")
+            seen_tokens.add(token)
+        else:
+            raise BridgeError("session_lookup_failed", "ROS session pagination exceeded its lookup budget.")
+        if matches:
+            candidate, item = next(iter(matches.items()))
+            resolved_session_id = candidate
+            cursor = item.get("FirstCursor")
+            if cursor not in (None, ""):
+                parse_first_cursor(cursor)
+                return candidate, cursor
+        if scan + 1 < MAX_SESSION_LOOKUP_SCANS:
+            time.sleep(0.2 * (2 ** scan))
+    return (resolved_session_id, None) if resolved_session_id else None
+
+
 def _consume_start_chat(
     args: argparse.Namespace,
     workspace: pathlib.Path,
@@ -428,6 +548,9 @@ def _consume_start_chat(
     summary = StreamSummary(args.session_id, mode=summary_mode or args.mode)
     diagnostics = []  # type: List[str]
     stream_cursor = None  # type: Optional[str]
+    first_cursor = None  # type: Optional[str]
+    lookup_attempted = False
+    first_cursor_attempts = 0
     stream_identity = None  # type: Optional[str]
     stream_sequence = 0
     pending_applied_stream_event_id = None  # type: Optional[str]
@@ -436,6 +559,42 @@ def _consume_start_chat(
     stalled_remote_interruptions = 0
     debug_log = None
     projection_stopped = False
+
+    def recover_missing_anchor():
+        nonlocal first_cursor, stream_identity, lookup_attempted
+        if (getattr(args, "transport", "aliyun_cli") != "aliyun_cli"
+                or getattr(args, "aliyun_cli_execution_mode", "local") != "remote"):
+            return False
+        if first_cursor is not None:
+            return True
+        if lookup_attempted:
+            return False
+        lookup_attempted = True
+        try:
+            recovered = _lookup_first_cursor(args, workspace, summary.session_id, worker_role, can_reconnect)
+        except BridgeError as exc:
+            if debug_log is not None:
+                with contextlib.suppress(Exception):
+                    debug_log.record("recovery-decision", recoverySource="FirstCursor", errorCode=exc.code,
+                                     hasRecoveryAnchor=False, reconnectAllowed=False, requestResubmitted=False)
+            raise BridgeError(
+                exc.code, exc.message + " The cloud outcome is unknown; Query was not replayed.",
+            ) from exc
+        if recovered is None:
+            return False
+        summary.session_id, first_cursor = recovered
+        # Publish only the recovered session identity, not a synthetic SSE event
+        # or a committed .0 cursor. The existing projection owns request fencing.
+        if project_payload(None, {"SessionId": summary.session_id}, False) is False:
+            return False
+        if first_cursor is None:
+            return False
+        stream_identity = parse_first_cursor(first_cursor)
+        if debug_log is not None:
+            with contextlib.suppress(Exception):
+                debug_log.record("recovery-decision", recoverySource="FirstCursor", hasRecoveryAnchor=True,
+                                 reconnectAllowed=True, requestResubmitted=False)
+        return True
 
     def project_payload(event_id, payload, already_applied):
         if on_payload is None:
@@ -558,9 +717,12 @@ def _consume_start_chat(
         buffer_start_flushes = getattr(on_payload, "flush_count", 0)
         buffer_start_elapsed = getattr(on_payload, "flush_elapsed", 0.0)
         attempt_start_sequence = stream_sequence
-        attempt_start_cursor = stream_cursor
+        attempt_start_cursor = stream_cursor or first_cursor
         attempt_start_diagnostics = len(diagnostics)
-        reconnecting = stream_cursor is not None
+        request_cursor = stream_cursor or first_cursor
+        reconnecting = request_cursor is not None
+        if first_cursor is not None and stream_cursor is None:
+            first_cursor_attempts += 1
         if reconnecting and can_reconnect is not None and can_reconnect() is False:
             return {"ok": True, "state": "worker-stopped", "_workerStopped": True}
         immediate = False
@@ -571,7 +733,7 @@ def _consume_start_chat(
 
         if getattr(args, "transport", "aliyun_cli") == "code":
             parameters = (
-                build_reconnect_start_chat_parameters(str(summary.session_id), stream_cursor)
+                build_reconnect_start_chat_parameters(str(summary.session_id), request_cursor)
                 if reconnecting
                 else build_start_chat_parameters(args, prompt, client_context, attachments)
             )
@@ -620,7 +782,7 @@ def _consume_start_chat(
                     response.close()
         else:
             command = (
-                build_reconnect_command(args, str(summary.session_id), stream_cursor)
+                build_reconnect_command(args, str(summary.session_id), request_cursor)
                 if reconnecting
                 else build_command(args, prompt, client_context, attachments)
             )
@@ -835,7 +997,9 @@ def _consume_start_chat(
         if stream_sequence > attempt_start_sequence:
             stalled_remote_interruptions = 0
         if transport_error is not None and transport_error.code == "remote_cli_stream_interrupted":
-            has_anchor = bool(stream_cursor and summary.session_id)
+            has_anchor = bool((stream_cursor or first_cursor) and summary.session_id)
+            if not has_anchor:
+                has_anchor = recover_missing_anchor()
             if stream_sequence == attempt_start_sequence:
                 stalled_remote_interruptions += 1
             exhausted = stalled_remote_interruptions >= MAX_REMOTE_STREAM_INTERRUPTION_RETRIES
@@ -886,7 +1050,9 @@ def _consume_start_chat(
         if transport_error is not None:
             if not transport_error.retryable:
                 raise transport_error
-            if stream_cursor is None or not isinstance(summary.session_id, str) or not summary.session_id:
+            if not (stream_cursor or first_cursor) or not summary.session_id:
+                recover_missing_anchor()
+            if not (stream_cursor or first_cursor) or not summary.session_id:
                 raise BridgeError(
                     "missing_recovery_anchor",
                     "StartChat was interrupted before a complete recovery anchor was committed.",
@@ -905,12 +1071,21 @@ def _consume_start_chat(
                 stalled_cli_truncations = 0
         elif summary.state in TERMINAL_STATES:
             return result()
-        elif stream_cursor is None or not isinstance(summary.session_id, str) or not summary.session_id:
+        elif not (stream_cursor or first_cursor) or not summary.session_id:
+            if recover_missing_anchor():
+                continue
             raise BridgeError(
                 "missing_recovery_anchor",
                 "StartChat ended before a complete recovery anchor was committed.",
             )
 
+        if (first_cursor_attempts >= MAX_REMOTE_STREAM_INTERRUPTION_RETRIES
+                and stream_cursor is None and first_cursor is not None):
+            raise BridgeError(
+                "stream_recovery_exhausted",
+                "Repeated FirstCursor replay yielded no complete event. The cloud outcome is unknown; "
+                "Query was not replayed.",
+            )
         if can_reconnect is not None and can_reconnect() is False:
             return {"ok": True, "state": "worker-stopped", "_workerStopped": True}
         reconnect_attempt += 1
@@ -1044,6 +1219,7 @@ def _request_from_job(job: Dict[str, Any], prompt: str) -> Dict[str, Any]:
         "aliyunCLIForwardEnv": job.get("aliyunCLIForwardEnv", legacy_forward_env),
         "debug": job.get("debug") is True,
         "sessionId": job.get("sessionId"),
+        "clientReferenceId": job.get("clientReferenceId"),
         "regionId": job.get("regionId"),
         "profile": job.get("profile"),
         "credentialSource": job.get("credentialSource"),
@@ -1130,6 +1306,7 @@ def _start_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
     }  # type: Dict[str, Any]
     if _is_remote_cli(job):
         job["remoteCLIForeground"] = True
+        job["clientReferenceId"] = job_id
     _atomic_json(job_path, job)
     request = _request_from_job(job, prompt)
     request["clientContext"] = payload.get("clientContext")
@@ -1727,6 +1904,7 @@ def run_worker(job_id: str, request_token: str) -> int:
         no_thinking=request.get("noThinking") is True,
         mode=request.get("mode"),
         session_id=request.get("sessionId"),
+        client_reference_id=request.get("clientReferenceId"),
     )
     prompt = request.get("prompt")
     if not isinstance(prompt, str):

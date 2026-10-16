@@ -1332,6 +1332,21 @@ def _apply_projection(job: Dict[str, Any], projection: Dict[str, Any]) -> Option
     return wire_projection if meaningful else None
 
 
+def _append_spool_bytes(spool: pathlib.Path, data: bytes, job: Dict[str, Any]) -> None:
+    # OSS-backed host workspaces need not support POSIX append/flush. Use the
+    # same atomic replacement as job checkpoints, while holding the job lock.
+    if job.get("transport") == "aliyun_cli" and job.get("aliyunCLIExecutionMode") == "remote":
+        previous = spool.read_bytes() if spool.exists() else b""
+        if len(previous) + len(data) > MAX_SPOOL_BYTES:
+            raise BridgeError("stream_failed", "The bounded ROS Agent event spool is full.")
+        _atomic_bytes(spool, previous + data)
+    else:
+        with spool.open("ab") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+
+
 def _append_projection_batch(
     job_id: str, projections: List[Tuple[Dict[str, Any], Optional[str]]],
 ) -> bool:
@@ -1388,10 +1403,7 @@ def _append_projection_batch(
             current_size = spool.stat().st_size if spool.exists() else 0
             if current_size + len(data) > MAX_SPOOL_BYTES:
                 raise BridgeError("stream_failed", "The bounded ROS Agent event spool is full.")
-            with spool.open("ab") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
+            _append_spool_bytes(spool, data, job)
             if os.name != "nt":
                 os.chmod(str(spool), 0o600)
         # Never persist a recovery cursor ahead of its event spool. A crash
@@ -1616,10 +1628,7 @@ def _finish_job(
         data = _json_bytes(boundary) + b"\n"
         current_size = spool.stat().st_size if spool.exists() else 0
         if current_size + len(data) <= MAX_SPOOL_BYTES:
-            with spool.open("ab") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
+            _append_spool_bytes(spool, data, job)
         _atomic_json(job_path, job)
     _touch_manager_activity()
     return True
@@ -1838,10 +1847,7 @@ def _follow_timeout_result(job_id: str, start_cursor: int) -> Optional[Dict[str,
         current_size = spool.stat().st_size if spool.exists() else 0
         if current_size + len(data) > MAX_SPOOL_BYTES:
             raise BridgeError("stream_failed", "The bounded ROS Agent event spool is full.")
-        with spool.open("ab") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
+        _append_spool_bytes(spool, data, job)
         if os.name != "nt":
             os.chmod(str(spool), 0o600)
         return _job_result(
