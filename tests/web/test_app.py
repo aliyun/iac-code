@@ -3458,12 +3458,16 @@ async def test_session_compaction_reports_lifecycle_winner_without_finished_even
 @pytest.mark.asyncio
 async def test_manual_compaction_runtime_creation_does_not_block_other_requests(tmp_path, monkeypatch) -> None:
     import threading
-    import time
 
     from iac_code.web.app import create_app
     from iac_code.web.session_manager import WebSessionManager
 
     release = threading.Event()
+    creation_started = asyncio.Event()
+    creation_finished = threading.Event()
+    loop = asyncio.get_running_loop()
+    loop_thread = threading.get_ident()
+    factory_threads = []
 
     class FakeResult:
         status = "success"
@@ -3479,7 +3483,11 @@ async def test_manual_compaction_runtime_creation_does_not_block_other_requests(
         agent_loop = AgentLoop()
 
     def create_runtime(_options):
-        release.wait(timeout=1)
+        factory_threads.append(threading.get_ident())
+        loop.call_soon_threadsafe(creation_started.set)
+        if not release.wait(timeout=10):
+            raise AssertionError("The health request did not finish while runtime creation was blocked")
+        creation_finished.set()
         return FakeRuntime()
 
     monkeypatch.setattr("iac_code.web.runtime.create_agent_runtime", create_runtime)
@@ -3487,23 +3495,25 @@ async def test_manual_compaction_runtime_creation_does_not_block_other_requests(
     manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=tmp_path)
     session = manager.create_session(session_id="compact-nonblocking")
     app = create_app(session_manager=manager)
-    timer = threading.Timer(0.3, release.set)
-    timer.start()
+    compact_task = None
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver") as client:
-            started_at = time.monotonic()
             compact_task = asyncio.create_task(client.post(f"/api/sessions/{session.session_id}/compact"))
-            await asyncio.sleep(0)
-            health_response = await client.get("/health")
-            health_elapsed = time.monotonic() - started_at
-            compact_response = await compact_task
+            await asyncio.wait_for(creation_started.wait(), timeout=5)
+            health_response = await asyncio.wait_for(client.get("/health"), timeout=5)
+            assert factory_threads and all(thread != loop_thread for thread in factory_threads)
+            assert not creation_finished.is_set()
+            assert not compact_task.done()
+            release.set()
+            compact_response = await asyncio.wait_for(compact_task, timeout=5)
     finally:
         release.set()
-        timer.cancel()
+        if compact_task is not None:
+            await asyncio.wait_for(asyncio.gather(compact_task, return_exceptions=True), timeout=5)
 
     assert health_response.status_code == 200
-    assert health_elapsed < 0.15
     assert compact_response.status_code == 202
+    assert compact_response.json()["state"] == "success"
 
 
 def test_manual_compaction_blocks_turns_and_drains_queued_input(tmp_path, monkeypatch) -> None:
