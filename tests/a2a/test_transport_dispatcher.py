@@ -6885,7 +6885,9 @@ async def test_public_sdk_pipeline_stop_reentry_omitted_task_uses_real_stop_proo
             assert fixture.model.business_calls == 1
         else:
             sending = fixture.send(request)
-            await asyncio.wait_for(fixture.model.resumed_model.wait(), timeout=_STREAM_TEST_TIMEOUT)
+            # This path replays real Pipeline/SDK recovery and durable writes;
+            # Windows file IO can exceed the mock-stream tests' five seconds.
+            await asyncio.wait_for(fixture.model.resumed_model.wait(), timeout=20)
             successor = request.message.task_id
             assert successor and successor != fixture.task_id
             intent = intent_store.load(context_id=fixture.context_id)

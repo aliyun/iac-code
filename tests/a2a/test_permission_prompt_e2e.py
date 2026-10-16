@@ -81,7 +81,7 @@ def _serve(
         async def execute(self, *, tool_input, context):
             with (observation_path / "executions.jsonl").open("a", encoding="utf-8") as output:
                 output.write(json.dumps(tool_input) + "\n")
-            if fault == "tool-block":
+            if fault in {"tool-block", "permission-claim-race"}:
                 import asyncio
 
                 (observation_path / "tool-started").touch()
@@ -180,6 +180,41 @@ def _serve(
 
     with ExitStack() as patches:
         patches.enter_context(patch("iac_code.a2a.executor.create_agent_runtime", runtime))
+        if fault == "permission-claim-race":
+            from iac_code.a2a.executor import IacCodeA2AExecutor
+
+            if Path(os.environ["IAC_CODE_CONFIG_DIR"]).parent.name == "worker-b":
+                mark_backed_up = PermissionWaitCheckpointStore.mark_claim_backed_up
+
+                def delayed_backup_ack(self, *args, **kwargs):
+                    # The shared snapshot contains the recorded decision before
+                    # its local backup ACK. Let C restore precisely that window.
+                    (observation_path / "decision-backup-published").touch()
+                    deadline = time.monotonic() + 15
+                    while not (observation_path / "loser-session-restored").exists():
+                        if time.monotonic() >= deadline:
+                            raise AssertionError("The competing worker did not restore the decision snapshot")
+                        time.sleep(0.02)
+                    return mark_backed_up(self, *args, **kwargs)
+
+                patches.enter_context(
+                    patch.object(PermissionWaitCheckpointStore, "mark_claim_backed_up", delayed_backup_ack)
+                )
+            else:
+                reconcile = IacCodeA2AExecutor._reconcile_session_before_route
+
+                async def delayed_reconcile(self, **kwargs):
+                    while not (observation_path / "decision-backup-published").exists():
+                        await asyncio.sleep(0.02)
+                    result = await reconcile(self, **kwargs)
+                    (observation_path / "loser-session-restored").touch()
+                    while not (observation_path / "tool-started").exists():
+                        await asyncio.sleep(0.02)
+                    return result
+
+                patches.enter_context(
+                    patch.object(IacCodeA2AExecutor, "_reconcile_session_before_route", delayed_reconcile)
+                )
         if fault == "runtime-close":
             from iac_code.a2a.task_store import A2ATaskStore
 

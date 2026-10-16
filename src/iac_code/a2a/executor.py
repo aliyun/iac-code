@@ -4118,17 +4118,21 @@ class IacCodeA2AExecutor(AgentExecutor):
                     session_id=context_record.session_id,
                 ),
             )
-        if isinstance(decision, dict) and decision.get("backupStatus") != "committed":
-            claim_id = str(decision.get("claimId") or "")
-            await backup_permission_wait_checkpoint(
-                store=store,
-                boundary_id=boundary_id,
-                cwd=context_record.cwd,
-                session_id=context_record.session_id,
-                backup_service=self._backup_service,
-                metrics=self._metrics,
-            )
-            record = store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
+
+        async def commit_decision_backup() -> None:
+            nonlocal record
+            if isinstance(decision, dict) and decision.get("backupStatus") != "committed":
+                claim_id = str(decision.get("claimId") or "")
+                await backup_permission_wait_checkpoint(
+                    store=store,
+                    boundary_id=boundary_id,
+                    cwd=context_record.cwd,
+                    session_id=context_record.session_id,
+                    backup_service=self._backup_service,
+                    metrics=self._metrics,
+                )
+                record = store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
+
         task_record = await self._task_store.get_or_create_task(
             task_id=response.task_id, context_id=response.context_id, restore_interrupted=False
         )
@@ -4164,6 +4168,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                         )
                     reserved_admission = reservation.token
                 try:
+                    # Hold the cross-process admission before publishing the
+                    # decision. A losing cold worker must not advance shared
+                    # backup lineage underneath the active recovery's runtime.
+                    await commit_decision_backup()
                     control = await self._execution_control_service.begin_execution(
                         context_id=response.context_id,
                         task_id=response.task_id,
@@ -4184,6 +4192,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                 control.bind_session(context_record.session_id)
                 await control.checkpoint()
                 await control.mark_execution_started()
+            else:
+                await commit_decision_backup()
             if PipelineLifecycleEventQueueCarrier.read(context) and not PipelineLifecycleEventQueueCarrier.is_bound(
                 context
             ):
