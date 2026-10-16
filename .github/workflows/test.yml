@@ -160,6 +160,11 @@ jobs:
         # the scenarios' own watchdogs. Unit tests above retain source coverage.
         run: uv run pytest tests/a2a_e2e/test_execution_control_scenarios.py -v
 
+      - name: Run AG-UI HTTP integration tests serially with coverage
+        # Real threaded servers share the runner's I/O budget. Keep the default
+        # A2A HTTP deadlines meaningful instead of competing with every worker.
+        run: uv run pytest tests/agui/test_http_sse_integration.py -v --cov --cov-append --cov-report=
+
       - name: Run remaining tests with coverage
         run: |
           uv run pytest tests/ -v -n auto \
@@ -168,6 +173,7 @@ jobs:
             --ignore=tests/a2a/test_execution_control_review_regressions.py \
             --ignore=tests/a2a/test_permission_execution_control.py \
             --ignore=tests/a2a_e2e/test_execution_control_scenarios.py \
+            --ignore=tests/agui/test_http_sse_integration.py \
             --cov --cov-append --cov-report=term-missing \
             --junitxml=testcase.xml
 
