@@ -744,6 +744,15 @@ class SessionStorage:
         without claiming the new history guarantee for those layouts.
         """
         identity = record.identity()
+        # The first append changes a metadata-only directory into a history
+        # directory. Resolve that authority under the same guard as the write
+        # so another writer cannot change layouts between the resolver probes.
+        with self._session_write_guard(cwd, session_id):
+            return self._append_user_input_once_guarded(cwd, session_id, record, identity)
+
+    def _append_user_input_once_guarded(
+        self, cwd: str, session_id: str, record: PipelineUserHistoryRecord, identity: dict[str, str]
+    ) -> UserInputHistoryWriteResult:
         session_dir = self.v2_session_dir(cwd, session_id)
         if session_dir is None:
             if self._legacy_file_wins_over_metadata_only_dir(cwd, session_id):

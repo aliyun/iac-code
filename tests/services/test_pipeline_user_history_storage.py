@@ -144,9 +144,9 @@ def _history_process(projects, barrier, queue, message_id, text):
         result = storage.append_user_input_once(
             "/workspace", "session-1", PipelineUserHistoryRecord(message_id, "ctx-1", "task-1", text)
         )
-        queue.put(result.value)
-    except ValueError:
-        queue.put("conflict")
+        queue.put((result.value, None))
+    except ValueError as exc:
+        queue.put(("conflict", str(exc)))
 
 
 @pytest.mark.parametrize("race", ["same", "different", "conflict"])
@@ -166,7 +166,8 @@ def test_two_os_process_history_writers_are_atomic_and_isolated(history, race):
     for process in processes:
         process.join(15)
         assert process.exitcode == 0
-    results = sorted(queue.get(timeout=2) for _ in processes)
+    observations = [queue.get(timeout=2) for _ in processes]
+    results = sorted(result for result, _error in observations)
     assert (
         results
         == {
@@ -174,7 +175,9 @@ def test_two_os_process_history_writers_are_atomic_and_isolated(history, race):
             "different": ["appended", "appended"],
             "conflict": ["appended", "conflict"],
         }[race]
-    )
+    ), observations
+    if race == "conflict":
+        assert ("conflict", "Pipeline user history identity conflict") in observations
     messages = storage.load("/workspace", "session-1")
     assert len(messages) == (2 if race == "different" else 1)
     storage.ensure_v2_session_dir_for_new_session("/workspace", "session-2")
@@ -182,6 +185,59 @@ def test_two_os_process_history_writers_are_atomic_and_isolated(history, race):
     assert len(storage.load("/workspace", "session-2")) == 1
     queue.close()
     queue.join_thread()
+
+
+def _history_process_with_delayed_layout_lookup(projects, missing_checked, resume_lookup, queue):
+    storage = SessionStorage(projects)
+    directory_session_dir = storage._directory_session_dir
+    gated = False
+
+    def lookup(cwd, session_id):
+        nonlocal gated
+        result = directory_session_dir(cwd, session_id)
+        if result is None and not gated:
+            gated = True
+            missing_checked.set()
+            if not resume_lookup.wait(10):
+                raise RuntimeError("The competing history writer did not finish")
+        return result
+
+    storage._directory_session_dir = lookup
+    try:
+        result = storage.append_user_input_once(
+            "/workspace", "session-1", PipelineUserHistoryRecord("sdk-1", "ctx-1", "task-1", "original user input")
+        )
+        queue.put((result.value, None))
+    except ValueError as exc:
+        queue.put(("conflict", str(exc)))
+
+
+def test_first_history_file_created_between_layout_probes_remains_idempotent(history):
+    storage, record = history
+    context = multiprocessing.get_context("spawn")
+    missing_checked, resume_lookup = context.Event(), context.Event()
+    queue = context.Queue()
+    process = context.Process(
+        target=_history_process_with_delayed_layout_lookup,
+        args=(str(storage._projects_dir), missing_checked, resume_lookup, queue),
+    )
+    process.start()
+    try:
+        assert missing_checked.wait(10)
+        assert storage.append_user_input_once("/workspace", "session-1", record) is UserInputHistoryWriteResult.APPENDED
+        resume_lookup.set()
+        process.join(15)
+        assert process.exitcode == 0
+        result = queue.get(timeout=2)
+        assert result == ("already_present", None), result
+        assert [message.content for message in storage.load("/workspace", "session-1")] == [record.text]
+    finally:
+        resume_lookup.set()
+        if process.is_alive():
+            process.terminate()
+            process.join(10)
+        queue.close()
+        queue.join_thread()
 
 
 @pytest.mark.parametrize("damage", ["symlink", "directory", "metadata"])
