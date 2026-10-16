@@ -153,6 +153,8 @@ class _AguiServer:
         return "http://127.0.0.1:{}".format(self.port)
 
     def start(self, *, generation: int, a2a_url: str) -> None:
+        if generation > 1:
+            self.port = _free_port()
         self._stdout = (self.run_dir / "agui-{}.stdout.log".format(generation)).open("w", encoding="utf-8")
         self._stderr = (self.run_dir / "agui-{}.stderr.log".format(generation)).open("w", encoding="utf-8")
         env = os.environ.copy()

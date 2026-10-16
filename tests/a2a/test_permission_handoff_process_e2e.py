@@ -28,7 +28,9 @@ def document(root):
     return json.loads((root / "shared/a2a/execution-control/context-1.json").read_text(encoding="utf-8"))
 
 
-def worker(root, name, fault=None):
+def worker(root, name, fault=None, *, resident_timeout=300):
+    # Only the original worker's short deadline injects the handoff fault.
+    # Contenders must not start a second residence-timeout fault while replying.
     return Server(
         root,
         config_dir=str(root / name / "config"),
@@ -36,7 +38,7 @@ def worker(root, name, fault=None):
         backup_dir=str(root / "shared/backup"),
         observation_dir=str(root / "shared"),
         tool_count=1,
-        resident_timeout=0.2,
+        resident_timeout=resident_timeout,
         fault=fault,
     )
 
@@ -56,7 +58,7 @@ def assert_success(events, text):
 @pytest.mark.parametrize("fault", ["runtime-close", "backup-failure"])
 def test_incomplete_handoff_rejects_cold_worker_and_local_reply_can_retry(tmp_path, fault):
     (tmp_path / "workspace").mkdir()
-    original = worker(tmp_path, "original", fault)
+    original = worker(tmp_path, "original", fault, resident_timeout=0.2)
     replacement = worker(tmp_path, "replacement")
     marker = "runtime-close-started" if fault == "runtime-close" else "backup-failed"
     release = "release-runtime-close" if fault == "runtime-close" else "release-backup"
@@ -75,7 +77,19 @@ def test_incomplete_handoff_rejects_cold_worker_and_local_reply_can_retry(tmp_pa
         assert document(tmp_path)["inputHandoffReady"] is False
 
         (tmp_path / "shared" / release).touch()
-        resumed = original.send(_reply(permission), task_id=permission["requestTaskId"])
+        deadline = time.monotonic() + 15
+        while True:
+            resumed = original.send(_reply(permission), task_id=permission["requestTaskId"])
+            if not any(
+                event.get("error", {}).get("message") == "A2A context runtime is closing for permission handoff"
+                for event in resumed
+            ):
+                break
+            # Releasing the gate starts asynchronous close cleanup. The exact
+            # busy response must remain non-executing until that cleanup ends.
+            assert count_lines(tmp_path / "shared/executions.jsonl") == 0
+            assert time.monotonic() < deadline, resumed
+            time.sleep(0.02)
         assert_success(resumed, "completed approved batch")
         assert count_lines(tmp_path / "shared/executions.jsonl") == 1
         assert_success(original.send("new prompt"), "handled new prompt")
@@ -93,7 +107,7 @@ def test_incomplete_handoff_rejects_cold_worker_and_local_reply_can_retry(tmp_pa
 
 def test_crash_after_shared_backup_before_handoff_commit_cannot_authorize_takeover(tmp_path):
     (tmp_path / "workspace").mkdir()
-    original = worker(tmp_path, "original", "crash-before-commit")
+    original = worker(tmp_path, "original", "crash-before-commit", resident_timeout=0.2)
     replacement = worker(tmp_path, "replacement")
     try:
         original.start()
@@ -121,7 +135,7 @@ def test_crash_after_shared_backup_before_handoff_commit_cannot_authorize_takeov
 
 def test_two_http_workers_claim_once_and_old_owner_cannot_overwrite_replacement(tmp_path):
     (tmp_path / "workspace").mkdir()
-    original = worker(tmp_path, "original")
+    original = worker(tmp_path, "original", resident_timeout=0.2)
     contenders = [worker(tmp_path, name, "tool-block") for name in ("worker-b", "worker-c")]
     try:
         original.start()
@@ -157,6 +171,7 @@ def test_two_http_workers_claim_once_and_old_owner_cannot_overwrite_replacement(
             )
             assert document(tmp_path)["executionId"] == replacement["executionId"]
             assert document(tmp_path)["serverInstanceId"] == replacement["serverInstanceId"]
+            assert document(tmp_path)["phase"] == "running"
             assert count_lines(tmp_path / "shared/executions.jsonl") == 1
             (tmp_path / "shared/release-tool").touch()
             results = [future.result(timeout=15) for future in futures]

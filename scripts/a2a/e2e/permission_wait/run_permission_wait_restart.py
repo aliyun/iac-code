@@ -112,11 +112,14 @@ class _BackgroundStream:
     def wait_for_permission(self, timeout: float) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # Completion follows the last append. Observe it before taking the
+            # snapshot so EOF cannot invalidate an earlier, empty snapshot.
+            finished = self.done.is_set()
             inputs = [value for value in _iac_code_values(self.snapshot(), "input") if isinstance(value, dict)]
             permission = next((value for value in inputs if value.get("kind") == "permission"), None)
             if permission is not None:
                 return permission
-            if self.done.is_set():
+            if finished:
                 raise RuntimeError("pipeline stream ended before permission boundary") from self.error
             time.sleep(0.02)
         raise TimeoutError("timed out waiting for pipeline permission boundary")
@@ -358,6 +361,9 @@ class _FixtureServer:
         return "http://127.0.0.1:{}".format(self.port)
 
     def start(self, generation: int) -> None:
+        if generation > 1:
+            # Windows can retain a recently closed listener in TIME_WAIT.
+            self.port = _free_port()
         fixture = self.repo_root / "scripts" / "a2a" / "e2e" / "permission_wait" / "permission_wait_fixture_server.py"
         self._stdout = (self.run_dir / "server-{}.stdout.log".format(generation)).open("w", encoding="utf-8")
         self._stderr = (self.run_dir / "server-{}.stderr.log".format(generation)).open("w", encoding="utf-8")
@@ -408,7 +414,8 @@ class _FixtureServer:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             if self.process is not None and self.process.poll() is not None:
-                raise RuntimeError("fixture A2A server exited with code {}".format(self.process.returncode))
+                stderr = Path(self._stderr.name).read_text(encoding="utf-8", errors="replace")[-2000:]
+                raise RuntimeError("fixture A2A server exited with code {}: {}".format(self.process.returncode, stderr))
             try:
                 with urlopen(self.url + "/health", timeout=0.5) as response:
                     if response.status == 200:
