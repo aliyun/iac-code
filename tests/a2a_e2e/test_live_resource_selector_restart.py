@@ -11,6 +11,7 @@ import pytest
 
 from iac_code.config import get_config_dir
 from scripts.a2a.e2e.resource_selector import run_live_resource_selector_restart as restart
+from scripts.a2a.e2e.resource_selector.live_pipeline_server import _followup_request_facts
 
 _REAL_CONFIG = get_config_dir()  # Before the autouse fixture isolates the developer's HOME/config.
 _LIVE_ENABLED = os.environ.get("IAC_CODE_A2A_RESOURCE_SELECTOR_RESTART_LIVE_E2E", "").lower() in {"1", "true", "yes"}
@@ -181,6 +182,14 @@ def test_restart_flow_keeps_original_config_and_cleans_up(monkeypatch, tmp_path,
             calls.append("stop")
 
         def stream(self, *, name, prompt, **_kwargs):
+            if name == "next-turn" and mode == "pipeline":
+                summary = '[Pipeline Handoff Context]\nIncluded context:\n' + json.dumps(
+                    {"original_user_request": "fake original demand"}
+                )
+                facts = _followup_request_facts({"messages": [
+                    {"role": "user", "content": summary}, {"role": "user", "content": prompt}
+                ]})
+                restart.common._append_jsonl(self.run_dir / "model-request-facts.jsonl", facts)
             return restart.common.StreamSummary(
                 name=name,
                 prompt=prompt,

@@ -158,6 +158,20 @@ def test_model_wire_probe_exports_only_facts_and_detects_message_order(latest_ha
     assert _followup_request_facts({"messages": [{"role": "user", "content": "unrelated"}]}) is None
 
 
+@pytest.mark.parametrize("standalone", [False, True])
+def test_model_wire_probe_verifies_original_request_is_only_in_handoff(standalone):
+    original = "private original request"
+    summary = '[Pipeline Handoff Context]\nIncluded context:\n' + json.dumps({"original_user_request": original})
+    messages = [{"role": "user", "content": summary}]
+    if standalone:
+        messages.insert(0, {"role": "user", "content": original})
+    messages.append({"role": "user", "content": "RESTART_NEXT_TURN_OK_private"})
+    facts = _followup_request_facts({"messages": messages})
+    assert facts["selector_next_turn_wire_original_request_in_handoff"] is True
+    assert facts["selector_next_turn_wire_original_request_standalone"] is standalone
+    assert "private" not in json.dumps(facts)
+
+
 @pytest.mark.parametrize("kind", ["receipt", "old-history", "new-pending"])
 def test_next_turn_receipt_and_old_input_are_not_new_selector_waits(tmp_path, kind):
     payload = {"kind": "cloud_resource_selection", "inputId": "old"}

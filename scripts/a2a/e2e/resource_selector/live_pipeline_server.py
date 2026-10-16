@@ -34,6 +34,17 @@ def _followup_request_facts(payload: Any) -> dict[str, bool] | None:
     users = [message for message in messages if message.get("role") == "user"]
     system = "\n".join(text(message) for message in messages if message.get("role") in {"system", "developer"})
     choice = payload.get("tool_choice")
+    original = ""
+    for message in users:
+        content = text(message)
+        if not content.startswith("[Pipeline Handoff Context]\n") or "Included context:\n" not in content:
+            continue
+        try:
+            context, _ = json.JSONDecoder().raw_decode(content.split("Included context:\n", 1)[1])
+        except ValueError:
+            continue
+        if isinstance(context, dict) and isinstance(context.get("original_user_request"), str):
+            original = context["original_user_request"]
     return {
         "selector_next_turn_wire_request_observed": True,
         "selector_next_turn_wire_last_user_has_marker": bool(users and has_marker(users[-1])),
@@ -48,6 +59,9 @@ def _followup_request_facts(payload: Any) -> dict[str, bool] | None:
         ),
         "selector_next_turn_wire_adjacent_user_messages": len(messages) >= 2
         and messages[-1].get("role") == messages[-2].get("role") == "user",
+        "selector_next_turn_wire_original_request_in_handoff": bool(original),
+        "selector_next_turn_wire_original_request_standalone": bool(original)
+        and any(text(message) == original for message in users),
     }
 
 

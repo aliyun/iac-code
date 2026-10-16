@@ -13,7 +13,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite full --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --list --suite all
 ```
 
-`fast` 包含 7 个 A2A、REPL、Web API 确定性契约用例；`full` 共 62 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
+`fast` 包含 7 个 A2A、REPL、Web API 确定性契约用例；`full` 共 64 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
 
 权限批次新增四条 HTTP E2E，复用 `tests/a2a/test_permission_prompt_e2e.py`，仅模型与工具使用确定性替身。`permission-prompt-supersede-{same-process,after-restart}` 验证权限待确认时的新 prompt 取消整个未执行批次、补齐 tool_result，并阻止旧权限回复重新执行；`permission-confirmation-followup-{same-process,after-restart}` 验证连续正常确认权限后，工具只执行一次，下一条普通 prompt 正常处理，重复权限回复不会重跑工具。四条均纳入 `full`，也可单独执行：
 
@@ -50,6 +50,8 @@ CI 可改用 `--cloud-credential-helper /path/to/helper.py`，此时源目录只
 `permission-namespace-{allow_once,deny,prompt}` 要求真实 Linux PID namespace，两个存活容器/namespace 的服务均为 PID 1，且 namespace 标识不同。替换 worker 使用空的本地配置目录，经共享备份恢复；模型与工具仍为离线替身。Linux 优先使用可用的 `unshare --user --map-root-user --mount --pid --fork --mount-proc`；若 user namespace 被禁用，再探测具备内核权限的直接 `unshare --mount --pid --fork --mount-proc`，随后才尝试可连接 daemon 的 Docker；macOS 可通过 Docker 运行。Docker 镜像按依赖锁文件和 Dockerfile 摘要缓存，只安装依赖，待测源码以只读目录挂载。缺少可用 namespace 能力直接失败，不降级为 mock 或 skip；首次镜像构建包含在 900 秒用例超时内。
 
 `permission-real-pipeline-{allow_once,deny}` 使用生产 PipelineRunner/StepExecutor 和小型测试流程，仅替换模型、工具与流程目录发现；验证真实权限挂起、重启恢复、步骤完成、普通对话交接及旧回复失效。`permission-protocol-{chat,responses,anthropic}` 经过真实 SDK/provider 与本地 HTTP 模型端点，检查网络请求中的调用 ID、取消结果和新用户输入。`permission-artifact-edit-restart` 使用真实文件工具，核对公开 GetTask 工件元数据及其引用文件，重启后再次核对。
+
+`permission-pipeline-handoff-context-{same-process,cold-recovery}` 另增 2 条，复用真实 Pipeline 引擎：旧需求全文进入现有交接摘要的 `original_user_request`；Normal 模型上下文只接收摘要和新输入，原始展示历史保留。冷恢复同时覆盖权限等待期间和交接完成后的重启，两条均核对实际模型输入、摘要格式与安全要求、工具执行次数及旧权限回复失效。真实选择器重启矩阵也检查模型 HTTP 请求中旧需求已折叠。
 
 `live-readonly` 新增 `selector-restart-{normal,pipeline}-{sigterm,sigkill,released}-{selected,canceled}` 共 12 条，复用真实资源选择器重启脚本，查询已有 VPC，不创建云资源；隔离配置、模型分配、凭证刷新与安全报告沿用 selector runner。每条核对恢复后首个 SSE 帧的 execution 归属、消费回执以及下一轮普通 prompt。
 
@@ -100,7 +102,7 @@ REPL 旧场景的 PTY 等待每 10 秒检查一次，每 60 秒在单用例的 s
 
 先按 `report.md` 找到失败用例与首次失败检查，再看对应的 `ci-result.json`、场景 `summary.json`、日志和源码。Agent 应做有界复现，明确归类为产品缺陷、用例/断言缺陷、环境/凭证故障、云资源清理故障或超时，并写出证据、受影响场景和建议修复。配置的一次自动重跑之外，真实云用例再次复现前先核对残留资源与清理结果。报告里的“初步线索”只是索引，不能替代复盘结论。
 
-总入口目前登记 183 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
+总入口目前登记 185 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
 
 ### 验收边界
 

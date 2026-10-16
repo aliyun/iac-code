@@ -4080,6 +4080,54 @@ async def test_pipeline_handoff_image_request_passes_image_blocks_to_normal_agen
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("existing_summary", [False, True])
+async def test_legacy_pipeline_handoff_backfills_full_request_and_preserves_public_history(
+    monkeypatch, tmp_path, existing_summary
+):
+    from iac_code.a2a.pipeline_paths import a2a_pipeline_dir_for_session
+    from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+    from iac_code.agent.message import Message as AgentMessage
+    from iac_code.pipeline.engine.handoff import build_handoff_summary
+    from iac_code.services.context_manager import ContextManager
+    from iac_code.services.session_storage import PipelineUserHistoryRecord, SessionStorage
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    cwd = str(tmp_path / "ws")
+    Path(cwd).mkdir()
+    session_id, context_id = "session-handoff", "ctx-handoff"
+    _ensure_v2_session(cwd, session_id)
+    storage = SessionStorage()
+    original = PipelineUserHistoryRecord("input-1", context_id, "pipeline-task", "完整旧需求\n保留换行").message()
+    storage.append(cwd, session_id, original)
+    summary = build_handoff_summary("selling", "completed", {"selection": {"status": "selected"}}, ["selection"])
+    if existing_summary:
+        storage.append(cwd, session_id, AgentMessage(role="user", content=summary))
+    events = _committed_normal_handoff_events(context_id=context_id, task_id="pipeline-task", summary=summary)
+    pipeline_dir = a2a_pipeline_dir_for_session(cwd=cwd, session_id=session_id)
+    A2APipelineJournal(pipeline_dir).append_many(events, durable=True)
+    A2APipelineSnapshotStore(pipeline_dir).save(reduce_pipeline_events(events))
+    persistence = A2APersistenceStore(tmp_path / "a2a")
+    persistence.save_context(A2AContextSnapshot(context_id=context_id, session_id=session_id, cwd=cwd))
+    executor = IacCodeA2AExecutor(
+        task_store=A2ATaskStore(metrics=NoOpA2AMetrics(), persistence=persistence), model="test"
+    )
+    for _ in range(2):
+        await executor._ensure_pipeline_handoff_context_in_session(context_id=context_id, cwd=cwd)
+    history = storage.load(cwd, session_id)
+    assert len(history) == 2 and history[0].content == original.content
+    handoff = history[1]
+    included, _ = json.JSONDecoder().raw_decode(handoff.content.split("Included context:\n", 1)[1])
+    assert included["original_user_request"] == original.content
+    assert summary.split("Safety requirements for normal chat:", 1)[1] == handoff.content.split(
+        "Safety requirements for normal chat:", 1
+    )[1]
+    manager = ContextManager("test")
+    manager.load_messages(history)
+    assert manager.get_context_messages() == [handoff]
+    assert manager.get_messages() == history
+
+
+@pytest.mark.asyncio
 async def test_pipeline_handoff_context_is_backfilled_from_snapshot_when_session_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
