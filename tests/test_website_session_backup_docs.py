@@ -297,7 +297,9 @@ def test_mcp_configuration_docs_start_with_claude_style_quick_start() -> None:
     )
     remote_add = "iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp"
     remote_auth = "iac-code mcp auth yuque"
-    stdio_add = "iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp"
+    stdio_add = (
+        "iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates"
+    )
     legacy_add = "iac-code mcp add local-catalog"
     failures: list[str] = []
 
@@ -332,7 +334,9 @@ def test_mcp_configuration_docs_start_with_claude_style_quick_start() -> None:
 def test_mcp_docs_have_dedicated_quick_start_entry() -> None:
     remote_add = "iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp"
     remote_auth = "iac-code mcp auth yuque"
-    stdio_add = "iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp"
+    stdio_add = (
+        "iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates"
+    )
     quick_start_relative = "mcp/quick-start.md"
     failures: list[str] = []
 

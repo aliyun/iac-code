@@ -1,12 +1,12 @@
 ---
 sidebar_position: 2
 title: Demarrage rapide MCP
-description: Ajouter un serveur MCP HTTP distant ou un wrapper stdio avec des commandes style Claude.
+description: Ajouter un serveur MCP HTTP distant ou un serveur stdio avec des commandes style Claude.
 ---
 
 # Demarrage rapide MCP
 
-Utilisez ce chemin quand vous avez deja une URL de serveur MCP ou une commande locale de wrapper stdio.
+Utilisez ce chemin quand vous avez deja une URL de serveur MCP ou une commande locale de serveur stdio.
 
 ## Serveur HTTP distant
 
@@ -28,18 +28,18 @@ Apres autorisation, lancez un health check borne :
 iac-code mcp get yuque --check
 ```
 
-## Wrapper Stdio
+## Serveur stdio
 
-Pour les wrappers comme `mcp-remote`, placez la commande subprocess apres `--` :
+Pour les serveurs stdio, placez la commande du sous-processus après `--`. Un serveur HTTP distant n'a pas besoin de wrapper : ajoutez-le avec `--transport http` comme indiqué ci-dessus.
 
 ```bash
-iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp
+iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
 ```
 
 Puis inspectez le serveur configure sans connexion :
 
 ```bash
-iac-code mcp get yuque-remote --config-only
+iac-code mcp get local-files --config-only
 ```
 
 ## Etapes suivantes

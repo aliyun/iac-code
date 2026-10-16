@@ -1,12 +1,12 @@
 ---
 sidebar_position: 2
 title: MCP Quick Start
-description: Add a remote HTTP MCP server or stdio wrapper with Claude-style commands.
+description: Add a remote HTTP MCP server or stdio server with Claude-style commands.
 ---
 
 # MCP Quick Start
 
-Use this path when you already have an MCP server URL or a local stdio wrapper command.
+Use this path when you already have an MCP server URL or a local stdio server command.
 
 ## Remote HTTP Server
 
@@ -28,18 +28,18 @@ After authorization, run a bounded health check:
 iac-code mcp get yuque --check
 ```
 
-## Stdio Wrapper
+## Stdio Server
 
-For wrappers such as `mcp-remote`, put the subprocess command after `--`:
+For stdio servers, put the subprocess command after `--`. A remote HTTP server does not need a wrapper: add it with `--transport http` as shown above.
 
 ```bash
-iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp
+iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
 ```
 
 Then inspect the configured server without connecting:
 
 ```bash
-iac-code mcp get yuque-remote --config-only
+iac-code mcp get local-files --config-only
 ```
 
 ## Next Steps
