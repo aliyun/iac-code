@@ -37,6 +37,7 @@ class A2ATaskRecord:
     updated_at: float = field(default_factory=time.time)
     created_at: float = field(default_factory=time.monotonic)
     last_active: float = field(default_factory=time.monotonic)
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
 
     def touch(self) -> None:
         self.last_active = time.monotonic()

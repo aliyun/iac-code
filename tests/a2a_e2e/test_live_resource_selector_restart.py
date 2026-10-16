@@ -27,6 +27,25 @@ def test_restart_runner_requires_explicit_cloud_opt_in(tmp_path):
         restart._parse_args(["--run-dir", str(tmp_path / "run")])
 
 
+@pytest.mark.parametrize("selection", [{"value": "vpc-selected"}, {"value": "vpc-other"}, {}, None])
+def test_restart_pipeline_requires_actual_selected_value_in_handoff(tmp_path, selection):
+    session = tmp_path / "projects" / "fixture" / "session.jsonl"
+    session.parent.mkdir(parents=True)
+    context = json.dumps({"selection": selection})
+    session.write_text(
+        json.dumps({"role": "tool", "content": "vpc-selected"})
+        + "\n"
+        + json.dumps({"role": "user", "content": "[Pipeline Handoff Context]\nIncluded context:\n" + context})
+        + "\n",
+        encoding="utf-8",
+    )
+    if selection == {"value": "vpc-selected"}:
+        restart._assert_selected_value_in_handoff(tmp_path, "vpc-selected")
+    else:
+        with pytest.raises(AssertionError, match="actual selected resource value"):
+            restart._assert_selected_value_in_handoff(tmp_path, "vpc-selected")
+
+
 @pytest.mark.parametrize("invalid", ["missing-state", "old-execution", "wrong-task", "not-working"])
 def test_restart_first_frame_rejects_unbound_execution(invalid):
     pending = {"contextId": "ctx-1", "requestTaskId": "task-1"}
@@ -212,6 +231,9 @@ def test_restart_flow_keeps_original_config_and_cleans_up(monkeypatch, tmp_path,
     monkeypatch.setattr(restart, "_execution_state", execution_state)
     monkeypatch.setattr(restart, "_release_execution", lambda *_args: calls.append("release"))
     monkeypatch.setattr(restart, "_answer_stream", answer_stream)
+    monkeypatch.setattr(
+        restart, "_assert_selected_value_in_handoff", lambda config, value: calls.append("handoff-value")
+    )
     args = restart._parse_args(
         [
             "--allow-real-cloud",
@@ -239,6 +261,7 @@ def test_restart_flow_keeps_original_config_and_cleans_up(monkeypatch, tmp_path,
         assert result["oldPid"] != result["newPid"]
         assert ("kill" in calls) is (style == "sigkill")
         assert ("release" in calls) is (style == "released")
+        assert ("handoff-value" in calls) is (mode == "pipeline" and answer == "selected")
     assert calls[-1] == "stop"
     assert os.environ["IAC_CODE_CONFIG_DIR"] == "previous-config"
     assert config_file.read_text(encoding="utf-8") == "model: fake-model\n"

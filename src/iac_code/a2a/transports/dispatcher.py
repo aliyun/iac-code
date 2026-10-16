@@ -981,6 +981,8 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         a2a_task_store = self.task_store if isinstance(self.task_store, A2ATaskStore) else None
         if resolve_request_run_mode(params.message) is RunMode.PIPELINE:
             wait = getattr(self.agent_executor, "wait_until_recoverable_pipeline_input", None)
+            if parse_permission_response(params.message) is not None:
+                wait = getattr(self.agent_executor, "wait_until_recoverable_permission_input", wait)
             if callable(wait):
                 await wait(context_id=task.context_id, task_id=task.id)
             if a2a_task_store is not None:
