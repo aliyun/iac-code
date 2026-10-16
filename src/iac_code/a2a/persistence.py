@@ -7,7 +7,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from iac_code.a2a.types import validate_protocol_id
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
@@ -43,6 +43,7 @@ class A2ATaskSnapshot:
     updated_at: float = field(default_factory=time.time)
     owner: str = ""
     expected_permission_backup_generation: int | None = None
+    artifacts: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -172,6 +173,7 @@ class A2APersistenceStore:
         if not isinstance(task_id, str) or not isinstance(context_id, str) or not isinstance(state, str):
             return None
         raw_output_text = data.get("output_text")
+        raw_artifacts = data.get("artifacts")
         output_text = (
             [item for item in raw_output_text if isinstance(item, str)] if isinstance(raw_output_text, list) else []
         )
@@ -195,6 +197,8 @@ class A2APersistenceStore:
             status_message=status_message if isinstance(status_message, str) else "",
             updated_at=float(updated_at) if isinstance(updated_at, (int, float)) else time.time(),
             expected_permission_backup_generation=expected_generation,
+            artifacts=[cast(dict[str, Any], item) for item in raw_artifacts if isinstance(item, dict)]
+            if isinstance(raw_artifacts, list) else [],
         )
 
     @staticmethod
