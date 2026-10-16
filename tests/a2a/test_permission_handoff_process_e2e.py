@@ -138,7 +138,7 @@ def test_crash_after_shared_backup_before_handoff_commit_cannot_authorize_takeov
 def test_two_http_workers_claim_once_and_old_owner_cannot_overwrite_replacement(tmp_path):
     (tmp_path / "workspace").mkdir()
     original = worker(tmp_path, "original", resident_timeout=0.2)
-    contenders = [worker(tmp_path, name, "tool-block") for name in ("worker-b", "worker-c")]
+    contenders = [worker(tmp_path, name, "permission-claim-race") for name in ("worker-b", "worker-c")]
     try:
         original.start()
         permission = _permission(original.send("original"))
@@ -175,10 +175,16 @@ def test_two_http_workers_claim_once_and_old_owner_cannot_overwrite_replacement(
             assert document(tmp_path)["serverInstanceId"] == replacement["serverInstanceId"]
             assert document(tmp_path)["phase"] == "running"
             assert count_lines(tmp_path / "shared/executions.jsonl") == 1
+            loser = futures[1].result(timeout=15)
+            errors = [event["error"] for event in loser if "error" in event]
+            assert len(errors) == 1, loser
+            assert errors[0]["data"]["reason"] == "LIVE_OWNER", errors
+            assert errors[0]["data"]["executionResumed"] is False, errors
+            assert document(tmp_path)["executionId"] == replacement["executionId"]
             (tmp_path / "shared/release-tool").touch()
             results = [future.result(timeout=15) for future in futures]
         winners = [index for index, events in enumerate(results) if "completed approved batch" in json.dumps(events)]
-        assert len(winners) == 1, results
+        assert winners == [0], results
         assert_success(results[winners[0]], "completed approved batch")
         assert count_lines(tmp_path / "shared/executions.jsonl") == 1
         assert count_lines(tmp_path / "shared/model-inputs.jsonl") == 2
