@@ -17,10 +17,10 @@ iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
 iac-code mcp auth yuque
 ```
 
-`mcp-remote` などの stdio ラッパーの場合は、サブプロセス コマンドを `--` の後に置きます。
+stdio サーバーの場合は、サブプロセスのコマンドを `--` の後に指定します。リモート HTTP サーバーにラッパーは不要です。上の例のように `--transport http` で追加してください。
 
 ```bash
-iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp
+iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
 ```
 
 ## Configuration Sources
@@ -71,10 +71,10 @@ iac-code mcp add --transport sse events https://mcp.example.com/sse
 iac-code mcp add --transport ws realtime wss://mcp.example.com/mcp
 ```
 
-`mcp-remote` などの stdio ラッパーの場合は、サブプロセス コマンドを `--` の後に置きます。
+stdio サーバーの場合は、サブプロセスのコマンドを `--` の後に指定します。リモート HTTP サーバーにラッパーは不要です。上の例のように `--transport http` で追加してください。
 
 ```bash
-iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp
+iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
 ```
 
 利用可能なコマンド:

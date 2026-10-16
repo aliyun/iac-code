@@ -1,12 +1,12 @@
 ---
 sidebar_position: 2
 title: MCP クイックスタート
-description: Claude style commands で remote HTTP MCP server または stdio wrapper を追加します。
+description: Claude style commands で remote HTTP MCP server または stdio server を追加します。
 ---
 
 # MCP クイックスタート
 
-MCP server URL またはローカル stdio wrapper command が分かっている場合は、この主経路を使います。
+MCP server URL またはローカル stdio server command が分かっている場合は、この主経路を使います。
 
 ## リモート HTTP Server
 
@@ -28,18 +28,18 @@ authorization 後、bounded health check を実行します。
 iac-code mcp get yuque --check
 ```
 
-## Stdio Wrapper
+## Stdio サーバー
 
-`mcp-remote` などの wrapper では、subprocess command を `--` の後に置きます。
+stdio サーバーの場合は、サブプロセスのコマンドを `--` の後に指定します。リモート HTTP サーバーにラッパーは不要です。上の例のように `--transport http` で追加してください。
 
 ```bash
-iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp
+iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
 ```
 
 次に、接続せずに configured server を確認します。
 
 ```bash
-iac-code mcp get yuque-remote --config-only
+iac-code mcp get local-files --config-only
 ```
 
 ## 次のステップ
