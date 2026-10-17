@@ -6420,7 +6420,9 @@ def test_remote_public_start_command_finishes_without_a_second_follow_command(re
 def test_remote_real_disconnect_before_anchor_fails_without_retrying_query(remote_lifecycle):
     env = remote_lifecycle
     started = env.start("no-anchor")
-    foreground = env.drive(started["jobId"])
+    # This case includes bounded session-list probes. The idle window must
+    # cover their parser handoffs, not just the initial StartChat invocation.
+    foreground = env.drive(started["jobId"], seconds=5)
     env.wait_for(lambda: len(env.calls()) == 1)
     env.context.with_suffix(".disconnect").touch()
     env.finish_drive(foreground, timeout=20)
