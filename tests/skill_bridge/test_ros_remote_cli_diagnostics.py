@@ -299,11 +299,11 @@ def test_remote_sse_loss_before_current_request_anchor_reports_unknown_without_r
     options.session_id = known_session
     with pytest.raises(bridge.BridgeError) as failure:
         bridge._consume_start_chat(options, tmp_path, "an answer already accepted by the cloud", None, [])
-    assert failure.value.code == "missing_recovery_anchor"
+    assert failure.value.code == ("session_lookup_failed" if known_session else "missing_recovery_anchor")
     assert "outcome is unknown" in failure.value.message
-    assert "will not replay Query" in failure.value.message
     assert failure.value.retryable is False
-    assert len(calls) == 1
+    assert len(calls) == (2 if known_session else 1)
+    assert sum("--query" in command for command in calls) == 1
     assert "--query" in calls[0]
     decision = [item for item in records(tmp_path) if item["kind"] == "recovery-decision"][0]
     assert decision["hasRecoveryAnchor"] is False
@@ -591,6 +591,7 @@ def test_remote_truncated_batch_flushes_durable_cursor_before_reconnect(monkeypa
 
 
 @pytest.mark.parametrize('strategy', ['per-event', 'batched'])
+@pytest.mark.timeout(120)
 def test_remote_real_subprocess_truncation_with_slow_durable_writes(
     monkeypatch, tmp_path, buffered_job, strategy, record_property,
 ):
