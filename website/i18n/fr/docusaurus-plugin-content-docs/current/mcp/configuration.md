@@ -17,10 +17,10 @@ iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
 iac-code mcp auth yuque
 ```
 
-Pour les wrappers stdio tels que `mcp-remote`, placez la commande subprocess apres `--` :
+Pour les serveurs stdio, placez la commande du sous-processus après `--`. Un serveur HTTP distant n'a pas besoin de wrapper : ajoutez-le avec `--transport http` comme indiqué ci-dessus.
 
 ```bash
-iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp
+iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
 ```
 
 ## Configuration Sources
@@ -71,10 +71,10 @@ iac-code mcp add --transport sse events https://mcp.example.com/sse
 iac-code mcp add --transport ws realtime wss://mcp.example.com/mcp
 ```
 
-Pour les wrappers stdio tels que `mcp-remote`, placez la commande subprocess après `--` :
+Pour les serveurs stdio, placez la commande du sous-processus après `--`. Un serveur HTTP distant n'a pas besoin de wrapper : ajoutez-le avec `--transport http` comme indiqué ci-dessus.
 
 ```bash
-iac-code mcp add yuque-remote --scope user -- npx mcp-remote https://mcp.example.com/yuque/mcp
+iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
 ```
 
 Commandes disponibles :
