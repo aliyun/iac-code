@@ -591,6 +591,7 @@ def test_remote_truncated_batch_flushes_durable_cursor_before_reconnect(monkeypa
 
 
 @pytest.mark.parametrize('strategy', ['per-event', 'batched'])
+@pytest.mark.timeout(120)
 def test_remote_real_subprocess_truncation_with_slow_durable_writes(
     monkeypatch, tmp_path, buffered_job, strategy, record_property,
 ):
