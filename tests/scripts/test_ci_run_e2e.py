@@ -1388,6 +1388,9 @@ def test_public_live_summary_smoke_diagnostics_do_not_export_task_or_response_co
     ('smoke_sync_permission_workspace_allowed', False),
     ('smoke_sync_permission_target_shape', 'multiple'),
     ('smoke_sync_permission_effect', 'file_change'),
+    ('smoke_sync_same_permission_pending', True),
+    ('smoke_sync_exit_reason', 'timeout'),
+    ('smoke_sync_permission_confirmation', 'unconfirmed'),
 ])
 def test_public_smoke_permission_diagnostics_accept_only_closed_values(field, value):
     public = run_e2e._public_live_summary({'diagnostics': {field: value}})

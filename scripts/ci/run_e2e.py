@@ -895,6 +895,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "smoke_sync_permission_metadata_present", "smoke_sync_permission_schema_supported",
             "smoke_sync_permission_task_matches", "smoke_sync_permission_context_matches",
             "smoke_sync_permission_identity_complete", "smoke_sync_permission_workspace_allowed",
+            "smoke_sync_same_permission_pending",
             "repl_first_rollback_input_intact",
             "repl_pending_question_answered",
             "repl_question_ack_free_text_allowed",
@@ -921,6 +922,12 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 'read', 'file_change', 'cloud_change', 'local_execution', 'unknown', 'other',
             },
             'smoke_sync_task_probe_category': {'verified', 'query_failed', 'task_ambiguous'},
+            'smoke_sync_exit_reason': {
+                'completed', 'timeout', 'client_error', 'task_ambiguous', 'invalid_task',
+                'unsupported_input', 'unauthorized_permission', 'task_ended', 'task_query_failed',
+                'final_output_unavailable',
+            },
+            'smoke_sync_permission_confirmation': {'not_sent', 'unconfirmed', 'acknowledged', 'task_advanced'},
             'smoke_sync_task_state': {
                 'submitted', 'working', 'input-required', 'completed', 'failed', 'canceled',
                 'rejected', 'auth-required', 'unknown',
