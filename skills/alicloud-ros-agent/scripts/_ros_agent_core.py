@@ -1543,6 +1543,9 @@ def _is_cli_stream_interruption(value: Any) -> bool:
         status = value.get("statusCode", value.get("httpStatus"))
         if code is not None or (isinstance(status, int) and 400 <= status < 500):
             return False  # Structured auth, expiry and cursor errors stay authoritative.
+        if (value.get("summary") == "Failed to call tool" and isinstance(value.get("detail"), str)
+                and re.fullmatch(r"Async task polling timeout after [0-9]+ seconds", value["detail"])):
+            return True  # MCP stopped polling; this does not prove the cloud task failed.
         return any(_is_cli_stream_interruption(value.get(key)) for key in ("detail", "message", "Message", "error"))
     if not isinstance(value, str):
         return False
@@ -1556,6 +1559,9 @@ def _is_cli_stream_interruption(value: Any) -> bool:
 def is_remote_cli_stream_interruption(*diagnostics: str) -> bool:
     candidates = []
     for diagnostic in diagnostics:
+        diagnostic = diagnostic.strip()
+        if diagnostic.startswith("MCP Returned Error Result "):
+            diagnostic = diagnostic[len("MCP Returned Error Result "):]
         try:
             value = json.loads(diagnostic)
         except ValueError:

@@ -901,7 +901,7 @@ def _consume_start_chat(
                 return result()
             transport_error = BridgeError(
                 "remote_cli_stream_interrupted",
-                "The remote CLI reported SSE connection lost; the cloud outcome is not yet known.",
+                "The remote CLI stream was interrupted; the cloud outcome is not yet known.",
                 True,
             )
         if stream_sequence > attempt_start_sequence:
