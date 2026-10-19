@@ -18,6 +18,10 @@ bridge = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bridge)
 
 SSE_LOST = "Aliyun CLI call failed: failed to call tool: SSE connection lost"
+MCP_POLL_TIMEOUT = "MCP Returned Error Result " + json.dumps({
+    "summary": "Failed to call tool", "popRequestId": "fake-request-id",
+    "detail": "Async task polling timeout after 600 seconds",
+})
 
 
 def args(**overrides):
@@ -79,7 +83,7 @@ def executor(monkeypatch):
     return commands, outputs
 
 
-@pytest.mark.parametrize("failure", [("", 1, SSE_LOST), ("[", 0, ""), ("", 0, "")])
+@pytest.mark.parametrize("failure", [("", 1, SSE_LOST), ("", 1, MCP_POLL_TIMEOUT), ("[", 0, ""), ("", 0, "")])
 @pytest.mark.parametrize("known_session", [False, True])
 def test_first_event_loss_recovers_without_resending_query(executor, tmp_path, failure, known_session):
     commands, outputs = executor
@@ -211,11 +215,12 @@ def test_missing_session_lookup_is_bounded_and_never_replays_query(executor, tmp
     assert sum("--query" in command for command in commands) == 1
 
 
-def test_recovered_session_is_published_even_when_first_cursor_is_not_ready(executor, tmp_path):
+@pytest.mark.parametrize("diagnostic", [SSE_LOST, MCP_POLL_TIMEOUT])
+def test_recovered_session_is_published_even_when_first_cursor_is_not_ready(executor, tmp_path, diagnostic):
     commands, outputs = executor
     pending = session()
     pending.pop("FirstCursor")
-    outputs.extend([("", 1, SSE_LOST)] + [(page(pending), 0, "")] * bridge.MAX_SESSION_LOOKUP_SCANS)
+    outputs.extend([("", 1, diagnostic)] + [(page(pending), 0, "")] * bridge.MAX_SESSION_LOOKUP_SCANS)
     identities = []
     with pytest.raises(bridge.BridgeError) as failure:
         bridge._consume_start_chat(
