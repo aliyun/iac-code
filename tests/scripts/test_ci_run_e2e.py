@@ -167,8 +167,8 @@ def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> No
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
     assert len(full) == 66
-    assert len(live) == 121
-    assert len(run_e2e.CASES) == 187
+    assert len(live) == 129
+    assert len(run_e2e.CASES) == 195
     agui = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live-agui", "--list"]))
     assert {case.name for case in agui} == {"agui-selector-" + name for name in run_e2e.AGUI_SCENARIOS}
     assert len(agui) == 6
@@ -229,6 +229,18 @@ def test_live_requires_complete_credential_source_and_write_opt_in(tmp_path: Pat
         ["--suite", "live", "--credential-source-dir", str(tmp_path), "--allow-cloud-write"]
     )
     assert len(run_e2e.select_cases(args)) == len(run_e2e.LIVE_CASES)
+
+
+def test_ros_awareness_cases_are_live_llm_only_and_keep_all_scenarios(tmp_path: Path) -> None:
+    for name in (".credentials.yml", "settings.yml"):
+        (tmp_path / name).write_text("fixture", encoding="utf-8")
+    cases = [case for case in run_e2e.LIVE_CASES if case.live_runner == "ros_awareness"]
+    assert {case.args[1] for case in cases} == set(run_e2e.ROS_AWARENESS_SCENARIOS)
+    for case in cases:
+        args = run_e2e.parse_args(["--case", case.name, "--credential-source-dir", str(tmp_path)])
+        assert run_e2e.select_cases(args) == [case]
+        assert case.group == "readonly" and not case.cloud_write
+        assert run_e2e._live_cleanup_status(case, None) == "not-needed"
 
 
 def test_live_accepts_llm_only_source_with_cloud_helper(tmp_path: Path) -> None:
@@ -966,8 +978,9 @@ def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
         assert len(scenarios[0].name.removeprefix("scenario-")) == 32
 
 
-def test_smoke_adapter_has_model_config_but_no_cloud_credentials(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("runner", ["smoke", "ros_awareness"])
+def test_llm_only_adapter_has_model_config_but_no_cloud_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: str
 ) -> None:
     script = tmp_path / "smoke.py"
     script.write_text(
@@ -981,6 +994,7 @@ def test_smoke_adapter_has_model_config_but_no_cloud_credentials(
         "assert Path(os.environ['HOME']).is_relative_to(run_dir)\n"
         "assert Path(os.environ['USERPROFILE']).is_relative_to(run_dir)\n"
         "assert '--allow-real-cloud' not in sys.argv\n"
+        "assert ('--allow-real-llm' in sys.argv) == ('ros_awareness' == sys.argv[sys.argv.index('--runner') + 1])\n"
         "(run_dir / 'summary.json').write_text("
         "json.dumps({'passed': True, 'checks': {'ok': True}}), encoding='utf-8')\n",
         encoding="utf-8",
@@ -991,9 +1005,11 @@ def test_smoke_adapter_has_model_config_but_no_cloud_credentials(
     (source / ".cloud-credentials.yml").write_text("cloud-fixture", encoding="utf-8")
     (source / "settings.yml").write_text('{"activeProvider": "dashscope"}', encoding="utf-8")
     monkeypatch.setattr(run_e2e, "REPO_ROOT", tmp_path)
-    case = run_e2e.Case("smoke-vpc-fixture", "smoke.py", (), 5, "live", live_runner="smoke")
+    case = run_e2e.Case("llm-only-fixture", "smoke.py", ("--runner", runner), 5, "live", live_runner=runner)
+    helper = tmp_path / "must-not-run.py"
+    helper.write_text("raise AssertionError('LLM-only tests must not request cloud credentials')", encoding="utf-8")
 
-    result = run_e2e.run_case(case, tmp_path / "report", source)
+    result = run_e2e.run_case(case, tmp_path / "report", source, cloud_credential_helper=helper)
 
     assert result["status"] == "passed"
     assert result["cleanupStatus"] == "not-needed"
