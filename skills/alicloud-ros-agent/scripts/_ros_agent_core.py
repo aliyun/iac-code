@@ -58,11 +58,15 @@ def _secure_directory(path: pathlib.Path) -> None:
 
 
 def _atomic_json(path: pathlib.Path, value: Dict[str, Any], mode: int = 0o600) -> None:
+    _atomic_bytes(path, _json_bytes(value), mode)
+
+
+def _atomic_bytes(path: pathlib.Path, value: bytes, mode: int = 0o600) -> None:
     _secure_directory(path.parent)
     descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(value, handle, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(value)
             handle.flush()
             os.fsync(handle.fileno())
         if os.name != "nt":
@@ -764,6 +768,8 @@ def build_command(
     )
     if args.session_id:
         command.extend(["--session-id", args.session_id])
+    elif execution_mode == "remote" and getattr(args, "client_reference_id", None):
+        command.extend(["--body", _json_bytes({"ClientReferenceId": args.client_reference_id}).decode("utf-8")])
     if args.region_id:
         command.extend(["--biz-region-id", args.region_id])
     for attachment in attachments:
@@ -773,6 +779,38 @@ def build_command(
                 values.append("{}={}".format(field, attachment[field]))
         command.extend(["--attachments", *values])
     return command
+
+
+def build_session_list_command(args: argparse.Namespace, next_token: Optional[str] = None) -> List[str]:
+    # V2 routing and pagination must use the ROS plugin's published CLI flags.
+    # Putting them only in --body can silently return the legacy V1 list.
+    command = [
+        resolve_aliyun(args.aliyun_path), "ros", "list-chat-sessions",
+        "--endpoint", args.endpoint,
+        "--connect-timeout", str(min(int(args.connect_timeout), 10)),
+        "--read-timeout", str(min(int(args.read_timeout), 30)),
+        "--user-agent", USER_AGENT,
+        "--agent-version", "V2",
+        "--biz-mode", "IaCCodePipeline" if args.mode == "pipeline" else "IaCCodeNormal",
+        "--max-results", "20",
+        "--body", _json_bytes({"SessionScopeOption": "CurrentCaller"}).decode("utf-8"),
+    ]
+    if next_token:
+        command.extend(["--next-token", next_token])
+    if args.region_id:
+        command.extend(["--region", args.region_id])
+    return command
+
+
+def parse_first_cursor(value: Any) -> str:
+    # A server-provided replay origin is not a business event ID. Keep .0
+    # separate from parse_stream_event_id's strictly positive event sequences.
+    if not isinstance(value, str) or len(value) > 4096:
+        raise BridgeError("invalid_first_cursor", "ROS returned an invalid FirstCursor.")
+    identity, separator, sequence = value.rpartition(".")
+    if not separator or sequence != "0" or not identity.startswith("v1.") or len(identity) <= 3:
+        raise BridgeError("invalid_first_cursor", "ROS returned an invalid FirstCursor.")
+    return identity
 
 
 def build_reconnect_command(args: argparse.Namespace, session_id: str, cursor: str) -> List[str]:
@@ -1505,6 +1543,9 @@ def _is_cli_stream_interruption(value: Any) -> bool:
         status = value.get("statusCode", value.get("httpStatus"))
         if code is not None or (isinstance(status, int) and 400 <= status < 500):
             return False  # Structured auth, expiry and cursor errors stay authoritative.
+        if (value.get("summary") == "Failed to call tool" and isinstance(value.get("detail"), str)
+                and re.fullmatch(r"Async task polling timeout after [0-9]+ seconds", value["detail"])):
+            return True  # MCP stopped polling; this does not prove the cloud task failed.
         return any(_is_cli_stream_interruption(value.get(key)) for key in ("detail", "message", "Message", "error"))
     if not isinstance(value, str):
         return False
@@ -1518,6 +1559,9 @@ def _is_cli_stream_interruption(value: Any) -> bool:
 def is_remote_cli_stream_interruption(*diagnostics: str) -> bool:
     candidates = []
     for diagnostic in diagnostics:
+        diagnostic = diagnostic.strip()
+        if diagnostic.startswith("MCP Returned Error Result "):
+            diagnostic = diagnostic[len("MCP Returned Error Result "):]
         try:
             value = json.loads(diagnostic)
         except ValueError:
@@ -1700,3 +1744,93 @@ def is_retryable_cli_failure(return_code: int, *diagnostics: str) -> bool:
             if code in stable_timeout_codes:
                 return True
     return False
+
+
+def _read_session_list_page(args, workspace, next_token, worker_role, can_reconnect):
+    command = build_session_list_command(args, next_token)
+    process = None
+    with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+        try:
+            if getattr(args, "managed_job_id", None):
+                process = _ForegroundCLIProcess(
+                    args.managed_job_id, command, {REMOTE_BOOTSTRAP_INVOCATION_ENV: uuid.uuid4().hex},
+                    stderr_file, worker_role, getattr(args, "debug", False), MAX_SESSION_LIST_BYTES,
+                )
+            else:
+                process = subprocess.Popen(
+                    command, cwd=str(workspace), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                    stderr=stderr_file, text=True, encoding="utf-8", errors="replace",
+                )
+            output = bytearray()
+            for line in process.stdout:
+                if can_reconnect is not None and can_reconnect() is False:
+                    raise BridgeError("session_lookup_stopped", "The session lookup was stopped.")
+                output.extend(line.encode("utf-8"))
+                if len(output) > MAX_SESSION_LIST_BYTES:
+                    raise BridgeError("session_lookup_failed", "The session list exceeded its response limit.")
+            if process.wait() != 0:
+                raise BridgeError("session_lookup_failed", "ROS ListChatSessions failed; the cloud outcome is unknown.")
+            page = json.loads(output.decode("utf-8"))
+            for _ in range(4):
+                if isinstance(page, dict) and isinstance(page.get("Sessions"), list):
+                    return page
+                if not isinstance(page, dict):
+                    break
+                page = page.get("body", page.get("data", page.get("Data")))
+                if isinstance(page, str):
+                    page = json.loads(page)
+            raise BridgeError("session_lookup_failed", "ROS did not return a complete session list.")
+        except (OSError, ValueError) as exc:
+            raise BridgeError("session_lookup_failed", "ROS did not return a complete session list.") from exc
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    _stop_process(process)
+                process.stdout.close()
+
+
+def _lookup_first_cursor(args, workspace, session_id, worker_role, can_reconnect):
+    reference = getattr(args, "client_reference_id", None)
+    if not session_id and not reference:
+        return None
+    resolved_session_id = None
+    for scan in range(MAX_SESSION_LOOKUP_SCANS):
+        token = None
+        seen_tokens = set()
+        matches = {}  # type: Dict[str, Dict[str, Any]]
+        for _ in range(MAX_SESSION_LOOKUP_PAGES):
+            if can_reconnect is not None and can_reconnect() is False:
+                return None
+            page = _read_session_list_page(args, workspace, token, worker_role, can_reconnect)
+            for item in page["Sessions"]:
+                if not isinstance(item, dict):
+                    raise BridgeError("session_lookup_failed", "ROS returned an invalid session list item.")
+                candidate = item.get("SessionId")
+                if (candidate == session_id if session_id else item.get("ClientReferenceId") == reference):
+                    if not isinstance(candidate, str) or not candidate:
+                        raise BridgeError("session_lookup_failed", "ROS returned an invalid SessionId.")
+                    matches[candidate] = item
+            if len(matches) > 1:
+                raise BridgeError("ambiguous_session_reference", "Multiple ROS sessions match the ClientReferenceId.")
+            token = page.get("NextToken")
+            if token is not None and not isinstance(token, str):
+                raise BridgeError("session_lookup_failed", "ROS returned an invalid session page token.")
+            # SessionId is already the server's unique identity. Reference-based
+            # lookup must finish pagination before treating a match as unique.
+            if not token or (session_id and matches):
+                break
+            if token in seen_tokens:
+                raise BridgeError("session_lookup_failed", "ROS session pagination made no progress.")
+            seen_tokens.add(token)
+        else:
+            raise BridgeError("session_lookup_failed", "ROS session pagination exceeded its lookup budget.")
+        if matches:
+            candidate, item = next(iter(matches.items()))
+            resolved_session_id = candidate
+            cursor = item.get("FirstCursor")
+            if cursor not in (None, ""):
+                parse_first_cursor(cursor)
+                return candidate, cursor
+        if scan + 1 < MAX_SESSION_LOOKUP_SCANS:
+            time.sleep(0.2 * (2 ** scan))
+    return (resolved_session_id, None) if resolved_session_id else None

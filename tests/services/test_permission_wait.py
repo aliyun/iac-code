@@ -1015,32 +1015,52 @@ async def test_duplicate_live_registration_rejects_different_future(tmp_path) ->
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("registration_delay", [0, 0.05])
 async def test_resident_timer_retries_when_grace_callback_observes_unexpired_deadline(
     monkeypatch,
     tmp_path,
+    registration_delay,
 ) -> None:
+    import iac_code.services.permission_wait as permission_wait
+
     store = _store(tmp_path)
     policy = PermissionWaitPolicy(resident_timeout_seconds=0.01, timeout_grace_seconds=0.01)
     record = _record(store, policy)
     boundary_id = record["boundaryId"]
+    clock = permission_wait.parse_utc(record["residentDeadlineAt"])
+    assert clock is not None
+    monkeypatch.setattr(permission_wait, "utc_now", lambda: clock)
     future: asyncio.Future[bool | PermissionWaitOutcome] = asyncio.get_running_loop().create_future()
     coordinator = PermissionWaitCoordinator(policy)
     original_suspend_now = coordinator.suspend_now
     attempts = 0
 
     async def observe_early_grace_deadline(value: str) -> bool:
-        nonlocal attempts
+        nonlocal attempts, clock
         attempts += 1
         if attempts == 1:
+            grace_record = store.load(value)
+            assert grace_record["phase"] == "TIMEOUT_GRACE"
+            # Exercise exactly one early callback, independently of filesystem
+            # latency and Windows timer resolution.
+            clock = permission_wait.parse_utc(grace_record["graceDeadlineAt"])
+            assert clock is not None
             return False
         return await original_suspend_now(value)
 
     monkeypatch.setattr(coordinator, "suspend_now", observe_early_grace_deadline)
+    await asyncio.sleep(registration_delay)
     coordinator.register_live(record=record, store=store, future=future)
 
-    assert await asyncio.wait_for(future, timeout=1) is PermissionWaitOutcome.SUSPEND
-    assert attempts == 2
-    assert store.load(boundary_id)["phase"] == "SUSPENDING"
+    try:
+        timer = coordinator._owners[boundary_id].timer
+        assert timer is not None
+        await timer  # The pytest timeout remains the watchdog, not a 1s IO race.
+        assert future.result() is PermissionWaitOutcome.SUSPEND
+        assert attempts == 2
+        assert store.load(boundary_id)["phase"] == "SUSPENDING"
+    finally:
+        coordinator.unregister_live(boundary_id)
 
 
 @pytest.mark.asyncio

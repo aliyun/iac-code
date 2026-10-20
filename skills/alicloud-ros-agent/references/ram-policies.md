@@ -7,6 +7,7 @@ The selected credential needs only the ROS API actions used by this bridge:
 | Action | Required when | Access |
 |---|---|---|
 | `ros:StartChat` | Every ROS Agent conversation, continuation, or permission response | Write |
+| `ros:ListChatSessions` | Remote CLI recovers a SessionId/FirstCursor before a complete SSE event was received | Read |
 | `ros:StopChat` | The user explicitly cancels an active ROS Agent conversation | Write |
 
 Do not grant `ros:*` or a product-wide `FullAccess` policy. If the RAM service supports resource-level scoping for
