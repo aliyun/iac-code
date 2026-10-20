@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 from iac_code.i18n import _
@@ -15,7 +17,29 @@ from iac_code.pipeline.selling_solution_first.tools.candidate_planning_records i
     latest_candidate_outline_batch,
 )
 
-__all__ = ["enrich_completion_input"]
+__all__ = ["build_prompt_context", "enrich_completion_input"]
+
+
+def build_prompt_context() -> dict[str, Any]:
+    """Inject the short skill supplement only when ROS awareness is enabled."""
+    enabled = os.environ.get("IAC_CODE_ROS_AGENT_AWARENESS", "").strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return {"ros_agent_awareness": ""}
+
+    from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredentials
+
+    # The credential loader prefers the current session's request-local override.
+    credential = AliyunCredentials.load()
+    region = (credential.region_id if credential is not None else "").strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region):
+        region = DEFAULT_REGION
+    destination = f"[AI Assistant](https://ros.console.aliyun.com/{region}/chat)"
+    supplement = (
+        Path(__file__).resolve().parents[1]
+        / "skills/iac-aliyun-solution-first/ros-agent-awareness.md"
+    ).read_text(encoding="utf-8").strip()
+    return {"ros_agent_awareness": "\n\n" + supplement.replace("{ai_assistant_destination}", destination)}
+
 
 # 说服力字段与各自的最少条目数。缺失或空数组时方案卡只剩一句概述，用户无从判断为什么该选它，
 # 因此这里和 completion_input_schema 一样把它们当硬要求，而不是可选补充。

@@ -39,7 +39,7 @@ user_invocable: false
 - **medium**：用户描述了业务目标，可合理推断需要基础设施（如"我想做个在线商城"）
 - **low**：描述极其模糊，是否需要基础设施尚不确定（如"我有个项目想上线"）
 
-置信度写入 `intent.confidence`。
+置信度写入 `intent.confidence`。{ros_agent_awareness}
 
 ## 澄清提问能力
 
