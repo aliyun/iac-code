@@ -70,6 +70,11 @@ def records(root):
 
 
 SSE_LOST = "Aliyun CLI call failed: failed to call tool: SSE connection lost"
+MCP_POLL_TIMEOUT = {
+    "summary": "Failed to call tool", "popRequestId": "fake-request-id",
+    "detail": "Async task polling timeout after 600 seconds",
+}
+MCP_POLL_TIMEOUT_STDERR = "MCP Returned Error Result " + json.dumps(MCP_POLL_TIMEOUT)
 
 
 @pytest.mark.parametrize("operation", ["read", "replace"])
@@ -179,6 +184,9 @@ def test_foreground_stream_mailbox_rejects_other_api_operations():
     json.dumps({"summary": "Failed to call tool", "detail": "SSE connection lost"}),
     json.dumps({"error": "failed to call tool: SSE connection lost"}),
     json.dumps({"error": {"message": SSE_LOST}}),
+    json.dumps(MCP_POLL_TIMEOUT),
+    MCP_POLL_TIMEOUT_STDERR,
+    json.dumps({"error": MCP_POLL_TIMEOUT}),
 ])
 def test_remote_stream_interruption_recognizes_only_transport_envelopes(diagnostic):
     assert bridge.is_remote_cli_stream_interruption(diagnostic)
@@ -195,14 +203,22 @@ def test_remote_stream_interruption_recognizes_only_transport_envelopes(diagnost
     json.dumps({"error": {"code": "Unauthorized", "message": SSE_LOST}}),
     json.dumps({"id": "v1.business.1", "message": SSE_LOST}),
     json.dumps({"result": {"message": SSE_LOST}}),
+    MCP_POLL_TIMEOUT["detail"],  # Only the known MCP transport envelope is recoverable.
+    json.dumps({"summary": "Unknown failure", "detail": MCP_POLL_TIMEOUT["detail"]}),
+    json.dumps({"summary": "Failed to call tool", "detail": "Async task polling timeout after unknown seconds"}),
+    json.dumps({"id": "v1.business.1", "data": MCP_POLL_TIMEOUT}),
+    json.dumps({"result": MCP_POLL_TIMEOUT}),
+    "MCP Returned Error Result " + json.dumps(dict(MCP_POLL_TIMEOUT, code="StreamExpired")),
+    "MCP Returned Error Result " + json.dumps(dict(MCP_POLL_TIMEOUT, statusCode=403)),
 ])
 def test_remote_stream_interruption_does_not_reclassify_business_or_fatal_errors(diagnostic):
     assert not bridge.is_remote_cli_stream_interruption(diagnostic)
 
 
-def test_remote_stream_interruption_does_not_override_structured_expiry_in_same_attempt():
+@pytest.mark.parametrize("diagnostic", [SSE_LOST, MCP_POLL_TIMEOUT_STDERR])
+def test_remote_stream_interruption_does_not_override_structured_expiry_in_same_attempt(diagnostic):
     assert not bridge.is_remote_cli_stream_interruption(
-        SSE_LOST, json.dumps({"error": {"code": "StreamExpired", "message": "replay window expired"}}),
+        diagnostic, json.dumps({"error": {"code": "StreamExpired", "message": "replay window expired"}}),
     )
 
 
@@ -235,21 +251,27 @@ def test_remote_reconnect_fatal_error_is_not_masked_by_previous_sse_diagnostic(m
 
 @pytest.mark.parametrize("channel,exit_code", [("stderr", 1), ("stdout", 1), ("stdout", 0), ("json-error", 0)])
 @pytest.mark.parametrize("debug", [False, True])
+@pytest.mark.parametrize("transport_error", [SSE_LOST, MCP_POLL_TIMEOUT])
 def test_remote_sse_loss_reconnects_from_durable_anchor_without_query(
-    monkeypatch, tmp_path, buffered_job, channel, exit_code, debug,
+    monkeypatch, tmp_path, buffered_job, channel, exit_code, debug, transport_error,
 ):
     buffer, _append, job_path, spool = buffered_job
     calls = []
     first = [{"id": "v1.batch.{}".format(i), "data": payload("TASK_STATE_WORKING")} for i in range(1, 4)]
-    error = json.dumps({"summary": "Failed to call tool", "detail": SSE_LOST})
+    error = json.dumps(transport_error if isinstance(transport_error, dict) else {
+        "summary": "Failed to call tool", "detail": transport_error,
+    })
     if channel == "json-error":
-        error = json.dumps({"error": SSE_LOST})
+        error = json.dumps({"error": transport_error})
 
     def launch(command, **kwargs):
         calls.append(command)
         if len(calls) == 1:
             if channel == "stderr":
-                kwargs["stderr"].write(SSE_LOST.encode())
+                diagnostic = (
+                    "MCP Returned Error Result " + error if isinstance(transport_error, dict) else transport_error
+                )
+                kwargs["stderr"].write(diagnostic.encode())
             return Process(json.dumps(first) + ("\n" + error if channel != "stderr" else ""), exit_code)
         assert len(calls) == 2
         assert bridge._load_state_json(job_path)["streamCursor"] == "v1.batch.3"
@@ -299,11 +321,11 @@ def test_remote_sse_loss_before_current_request_anchor_reports_unknown_without_r
     options.session_id = known_session
     with pytest.raises(bridge.BridgeError) as failure:
         bridge._consume_start_chat(options, tmp_path, "an answer already accepted by the cloud", None, [])
-    assert failure.value.code == "missing_recovery_anchor"
+    assert failure.value.code == ("session_lookup_failed" if known_session else "missing_recovery_anchor")
     assert "outcome is unknown" in failure.value.message
-    assert "will not replay Query" in failure.value.message
     assert failure.value.retryable is False
-    assert len(calls) == 1
+    assert len(calls) == (2 if known_session else 1)
+    assert sum("--query" in command for command in calls) == 1
     assert "--query" in calls[0]
     decision = [item for item in records(tmp_path) if item["kind"] == "recovery-decision"][0]
     assert decision["hasRecoveryAnchor"] is False
@@ -311,7 +333,10 @@ def test_remote_sse_loss_before_current_request_anchor_reports_unknown_without_r
 
 
 @pytest.mark.parametrize("advance", [False, True])
-def test_remote_sse_loss_bounds_no_progress_and_resets_budget_after_committed_events(monkeypatch, tmp_path, advance):
+@pytest.mark.parametrize("diagnostic", [SSE_LOST, MCP_POLL_TIMEOUT_STDERR])
+def test_remote_sse_loss_bounds_no_progress_and_resets_budget_after_committed_events(
+    monkeypatch, tmp_path, advance, diagnostic,
+):
     calls = []
     cursors = []
 
@@ -321,7 +346,7 @@ def test_remote_sse_loss_bounds_no_progress_and_resets_budget_after_committed_ev
         if attempt > 1:
             assert "--query" not in command
             cursors.append(json.loads(command[command.index("--body") + 1])["StreamOptions.Cursor"])
-        kwargs["stderr"].write(SSE_LOST.encode())
+        kwargs["stderr"].write(diagnostic.encode())
         if attempt == 1 or (advance and attempt == 4):
             seq = 1 if attempt == 1 else 2
             return Process(json.dumps({"id": "v1.retry.{}".format(seq), "data": payload("TASK_STATE_WORKING")}), 1)
@@ -342,12 +367,13 @@ def test_remote_sse_loss_bounds_no_progress_and_resets_budget_after_committed_ev
 
 
 @pytest.mark.parametrize("state", ["TASK_STATE_COMPLETED", "TASK_STATE_FAILED"])
-def test_remote_sse_loss_after_terminal_event_preserves_authoritative_outcome(monkeypatch, tmp_path, state):
+@pytest.mark.parametrize("diagnostic", [SSE_LOST, MCP_POLL_TIMEOUT_STDERR])
+def test_remote_sse_loss_after_terminal_event_preserves_authoritative_outcome(monkeypatch, tmp_path, state, diagnostic):
     calls = []
 
     def launch(command, **kwargs):
         calls.append(command)
-        kwargs["stderr"].write(SSE_LOST.encode())
+        kwargs["stderr"].write(diagnostic.encode())
         return Process(json.dumps({"id": "v1.final.1", "data": payload(state)}), 1)
 
     monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/fake/aliyun")
@@ -402,12 +428,13 @@ def test_remote_terminal_does_not_mask_invalid_cli_array_separator(monkeypatch, 
     assert failure.value.code == "invalid_cli_output"
 
 
-def test_local_cli_sse_loss_keeps_existing_non_retryable_behavior(monkeypatch, tmp_path):
+@pytest.mark.parametrize("diagnostic", [SSE_LOST, MCP_POLL_TIMEOUT_STDERR])
+def test_local_cli_sse_loss_keeps_existing_non_retryable_behavior(monkeypatch, tmp_path, diagnostic):
     calls = []
 
     def launch(command, **kwargs):
         calls.append(command)
-        kwargs["stderr"].write(SSE_LOST.encode())
+        kwargs["stderr"].write(diagnostic.encode())
         return Process(json.dumps({"id": "v1.local.1", "data": payload("TASK_STATE_WORKING")}), 1)
 
     monkeypatch.setattr(bridge, "resolve_aliyun", lambda _path: "/fake/aliyun")
@@ -591,6 +618,7 @@ def test_remote_truncated_batch_flushes_durable_cursor_before_reconnect(monkeypa
 
 
 @pytest.mark.parametrize('strategy', ['per-event', 'batched'])
+@pytest.mark.timeout(120)
 def test_remote_real_subprocess_truncation_with_slow_durable_writes(
     monkeypatch, tmp_path, buffered_job, strategy, record_property,
 ):

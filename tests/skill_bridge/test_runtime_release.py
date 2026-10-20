@@ -292,6 +292,24 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
             assert 'SKILL_DISTRIBUTION = "public"' in bridge
 
 
+def test_ros_skill_loads_with_crlf_checkout_within_source_limits(tmp_path: Path) -> None:
+    source_root = ROOT / "skills" / "alicloud-ros-agent" / "scripts"
+    for source in source_root.glob("*.py"):
+        # Git and profile rendering can use CRLF on Windows. Keep the real
+        # on-disk limit, rather than normalizing away bytes in the loader.
+        contents = source.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8")
+        assert len(contents) <= 128 * 1024, source.name
+        (tmp_path / source.name).write_bytes(contents)
+    subprocess.run(
+        [sys.executable, str(tmp_path / "ros_agent.py"), "--help"],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=30,
+    )
+
+
 def test_agenthub_profiles_package_as_independent_products(tmp_path: Path) -> None:
     iac_archive = tmp_path / "alibabacloud-iac-code-skill-0.1.0.zip"
     iac_manifest = tmp_path / "iac-manifest.json"

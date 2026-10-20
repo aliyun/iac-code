@@ -156,6 +156,35 @@ async def test_strict_close_blocks_reconciliation_until_retry_confirms_success(s
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_retries_completed_close_after_its_original_wait_timed_out(store):
+    runtime = _Runtime(blocked=True)
+    record = await create_context(store, runtime)
+    with pytest.raises(asyncio.TimeoutError):
+        await store.discard_context_runtime_for_input_handoff("ctx")
+    with pytest.raises(RuntimeError, match="closing"):
+        await store.ensure_context_reconciliation_safe("ctx")
+    runtime.release.set()
+    await runtime.finished.wait()
+    # A permission response enters reconciliation before it can retry the
+    # handoff. A successful completed close must not leave that route fenced.
+    await store.ensure_context_reconciliation_safe("ctx")
+    assert record.runtime is None
+    assert runtime.calls == 1
+    assert not await store.context_reconciliation_is_blocked("ctx")
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_cannot_reap_failed_runtime_teardown(store):
+    runtime = _Runtime(fail=True)
+    record = await create_context(store, runtime)
+    with pytest.raises(RuntimeError, match="teardown failed"):
+        await store.discard_context_runtime_for_input_handoff("ctx")
+    with pytest.raises(RuntimeError, match="closing"):
+        await store.ensure_context_reconciliation_safe("ctx")
+    assert record.runtime is runtime
+
+
+@pytest.mark.asyncio
 async def test_runtime_creation_inflight_cannot_be_declared_drained(store):
     gate = asyncio.Event()
     creating = asyncio.create_task(gate.wait())

@@ -76,12 +76,16 @@ if str(REPO_ROOT) not in sys.path:
 
 from iac_code.services.telemetry.identity import E2E_USER_ID_ENV, is_e2e_user_id  # noqa: E402
 from scripts.a2a.e2e.execution_control.run_execution_control_scenarios import SCENARIO_MODES  # noqa: E402
+from scripts.a2a.e2e.permission_wait.run_permission_prompt_handoff import (  # noqa: E402
+    EXTRA_NODES as PERMISSION_RECOVERY_NODES,
+)
 from scripts.a2a.e2e.resource_selector.run_live_agui_resource_selector import (  # noqa: E402
     AGUI_FAILURE_REASONS,
     AGUI_STREAM_TRACE_CODES,
 )
 from scripts.a2a.e2e.resource_selector.run_live_agui_resource_selector import SCENARIOS as AGUI_SCENARIOS  # noqa: E402
 from scripts.a2a.e2e.resource_selector.run_live_resource_selector import SCENARIOS as SELECTOR_SCENARIOS  # noqa: E402
+from scripts.a2a.e2e.resource_selector.run_live_resource_selector_restart import FAILURE_STAGES  # noqa: E402
 from scripts.a2a.e2e.run_recovery_scenarios import _SCENARIOS as A2A_RECOVERY_SCENARIOS  # noqa: E402
 from scripts.a2a.e2e.run_recovery_scenarios import MULTIMODAL_SCENARIOS as A2A_MULTIMODAL_SCENARIOS  # noqa: E402
 from scripts.ci.live_diagnostics import collect_live_diagnostics  # noqa: E402
@@ -166,7 +170,7 @@ PERMISSION_CASES = (
         "scripts/a2a/e2e/permission_wait/run_permission_prompt_handoff.py",
         ("--scenario", scenario, "--mode", mode), 90, "full",
     )
-    for scenario in ("prompt-supersede", "confirmation-followup")
+    for scenario in ("prompt-supersede", "confirmation-followup", "mixed-confirmation-followup")
     for mode in ("same-process", "after-restart")
 ) + (
     Case(
@@ -189,6 +193,21 @@ PERMISSION_CASES = (
         90, "full", result_source="stdout",
     )
     for decision in ("allow_once", "deny")
+)
+PERMISSION_CASES += tuple(
+    Case(
+        "permission-" + scenario,
+        "scripts/a2a/e2e/permission_wait/run_permission_prompt_handoff.py",
+        ("--scenario", scenario), 120, "full",
+    )
+    for scenario in PERMISSION_RECOVERY_NODES
+) + tuple(
+    Case(
+        "permission-namespace-" + decision,
+        "scripts/a2a/e2e/permission_wait/run_namespace_handoff.py",
+        ("--decision", decision), 900, "full", cleanup_grace=45,
+    )
+    for decision in ("allow_once", "deny", "prompt")
 )
 CASES = FAST_CASES + EXECUTION_CASES + PERMISSION_CASES
 LIVE_SCRIPT = "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py"
@@ -220,6 +239,16 @@ LIVE_CASES = tuple(
         live_runner="selector", group="readonly",
     )
     for scenario in SELECTOR_SCENARIOS
+) + tuple(
+    Case(
+        "selector-restart-{}-{}-{}".format(mode, style, answer),
+        "scripts/a2a/e2e/resource_selector/run_live_resource_selector_restart.py",
+        ("--mode", mode, "--restart-style", style, "--answer", answer),
+        1800, "live", cleanup_grace=60, live_runner="selector", group="readonly",
+    )
+    for mode in ("normal", "pipeline")
+    for style in ("sigterm", "sigkill", "released")
+    for answer in ("selected", "canceled")
 ) + tuple(
     Case(
         "agui-selector-" + scenario, "scripts/a2a/e2e/resource_selector/run_live_agui_resource_selector.py",
@@ -558,6 +587,9 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         if isinstance(checks, dict)
         else {},
     }
+    restart_stage = summary.get("selector_restart_failure_stage")
+    if isinstance(restart_stage, str) and restart_stage in FAILURE_STAGES:
+        public["selector_restart_failure_stage"] = restart_stage
     if summary.get("scenario") in AGUI_SCENARIOS:
         trace = summary.get("aguiStreamTrace")
         if isinstance(trace, list):
@@ -839,6 +871,12 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "selector_next_turn_native_select_tool", "selector_next_turn_native_memory_tool",
             "selector_next_turn_native_file_tool", "selector_next_turn_public_selection_wait",
             "selector_next_turn_public_permission_wait",
+            "selector_next_turn_wire_request_observed", "selector_next_turn_wire_last_user_has_marker",
+            "selector_next_turn_wire_last_message_has_marker", "selector_next_turn_wire_step_prompt_present",
+            "selector_next_turn_wire_forced_tool",
+            "selector_next_turn_wire_selector_tools_available", "selector_next_turn_wire_adjacent_user_messages",
+            "selector_next_turn_wire_original_request_in_handoff",
+            "selector_next_turn_wire_original_request_standalone",
             "final_target_step_security_group", "final_target_step_vswitch",
             "final_target_intent_security_group", "final_target_intent_vswitch",
             "final_target_architecture_security_group", "final_target_architecture_vswitch",
@@ -857,6 +895,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "smoke_sync_permission_metadata_present", "smoke_sync_permission_schema_supported",
             "smoke_sync_permission_task_matches", "smoke_sync_permission_context_matches",
             "smoke_sync_permission_identity_complete", "smoke_sync_permission_workspace_allowed",
+            "smoke_sync_same_permission_pending",
             "repl_first_rollback_input_intact",
             "repl_pending_question_answered",
             "repl_question_ack_free_text_allowed",
@@ -883,6 +922,12 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
                 'read', 'file_change', 'cloud_change', 'local_execution', 'unknown', 'other',
             },
             'smoke_sync_task_probe_category': {'verified', 'query_failed', 'task_ambiguous'},
+            'smoke_sync_exit_reason': {
+                'completed', 'timeout', 'client_error', 'task_ambiguous', 'invalid_task',
+                'unsupported_input', 'unauthorized_permission', 'task_ended', 'task_query_failed',
+                'final_output_unavailable',
+            },
+            'smoke_sync_permission_confirmation': {'not_sent', 'unconfirmed', 'acknowledged', 'task_advanced'},
             'smoke_sync_task_state': {
                 'submitted', 'working', 'input-required', 'completed', 'failed', 'canceled',
                 'rejected', 'auth-required', 'unknown',
@@ -1492,7 +1537,7 @@ def run_case(
 
     def refresh_cloud_credentials() -> None:
         assert cloud_credential_helper is not None
-        if case.live_runner == "selector":
+        if case.live_runner == "selector" and not case.script.endswith("run_live_resource_selector_restart.py"):
             runtime_config_dir = script_dir / ".runtime-config"
         elif case.live_runner == "repl":
             runtime_config_dir = config_dir / ".e2e-runs" / script_dir.name
@@ -1582,7 +1627,7 @@ def run_case(
             runtime_config_dir = config_dir
             if case.live_runner == 'repl':
                 runtime_config_dir = config_dir / '.e2e-runs' / script_dir.name
-            elif case.live_runner == 'selector':
+            elif case.live_runner == 'selector' and not case.script.endswith('run_live_resource_selector_restart.py'):
                 runtime_config_dir = script_dir / '.runtime-config'
             failure_evidence = collect_live_diagnostics(
                 script_dir, summary, runtime_config_dir=runtime_config_dir,

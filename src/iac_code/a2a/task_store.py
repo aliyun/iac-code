@@ -254,6 +254,8 @@ class A2ATaskStore(TaskStore):
                         output_text=list(output_text),
                         updated_at=updated_at,
                         expected_permission_backup_generation=expected_permission_backup_generation,
+                        artifacts=list(record.artifacts) if record is not None
+                        else (list(persisted_task.artifacts) if persisted_task is not None else []),
                     )
                     context_snapshot = A2AContextSnapshot(
                         context_id=context_id,
@@ -419,6 +421,7 @@ class A2ATaskStore(TaskStore):
             or task_id in self._task_persistence_dirty
             or record.state != next_state
             or record.owner != owner
+            or record.artifacts != [MessageToDict(artifact) for artifact in task.artifacts]
         )
         if record is None:
             record = A2ATaskRecord(
@@ -435,6 +438,7 @@ class A2ATaskStore(TaskStore):
             record.owner = owner
             record.updated_at = incoming_updated_at
             record.touch()
+        record.artifacts = [MessageToDict(artifact) for artifact in task.artifacts]
         self._mirror_task(record, persist_shared_snapshot=persist_shared_snapshot)
 
     def _restore_rejected_sdk_projection(
@@ -582,6 +586,7 @@ class A2ATaskStore(TaskStore):
                     output_text=list(record.output_text),
                     updated_at=record.updated_at,
                     expected_permission_backup_generation=generation,
+                    artifacts=list(record.artifacts),
                 )
             else:
                 assert persisted is not None
@@ -711,6 +716,7 @@ class A2ATaskStore(TaskStore):
         context_id = validate_protocol_id(context_id)
         create_task: asyncio.Task[Any] | None = None
         async with self._mutation_lock:
+            self._finish_completed_input_handoff_runtime_close_locked(context_id)
             if context_id in self._input_handoff_runtime_close_tasks:
                 raise RuntimeError("A2A context runtime is closing for permission handoff")
             if context_id in self._contexts:
@@ -1044,9 +1050,21 @@ class A2ATaskStore(TaskStore):
         context_id = validate_protocol_id(context_id)
         return self._reconciliation_locks.setdefault(context_id, asyncio.Lock())
 
+    def _finish_completed_input_handoff_runtime_close_locked(self, context_id: str) -> None:
+        closing = self._input_handoff_runtime_close_tasks.get(context_id)
+        if closing is None or not closing.done() or closing.cancelled() or closing.exception() is not None:
+            return
+        record = self._contexts.get(context_id)
+        if record is not None:
+            record.runtime = None
+            record.touch()
+            self._mirror_context(record)
+        self._input_handoff_runtime_close_tasks.pop(context_id, None)
+
     async def context_reconciliation_is_blocked(self, context_id: str) -> bool:
         context_id = validate_protocol_id(context_id)
         async with self._mutation_lock:
+            self._finish_completed_input_handoff_runtime_close_locked(context_id)
             return (
                 bool(self._context_execution_starts.get(context_id))
                 or context_id in self._input_handoff_runtime_close_tasks
@@ -1239,6 +1257,7 @@ class A2ATaskStore(TaskStore):
     async def ensure_context_reconciliation_safe(self, context_id: str) -> None:
         context_id = validate_protocol_id(context_id)
         async with self._mutation_lock:
+            self._finish_completed_input_handoff_runtime_close_locked(context_id)
             if context_id in self._input_handoff_runtime_close_tasks:
                 raise RuntimeError("A2A context runtime is closing for permission handoff")
             if self._context_execution_starts.get(context_id):
@@ -1267,6 +1286,7 @@ class A2ATaskStore(TaskStore):
 
         runtime: Any | None = None
         async with self._mutation_lock:
+            self._finish_completed_input_handoff_runtime_close_locked(context_id)
             if context_id in self._input_handoff_runtime_close_tasks:
                 raise RuntimeError("A2A context runtime is closing for permission handoff")
             create_task = self._context_runtime_tasks.get(context_id)
@@ -1325,6 +1345,7 @@ class A2ATaskStore(TaskStore):
                     owner=record.owner,
                     output_text=list(record.output_text),
                     expected_permission_backup_generation=record.expected_permission_backup_generation,
+                    artifacts=list(record.artifacts),
                     expired=record.expired,
                     updated_at=record.updated_at,
                     created_at=record.created_at,
@@ -1450,6 +1471,7 @@ class A2ATaskStore(TaskStore):
                     output_text=list(record.output_text),
                     updated_at=record.updated_at,
                     expected_permission_backup_generation=record.expected_permission_backup_generation,
+                    artifacts=list(record.artifacts),
                 )
                 context_snapshot = A2AContextSnapshot(
                     context_id=context.context_id,
@@ -1838,6 +1860,7 @@ class A2ATaskStore(TaskStore):
             output_text=list(record.output_text),
             updated_at=record.updated_at,
             expected_permission_backup_generation=record.expected_permission_backup_generation,
+            artifacts=list(record.artifacts),
         )
         if self._persistence is not None and persist_shared_snapshot:
             try:
@@ -2202,6 +2225,7 @@ def _record_from_snapshot(snapshot: A2ATaskSnapshot) -> A2ATaskRecord:
         owner=snapshot.owner,
         output_text=list(snapshot.output_text),
         expected_permission_backup_generation=snapshot.expected_permission_backup_generation,
+        artifacts=list(snapshot.artifacts),
         updated_at=snapshot.updated_at,
     )
 
@@ -2221,7 +2245,10 @@ def _task_from_snapshot(snapshot: A2ATaskSnapshot) -> Task:
         message=status_message,
         timestamp=_timestamp_from_epoch(snapshot.updated_at),
     )
-    return Task(id=snapshot.task_id, context_id=snapshot.context_id, status=status)
+    task = Task(id=snapshot.task_id, context_id=snapshot.context_id, status=status)
+    for artifact in snapshot.artifacts:
+        ParseDict(artifact, task.artifacts.add())
+    return task
 
 
 def _task_state_to_a2a_state(state: str) -> int:

@@ -160,6 +160,11 @@ jobs:
         # the scenarios' own watchdogs. Unit tests above retain source coverage.
         run: uv run pytest tests/a2a_e2e/test_execution_control_scenarios.py -v
 
+      - name: Run AG-UI HTTP integration tests serially with coverage
+        # Real threaded servers share the runner's I/O budget. Keep the default
+        # A2A HTTP deadlines meaningful instead of competing with every worker.
+        run: uv run pytest tests/agui/test_http_sse_integration.py -v --cov --cov-append --cov-report=
+
       - name: Run remaining tests with coverage
         run: |
           uv run pytest tests/ -v -n auto \
@@ -168,6 +173,7 @@ jobs:
             --ignore=tests/a2a/test_execution_control_review_regressions.py \
             --ignore=tests/a2a/test_permission_execution_control.py \
             --ignore=tests/a2a_e2e/test_execution_control_scenarios.py \
+            --ignore=tests/agui/test_http_sse_integration.py \
             --cov --cov-append --cov-report=term-missing \
             --junitxml=testcase.xml
 
@@ -210,6 +216,16 @@ jobs:
       - name: Run A2A execution-control process tests serially
         run: uv run pytest tests/a2a_e2e/test_execution_control_scenarios.py -v --no-header
 
+      - name: Run ROS bridge and permission timer tests serially
+        # Real CLI children and hundreds of durable writes must not compete
+        # with every xdist worker for Windows timer and filesystem capacity.
+        run: >-
+          uv run pytest
+          tests/skill_bridge/test_alicloud_ros_agent_bridge.py
+          tests/skill_bridge/test_ros_remote_cli_diagnostics.py
+          tests/services/test_permission_wait.py
+          -v --no-header
+
       - name: Run remaining tests
         run: >-
           uv run pytest tests/ -v --no-header -n auto
@@ -221,3 +237,6 @@ jobs:
           --ignore=tests/a2a/test_permission_prompt_e2e.py
           --ignore=tests/a2a/test_pipeline_continuation.py
           --ignore=tests/a2a_e2e/test_execution_control_scenarios.py
+          --ignore=tests/skill_bridge/test_alicloud_ros_agent_bridge.py
+          --ignore=tests/skill_bridge/test_ros_remote_cli_diagnostics.py
+          --ignore=tests/services/test_permission_wait.py

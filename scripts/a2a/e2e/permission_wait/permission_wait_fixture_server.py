@@ -122,7 +122,9 @@ def _create_fixture_runtime(
                 for message in messages
                 for block in (message.content if isinstance(message.content, list) else [])
             )
-            if has_tool_result:
+            if has_tool_result or (
+                isinstance(messages[-1].content, str) and messages[-1].content.startswith("ordinary follow-up")
+            ):
                 yield MessageStartEvent(message_id="fixture-final")
                 yield TextDeltaEvent(text="fixture recovery completed")
                 yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -241,7 +243,7 @@ def _create_fixture_pipeline(
     class FixturePipeline:
         pipeline_name = "selling_solution_first" if pipeline_step_id else "selling"
         emit_stack_events = False
-        handoff_enabled = handoff_first
+        handoff_enabled = True
 
         def __init__(self) -> None:
             self.session = SimpleNamespace(session_dir=root_session_dir / "pipeline")
@@ -477,7 +479,7 @@ def _create_fixture_pipeline(
 
         def should_switch_to_normal(self, data: dict[str, Any]) -> bool:
             del data
-            return handoff_first
+            return True
 
         def build_normal_handoff_summary(self, data: dict[str, Any]) -> str:
             del data

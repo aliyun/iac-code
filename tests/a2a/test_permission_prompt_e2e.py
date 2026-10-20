@@ -1,10 +1,12 @@
 """Real HTTP/SDK/AgentLoop coverage for prompts and replies at permission waits."""
 
+import asyncio
 import json
 import multiprocessing
 import os
 import socket
 import time
+from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,7 +24,23 @@ from iac_code.services.session_storage import SessionStorage
 pytestmark = pytest.mark.timeout(120)
 
 
-def _serve(root: str, port: int) -> None:
+def _serve(
+    root: str,
+    port: int,
+    *,
+    protocol: str | None = None,
+    model_url: str | None = None,
+    config_dir: str | None = None,
+    persistence_dir: str | None = None,
+    backup_dir: str | None = None,
+    observation_dir: str | None = None,
+    resident_timeout: float = 300,
+    tool_count: int = 3,
+    fault: str | None = None,
+    host: str = "127.0.0.1",
+    pipeline_dir: str | None = None,
+    artifact_mode: bool = False,
+) -> None:
     """Only the model and tool are fake; restart kills the actual server process."""
     import uvicorn
 
@@ -40,29 +58,75 @@ def _serve(root: str, port: int) -> None:
     from tests.agent.test_agent_loop_permissions import WriteTool
 
     root_path = Path(root)
-    os.environ["IAC_CODE_CONFIG_DIR"] = str(root_path / "config")
-    os.environ["IAC_CODE_CONFIG_BACKUP_DIR"] = str(root_path / "backup")
-    os.environ["IAC_CODE_MODE"] = "normal"
+    os.environ["IAC_CODE_CONFIG_DIR"] = config_dir or str(root_path / "config")
+    os.environ["IAC_CODE_CONFIG_BACKUP_DIR"] = backup_dir or str(root_path / "backup")
+    os.environ["IAC_CODE_MODE"] = "pipeline" if pipeline_dir else "normal"
+    if pipeline_dir:
+        os.environ["IAC_CODE_PIPELINE_NAME"] = "permission-engine-fixture"
     os.environ["IACCODE_A2A_ALLOWED_CWDS"] = str(root_path)
     os.environ.pop("IAC_CODE_CONFIG_BACKUP_TMP_DIR", None)
-    inputs = root_path / "model-inputs.jsonl"
+    observation_path = Path(observation_dir) if observation_dir else root_path
+    observation_path.mkdir(parents=True, exist_ok=True)
+    inputs = observation_path / "model-inputs.jsonl"
+
+    async def close_runtime():
+        if fault == "runtime-close":
+            import asyncio
+
+            (observation_path / "runtime-close-started").touch()
+            while not (observation_path / "release-runtime-close").exists():
+                await asyncio.sleep(0.02)
 
     class RecordingTool(WriteTool):
         async def execute(self, *, tool_input, context):
-            with (root_path / "executions.jsonl").open("a", encoding="utf-8") as output:
+            with (observation_path / "executions.jsonl").open("a", encoding="utf-8") as output:
                 output.write(json.dumps(tool_input) + "\n")
+            if fault in {"tool-block", "permission-claim-race"}:
+                import asyncio
+
+                (observation_path / "tool-started").touch()
+                while not (observation_path / "release-tool").exists():
+                    await asyncio.sleep(0.02)
             return ToolResult.success("executed")
 
     class Provider:
         def get_model_name(self):
             return "test"
 
-        async def stream(self, messages, system, tools=None):
+        async def stream(self, messages, system, tools=None, max_tokens=8192):
             with inputs.open("a", encoding="utf-8") as output:
                 output.write(json.dumps([asdict(message) for message in messages]) + "\n")
             yield MessageStartEvent(message_id="model-message")
-            if messages[-1].content == "original":
-                for index in range(3):
+            is_step = any(tool.name == "complete_step" for tool in tools or [])
+            has_results = any(
+                block.type == "tool_result"
+                for message in messages
+                if isinstance(message.content, list)
+                for block in message.content
+            )
+            if (
+                artifact_mode
+                and isinstance(messages[-1].content, str)
+                and messages[-1].content in {"create template", "edit template"}
+            ):
+                creating = messages[-1].content == "create template"
+                name = "write_file" if creating else "edit_file"
+                arguments = {"path": "template.yaml"}
+                if creating:
+                    arguments["content"] = "ROSTemplateFormatVersion: '2015-09-01'\nDescription: old\n"
+                else:
+                    arguments.update(old_string="Description: old", new_string="Description: updated template content")
+                yield ToolUseStartEvent(tool_use_id="artifact-tool", name=name)
+                yield ToolUseEndEvent(tool_use_id="artifact-tool", name=name, input=arguments)
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+            elif is_step and has_results:
+                yield ToolUseStartEvent(tool_use_id="complete-step", name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id="complete-step", name="complete_step", input={"conclusion": {"status": "ready"}}
+                )
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+            elif messages[-1].content == "original" or is_step:
+                for index in range(tool_count):
                     tool_id = f"tool-{index + 1}"
                     yield ToolUseStartEvent(tool_use_id=tool_id, name="write_test")
                     yield ToolUseEndEvent(tool_use_id=tool_id, name="write_test", input={"value": tool_id})
@@ -72,16 +136,36 @@ def _serve(root: str, port: int) -> None:
                 yield TextDeltaEvent(text=text)
                 yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 
+    def make_provider():
+        if protocol is None:
+            return Provider()
+        from iac_code.providers.anthropic_provider import AnthropicProvider
+        from iac_code.providers.openai_provider import OpenAIProvider
+        from iac_code.providers.responses_provider import ResponsesProvider
+
+        provider_type = {"chat": OpenAIProvider, "responses": ResponsesProvider, "anthropic": AnthropicProvider}[
+            protocol
+        ]
+        return provider_type(model="fixture", api_key="fixture-key", base_url=model_url, thinking_enabled=False)
+
     def runtime(options):
         from iac_code.tools.base import ToolRegistry
 
         registry = ToolRegistry()
-        registry.register(RecordingTool())
-        provider = Provider()
+        if artifact_mode:
+            from iac_code.tools.edit_file import EditFileTool
+            from iac_code.tools.write_file import WriteFileTool
+
+            registry.register(WriteFileTool())
+            registry.register(EditFileTool())
+        else:
+            registry.register(RecordingTool())
+        provider = make_provider()
         return SimpleNamespace(
             session_id=options.session_id,
             provider_manager=provider,
             tool_registry=registry,
+            aclose=close_runtime,
             agent_loop=AgentLoop(
                 provider_manager=provider,
                 system_prompt="test",
@@ -94,24 +178,108 @@ def _serve(root: str, port: int) -> None:
             ),
         )
 
-    with (
-        patch("iac_code.a2a.executor.create_agent_runtime", runtime),
-        patch("tiktoken.get_encoding", side_effect=RuntimeError("offline test")),
-    ):
+    with ExitStack() as patches:
+        patches.enter_context(patch("iac_code.a2a.executor.create_agent_runtime", runtime))
+        if fault == "permission-claim-race":
+            from iac_code.a2a.executor import IacCodeA2AExecutor
+
+            if Path(os.environ["IAC_CODE_CONFIG_DIR"]).parent.name == "worker-b":
+                mark_backed_up = PermissionWaitCheckpointStore.mark_claim_backed_up
+
+                def delayed_backup_ack(self, *args, **kwargs):
+                    # The shared snapshot contains the recorded decision before
+                    # its local backup ACK. Let C restore precisely that window.
+                    (observation_path / "decision-backup-published").touch()
+                    deadline = time.monotonic() + 15
+                    while not (observation_path / "loser-session-restored").exists():
+                        if time.monotonic() >= deadline:
+                            raise AssertionError("The competing worker did not restore the decision snapshot")
+                        time.sleep(0.02)
+                    return mark_backed_up(self, *args, **kwargs)
+
+                patches.enter_context(
+                    patch.object(PermissionWaitCheckpointStore, "mark_claim_backed_up", delayed_backup_ack)
+                )
+            else:
+                reconcile = IacCodeA2AExecutor._reconcile_session_before_route
+
+                async def delayed_reconcile(self, **kwargs):
+                    while not (observation_path / "decision-backup-published").exists():
+                        await asyncio.sleep(0.02)
+                    result = await reconcile(self, **kwargs)
+                    (observation_path / "loser-session-restored").touch()
+                    while not (observation_path / "tool-started").exists():
+                        await asyncio.sleep(0.02)
+                    return result
+
+                patches.enter_context(
+                    patch.object(IacCodeA2AExecutor, "_reconcile_session_before_route", delayed_reconcile)
+                )
+        if fault == "runtime-close":
+            from iac_code.a2a.task_store import A2ATaskStore
+
+            close_for_handoff = A2ATaskStore.discard_context_runtime_for_input_handoff
+
+            async def observed_close(self, context_id):
+                try:
+                    await close_for_handoff(self, context_id)
+                except asyncio.TimeoutError:
+                    (observation_path / "runtime-close-wait-expired").touch()
+                    raise
+
+            patches.enter_context(patch("iac_code.a2a.task_store._RUNTIME_CLOSE_TIMEOUT_SECONDS", 0.1))
+            patches.enter_context(
+                patch.object(A2ATaskStore, "discard_context_runtime_for_input_handoff", observed_close)
+            )
+        if pipeline_dir:
+            pipelines = {"permission-engine-fixture": Path(pipeline_dir)}
+            patches.enter_context(patch("iac_code.pipeline.discover_pipelines", return_value=pipelines))
+            patches.enter_context(patch("iac_code.a2a.pipeline_executor.discover_pipelines", return_value=pipelines))
+            patches.enter_context(patch("iac_code.a2a.pipeline_executor.create_agent_runtime", runtime))
+        patches.enter_context(patch("tiktoken.get_encoding", side_effect=RuntimeError("offline test")))
+        if fault == "backup-failure":
+            from iac_code.services.session_backup import SessionBackupService
+
+            original_backup = SessionBackupService.backup_recoverable_input_handoff
+
+            def gated_backup(self, *args, **kwargs):
+                if not (observation_path / "release-backup").exists():
+                    (observation_path / "backup-failed").touch()
+                    raise OSError("injected shared backup write failure")
+                return original_backup(self, *args, **kwargs)
+
+            patches.enter_context(patch.object(SessionBackupService, "backup_recoverable_input_handoff", gated_backup))
+        if fault == "crash-before-commit":
+            from iac_code.a2a.permission_handoff import SuspendedPermissionHandoff
+
+            def crash_before_commit(*_args):
+                (observation_path / "crash-before-commit").touch()
+                os._exit(77)
+
+            patches.enter_context(patch.object(SuspendedPermissionHandoff, "_publish_committed", crash_before_commit))
         app = create_app(
-            host="127.0.0.1",
+            host=host,
             port=port,
             token=None,
             model="test",
-            persistence_dir=root_path / "a2a",
-            permission_wait={"resident_timeout_seconds": 300},
+            auto_approve_permissions=artifact_mode,
+            persistence_dir=Path(persistence_dir) if persistence_dir else root_path / "a2a",
+            artifact_dir=root_path / "a2a/artifacts" if artifact_mode else None,
+            permission_wait={"resident_timeout_seconds": resident_timeout, "timeout_grace_seconds": 0},
         )
-        uvicorn.run(app, host="127.0.0.1", port=port, log_level="error")
+        from iac_code.a2a.execution_owner import ExecutionOwnerIdentity
+
+        Path(os.environ["IAC_CODE_CONFIG_DIR"]).mkdir(parents=True, exist_ok=True)
+        (Path(os.environ["IAC_CODE_CONFIG_DIR"]) / "fixture-owner.json").write_text(
+            json.dumps(ExecutionOwnerIdentity.capture().model_dump(mode="json", by_alias=True)), encoding="utf-8"
+        )
+        uvicorn.run(app, host=host, port=port, log_level="error")
 
 
 class Server:
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, **options):
         self.root = root
+        self.options = options
         self.process = None
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
@@ -119,7 +287,9 @@ class Server:
         self.client = httpx.Client(base_url=f"http://127.0.0.1:{self.port}", trust_env=False, timeout=15)
 
     def start(self):
-        self.process = multiprocessing.get_context("spawn").Process(target=_serve, args=(str(self.root), self.port))
+        self.process = multiprocessing.get_context("spawn").Process(
+            target=_serve, args=(str(self.root), self.port), kwargs=self.options
+        )
         self.process.start()
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
@@ -183,14 +353,14 @@ def _permission(events, *, required=True):
     return None
 
 
-def _reply(permission):
+def _reply(permission, decision="allow_once"):
     return "IAC_CODE_PERMISSION: " + json.dumps(
         {
             **{
                 key: permission[key]
                 for key in ("schemaVersion", "kind", "requestTaskId", "contextId", "inputId", "toolUseId")
             },
-            "decision": "allow_once",
+            "decision": decision,
         }
     )
 
@@ -277,8 +447,14 @@ def test_new_prompt_cancels_unexecuted_permission_batch(tmp_path, monkeypatch, r
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("restart", [False, True], ids=["same-process", "after-restart"])
-def test_permission_confirmation_continues_batch_and_accepts_next_prompt(tmp_path, monkeypatch, restart):
+@pytest.mark.parametrize(
+    ("restart", "middle_decision"),
+    [(False, "allow_once"), (True, "allow_once"), (False, "deny"), (True, "deny")],
+    ids=["same-process", "after-restart", "mixed-deny-same-process", "mixed-deny-after-restart"],
+)
+def test_permission_confirmation_continues_batch_and_accepts_next_prompt(
+    tmp_path, monkeypatch, restart, middle_decision
+):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "workspace").mkdir()
     server = Server(tmp_path)
@@ -293,7 +469,7 @@ def test_permission_confirmation_continues_batch_and_accepts_next_prompt(tmp_pat
             server.stop()
             server.start()
 
-        with server.stream(_reply(second), task_id=second["requestTaskId"]) as response:
+        with server.stream(_reply(second, middle_decision), task_id=second["requestTaskId"]) as response:
             stream = server.events(response)
             third = None
             for event in stream:
@@ -323,13 +499,20 @@ def test_permission_confirmation_continues_batch_and_accepts_next_prompt(tmp_pat
         ), events
         executions_path = tmp_path / "executions.jsonl"
         executions = [json.loads(line) for line in executions_path.read_text(encoding="utf-8").splitlines()]
-        assert sorted(item["value"] for item in executions) == ["tool-1", "tool-2", "tool-3"]
+        expected_tools = ["tool-1", "tool-3"] if middle_decision == "deny" else ["tool-1", "tool-2", "tool-3"]
+        assert sorted(item["value"] for item in executions) == expected_tools
         inputs_path = tmp_path / "model-inputs.jsonl"
         inputs = [json.loads(line) for line in inputs_path.read_text(encoding="utf-8").splitlines()]
         assert len(inputs) == 2
         results = inputs[-1][-1]["content"]
-        assert [result["tool_use_id"] for result in results] == ["tool-1", "tool-2", "tool-3"]
-        assert all(not result["is_error"] and result["content"] == "executed" for result in results)
+        result_ids = [result["tool_use_id"] for result in results]
+        assert sorted(result_ids) == ["tool-1", "tool-2", "tool-3"]
+        if middle_decision == "allow_once":
+            assert result_ids == ["tool-1", "tool-2", "tool-3"]
+        for result in results:
+            denied = middle_decision == "deny" and result["tool_use_id"] == "tool-2"
+            assert result["is_error"] is denied
+            assert "user explicitly denied" in result["content"].lower() if denied else result["content"] == "executed"
 
         persistence = A2APersistenceStore(tmp_path / "a2a")
         assert persistence.load_task(third["requestTaskId"]).state == "input-required"
@@ -348,15 +531,21 @@ def test_permission_confirmation_continues_batch_and_accepts_next_prompt(tmp_pat
         assert not any("error" in event for event in next_events), next_events
         assert "Current execution is active in another process" not in next_output, next_events
         assert "handled new prompt" in next_output, next_events
-        assert len(executions_path.read_text(encoding="utf-8").splitlines()) == 3
+        assert len(executions_path.read_text(encoding="utf-8").splitlines()) == len(expected_tools)
         assert len(inputs_path.read_text(encoding="utf-8").splitlines()) == 3
 
         # Repeated confirmations must acknowledge/reject the old receipt,
         # without executing the already completed batch a second time.
-        for permission in (second, third):
-            server.send(_reply(permission), task_id=permission["requestTaskId"])
-        assert len(executions_path.read_text(encoding="utf-8").splitlines()) == 3
-        assert len(inputs_path.read_text(encoding="utf-8").splitlines()) == 3
+        for cold in (False, True):
+            if cold:
+                server.stop()
+                server.start()
+            for permission, decision in ((first, "allow_once"), (second, middle_decision), (third, "allow_once")):
+                server.send(_reply(permission, decision), task_id=permission["requestTaskId"])
+            assert len(executions_path.read_text(encoding="utf-8").splitlines()) == len(expected_tools)
+            assert len(inputs_path.read_text(encoding="utf-8").splitlines()) == 3
+        saved = SessionStorage().load(ctx.cwd, ctx.session_id)
+        assert [message.get_text() for message in saved].count("new prompt") == 1
     finally:
         server.stop()
         server.client.close()

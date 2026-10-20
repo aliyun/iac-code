@@ -112,11 +112,14 @@ class _BackgroundStream:
     def wait_for_permission(self, timeout: float) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
+            # Completion follows the last append. Observe it before taking the
+            # snapshot so EOF cannot invalidate an earlier, empty snapshot.
+            finished = self.done.is_set()
             inputs = [value for value in _iac_code_values(self.snapshot(), "input") if isinstance(value, dict)]
             permission = next((value for value in inputs if value.get("kind") == "permission"), None)
             if permission is not None:
                 return permission
-            if self.done.is_set():
+            if finished:
                 raise RuntimeError("pipeline stream ended before permission boundary") from self.error
             time.sleep(0.02)
         raise TimeoutError("timed out waiting for pipeline permission boundary")
@@ -358,6 +361,9 @@ class _FixtureServer:
         return "http://127.0.0.1:{}".format(self.port)
 
     def start(self, generation: int) -> None:
+        if generation > 1:
+            # Windows can retain a recently closed listener in TIME_WAIT.
+            self.port = _free_port()
         fixture = self.repo_root / "scripts" / "a2a" / "e2e" / "permission_wait" / "permission_wait_fixture_server.py"
         self._stdout = (self.run_dir / "server-{}.stdout.log".format(generation)).open("w", encoding="utf-8")
         self._stderr = (self.run_dir / "server-{}.stderr.log".format(generation)).open("w", encoding="utf-8")
@@ -408,7 +414,8 @@ class _FixtureServer:
         deadline = time.monotonic() + 20
         while time.monotonic() < deadline:
             if self.process is not None and self.process.poll() is not None:
-                raise RuntimeError("fixture A2A server exited with code {}".format(self.process.returncode))
+                stderr = Path(self._stderr.name).read_text(encoding="utf-8", errors="replace")[-2000:]
+                raise RuntimeError("fixture A2A server exited with code {}: {}".format(self.process.returncode, stderr))
             try:
                 with urlopen(self.url + "/health", timeout=0.5) as response:
                     if response.status == 200:
@@ -552,11 +559,7 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
         if "expected_permission_backup_generation" in public_payload or "minimum_generation" in public_payload:
             raise AssertionError("internal backup generation leaked into the public A2A stream")
         staged_snapshot = next(
-            (
-                path
-                for path in staging_dir.rglob("{}_v{}".format(session_id, expected_generation))
-                if path.is_dir()
-            ),
+            (path for path in staging_dir.rglob("{}_v{}".format(session_id, expected_generation)) if path.is_dir()),
             None,
         )
         if staged_snapshot is None:
@@ -820,7 +823,9 @@ def run_scenario(
                 background.join(max(0, deadline - time.monotonic()))
                 continuation_events.extend(background.snapshot())
                 if background.error is not None:
-                    raise RuntimeError("top-level Pipeline stream failed at the permission boundary") from background.error
+                    raise RuntimeError(
+                        "top-level Pipeline stream failed at the permission boundary"
+                    ) from background.error
                 break
             initial_events = candidate_events + continuation_events
         elif mode == "pipeline":
@@ -933,23 +938,58 @@ def run_scenario(
         if executions_after_recovery != expected_executions:
             raise AssertionError("unexpected tool execution count after recovery")
 
+        # Exercise the next turn before any duplicate receipt can settle or
+        # reopen execution ownership on behalf of the recovered response.
+        followup_prompt = "ordinary follow-up after permission recovery"
+        followup_events = _stream_request(
+            server.url,
+            _message_payload(workspace=workspace, prompt=followup_prompt, context_id=permission["contextId"]),
+            timeout=timeout,
+        )
+        if any(event.get("error") for event in followup_events) or "TASK_STATE_FAILED" in _task_states(followup_events):
+            raise AssertionError(
+                "next ordinary prompt failed after permission recovery: " + json.dumps(followup_events)
+            )
+        if "fixture recovery completed" not in _event_text(followup_events):
+            raise AssertionError("next ordinary prompt did not complete through the normal AgentLoop")
+        from iac_code.services.session_storage import SessionStorage
+
+        _context_path, context_snapshot = _single_json("contexts/*.json", run_dir / "a2a-state")
+        messages = SessionStorage(projects_dir=run_dir / "config/projects").load(
+            str(workspace), context_snapshot["session_id"]
+        )
+        if sum(message.get_text() == followup_prompt for message in messages) != 1:
+            raise AssertionError("next ordinary prompt was not persisted exactly once")
+
         duplicate_events = _stream_request(
             server.url,
-            _message_payload(workspace=workspace, prompt=query, context_id=permission["contextId"]),
+            _message_payload(
+                workspace=workspace,
+                prompt=query,
+                context_id=permission["contextId"],
+                task_id=permission["requestTaskId"],
+            ),
             timeout=timeout,
         )
         duplicate_acks = [
             value for value in _iac_code_values(duplicate_events, "inputReceived") if isinstance(value, dict)
         ]
         if not any(value.get("duplicate") is True for value in duplicate_acks):
-            raise AssertionError("same duplicate did not return the durable acknowledgement")
+            raise AssertionError(
+                "same duplicate did not return the durable acknowledgement: " + json.dumps(duplicate_events)
+            )
 
         conflicting = dict(response_data)
         conflicting["decision"] = "deny" if decision == "allow_once" else "allow_once"
         conflict_query = PERMISSION_QUERY_PREFIX + " " + json.dumps(conflicting, separators=(",", ":"))
         conflict_events = _stream_request(
             server.url,
-            _message_payload(workspace=workspace, prompt=conflict_query, context_id=permission["contextId"]),
+            _message_payload(
+                workspace=workspace,
+                prompt=conflict_query,
+                context_id=permission["contextId"],
+                task_id=permission["requestTaskId"],
+            ),
             timeout=timeout,
         )
         if "permission_resume_invalid" not in json.dumps(conflict_events, ensure_ascii=False):
@@ -1015,6 +1055,7 @@ def run_scenario(
             "toolExecutions": executions_final,
             "duplicateAcknowledged": True,
             "conflictRejected": True,
+            "nextOrdinaryPromptCompletedBeforeReplay": True,
             "restoredPermissionProjectionPreserved": projection_preserved,
             "durableWaitingPermissionRestored": True,
             "candidateSelectionBeforePermission": candidate_first,

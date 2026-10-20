@@ -158,6 +158,7 @@ from iac_code.services.permission_wait import (
     resolve_permission_execution_identity,
 )
 from iac_code.services.permissions.audit import emit_permission_boundary_audit
+from iac_code.services.pipeline_handoff_context import pipeline_handoff_message
 from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, AliyunCredentials
 from iac_code.services.providers.aliyun_identity import AliyunCallerIdentityUnavailableError
 from iac_code.services.session_backup import (
@@ -1510,6 +1511,17 @@ class IacCodeA2AExecutor(AgentExecutor):
             execution_control_service.set_termination_cleanup(self._terminate_detached_execution)
             execution_control_service.set_resume_callback(self._task_store.touch_context)
 
+    async def wait_until_recoverable_permission_input(self, *, context_id: str, task_id: str) -> None:
+        if self._execution_control_service is None:
+            return
+        control = self._execution_control_service.get_for_context(context_id)
+        if control is not None and control.task_id != task_id:
+            # A reply to a retired task must reach receipt validation without
+            # waiting on the newer task. Unresolved inputs still require the
+            # original task's fenced admission before they can execute.
+            return
+        await self.wait_until_recoverable_pipeline_input(context_id=context_id, task_id=task_id)
+
     async def wait_until_recoverable_pipeline_input(self, *, context_id: str, task_id: str) -> None:
         if self._execution_control_service is None:
             return
@@ -1702,7 +1714,12 @@ class IacCodeA2AExecutor(AgentExecutor):
                 owner = self._task_store.owner_for_context(getattr(context, "call_context", None))
                 current_task = asyncio.current_task()
                 recovery_admission = RecoverableInputAdmissionCarrier.read(context)
-                if permission_response is not None and existing is not None and existing.owner == owner:
+                if (
+                    permission_response is not None
+                    and existing is not None
+                    and existing.owner == owner
+                    and existing.task_id == permission_response.task_id
+                ):
                     try:
                         await existing.wait_for_permission_suspension_settlement()
                     except ExecutionControlConflictError as exc:
@@ -1715,6 +1732,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     and existing.owner == owner
                     and current_task is not None
                     and (permission_response is None or not existing.permission_handoff_requires_admission())
+                    and (permission_response is None or existing.task_id == permission_response.task_id)
                     # A naturally finalized permission turn may still receive
                     # a duplicate answer. Let the validated RESOLVED checkpoint
                     # acknowledge it; attaching would reopen settled ownership.
@@ -4100,17 +4118,21 @@ class IacCodeA2AExecutor(AgentExecutor):
                     session_id=context_record.session_id,
                 ),
             )
-        if isinstance(decision, dict) and decision.get("backupStatus") != "committed":
-            claim_id = str(decision.get("claimId") or "")
-            await backup_permission_wait_checkpoint(
-                store=store,
-                boundary_id=boundary_id,
-                cwd=context_record.cwd,
-                session_id=context_record.session_id,
-                backup_service=self._backup_service,
-                metrics=self._metrics,
-            )
-            record = store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
+
+        async def commit_decision_backup() -> None:
+            nonlocal record
+            if isinstance(decision, dict) and decision.get("backupStatus") != "committed":
+                claim_id = str(decision.get("claimId") or "")
+                await backup_permission_wait_checkpoint(
+                    store=store,
+                    boundary_id=boundary_id,
+                    cwd=context_record.cwd,
+                    session_id=context_record.session_id,
+                    backup_service=self._backup_service,
+                    metrics=self._metrics,
+                )
+                record = store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
+
         task_record = await self._task_store.get_or_create_task(
             task_id=response.task_id, context_id=response.context_id, restore_interrupted=False
         )
@@ -4146,6 +4168,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                         )
                     reserved_admission = reservation.token
                 try:
+                    # Hold the cross-process admission before publishing the
+                    # decision. A losing cold worker must not advance shared
+                    # backup lineage underneath the active recovery's runtime.
+                    await commit_decision_backup()
                     control = await self._execution_control_service.begin_execution(
                         context_id=response.context_id,
                         task_id=response.task_id,
@@ -4166,6 +4192,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                 control.bind_session(context_record.session_id)
                 await control.checkpoint()
                 await control.mark_execution_started()
+            else:
+                await commit_decision_backup()
             if PipelineLifecycleEventQueueCarrier.read(context) and not PipelineLifecycleEventQueueCarrier.is_bound(
                 context
             ):
@@ -4318,7 +4346,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                 task_id=response.task_id,
                 context_id=response.context_id,
             )
-            task.state = TASK_STATE_INPUT_REQUIRED
+            # Pipeline owns its completed/canceled/failed state. Reopening a
+            # completed Pipeline as input-required prevents natural release.
+            if normal_recovery:
+                task.state = TASK_STATE_INPUT_REQUIRED
             self._task_store.mirror_task(task)
             if normal_final_assistant_text is not None:
                 await self._publish_status(
@@ -5108,9 +5139,28 @@ class IacCodeA2AExecutor(AgentExecutor):
 
         session_storage = SessionStorage()
         messages = session_storage.load(cwd, ctx.session_id)
-        if isinstance(summary, str) and summary and not _session_has_user_message(messages, content=summary):
-            session_storage.append(cwd, ctx.session_id, AgentMessage(role="user", content=summary))
-            messages.append(AgentMessage(role="user", content=summary))
+        if isinstance(summary, str) and summary:
+            handoff_message = pipeline_handoff_message(summary, messages)
+            existing = next(
+                (
+                    message
+                    for message in messages
+                    if message.role == "user" and message.content in (summary, handoff_message.content)
+                ),
+                None,
+            )
+            if existing is None:
+                session_storage.append(cwd, ctx.session_id, handoff_message)
+                messages.append(handoff_message)
+            elif existing.content != handoff_message.content or any(
+                existing.metadata.get(key) != value for key, value in handoff_message.metadata.items()
+            ):
+                # Backfill legacy handoffs while retaining the original inputs
+                # and every other public history row in the root session.
+                existing.content = handoff_message.content
+                existing.metadata.update(handoff_message.metadata)
+                existing.token_count = 0
+                session_storage.save(cwd, ctx.session_id, messages)
         if cleanup_prompt is not None and not _session_has_active_cleanup_prompt_content(
             messages,
             content=cleanup_prompt,

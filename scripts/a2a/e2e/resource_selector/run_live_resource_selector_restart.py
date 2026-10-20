@@ -30,6 +30,47 @@ from iac_code.services.configuration_readiness import configuration_readiness  #
 from scripts.a2a.e2e.resource_selector import run_live_resource_selector as live  # noqa: E402
 
 RESTART_STYLES = ("sigterm", "sigkill", "released")
+FAILURE_STAGES = frozenset(
+    {
+        "setup",
+        "initial-selector",
+        "cloud-query",
+        "release",
+        "restart",
+        "answer-stream",
+        "answer-ready",
+        "answer-selector",
+        "answer-receipt",
+        "pipeline-handoff",
+        "handoff-value",
+        "next-turn",
+        "lifecycle-logs",
+    }
+)
+
+
+def _assert_selected_value_in_handoff(config_dir: Path, value: str) -> None:
+    """Check actual handoff data locally without publishing a cloud identity."""
+    for path in sorted((config_dir / "projects").rglob("session.jsonl"))[:20]:
+        if (
+            path.is_symlink()
+            or not path.resolve().is_relative_to(config_dir.resolve())
+            or path.stat().st_size > 2_000_000
+        ):
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            message = json.loads(line)
+            content = message.get("content")
+            if not isinstance(content, str) or not content.startswith("[Pipeline Handoff Context]"):
+                continue
+            marker = "Included context:\n"
+            if marker not in content:
+                continue
+            context, _end = json.JSONDecoder().raw_decode(content.split(marker, 1)[1].lstrip())
+            selection = context.get("selection") if isinstance(context, dict) else None
+            if isinstance(selection, dict) and selection.get("value") == value:
+                return
+    raise AssertionError("Pipeline handoff did not preserve the actual selected resource value")
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -190,6 +231,16 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     previous_config_dir = os.environ.get("IAC_CODE_CONFIG_DIR")
     secrets: set[str] = set()
     harness: live._Harness | None = None
+    failure_stage = "setup"
+
+    def first_wire_facts():
+        path = run_dir / "model-request-facts.jsonl"
+        if not path.is_file():
+            return {}
+        # Later requests can end in tool results after the model has already
+        # chosen to reopen the selector; inspect its first main-model request.
+        return json.loads(path.read_text(encoding="utf-8").splitlines()[0])
+
     try:
         os.environ["IAC_CODE_CONFIG_DIR"] = str(source)
         secrets = live._secret_values(source)
@@ -211,6 +262,7 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         harness.start()
         assert harness.server is not None and harness.server.process is not None
         old_pid = harness.server.process.pid
+        failure_stage = "initial-selector"
         initial = harness.stream(
             name="initial",
             prompt=(
@@ -221,13 +273,16 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
         )
         live._assert_input_required(initial)
         pending = live._single_pending(run_dir=run_dir, stream_name="initial", summary=initial, region=args.region)
+        failure_stage = "cloud-query"
         value, label, count, _values = asyncio.run(live._query_real_vpc(pending))
         before = _execution_state(harness, initial.context_id)
         common._write_json(run_dir / "before-restart-execution-state.json", before)
         if before["httpStatus"] != 200 or not before["state"].get("executionId"):
             raise AssertionError("execution state unavailable before restart")
         if args.restart_style == "released":
+            failure_stage = "release"
             _release_execution(harness, before, initial.context_id)
+        failure_stage = "restart"
         if args.restart_style == "sigkill":
             harness.restart_after_crash()
         else:
@@ -249,21 +304,46 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             _assert_resumed_execution(first_frame, before, pending)
 
         reply = live._selection_response(pending, status=args.answer, value=value, label=label, options_empty=False)
+        failure_stage = "answer-stream"
         answer = _answer_stream(harness, pending, reply, check_first_frame)
+        failure_stage = "answer-ready"
         _assert_turn_ready(answer, name="selection after restart")
+        failure_stage = "answer-selector"
         live._assert_no_new_selector(run_dir, stream_name="answer", previous_input_id=pending["inputId"])
+        failure_stage = "answer-receipt"
         _assert_answer_acknowledged(run_dir / "answer.events.jsonl", pending, args.answer)
+        failure_stage = "pipeline-handoff"
         if args.mode == "pipeline" and not answer.normal_handoff_ready:
             raise AssertionError("Pipeline did not complete and hand off after the selector answer")
+        if args.mode == "pipeline" and args.answer == "selected":
+            failure_stage = "handoff-value"
+            _assert_selected_value_in_handoff(source, value)
         token = "RESTART_NEXT_TURN_OK_" + uuid.uuid4().hex[:8]
+        failure_stage = "next-turn"
         next_turn = harness.stream(
             name="next-turn",
             context_id=initial.context_id,
-            prompt="这是同一会话的下一条普通消息。不要调用工具，只回复：" + token,
+            prompt=live._next_turn_prompt(token),
         )
         _assert_turn_ready(next_turn, name="next turn after restart")
-        if token not in next_turn.text:
-            raise AssertionError("real LLM did not complete the subsequent message")
+        next_turn_checks = live._assert_next_turn_reply(
+            next_turn,
+            context_id=initial.context_id,
+            token=token,
+            run_dir=run_dir,
+            config_dir=source,
+            previous_input_id=pending["inputId"],
+        )
+        if args.mode == "pipeline":
+            facts = first_wire_facts()
+            if not facts.get("selector_next_turn_wire_original_request_in_handoff") or facts.get(
+                "selector_next_turn_wire_original_request_standalone"
+            ):
+                raise AssertionError(
+                    "Normal model context did not fold the completed Pipeline request into its handoff"
+                )
+            next_turn_checks["completed Pipeline request is folded into handoff on the model wire"] = True
+        failure_stage = "lifecycle-logs"
         forbidden = [
             marker
             for marker in (*live.FORBIDDEN_LOG_MARKERS, "active in another process")
@@ -295,10 +375,16 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
             "newExecutionRegistered": True,
             "nextTurnCompleted": True,
             "pipelineHandoffVerified": answer.normal_handoff_ready,
+            "checks": next_turn_checks,
+            "diagnostics": first_wire_facts(),
         }
         common._write_json(run_dir / "summary.json", result)
         return result
     except Exception as exc:
+        evidence = {}
+        if isinstance(exc, live._NextTurnReplyMismatchError):
+            evidence = {"diagnostics": exc.diagnostics, "checks": exc.checks}
+            evidence["diagnostics"].update(first_wire_facts())
         common._write_json(
             run_dir / "summary.json",
             {
@@ -308,6 +394,8 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
                 "answer": args.answer,
                 "errorType": type(exc).__name__,
                 "error": str(exc),
+                "selector_restart_failure_stage": failure_stage,
+                **evidence,
             },
         )
         raise

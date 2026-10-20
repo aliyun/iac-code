@@ -668,7 +668,7 @@ class ReplPty:
                         config_path = self.env.get("IAC_CODE_CONFIG_DIR")
                         if config_path and _display_progress(Path(config_path)).get("pipeline_completed", 0):
                             raise RuntimeError("pipeline completed before first stack create started")
-                    if not diagnosed and elapsed >= self.args.wait_diagnosis_after:
+                    if not diagnosed and elapsed >= getattr(self.args, "wait_diagnosis_after", 120.0):
                         diagnosed = self._diagnose_wait(description, transcript_offset, elapsed)
                     continue
                 self._capture_child_output(f"{child.before}{child.after}")

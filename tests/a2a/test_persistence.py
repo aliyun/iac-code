@@ -1,3 +1,5 @@
+import json
+
 from iac_code.a2a.persistence import (
     A2AContextSnapshot,
     A2APersistenceStore,
@@ -40,6 +42,19 @@ def test_persistence_round_trips_internal_permission_backup_generation(tmp_path)
 
     assert restored is not None
     assert restored.expected_permission_backup_generation == 7
+
+
+def test_task_artifacts_round_trip_and_legacy_snapshot_remains_readable(tmp_path) -> None:
+    store = A2APersistenceStore(tmp_path)
+    artifacts = [{"artifactId": "template-1", "metadata": {"size": 42, "sha256": "fixture-digest"}}]
+    store.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="completed", artifacts=artifacts))
+    assert store.load_task("task-1").artifacts == artifacts
+
+    path = tmp_path / "tasks" / "task-1.json"
+    legacy = json.loads(path.read_text(encoding="utf-8"))
+    del legacy["artifacts"]
+    path.write_text(json.dumps(legacy), encoding="utf-8")
+    assert store.load_task("task-1").artifacts == []
 
 
 def test_persistence_loads_task_without_permission_backup_generation(tmp_path) -> None:

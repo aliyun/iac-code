@@ -28,3 +28,6 @@ steps:
         status:
           type: string
           enum: [selected, canceled]
+        value:
+          type: string
+          description: The exact selected VPC id from the tool result; omit for cancellation.

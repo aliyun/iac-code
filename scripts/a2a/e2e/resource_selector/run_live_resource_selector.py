@@ -563,7 +563,14 @@ class _NextTurnReplyMismatchError(AssertionError):
         self.checks = checks
 
 
-def _next_turn_evidence(run_dir: Path, config_dir: Path, token: str, summary: StreamSummary) -> dict[str, bool]:
+def _next_turn_evidence(
+    run_dir: Path,
+    config_dir: Path,
+    token: str,
+    summary: StreamSummary,
+    *,
+    previous_input_id: str = "",
+) -> dict[str, bool]:
     """Compare the actual follow-up and reply locally without exporting their contents."""
     evidence = {
         "selector_next_turn_public_text_present": bool(summary.text.strip()),
@@ -590,15 +597,25 @@ def _next_turn_evidence(run_dir: Path, config_dir: Path, token: str, summary: St
                 continue
             for item in _walk(record):
                 if isinstance(item, Mapping):
+                    code = item.get("iac_code")
+                    pending = code.get("inputRequired") if isinstance(code, Mapping) else None
+                    if item.get("eventType") == "input_required":
+                        pending = item.get("input", item.get("data"))
+                    if item.get("eventType") == "permission_requested":
+                        pending = item.get("permission")
+                    if not isinstance(pending, Mapping):
+                        continue
+                    if previous_input_id and pending.get("inputId") == previous_input_id:
+                        continue
                     evidence["selector_next_turn_public_selection_wait"] |= (
-                        item.get("kind") == "cloud_resource_selection"
+                        pending.get("kind") == "cloud_resource_selection"
                     )
-                    evidence["selector_next_turn_public_permission_wait"] |= item.get("kind") == "permission"
+                    evidence["selector_next_turn_public_permission_wait"] |= pending.get("kind") == "permission"
     paths = sorted((config_dir / "projects").rglob("session.jsonl"))
     if not paths or len(paths) > 20:
         evidence["selector_next_turn_scan_complete"] = False
     for path in paths[:20]:
-        if path.is_symlink() or not path.resolve().is_relative_to(run_dir.resolve()):
+        if path.is_symlink() or not path.resolve().is_relative_to(config_dir.resolve()):
             evidence["selector_next_turn_scan_complete"] = False
             continue
         try:
@@ -613,15 +630,25 @@ def _next_turn_evidence(run_dir: Path, config_dir: Path, token: str, summary: St
             continue
         followup = False
         for record in records:
-            for message in _walk(record):
+            # SessionStorage.load reads only top-level message rows. Embedded
+            # checkpoint/history copies are not later native model actions.
+            for message in (record,):
                 if not isinstance(message, Mapping) or message.get("role") not in {"user", "assistant"}:
                     continue
                 content = message.get("content")
-                text = content if isinstance(content, str) else "".join(
-                    part.get("text", "") for part in content or []
-                    if isinstance(part, Mapping) and part.get("type") == "text"
-                    and isinstance(part.get("text"), str)
-                ) if isinstance(content, list) else ""
+                text = (
+                    content
+                    if isinstance(content, str)
+                    else "".join(
+                        part.get("text", "")
+                        for part in content or []
+                        if isinstance(part, Mapping)
+                        and part.get("type") == "text"
+                        and isinstance(part.get("text"), str)
+                    )
+                    if isinstance(content, list)
+                    else ""
+                )
                 if message["role"] == "user" and token in text:
                     followup = True
                     evidence["selector_next_turn_native_prompt_present"] = True
@@ -636,28 +663,38 @@ def _next_turn_evidence(run_dir: Path, config_dir: Path, token: str, summary: St
                             continue
                         name = part.get("name")
                         evidence["selector_next_turn_native_select_tool"] |= name in {
-                            "select_cloud_resource", "resolve_cloud_resource_selector",
+                            "select_cloud_resource",
+                            "resolve_cloud_resource_selector",
                         }
                         evidence["selector_next_turn_native_memory_tool"] |= name in {"read_memory", "write_memory"}
                         evidence["selector_next_turn_native_file_tool"] |= name in {
-                            "read_file", "list_files", "glob", "grep",
+                            "read_file",
+                            "list_files",
+                            "glob",
+                            "grep",
                         }
     return evidence
 
 
 def _next_turn_prompt(token: str) -> str:
     return (
-        "此前的云资源选择已经结束。这是同一会话中的下一条普通消息，与云资源无关。"
-        "不要继续资源选择，不要调用任何工具。只需逐字回复下面这一行，保留大小写和下划线；"
+        "上一项任务已经完成。现在执行一项新的纯文本任务。"
+        "不要调用任何工具。只需逐字回复下面这一行，保留大小写和下划线；"
         "不要解释、翻译或添加空格：\n{}"
     ).format(token)
 
 
 def _assert_next_turn_reply(
-    summary: StreamSummary, *, context_id: str, token: str, run_dir: Path, config_dir: Path,
+    summary: StreamSummary,
+    *,
+    context_id: str,
+    token: str,
+    run_dir: Path,
+    config_dir: Path,
+    previous_input_id: str = "",
 ) -> dict[str, bool]:
     _assert_turn_ready(summary, name="next turn")
-    evidence = _next_turn_evidence(run_dir, config_dir, token, summary)
+    evidence = _next_turn_evidence(run_dir, config_dir, token, summary, previous_input_id=previous_input_id)
     checks = {
         "next turn completed in same A2A context": summary.context_id == context_id,
         "next turn returned exact reply marker": token in summary.text,

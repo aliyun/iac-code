@@ -166,9 +166,9 @@ def test_default_selection_is_allowlisted_and_credential_free() -> None:
 def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> None:
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
-    assert len(full) == 47
-    assert len(live) == 109
-    assert len(run_e2e.CASES) == 156
+    assert len(full) == 64
+    assert len(live) == 121
+    assert len(run_e2e.CASES) == 185
     agui = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live-agui", "--list"]))
     assert {case.name for case in agui} == {"agui-selector-" + name for name in run_e2e.AGUI_SCENARIOS}
     assert len(agui) == 6
@@ -1388,6 +1388,9 @@ def test_public_live_summary_smoke_diagnostics_do_not_export_task_or_response_co
     ('smoke_sync_permission_workspace_allowed', False),
     ('smoke_sync_permission_target_shape', 'multiple'),
     ('smoke_sync_permission_effect', 'file_change'),
+    ('smoke_sync_same_permission_pending', True),
+    ('smoke_sync_exit_reason', 'timeout'),
+    ('smoke_sync_permission_confirmation', 'unconfirmed'),
 ])
 def test_public_smoke_permission_diagnostics_accept_only_closed_values(field, value):
     public = run_e2e._public_live_summary({'diagnostics': {field: value}})

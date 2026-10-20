@@ -79,9 +79,7 @@ def _run_payload(
         "runId": run_id,
         "state": {},
         "messages": (
-            []
-            if resume is not None
-            else [{"id": "message-{}".format(run_id), "role": "user", "content": prompt or ""}]
+            [] if resume is not None else [{"id": "message-{}".format(run_id), "role": "user", "content": prompt or ""}]
         ),
         "tools": [],
         "context": [],
@@ -155,6 +153,8 @@ class _AguiServer:
         return "http://127.0.0.1:{}".format(self.port)
 
     def start(self, *, generation: int, a2a_url: str) -> None:
+        if generation > 1:
+            self.port = _free_port()
         self._stdout = (self.run_dir / "agui-{}.stdout.log".format(generation)).open("w", encoding="utf-8")
         self._stderr = (self.run_dir / "agui-{}.stderr.log".format(generation)).open("w", encoding="utf-8")
         env = os.environ.copy()
@@ -213,6 +213,7 @@ class _AguiServer:
 
 
 def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
+    from iac_code.a2a.backup import PENDING_JOBS_DIRNAME
     from iac_code.services.session_backup import BACKUP_ENV_VAR, BACKUP_STATE_FILENAME, SessionBackupService
     from iac_code.services.session_backup_staging import SessionBackupStagingWorker
     from iac_code.services.session_storage import SessionStorage
@@ -405,6 +406,55 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
         if p2_checkpoint.get("phase") != "RESOLVED":
             raise AssertionError("AG-UI P2 retry did not resolve the restored checkpoint")
 
+        followup_prompt = "ordinary follow-up after AG-UI permission recovery"
+        followup_events = _agui_request(
+            agui.url, _run_payload(workspace, run_id="run-5", prompt=followup_prompt), timeout=timeout
+        )
+        if followup_events[-1].get("type") != "RUN_FINISHED" or followup_events[-1].get("outcome") != {
+            "type": "success"
+        }:
+            raise AssertionError("AG-UI next ordinary prompt did not finish successfully")
+        if "fixture recovery completed" not in json.dumps(followup_events):
+            raise AssertionError("AG-UI next ordinary prompt lost its normal AgentLoop response")
+        if _tool_execution_lines(execution_log) != ["executed", "executed-2"]:
+            raise AssertionError("AG-UI next ordinary prompt re-executed the approved batch")
+        saved = SessionStorage(config_dir / "projects").load(str(workspace), session_id)
+        if sum(message.get_text() == followup_prompt for message in saved) != 1:
+            raise AssertionError("AG-UI next ordinary prompt was not persisted exactly once")
+        for run_id in ("stale-before-restart", "stale-after-restart"):
+            if run_id == "stale-after-restart":
+                # RUN_FINISHED can precede the backend's durable natural handoff.
+                # This is a completed-turn restart, not a crash during capture;
+                # terminate() would forcibly interrupt that capture on Windows.
+                deadline = time.monotonic() + timeout
+                while True:
+                    _control_path, control = _single_json("execution-control/*.json", persistence_dir)
+                    handoff = control.get("naturalHandoff") or {}
+                    backup = control.get("backup") or {}
+                    if (
+                        control.get("phase") == "terminated"
+                        and control.get("releaseReady") is True
+                        and handoff.get("stagedCommitted") is True
+                        and handoff.get("snapshotCommitId")
+                        and handoff.get("snapshotCommitId") == backup.get("commitId")
+                        and not list((a2a.staging_dir / PENDING_JOBS_DIRNAME).glob("*.json"))
+                    ):
+                        break
+                    if time.monotonic() >= deadline:
+                        raise AssertionError("AG-UI completed turn did not commit its durable handoff before restart")
+                    time.sleep(0.02)
+                agui.stop()
+                a2a.stop()
+                a2a.start(3)
+                agui.start(generation=3, a2a_url=a2a.url)
+            _agui_request(
+                agui.url,
+                _run_payload(workspace, run_id=run_id, resume=_resolved_permission(permission_2_id)),
+                timeout=timeout,
+            )
+            if _tool_execution_lines(execution_log) != ["executed", "executed-2"]:
+                raise AssertionError("AG-UI stale permission response re-executed the batch")
+
         public_payload = json.dumps(
             first_events + second_events + not_ready_events + recovered_events,
             ensure_ascii=False,
@@ -414,6 +464,7 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
         return {
             "passed": True,
             "scenario": "agui-staged-backup-generation-fence",
+            "nextOrdinaryPromptCompletedBeforeReplay": True,
             "threadId": THREAD_ID,
             "taskId": permission_2["requestTaskId"],
             "oldSharedGeneration": old_shared_generation,
