@@ -209,7 +209,15 @@ PERMISSION_CASES += tuple(
     )
     for decision in ("allow_once", "deny", "prompt")
 )
-CASES = FAST_CASES + EXECUTION_CASES + PERMISSION_CASES
+CANDIDATE_BATCH_CASES = tuple(
+    Case(
+        "ssf-candidate-batch-" + mode,
+        "scripts/pipeline/e2e/run_candidate_batch_recovery.py",
+        ("--mode", mode), 90, "full",
+    )
+    for mode in ("same-process", "cold-recovery")
+)
+CASES = FAST_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES
 LIVE_SCRIPT = "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py"
 SELLING_CIDR_POOLS = tuple(str(pool) for pool in ipaddress.IPv4Network("10.250.0.0/16").subnets(new_prefix=22))
 if len(SELLING_SCENARIOS) > len(SELLING_CIDR_POOLS):
@@ -396,7 +404,7 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
     if args.suite == "fast":
         return list(FAST_CASES)
     if args.suite == "full":
-        return list(FAST_CASES + EXECUTION_CASES + PERMISSION_CASES)
+        return list(FAST_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES)
     if args.suite == "live":
         return list(LIVE_CASES)
     if args.suite.startswith("live-"):

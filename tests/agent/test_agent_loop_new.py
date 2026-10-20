@@ -145,6 +145,18 @@ def test_tool_result_block_metadata_filters_render_metadata_to_json_safe_fields(
     json.dumps(metadata)
 
 
+@pytest.mark.parametrize("candidate_set_id", ["outline-original", "", None, 123, {"id": "outline"}])
+def test_tool_result_block_metadata_preserves_only_valid_candidate_set_id(candidate_set_id):
+    metadata = AgentLoop._tool_result_block_metadata(
+        SimpleNamespace(is_externalized=False),
+        {"candidate_set_id": candidate_set_id, "idempotent": True, "unrelated": object()},
+    )
+
+    expected = {"candidate_set_id": candidate_set_id} if candidate_set_id == "outline-original" else {}
+    assert metadata == expected
+    json.dumps(metadata)
+
+
 def _marked_aliyun_http(**changes):
     value = {
         "contract_version": "aliyun_body_v1",

@@ -3049,6 +3049,10 @@ class AgentLoop:
             )
             from iac_code.tools.cloud.base_stack import persisted_stack_metadata
 
+            # Idempotent display calls retain the original batch across transcript recovery.
+            candidate_set_id = result_metadata.get("candidate_set_id")
+            if isinstance(candidate_set_id, str) and candidate_set_id:
+                metadata["candidate_set_id"] = candidate_set_id
             aliyun_http = sanitize_aliyun_http_metadata(result_metadata.get(ALIYUN_HTTP_METADATA_KEY))
             if aliyun_http is not None:
                 metadata[ALIYUN_HTTP_METADATA_KEY] = aliyun_http
