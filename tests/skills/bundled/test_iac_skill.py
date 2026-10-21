@@ -149,7 +149,8 @@ class TestIacSkill:
     def test_cloud_product_catalogs_list_all_bundled_product_references(self):
         product_names = {path.name for path in (IAC_SKILL_ROOT / "references" / "cloud-products").glob("*.md")}
 
-        for skill_path in [IAC_SKILL_ROOT / "SKILL.md", *SELLING_IAC_SKILLS]:
+        solution_first_skills = Path("src/iac_code/pipeline/selling_solution_first/skills").glob("*/SKILL.md")
+        for skill_path in [IAC_SKILL_ROOT / "SKILL.md", *SELLING_IAC_SKILLS, *solution_first_skills]:
             content = skill_path.read_text(encoding="utf-8")
             missing = sorted(name for name in product_names if name not in content)
             assert not missing, f"{skill_path} is missing cloud product references: {missing}"
