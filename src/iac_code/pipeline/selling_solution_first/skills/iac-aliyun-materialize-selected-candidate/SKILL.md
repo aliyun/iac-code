@@ -212,7 +212,7 @@ Preview 明确表明新建资源受配额、容量或账号限制时，先用 `a
 
 | 文件 | 内容 | 何时查阅 |
 |------|------|----------|
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、rds.md、redis.md、slb.md、vpc.md、oss.md） | 需要了解产品属性、规格选型、库存相关字段时 |
+| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、swas.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） | 需要了解产品属性、规格选型、库存相关字段时 |
 | [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 | 生成或修复 Parameters 定义时 |
 | [references/ros-template.md](references/ros-template.md) | ROS 模板最佳实践：RunCommand、嵌套栈、条件部署 | 生成或修复资源定义、内置函数用法等模板结构问题时 |
 | [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) | 参数推荐与回溯规则、PreviewStack 参数集形成方法 | 求解库存/已有资源参数并形成预览参数集时 |

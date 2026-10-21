@@ -23,6 +23,7 @@ SELLING_IAC_ALIYUN_SKILLS = (
     "iac-aliyun-deploying",
 )
 SELLING_SOLUTION_FIRST_REFERENCE_SKILLS = (
+    "iac-aliyun-solution-first",
     "iac-aliyun-deploying",
     "iac-aliyun-materialize-selected-candidate",
 )
