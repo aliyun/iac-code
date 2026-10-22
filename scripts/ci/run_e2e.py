@@ -308,6 +308,14 @@ LIVE_CASES = tuple(
         "promotional-offer-followup-a2a", "scripts/ci/run_promotional_offer_followup_a2a.py", (), 1200, "live",
         live_runner="promotional_offer_followup", group="readonly",
     ),
+    Case(
+        "coupon-budget-a2a", "scripts/ci/run_coupon_budget_a2a.py", (), 1800, "live",
+        live_runner="coupon_budget", group="readonly",
+    ),
+    Case(
+        "coupon-budget-mock-a2a", "scripts/ci/run_coupon_budget_mock_a2a.py", (), 3600, "live",
+        live_runner="coupon_budget_mock", group="readonly",
+    ),
     Case("smoke-a2a-vpc", "scripts/a2a/smoke/test_a2a_vpc.py", (), 800, "live", live_runner="smoke", group="smoke"),
     Case("smoke-acp-vpc", "scripts/acp/smoke/test_acp_vpc.py", (), 450, "live", live_runner="smoke", group="smoke"),
     Case(
@@ -513,7 +521,10 @@ def _read_summary(case_dir: Path, source: str) -> dict[str, Any] | None:
 
 
 def _live_cleanup_status(case: Case, summary: dict[str, Any] | None) -> str:
-    if case.live_runner in {"selector", "agui_selector", "canary", "legacy_a2a_readonly"} | LLM_ONLY_RUNNERS:
+    readonly_runners = {
+        "selector", "agui_selector", "canary", "legacy_a2a_readonly", "coupon_budget", "coupon_budget_mock",
+    }
+    if case.live_runner in readonly_runners | LLM_ONLY_RUNNERS:
         return "not-needed"
     if summary is None:
         return "unverified"

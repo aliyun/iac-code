@@ -167,8 +167,8 @@ def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> No
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
     assert len(full) == 66
-    assert len(live) == 130
-    assert len(run_e2e.CASES) == 196
+    assert len(live) == 132
+    assert len(run_e2e.CASES) == 198
     agui = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live-agui", "--list"]))
     assert {case.name for case in agui} == {"agui-selector-" + name for name in run_e2e.AGUI_SCENARIOS}
     assert len(agui) == 6

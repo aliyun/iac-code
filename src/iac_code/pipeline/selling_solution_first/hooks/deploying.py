@@ -23,6 +23,9 @@ from iac_code.pipeline.selling.hooks.deploying import (
     on_resource_observed,
     on_rollback_cleanup_required,
 )
+from iac_code.pipeline.selling_solution_first.tools.candidate_planning_records import (
+    normalize_solution_selection_costs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +136,7 @@ def evaluate_deployment_gate(selected_plan: Any) -> str:
 def on_enter(ctx: PipelineContext) -> None:
     """Record the deployment gate verdict inside the existing ``selected_plan`` conclusion."""
 
+    normalize_solution_selection_costs(ctx.snapshot().get("solution_selection"))
     selected_plan = ctx.get_conclusion("selected_plan")
     error = evaluate_deployment_gate(selected_plan)
     if not isinstance(selected_plan, dict):

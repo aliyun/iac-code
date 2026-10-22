@@ -107,7 +107,13 @@ def _assert_expanded_solution_first_resources(package_root: Path, setup_module) 
 
 
 @pytest.mark.asyncio
-async def test_installed_step_one_can_read_swas_guide_from_an_unrelated_workspace(tmp_path, monkeypatch):
+@pytest.mark.parametrize(("reference", "expected"), [
+    ("cloud-products/swas.md", ["OriginPrice", "包月价格"]),
+    ("coupons.md", ["DescribeCoupon", "DescribeCouponItemList"]),
+])
+async def test_installed_step_one_can_read_guides_from_an_unrelated_workspace(
+    tmp_path, monkeypatch, reference, expected,
+):
     setup_module = _load_setup_module(monkeypatch)
     package_root = tmp_path / "installed" / "iac_code"
     _seed_solution_first_skill_files(package_root)
@@ -116,7 +122,7 @@ async def test_installed_step_one_can_read_swas_guide_from_an_unrelated_workspac
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     roots = [str(skill_root)]
-    tool_input = {"path": "references/cloud-products/swas.md"}
+    tool_input = {"path": f"references/{reference}"}
     tool = ReadFileTool()
 
     permission = await tool.check_permissions(
@@ -129,8 +135,7 @@ async def test_installed_step_one_can_read_swas_guide_from_an_unrelated_workspac
         context=ToolContext(cwd=str(workspace), trusted_read_directories=roots, relative_read_directories=roots),
     )
     assert not result.is_error
-    assert "OriginPrice" in result.content
-    assert "包月价格" in result.content
+    assert all(value in result.content for value in expected)
 
 
 def test_selling_skill_references_are_expanded_for_installed_artifacts(monkeypatch, tmp_path):
