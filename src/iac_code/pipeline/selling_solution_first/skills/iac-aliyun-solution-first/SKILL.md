@@ -161,7 +161,9 @@ user_invocable: false
 
 ## 第二部分：详细架构规划
 
-查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件（ecs.md、swas.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md），了解选型策略、配置限制和计费方式；按需读取本次涉及的产品资料。
+规划、粗估或调用某个阿里云产品的 API 前，必须先用 `read_file` 读取 [references/cloud-products/](references/cloud-products/) 下该产品的对应文档，了解选型策略、配置限制和计费方式。同一上下文已完整读取时直接复用；只加载本次涉及产品的文档。
+
+产品与文件映射：云服务器 ECS → `ecs.md`；轻量应用服务器 SWAS → `swas.md`；云数据库 RDS → `rds.md`；云数据库 Redis → `redis.md`；负载均衡 SLB/CLB/ALB/NLB → `slb.md`；专有网络 VPC → `vpc.md`；对象存储 OSS → `oss.md`；全球加速 GA → `ga.md`。
 
 ### 核心原则：按需设计，不过度发挥
 
