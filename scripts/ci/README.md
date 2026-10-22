@@ -35,7 +35,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite live --jobs 4 \
   --allow-cloud-write
 ```
 
-默认三文件模式下，凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 129 个：42 个 selling flow A2A/REPL 场景、20 个 A2A 只读资源选择（含 12 个重启恢复矩阵）、6 个 AGUI HTTP/SSE 资源选择、16 个 REPL 旧场景、33 个 A2A 恢复场景、3 个 VPC 模板 smoke、1 个只读云 API canary、8 个 ROS 助手引导真实模型场景。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety`、`live-repl`、`live-smoke` 或 `live-agui`，也可用 `--case` 指定单个用例。AGUI 的 6 条覆盖普通聊天与 Pipeline 的选择、取消和直接输入，通过 HTTP/SSE 运行，不需要浏览器；使用文本模型池，查询已有 VPC，不创建资源，清理状态为“无需清理”。可单独运行 `--suite live-agui`，或指定 `--case agui-selector-normal-selected`。三个 VPC smoke 只接收 LLM 与 settings 配置，使用隔离的 HOME，不接收云凭证；它们验证生成模板，不创建 VPC。并行 selling 场景各用独立的 `10.250.0.0/16` 子网池，避免独立进程重复预留同一 VSwitch CIDR；原 runner 单独运行仍沿用原池。旧 A2A、REPL 和 selling 场景不强制测试 StackName；清理读取隔离会话中真实 CreateStack 接受回执，按实际 ID、名称和地域校验后删除。仅查询、等待或模型提及的资源不能授权删除；硬超时后由独立清理进程再次尝试。selling、REPL 旧用例和 A2A 恢复用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组。硬超时不代表清理成功，需检查报告和测试账号残留资源。
+默认三文件模式下，凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 130 个：42 个 selling flow A2A/REPL 场景、20 个 A2A 只读资源选择（含 12 个重启恢复矩阵）、6 个 AGUI HTTP/SSE 资源选择、16 个 REPL 旧场景、33 个 A2A 恢复场景、3 个 VPC 模板 smoke、1 个只读云 API canary、8 个 ROS 助手引导真实模型场景、1 个活动商品追问 A2A 场景。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety`、`live-repl`、`live-smoke` 或 `live-agui`，也可用 `--case` 指定单个用例。AGUI 的 6 条覆盖普通聊天与 Pipeline 的选择、取消和直接输入，通过 HTTP/SSE 运行，不需要浏览器；使用文本模型池，查询已有 VPC，不创建资源，清理状态为“无需清理”。可单独运行 `--suite live-agui`，或指定 `--case agui-selector-normal-selected`。三个 VPC smoke 只接收 LLM 与 settings 配置，使用隔离的 HOME，不接收云凭证；它们验证生成模板，不创建 VPC。并行 selling 场景各用独立的 `10.250.0.0/16` 子网池，避免独立进程重复预留同一 VSwitch CIDR；原 runner 单独运行仍沿用原池。旧 A2A、REPL 和 selling 场景不强制测试 StackName；清理读取隔离会话中真实 CreateStack 接受回执，按实际 ID、名称和地域校验后删除。仅查询、等待或模型提及的资源不能授权删除；硬超时后由独立清理进程再次尝试。selling、REPL 旧用例和 A2A 恢复用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组。硬超时不代表清理成功，需检查报告和测试账号残留资源。
 
 CI 可改用 `--cloud-credential-helper /path/to/helper.py`，此时源目录只需 LLM 凭证和 `settings.yml`。Helper 接口为 `cloud --output <目标 .cloud-credentials.yml 路径>`；它在每个真实云用例开始前调用，长用例每 10 分钟调用一次，异常清理前也会再次调用。若 helper 需要独立 Python 环境，传 `--cloud-credential-python /path/to/python`。Helper 必须原子地写入私有权限文件，且不得在标准输出或错误输出打印凭证。模板 smoke 不调用 helper。本地原有的三文件运行方式继续支持。
 
@@ -70,6 +70,14 @@ uv run --no-sync python scripts/ci/run_e2e.py \
   --case ros-awareness-renewal --case ros-awareness-default-region \
   --case ros-awareness-disabled --case ros-awareness-deployment-pricing \
   --credential-source-dir /path/to/test-config --jobs 2 --retries 0
+```
+
+`promotional-offer-followup-a2a` 通过生产 HTTP/SSE A2A Server 验证真实模型：先为“最低 2G、推荐 4G”的旅游 Agent 规划服务器，再保留会话追问活动商品，最后明确咨询活动购买资格。检查内存下限、部署上下文中的同地域助手引导，以及独立活动咨询的可见链接和持久化结束原因。测试不替换模型或工具结果、不选择部署方案，仅复制 LLM 凭证与 settings，不接收云凭证、不查询实际活动资格；首轮历史附图中的规格以文本复现。四模型覆盖需分别指定每个 `--text-model` 运行，不把单次调度当成四模型全覆盖。
+
+```bash
+uv run --no-sync python scripts/ci/run_e2e.py --case promotional-offer-followup-a2a \
+  --text-model deepseek-v4.1-flash --credential-source-dir /path/to/test-config \
+  --jobs 1 --retries 0
 ```
 
 ## 真实用例的模型池与思考强度
