@@ -16,6 +16,7 @@ import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
@@ -50,6 +51,18 @@ QUESTION = (
     "本次计算费可抵扣金额、计算部分需补现金、结论依据；"
     "无法确认的填写待确认，不要猜测。暂不选择方案、不重新规划、不下单或用券。"
 )
+
+
+def has_assistant_reference(text: str) -> bool:
+    """Recognize console links by their parsed host, not a substring in an arbitrary URL."""
+    for url in re.findall(r"https?://[^\s<>()\[\]]+", text):
+        try:
+            parsed = urlsplit(url)
+            if parsed.scheme == "https" and parsed.hostname == "ros.console.aliyun.com":
+                return True
+        except ValueError:
+            continue
+    return False
 
 
 def answer_cell(text: str, label: str) -> str:
@@ -200,7 +213,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             row = {
                 "case": case, "title": CASES[case].title, "expected_cash": CASES[case].cash,
                 "cash_cell": cell, "passed": all(local.values()), "checks": local,
-                "assistant_reference_present": "ros.console.aliyun.com/" in text,
+                "assistant_reference_present": has_assistant_reference(text),
                 "seconds": round(time.monotonic() - start, 2),
             }
             rows.append(row)
