@@ -3,7 +3,21 @@
 import pytest
 
 from scripts.ci.coupon_fixtures import coupon, response
-from scripts.ci.run_coupon_budget_mock_a2a import amount_matches, cash_cell, evaluate_answer
+from scripts.ci.run_coupon_budget_mock_a2a import amount_matches, cash_cell, evaluate_answer, has_assistant_reference
+
+
+@pytest.mark.parametrize(("text", "expected"), [
+    ("[AI Assistant](https://ros.console.aliyun.com/cn-beijing/chat)", True),
+    ("https://ROS.CONSOLE.ALIYUN.COM/cn-hangzhou/chat", True),
+    ("https://example.com/ros.console.aliyun.com/cn-beijing/chat", False),
+    ("https://ros.console.aliyun.com.example.com/cn-beijing/chat", False),
+    ("https://ros.console.aliyun.com@example.com/cn-beijing/chat", False),
+    ("https://example.com/?next=https%3A%2F%2Fros.console.aliyun.com%2Fchat", False),
+    ("https://[invalid/path", False),
+    ("No link", False),
+])
+def test_assistant_reference_uses_the_exact_url_host(text, expected):
+    assert has_assistant_reference(text) is expected
 
 
 def test_an_old_coupon_id_cannot_observe_a_new_fixture():
