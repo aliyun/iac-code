@@ -7101,9 +7101,10 @@ msgstr "未找到阿里云 API {operation}。请检查产品、版本和操作�
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
-"Alibaba Cloud API metadata for {operation} is temporarily unavailable; "
-"try again later."
-msgstr "{operation} 的阿里云 API 元数据暂时不可用，请稍后重试。"
+"Alibaba Cloud API metadata for {operation} is temporarily unavailable. "
+"Retry the same tool call once after a short wait; if it still fails, "
+"report the temporary failure rather than treating the API as unsupported."
+msgstr "{operation} 的阿里云 API 元数据暂时不可用。请稍等后重试同一工具调用一次；若仍失败，请报告临时故障，不要判断为该 API 不受支持。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

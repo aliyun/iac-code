@@ -7684,11 +7684,10 @@ msgstr ""
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
-"Alibaba Cloud API metadata for {operation} is temporarily unavailable; "
-"try again later."
-msgstr ""
-"Die Alibaba-Cloud-API-Metadaten für {operation} sind vorübergehend nicht "
-"verfügbar. Versuchen Sie es später erneut."
+"Alibaba Cloud API metadata for {operation} is temporarily unavailable. "
+"Retry the same tool call once after a short wait; if it still fails, "
+"report the temporary failure rather than treating the API as unsupported."
+msgstr "Die Alibaba-Cloud-API-Metadaten für {operation} sind vorübergehend nicht verfügbar. Wiederhole denselben Tool-Aufruf nach kurzer Wartezeit einmal. Falls er erneut fehlschlägt, melde die vorübergehende Störung, statt die API als nicht unterstützt einzustufen."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

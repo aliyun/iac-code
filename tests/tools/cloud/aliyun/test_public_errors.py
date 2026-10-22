@@ -57,7 +57,9 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Verify the cloud resource state before retrying.",
         "Alibaba Cloud returned an unsupported response body for {operation}. "
         "Verify the cloud resource state before retrying.",
-        "Alibaba Cloud API metadata for {operation} is temporarily unavailable; try again later.",
+        "Alibaba Cloud API metadata for {operation} is temporarily unavailable. "
+        "Retry the same tool call once after a short wait; if it still fails, "
+        "report the temporary failure rather than treating the API as unsupported.",
         "Alibaba Cloud endpoint cache could not be updated for {operation} in {region}. "
         "Check local configuration storage and retry.",
         "Alibaba Cloud API parameters are invalid for {operation}.",
