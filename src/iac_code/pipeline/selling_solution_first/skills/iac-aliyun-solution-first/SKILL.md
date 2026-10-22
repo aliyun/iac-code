@@ -122,6 +122,8 @@ user_invocable: false
 
 ### 硬约束提取规则
 
+CPU、内存、磁盘、带宽等规格直接影响费用，必须准确区分用户的最低要求、推荐配置与固定要求，不得擅自升降规格或把推荐值提升为硬约束。同一规格同时有最低值和推荐值时，最低值作为约束下限，推荐值仅作选型偏好。
+
 每条硬约束是一个对象，字段为 `id`、`target`、`property`、`operator`、`value`、可选 `unit`、`verification_mode`、`source`、`source_text`：
 
 - `id`：当前请求内稳定且唯一的约束标识；用户修改同一约束时保持 ID，内容更新为最新要求。
@@ -136,7 +138,7 @@ user_invocable: false
 
 提取规则：
 
-- "2 核 4 GiB"可提取为同一目标的 `vcpu eq 2 count` 与 `memory eq 4 GiB` 两条约束；它们需要把实际产品规格映射到具体部署参数，因此使用 `verification_mode: tool`。这里只负责忠实表达，不选择具体实例规格或 API。
+- 用户明确固定为"2 核 4 GiB"时，提取 `vcpu eq 2 count` 与 `memory eq 4 GiB`；若同时说明"最低 2 GiB，推荐 4 GiB"，内存只提取 `memory gte 2 GiB`，不得再加 `memory eq/gte 4 GiB`。规格需要映射到具体部署参数，使用 `verification_mode: tool`；这里只忠实表达，不选择具体实例规格或 API。
 - 将用户口语单位规范化后写入结构化字段：CPU 的"核/核心/vCPU"统一为 `count`，内存语境中的 `g/G` 统一为 `GiB`、`m/M` 统一为 `MiB`；保留用户原始表达在 `source_text`，不要把内存单位误解为带宽单位。
 - "至少 100 GiB""带宽不超过 20 Mbps""只能用 8.0""不要公网 IP"分别使用 `gte`、`lte`、`in/eq`、`eq false` 等通用表达。
 - 实际值能从模板属性或最终部署参数直接定位时使用 `verification_mode: direct`；依赖云产品元数据、SKU 映射、库存或已有资源状态时使用 `verification_mode: tool`。
@@ -388,6 +390,7 @@ user_invocable: false
 
 用户选择后本步骤会带着已保存的候选上下文恢复执行：
 
+- "为什么不能选……""这个能用吗"等适用性或价格追问不是选案确认。先回答问题；没有明确选择或修改要求时，不提交 `selected`、不进入实现，也不重新规划。
 - 结构化选择消息优先使用候选坐标 `selected_candidate_index` / `selected_evaluated_candidate_index`（两者一致，都是 0 基下标）。
 - 用户提供候选名称时按 `name` 匹配；名称重复时必须用下标消歧。
 - 本步骤只确定架构方案，不接收部署参数覆盖。结构化消息中的 `parameter_overrides`、`deployment_parameters` 或 `parameters` 不写入结论；模板生成后的部署参数统一由下一步处理。

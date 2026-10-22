@@ -167,8 +167,8 @@ def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> No
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
     assert len(full) == 66
-    assert len(live) == 129
-    assert len(run_e2e.CASES) == 195
+    assert len(live) == 130
+    assert len(run_e2e.CASES) == 196
     agui = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live-agui", "--list"]))
     assert {case.name for case in agui} == {"agui-selector-" + name for name in run_e2e.AGUI_SCENARIOS}
     assert len(agui) == 6
@@ -978,7 +978,7 @@ def test_live_adapter_uses_isolated_credentials_and_sanitized_result(
         assert len(scenarios[0].name.removeprefix("scenario-")) == 32
 
 
-@pytest.mark.parametrize("runner", ["smoke", "ros_awareness"])
+@pytest.mark.parametrize("runner", ["smoke", "ros_awareness", "promotional_offer_followup"])
 def test_llm_only_adapter_has_model_config_but_no_cloud_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: str
 ) -> None:
@@ -994,7 +994,8 @@ def test_llm_only_adapter_has_model_config_but_no_cloud_credentials(
         "assert Path(os.environ['HOME']).is_relative_to(run_dir)\n"
         "assert Path(os.environ['USERPROFILE']).is_relative_to(run_dir)\n"
         "assert '--allow-real-cloud' not in sys.argv\n"
-        "assert ('--allow-real-llm' in sys.argv) == ('ros_awareness' == sys.argv[sys.argv.index('--runner') + 1])\n"
+        "assert ('--allow-real-llm' in sys.argv) == "
+        "(sys.argv[sys.argv.index('--runner') + 1] in {'ros_awareness', 'promotional_offer_followup'})\n"
         "(run_dir / 'summary.json').write_text("
         "json.dumps({'passed': True, 'checks': {'ok': True}}), encoding='utf-8')\n",
         encoding="utf-8",

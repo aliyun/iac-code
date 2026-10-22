@@ -122,7 +122,7 @@ async def test_pipeline_prompt_uses_each_concurrent_callers_console_region(execu
         assert f"https://ros.console.aliyun.com/{own}/chat" in skill_and_step
         assert "ROS console override" in skill_and_step
         assert "ros_agent_awareness" not in prompt
-        assert "This overrides deployment clarification/reselection" in prompt
+        assert "override clarification/reselection" in prompt
         assert "with `status: rejected`" in prompt
 
 
@@ -134,7 +134,7 @@ def test_handoff_is_limited_to_planning_and_leaves_normal_prompts_alone(executor
     assert "ROS console override" in prompts[0]
     assert all("ROS console override" not in prompt for prompt in prompts[1:])
     assert "ROS console override" not in build_system_prompt(cwd=str(tmp_path))
-    assert "Keep deployment-related questions here" in prompts[0]
+    assert "Keep deployment architecture/cost tradeoffs here" in prompts[0]
     assert "do not promise discounts or session transfer" in prompts[0]
 
 

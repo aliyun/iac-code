@@ -26,7 +26,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLOUD_REFRESH_SECONDS = 600
-LLM_ONLY_RUNNERS = frozenset({"smoke", "ros_awareness"})
+LLM_ONLY_RUNNERS = frozenset({"smoke", "ros_awareness", "promotional_offer_followup"})
 SAFE_LIVE_AUDIT_NOTE = re.compile(
     r"credential audit: source=(?:llm|cloud); "
     r"location=(?:logs|artifacts|workspace|templates|other); "
@@ -304,6 +304,10 @@ LIVE_CASES = tuple(
     )
     for scenario in ROS_AWARENESS_SCENARIOS
 ) + (
+    Case(
+        "promotional-offer-followup-a2a", "scripts/ci/run_promotional_offer_followup_a2a.py", (), 1200, "live",
+        live_runner="promotional_offer_followup", group="readonly",
+    ),
     Case("smoke-a2a-vpc", "scripts/a2a/smoke/test_a2a_vpc.py", (), 800, "live", live_runner="smoke", group="smoke"),
     Case("smoke-acp-vpc", "scripts/acp/smoke/test_acp_vpc.py", (), 450, "live", live_runner="smoke", group="smoke"),
     Case(
@@ -1512,7 +1516,7 @@ def run_case(
                     command.extend(("--provider", "dashscope"))
         if case.live_runner not in LLM_ONLY_RUNNERS and cloud_credential_helper is not None:
             _prepare_cloud_credentials(cloud_credential_helper, source_config_dir, cloud_credential_python)
-        if case.live_runner == "ros_awareness":
+        if case.live_runner in {"ros_awareness", "promotional_offer_followup"}:
             command.append("--allow-real-llm")
         elif case.live_runner not in LLM_ONLY_RUNNERS:
             command.append("--allow-real-cloud")
