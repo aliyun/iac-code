@@ -174,7 +174,7 @@ class TestSkillReferences:
         links = set(REFERENCE_LINK_PATTERN.findall(text))
 
         # Product knowledge is read on demand; template/pricing workflows stay in Step 2.
-        assert links == {"references/cloud-products/"}
+        assert links == {"references/cloud-products/", "references/coupons.md"}
         assert "OriginPrice" not in text
 
 

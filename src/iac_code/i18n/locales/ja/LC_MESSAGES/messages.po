@@ -5782,9 +5782,9 @@ msgstr "コスト、可用性、または複雑性に関する最も重要なト
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
 "candidates must be a non-empty array of unique outlines with "
-"candidate_name, summary, total_monthly_cost and key_tradeoff"
+"candidate_name, summary, total_cost and key_tradeoff"
 msgstr ""
-"candidates は candidate_name、summary、total_monthly_cost、key_tradeoff "
+"candidates は candidate_name、summary、total_cost、key_tradeoff "
 "を含む、一意な概要の空でない配列である必要があります"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py

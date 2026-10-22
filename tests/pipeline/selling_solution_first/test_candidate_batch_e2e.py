@@ -4,6 +4,7 @@ from contextlib import aclosing
 from pathlib import Path
 
 import pytest
+import yaml
 
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
@@ -29,7 +30,7 @@ OUTLINE = {
         {
             "candidate_name": NAME,
             "summary": "One managed RDS instance in Hangzhou",
-            "total_monthly_cost": "CNY 800-1200/month",
+            "total_cost": "CNY 800-1200/month",
             "key_tradeoff": "Fixed monthly cost",
         }
     ],
@@ -46,6 +47,7 @@ DETAIL = {
             "product": "RDS",
             "purpose": "database",
             "quantity": 1,
+            "rough_cost": "CNY 800-1200/month",
             "lifecycle": "create",
         }
     ],
@@ -66,6 +68,7 @@ class PlanningModel:
 
     def __init__(self):
         self.calls = 0
+        self.materialization_inspected = False
 
     def get_model_name(self):
         return "deterministic-p18-fixture"
@@ -99,6 +102,12 @@ class PlanningModel:
                 },
             ),
         ]
+        if self.calls == len(script) - 1 and "第二步" in system:
+            assert all(key not in system for key in ("monthly_range", "rough_monthly_cost", "monthly_cost"))
+            assert "CNY 800-1200/month" in system
+            self.materialization_inspected = True
+            yield MessageStartEvent(message_id="materialization-prompt-checked")
+            return
         assert self.calls < len(script), (
             "Valid selection fell back to the model instead of advancing",
             [
@@ -117,8 +126,8 @@ class PlanningModel:
         yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
 
 
-@pytest.mark.parametrize("cold", [False, True], ids=["same-process", "cold-recovery"])
-async def test_idempotent_outline_survives_selection_resume(tmp_path, monkeypatch, cold):
+@pytest.mark.parametrize("mode", ["same-process", "cold-recovery", "legacy-cold-recovery"])
+async def test_idempotent_outline_survives_selection_resume(tmp_path, monkeypatch, mode):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
     workspace = tmp_path / "workspace"
@@ -151,11 +160,27 @@ async def test_idempotent_outline_survives_selection_resume(tmp_path, monkeypatc
     )
     assert model.calls == 4
 
-    if cold:
+    if mode == "legacy-cold-recovery":
+        # Simulate a sidecar written by the previous version, keeping state/version metadata intact.
+        context_path = flow.session.context_path
+        snapshot = yaml.safe_load(context_path.read_text())
+        for candidate in snapshot["solution_selection"]["value"]["candidates"]:
+            cost = candidate["rough_cost"]
+            cost["monthly_range"] = cost.pop("cost_range")
+            for item in cost["items"]:
+                item["monthly_cost"] = item.pop("cost")
+            for resource in candidate["resource_inventory"]:
+                resource["rough_monthly_cost"] = resource.pop("rough_cost")
+        context_path.write_text(yaml.safe_dump(snapshot, allow_unicode=True))
+    if mode != "same-process":
         # Construct a new runner/storage: restore the real sidecar and attempt
         # transcript from disk, without carrying the live completion guard.
         flow = runner(resume=True)
-        assert flow.context.get_conclusion("solution_selection") == saved
+        restored = flow.context.get_conclusion("solution_selection")
+        if mode == "legacy-cold-recovery":
+            assert "monthly_range" in restored["candidates"][0]["rough_cost"]
+        else:
+            assert restored == saved
 
     resumed = []
     async with aclosing(flow.resume(encode_selected_candidate(NAME, 0))) as stream:
@@ -167,8 +192,11 @@ async def test_idempotent_outline_survives_selection_resume(tmp_path, monkeypatc
                 isinstance(event, PipelineEvent)
                 and event.type == PipelineEventType.STEP_STARTED
                 and event.step_id == "materialize_selected_candidate"
+                and mode != "legacy-cold-recovery"
             ):
                 break  # The selection boundary is verified; do not create cloud resources.
+            if isinstance(event, MessageStartEvent) and event.message_id == "materialization-prompt-checked":
+                break
 
     selected = flow.context.get_conclusion("solution_selection")
     assert selected["status"] == "selected", (
@@ -179,6 +207,8 @@ async def test_idempotent_outline_survives_selection_resume(tmp_path, monkeypatc
     assert selected["selected_candidate_index"] == 0
     assert selected["selected_candidate"] == saved["candidates"][0]
     assert model.calls == 4, "Selection must not regenerate candidates or call the model again"
+    if mode == "legacy-cold-recovery":
+        assert model.materialization_inspected, "Verify the real Step 2 prompt after legacy disk recovery"
     assert any(
         isinstance(event, PipelineEvent)
         and event.type == PipelineEventType.STEP_STARTED

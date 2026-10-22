@@ -299,28 +299,28 @@ steps:
                     billing_method:
                       type: string
                       description: 用于粗估的计费方式，例如按量付费。
-                    rough_monthly_cost:
+                    rough_cost:
                       type: string
-                      description: 该清单项的月度粗估区间或免费说明。
+                      description: 该清单项的粗估区间及周期，默认按月，用户指定单位或时长时与其一致。
                     lifecycle:
                       type: string
                       enum: [create, use_existing, reference, forbid]
                       description: 与 resource_intents 一致的资源生命周期。
               rough_cost:
                 type: object
-                description: Step 1 的架构级月度粗估，不是 ROS 精确询价结果。
-                required: [currency, monthly_range, items, assumptions, exclusions, confidence]
+                description: 架构级费用粗估，默认按月，用户指定单位或时长时与其一致；不是 ROS 精确询价结果。
+                required: [currency, cost_range, items, assumptions, exclusions, confidence]
                 properties:
                   currency:
                     type: string
                     enum: [CNY]
                     description: 粗估费用币种，固定为 CNY。
-                  monthly_range:
+                  cost_range:
                     type: string
-                    description: 面向用户的月度总费用区间，例如 ¥500～¥800/月。
+                    description: 面向用户的总费用区间及实际周期，例如 ¥500～¥800/月或 ¥3～¥5/小时。
                   items:
                     type: array
-                    description: 构成月度粗估的主要计费项。
+                    description: 构成当前周期粗估的主要计费项。
                     items:
                       type: object
                       description: 一项产品或资源的粗估费用。
@@ -331,9 +331,9 @@ steps:
                         spec:
                           type: string
                           description: 采用的粗估规格与数量。
-                        monthly_cost:
+                        cost:
                           type: string
-                          description: 该项月度粗估区间或免费说明。
+                          description: 该项粗估区间及实际周期，须与总费用使用同一单位和时长。
                   assumptions:
                     type: array
                     description: 粗估成立所依据的地域、用量、规格和计费假设。

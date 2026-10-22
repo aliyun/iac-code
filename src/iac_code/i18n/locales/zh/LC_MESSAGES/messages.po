@@ -5710,10 +5710,10 @@ msgstr "最重要的成本、可用性或复杂度取舍"
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
 "candidates must be a non-empty array of unique outlines with "
-"candidate_name, summary, total_monthly_cost and key_tradeoff"
+"candidate_name, summary, total_cost and key_tradeoff"
 msgstr ""
 "candidates 必须是非空且不重名的候选方案概览数组，每项包含 "
-"candidate_name、summary、total_monthly_cost 和 key_tradeoff"
+"candidate_name、summary、total_cost 和 key_tradeoff"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 #, python-brace-format

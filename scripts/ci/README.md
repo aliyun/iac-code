@@ -106,7 +106,29 @@ uv run --no-sync python scripts/ci/run_e2e.py --case ssf-a2a-happy-multi-plan \
 
 ## CI 接入
 
-CI 调用同一个入口，并用 `--run-dir` 指定报告目录。`fast` 适合快速检查，`full` 适合完整确定性验收。真实场景必须提供测试专用配置目录和 `--allow-cloud-write`。配置文件内容应通过 CI 的 Secret 注入，且不要进入代码、作业输出或上传附件。
+`coupon-budget-a2a` 使用真实模型、HTTP/SSE A2A 和只读云 API，验证默认月费、明确小时与时长后的估价，以及当前部署中的优惠券查询不被分流。它也验证优惠券指南中的两条 API、字段与分页，不购买资源或实际使用优惠券：
+
+```bash
+uv run python scripts/ci/run_e2e.py --case coupon-budget-a2a --suite live \
+  --credential-source-dir /path/to/test-config --text-model glm-5.2-fast-preview
+
+# 仅验证指南 API，使用当前配置的云凭证，不调用模型
+uv run python scripts/ci/run_coupon_budget_a2a.py --api-only --allow-real-cloud \
+  --run-dir /tmp/coupon-api-check
+```
+
+API 验证需要账号内实际存在优惠券及可查询的商品记录；空列表不能作为券字段和商品查询已验证的证明。API/模型原始结果留在私有运行目录，不上传为公开报告。该用例验证只读识别与规划，不证明特定订单或账单一定能抵扣。
+
+`coupon-budget-mock-a2a` 补充没有真实可用券时的判断覆盖：A2A Server、模型和方案规划均使用真实实现，只在测试进程中替换 `DescribeCoupon`、`DescribeCouponItemList` 的业务返回；其它 BSS 操作在该测试进程中不开放。覆盖可用余额、余额不足、包年包月限制、GPU 排除、范围未知、过期、满减门槛、商品黑名单与查询失败九种情况。每种情况固定使用测试输入“8 小时 GPU 计算费 240 元”，核对模型表格中的抵扣额、需补现金及继续等待选案的流程状态；这不是 GPU 实时报价或实际结算证明。
+
+```bash
+uv run python scripts/ci/run_e2e.py --case coupon-budget-mock-a2a --suite live \
+  --credential-source-dir /path/to/test-config --text-model glm-5.2-fast-preview
+```
+
+Mock 入口只位于 `scripts/ci/`，不修改应用运行时，也没有生产环境开关。真实结果与模拟结果使用不同用例名、报告目录及 `coupon_api_mocked` 标记；不可把该用例当成真实账单抵扣通过。
+
+CI 调用同一个入口，并用 `--run-dir` 指定报告目录。`fast` 适合快速检查，`full` 适合完整确定性验收。真实场景必须提供测试专用配置目录；包含云写入的用例还需 `--allow-cloud-write`。配置文件内容应通过 CI 的 Secret 注入，且不要进入代码、作业输出或上传附件。
 
 `report.md` 是概要表，`report.html` 可展开每个用例，`summary.json` 和各用例 `ci-result.json` 是结构化详情，`junit.xml` 供 CI 测试报告展示。确定性套件可上传 stdout/stderr；真实套件仅上传筛选后的状态文件，不上传原始日志、凭证、工作目录或场景原始 summary。
 
@@ -127,7 +149,7 @@ REPL 旧场景的 PTY 等待每 10 秒检查一次，每 60 秒在单用例的 s
 
 先按 `report.md` 找到失败用例与首次失败检查，再看对应的 `ci-result.json`、场景 `summary.json`、日志和源码。Agent 应做有界复现，明确归类为产品缺陷、用例/断言缺陷、环境/凭证故障、云资源清理故障或超时，并写出证据、受影响场景和建议修复。配置的一次自动重跑之外，真实云用例再次复现前先核对残留资源与清理结果。报告里的“初步线索”只是索引，不能替代复盘结论。
 
-总入口目前登记 195 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
+总入口目前登记 198 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
 
 ### 验收边界
 

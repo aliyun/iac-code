@@ -15,6 +15,9 @@ from iac_code.i18n import _
 from iac_code.pipeline.engine.complete_step_tool import CompletionEnrichmentError
 from iac_code.pipeline.engine.context import PipelineContext
 from iac_code.pipeline.engine.ui_contract import parse_deployment_confirmation
+from iac_code.pipeline.selling_solution_first.tools.candidate_planning_records import (
+    normalize_solution_selection_costs,
+)
 from iac_code.tools.cloud.aliyun.ros_yaml import ros_yaml_load
 
 __all__ = [
@@ -68,6 +71,7 @@ def on_enter(ctx: PipelineContext) -> None:
     """Record candidate resolver state in Step 1 context for prompts and the deploy gate."""
 
     selection = ctx.get_conclusion("solution_selection")
+    normalize_solution_selection_costs(selection)
     index, candidate, error = resolve_authoritative_candidate(selection)
     if not isinstance(selection, dict):
         return

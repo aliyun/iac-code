@@ -6158,10 +6158,10 @@ msgstr ""
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
 "candidates must be a non-empty array of unique outlines with "
-"candidate_name, summary, total_monthly_cost and key_tradeoff"
+"candidate_name, summary, total_cost and key_tradeoff"
 msgstr ""
 "candidates doit être un tableau non vide de résumés uniques contenant "
-"candidate_name, summary, total_monthly_cost et key_tradeoff"
+"candidate_name, summary, total_cost et key_tradeoff"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 #, python-brace-format

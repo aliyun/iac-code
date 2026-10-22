@@ -6099,10 +6099,10 @@ msgstr "A contrapartida mais importante de custo, disponibilidade ou complexidad
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
 "candidates must be a non-empty array of unique outlines with "
-"candidate_name, summary, total_monthly_cost and key_tradeoff"
+"candidate_name, summary, total_cost and key_tradeoff"
 msgstr ""
 "candidates deve ser um array não vazio de resumos exclusivos com "
-"candidate_name, summary, total_monthly_cost e key_tradeoff"
+"candidate_name, summary, total_cost e key_tradeoff"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 #, python-brace-format
