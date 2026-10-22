@@ -7198,9 +7198,10 @@ msgstr "Alibaba Cloud API {operation} が見つかりません。プロダクト
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
-"Alibaba Cloud API metadata for {operation} is temporarily unavailable; "
-"try again later."
-msgstr "{operation} の Alibaba Cloud API メタデータは一時的に利用できません。後でもう一度お試しください。"
+"Alibaba Cloud API metadata for {operation} is temporarily unavailable. "
+"Retry the same tool call once after a short wait; if it still fails, "
+"report the temporary failure rather than treating the API as unsupported."
+msgstr "{operation} の Alibaba Cloud API メタデータは一時的に利用できません。少し待ってから同じツール呼び出しを一度再試行してください。それでも失敗する場合は、API がサポートされていないと判断せず、一時的な障害として報告してください。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

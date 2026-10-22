@@ -1099,7 +1099,7 @@ async def test_api_request_identity_completes_official_payload_across_all_cache_
     await disk_client.aclose()
 
     clock.advance(timedelta(days=8))
-    stale_client = client(tmp_path, Remote([response(500), response(500)]), clock)
+    stale_client = client(tmp_path, Remote([response(500) for _ in range(6)]), clock)
     assert (await stale_client.get_product("Ecs")).value is not None
     stale = await stale_client.get_api("Ecs", "2014-05-26", "DescribeInstances")
 
@@ -1249,7 +1249,7 @@ async def test_client_product_style_fallback_expires_with_products_cache_envelop
         [
             response(200, load_fixture("products.json")),
             response(200, first_api),
-            refresh_response,
+            *([response(500) for _ in range(3)] if refresh_outcome == "unavailable" else [refresh_response]),
             response(200, second_api),
             response(404),
         ]
@@ -1268,7 +1268,7 @@ async def test_client_product_style_fallback_expires_with_products_cache_envelop
         assert refreshed.error == "temporarily_unavailable"
     assert after_expiry.value is None
     assert after_expiry.error == "protocol_error"
-    assert len(remote.requests) == 5
+    assert len(remote.requests) == (7 if refresh_outcome == "unavailable" else 5)
     assert remote.requests[-1].url.path.endswith("/Ecs/versions/2014-05-26/api-docs.json")
     await openmeta.aclose()
 
@@ -1448,7 +1448,7 @@ async def test_stale_prefetched_api_docs_are_a_positive_fallback_for_exact_metad
         "components": describe_regions.pop("components"),
         "apis": {"DescribeRegions": describe_regions},
     }
-    remote = Remote([response(200, api_docs_payload), response(503)])
+    remote = Remote([response(200, api_docs_payload), *[response(503) for _ in range(3)]])
     openmeta = client(tmp_path, remote, clock)
 
     openmeta.prefetch_api_docs("Ecs", ("2014-05-26",))
@@ -1459,7 +1459,7 @@ async def test_stale_prefetched_api_docs_are_a_positive_fallback_for_exact_metad
     assert result.value is not None and result.value.action == "DescribeRegions"
     assert result.source == "stale_cache"
     assert result.cache_status == "disk_stale"
-    assert len(remote.requests) == 2
+    assert len(remote.requests) == 4
     await openmeta.aclose()
 
 
@@ -1614,7 +1614,7 @@ async def test_client_classifies_semantic_and_http_errors(
     tmp_path: Path, status: int, payload: object, error: str
 ) -> None:
     clock = FakeClock()
-    remote = Remote([response(status, payload)])
+    remote = Remote([response(status, payload) for _ in range(3 if status in {429, 500} else 1)])
     openmeta = client(tmp_path, remote, clock)
 
     result = await openmeta.get_api("Ecs", "2014-05-26", "DescribeInstances")
@@ -1743,7 +1743,7 @@ async def test_client_rejects_a_third_safe_redirect(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_client_classifies_timeout_as_temporarily_unavailable(tmp_path: Path) -> None:
     clock = FakeClock()
-    openmeta = client(tmp_path, Remote([httpx.ReadTimeout("timed out")]), clock)
+    openmeta = client(tmp_path, Remote([httpx.ReadTimeout("timed out") for _ in range(3)]), clock)
 
     result = await openmeta.get_api("Ecs", "2014-05-26", "DescribeInstances")
 
@@ -1863,7 +1863,7 @@ async def test_disk_cleanup_limits_managed_cache_and_leaves_product_summary(
 async def test_client_fresh_stale_negative_and_corrupt_disk_cache_boundaries(tmp_path: Path) -> None:
     clock = FakeClock()
     payload = load_fixture("ecs_describe_instances.json")
-    remote = Remote([response(200, payload), response(500), response(404)])
+    remote = Remote([response(200, payload), *[response(500) for _ in range(3)], response(404)])
     openmeta = client(tmp_path, remote, clock)
 
     remote_result = await openmeta.get_api("Ecs", "2014-05-26", "DescribeInstances")
@@ -1886,7 +1886,7 @@ async def test_client_fresh_stale_negative_and_corrupt_disk_cache_boundaries(tmp
 
     cache_file = tmp_path / "apis" / "Ecs" / "2014-05-26" / "DescribeInstances.json"
     cache_file.write_text('{"payload_sha256":"wrong"}', encoding="utf-8")
-    second = client(tmp_path, Remote([response(500)]), clock)
+    second = client(tmp_path, Remote([response(500) for _ in range(3)]), clock)
     assert (await second.get_api("Ecs", "2014-05-26", "DescribeInstances")).error == "temporarily_unavailable"
     await second.aclose()
 
@@ -2037,7 +2037,7 @@ async def test_product_lookup_does_not_negative_cache_fresh_summary_miss_when_re
         }
     )
     write_cache_envelope(tmp_path / "products.zh-cn.json", cached_products, clock)
-    remote = Remote([response(500, {"message": "temporary"}), response(200, refreshed_products)])
+    remote = Remote([*[response(500, {"message": "temporary"}) for _ in range(3)], response(200, refreshed_products)])
     openmeta = client(tmp_path, remote, clock)
 
     unavailable = await openmeta.get_product("AgentTeams")
@@ -2047,7 +2047,7 @@ async def test_product_lookup_does_not_negative_cache_fresh_summary_miss_when_re
     assert unavailable.error == "temporarily_unavailable"
     assert recovered.value is not None
     assert recovered.value.product == "AgentTeams"
-    assert len(remote.requests) == 2
+    assert len(remote.requests) == 4
     await openmeta.aclose()
 
 

@@ -140,9 +140,11 @@ def public_aliyun_error(
             operation=operation
         )
     if code == "metadata_unavailable":
-        return _("Alibaba Cloud API metadata for {operation} is temporarily unavailable; try again later.").format(
-            operation=operation
-        )
+        return _(
+            "Alibaba Cloud API metadata for {operation} is temporarily unavailable. "
+            "Retry the same tool call once after a short wait; if it still fails, "
+            "report the temporary failure rather than treating the API as unsupported."
+        ).format(operation=operation)
     if code == "metadata_protocol_error":
         return _(
             "Alibaba Cloud API metadata for {operation} returned an incompatible response. "
