@@ -6,7 +6,9 @@ import asyncio
 import json
 import logging
 import time
+from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -15,7 +17,7 @@ from iac_code.tools.cloud.aliyun import openmeta as module
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
 from iac_code.tools.cloud.aliyun.contract_store import canonical_input_sha256
 from iac_code.tools.cloud.aliyun.openmeta import OpenMetaClient
-from iac_code.tools.cloud.aliyun.retry_policy import retry_delay
+from iac_code.tools.cloud.aliyun.retry_policy import RetryBudget, retry_delay
 from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
 from iac_code.types.permissions import InvocationBinding, ToolPermissionContext
 
@@ -122,13 +124,21 @@ async def test_metadata_deadline_cancels_inflight_read(tmp_path: Path, monkeypat
 
 @pytest.mark.asyncio
 async def test_backoff_cannot_cross_metadata_deadline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(module, "_REQUEST_TIMEOUT_SECONDS", 0.01)
+    elapsed = 0.0
+    # Leave request startup independent of runner load, then simulate a response
+    # with only 10 ms left. Keep asyncio's scheduler on its real clock.
+    def clock() -> float:
+        return elapsed
+
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=clock))
+    monkeypatch.setattr(module, "RetryBudget", partial(RetryBudget, clock=clock))
     monkeypatch.setattr(module, "retry_delay", retry_delay)
     calls = 0
 
     async def handler(_request: httpx.Request) -> httpx.Response:
-        nonlocal calls
+        nonlocal calls, elapsed
         calls += 1
+        elapsed = module._REQUEST_TIMEOUT_SECONDS - 0.01
         return httpx.Response(503, headers={"Retry-After": "2"})
 
     client = OpenMetaClient(cache_dir=tmp_path, transport=httpx.MockTransport(handler))
