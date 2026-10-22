@@ -163,7 +163,7 @@ async def test_idempotent_outline_survives_selection_resume(tmp_path, monkeypatc
     if mode == "legacy-cold-recovery":
         # Simulate a sidecar written by the previous version, keeping state/version metadata intact.
         context_path = flow.session.context_path
-        snapshot = yaml.safe_load(context_path.read_text())
+        snapshot = yaml.safe_load(context_path.read_text(encoding="utf-8"))
         for candidate in snapshot["solution_selection"]["value"]["candidates"]:
             cost = candidate["rough_cost"]
             cost["monthly_range"] = cost.pop("cost_range")
@@ -171,7 +171,7 @@ async def test_idempotent_outline_survives_selection_resume(tmp_path, monkeypatc
                 item["monthly_cost"] = item.pop("cost")
             for resource in candidate["resource_inventory"]:
                 resource["rough_monthly_cost"] = resource.pop("rough_cost")
-        context_path.write_text(yaml.safe_dump(snapshot, allow_unicode=True))
+        context_path.write_text(yaml.safe_dump(snapshot, allow_unicode=True), encoding="utf-8")
     if mode != "same-process":
         # Construct a new runner/storage: restore the real sidecar and attempt
         # transcript from disk, without carrying the live completion guard.

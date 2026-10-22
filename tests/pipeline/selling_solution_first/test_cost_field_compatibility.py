@@ -130,5 +130,9 @@ def test_all_current_model_contracts_and_skill_examples_avoid_legacy_cost_fields
         ShowArchitecturePlanTool().input_schema, ShowCandidateDetailTool().input_schema,
         pipeline.steps[0].conclusion_schema,
     ]
-    rendered = json.dumps(contracts) + (skill_root / "SKILL.md").read_text() + (skill_root / "evals.json").read_text()
+    rendered = (
+        json.dumps(contracts)
+        + (skill_root / "SKILL.md").read_text(encoding="utf-8")
+        + (skill_root / "evals.json").read_text(encoding="utf-8")
+    )
     assert not any(key in rendered for key in LEGACY_FIELDS)

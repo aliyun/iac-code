@@ -5681,9 +5681,9 @@ msgstr ""
 msgid ""
 "Display one complete batch of lightweight candidate outlines before rich "
 "details are generated. Submit every current candidate in order with its "
-"name, summary, monthly estimate and key trade-off. Do not include "
-"topology nodes, resource inventory or detailed cost items."
-msgstr "在生成详细信息前，先一次性展示一批完整的轻量候选方案概览。按顺序提交当前每个候选方案的名称、摘要、月度估价和关键取舍。不要包含拓扑节点、资源清单或详细费用项。"
+"name, summary, cost estimate and key trade-off. Do not include topology "
+"nodes, resource inventory or detailed cost items."
+msgstr "在生成详细信息前，先一次性展示一批完整的轻量候选方案概览。按顺序提交当前每个候选方案的名称、摘要、费用估算和关键取舍。不要包含拓扑节点、资源清单或详细费用项。"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
@@ -5700,8 +5700,10 @@ msgid "Short product combination and architecture summary"
 msgstr "简短的产品组合与架构摘要"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
-msgid "Rough monthly range, such as ¥230～¥380/month"
-msgstr "粗略月费范围，例如 ¥230～¥380/月"
+msgid ""
+"Rough cost range including its period: monthly by default, or the user's "
+"requested unit and duration."
+msgstr "包含计费周期的粗略费用范围：默认按月，或按用户要求的时间单位和时长。"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid "The most important cost, availability or complexity trade-off"
@@ -5805,10 +5807,10 @@ msgid ""
 "show_architecture_plan batch. Call once per model turn in candidate index"
 " order. Include resource lifecycle intent, topology graph, resource "
 "inventory, cost assumptions and decision notes; do not repeat summary or "
-"monthly total."
+"cost total."
 msgstr ""
 "仅展示最新 show_architecture_plan "
-"批次中一个候选方案的完整详情。每个模型轮次按候选方案索引顺序调用一次。包括资源生命周期意图、拓扑图、资源清单、费用假设和决策说明；不要重复摘要或月度总价。"
+"批次中一个候选方案的完整详情。每个模型轮次按候选方案索引顺序调用一次。包括资源生命周期意图、拓扑图、资源清单、费用假设和决策说明；不要重复摘要或总费用。"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
 msgid "Zero-based index from the latest candidate outline batch"
