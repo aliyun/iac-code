@@ -57,3 +57,4 @@
   candidate_id、output_path 和同序 options。
 - `complete_step` 参数必须是 `{"conclusion": {...}}`，不得把结论字段放到工具参数顶层。
 - 本 Step 不生成或写入模板、不做 ROS 精确询价、不执行云写操作。只读查询、记忆读取和展示的边界遵循技能与当前工具权限。
+{ros_agent_awareness}
