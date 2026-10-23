@@ -2831,7 +2831,10 @@ def test_repl_running_checkpoint_uses_target_step_persisted_tool_use(runner: Mod
 @pytest.mark.parametrize("allow_free_text", [True, False])
 def test_repl_running_step2_answers_native_question_before_template_fault(
     runner: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, allow_free_text: bool,
+    repl_poll_clock,
 ) -> None:
+    # Verify question/tool ordering independently of disk latency on loaded CI workers.
+    # The separate deadline test below explicitly advances the polling clock.
     directory = tmp_path / "projects/project/session/pipeline"
     transcript = directory / "transcripts/step2/session.jsonl"
     transcript.parent.mkdir(parents=True)
