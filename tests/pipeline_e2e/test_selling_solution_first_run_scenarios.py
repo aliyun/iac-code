@@ -55,6 +55,19 @@ def runner() -> ModuleType:
     return _runner_module()
 
 
+@pytest.fixture
+def repl_poll_clock(runner, monkeypatch):
+    # These tests check polling decisions, not filesystem speed. Advance time
+    # only at sleeps so a busy Windows runner still performs the first read.
+    now = [0.0]
+
+    def sleep(seconds):
+        now[0] += seconds
+
+    monkeypatch.setattr(runner, 'time', SimpleNamespace(monotonic=lambda: now[0], sleep=sleep))
+    return now
+
+
 @pytest.mark.parametrize(('depends_on_old', 'expected_count'), [(False, 0), (True, 1)])
 def test_cleanup_dependency_probe_uses_accepted_stacks_and_exports_no_identity(
     runner, tmp_path, monkeypatch, capsys, depends_on_old, expected_count,
@@ -211,7 +224,9 @@ def test_multimodal_question_wait_ignores_terminal_prompt_without_native_questio
 
 
 @pytest.mark.parametrize('terminal', [None, 'pipeline_failed', 'pipeline_completed'])
-def test_multimodal_wait_without_native_input_fails_without_sending_image(runner, tmp_path, monkeypatch, terminal):
+def test_multimodal_wait_without_native_input_fails_without_sending_image(
+    runner, tmp_path, monkeypatch, terminal, repl_poll_clock,
+):
     pipeline = tmp_path / 'projects/p/s/pipeline'
     pipeline.mkdir(parents=True)
     if terminal:
@@ -227,6 +242,9 @@ def test_multimodal_wait_without_native_input_fails_without_sending_image(runner
         runner._repl_wait_multimodal_confirmation(runtime, pty, primary_image_key='ask-first-answer', phase='initial')
     if not terminal:
         assert runtime.checks['REPL display user_input_required occurrence 1 observed'] is False
+        assert repl_poll_clock[0] == 0.1
+    else:
+        assert repl_poll_clock[0] == 0.0
 
 
 def test_multimodal_confirmation_ignores_confirmation_before_latest_selection(runner, tmp_path, monkeypatch):
@@ -254,7 +272,7 @@ def test_multimodal_confirmation_ignores_confirmation_before_latest_selection(ru
     assert pty.events[-1]['occurrence'] == 2
 
 
-def test_image_question_does_not_resend_while_original_question_is_unacknowledged(runner, tmp_path):
+def test_image_question_does_not_resend_while_original_question_is_unacknowledged(runner, tmp_path, repl_poll_clock):
     meta = tmp_path / 'projects/p/s/pipeline/meta.yaml'
     meta.parent.mkdir(parents=True)
     meta.write_text(yaml.safe_dump({'current_step': runner.NEW_STEPS[1], 'execution': {
