@@ -63,7 +63,7 @@ uv run --no-sync python scripts/ci/run_e2e.py \
   --case ssf-candidate-batch-cold-recovery --jobs 1 --retries 0
 ```
 
-`ros-awareness-*` 纳入 `live-readonly`，验证生产 Step 1 引擎和工具在真实模型下的分流：优惠、续费、计费、GPU 库存价格、流量抵扣、默认地域，以及开关关闭、部署成本咨询两个对照场景。验收用户可见链接、地域、持久化结束原因及澄清边界；不替换模型输出，不覆盖 HTTP/UI，不调用云 API。只复制 LLM 凭证和 settings，不接收云凭证或调用云凭证 helper。可定向运行：
+`ros-awareness-*` 纳入 `live-readonly`，验证生产 Step 1 引擎和工具在真实模型下的分流：优惠、续费、计费、GPU 库存价格、流量抵扣、默认地域，以及开关关闭、部署成本咨询两个对照场景。计费保留自然问法 `ros-awareness-billing` 和明确不部署的问法 `ros-awareness-billing-explicit`，两者均须正确分流。验收用户可见链接、地域、持久化结束原因及澄清边界；不替换模型输出，不覆盖 HTTP/UI，不调用云 API。只复制 LLM 凭证和 settings，不接收云凭证或调用云凭证 helper。可定向运行：
 
 ```bash
 uv run --no-sync python scripts/ci/run_e2e.py \
@@ -149,7 +149,7 @@ REPL 旧场景的 PTY 等待每 10 秒检查一次，每 60 秒在单用例的 s
 
 先按 `report.md` 找到失败用例与首次失败检查，再看对应的 `ci-result.json`、场景 `summary.json`、日志和源码。Agent 应做有界复现，明确归类为产品缺陷、用例/断言缺陷、环境/凭证故障、云资源清理故障或超时，并写出证据、受影响场景和建议修复。配置的一次自动重跑之外，真实云用例再次复现前先核对残留资源与清理结果。报告里的“初步线索”只是索引，不能替代复盘结论。
 
-总入口目前登记 198 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
+总入口目前登记 199 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
 
 ### 验收边界
 

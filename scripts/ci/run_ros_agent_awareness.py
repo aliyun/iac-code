@@ -31,7 +31,8 @@ class Scenario:
 SCENARIOS = {
     "promotions": Scenario("阿里云现在有什么优惠活动和优惠券？我只想咨询，暂时不部署资源。"),
     "renewal": Scenario("已有的 ECS 快到期了，续费有折扣吗？"),
-    "billing": Scenario("我只咨询已有 ECS 的按量账单，不打算部署或创建资源。按量付费如何计费，欠费后怎么办？"),
+    "billing": Scenario("按量付费的 ECS 是如何计费的？欠费后怎么办？"),
+    "billing-explicit": Scenario("我只咨询已有 ECS 的按量账单，不打算部署或创建资源。按量付费如何计费，欠费后怎么办？"),
     "gpu-availability": Scenario("北京地域的 GPU 实例现在有哪些库存和单价？暂时不部署。", region="cn-shanghai"),
     "traffic-offset": Scenario("有没有能抵扣已有 ECS 公网流量费的流量包？"),
     "default-region": Scenario("我只想咨询阿里云的续费优惠，暂时不创建资源。", region=None),

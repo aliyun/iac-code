@@ -167,8 +167,8 @@ def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> No
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
     assert len(full) == 66
-    assert len(live) == 132
-    assert len(run_e2e.CASES) == 198
+    assert len(live) == 133
+    assert len(run_e2e.CASES) == 199
     agui = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live-agui", "--list"]))
     assert {case.name for case in agui} == {"agui-selector-" + name for name in run_e2e.AGUI_SCENARIOS}
     assert len(agui) == 6
@@ -241,6 +241,17 @@ def test_ros_awareness_cases_are_live_llm_only_and_keep_all_scenarios(tmp_path: 
         assert run_e2e.select_cases(args) == [case]
         assert case.group == "readonly" and not case.cloud_write
         assert run_e2e._live_cleanup_status(case, None) == "not-needed"
+
+
+def test_ros_awareness_preserves_natural_and_explicit_billing_questions() -> None:
+    scenarios = run_e2e.ROS_AWARENESS_SCENARIOS
+    assert scenarios["billing"].prompt == "按量付费的 ECS 是如何计费的？欠费后怎么办？"
+    assert scenarios["billing-explicit"].prompt == (
+        "我只咨询已有 ECS 的按量账单，不打算部署或创建资源。按量付费如何计费，欠费后怎么办？"
+    )
+    assert scenarios["billing"].handoff and scenarios["billing-explicit"].handoff
+    case_names = {case.name for case in run_e2e.LIVE_CASES}
+    assert {"ros-awareness-billing", "ros-awareness-billing-explicit"} <= case_names
 
 
 def test_live_accepts_llm_only_source_with_cloud_helper(tmp_path: Path) -> None:
