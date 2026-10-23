@@ -766,6 +766,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "text_exit_code", "text_output_length",
             "smoke_sync_output_length", "smoke_sync_task_count", "smoke_sync_trailing_agent_message_count",
             "smoke_sync_permission_response_count",
+            "coupon_visible_answer_followup_count",
             "cleanup_turn_event_count", "cleanup_turn_cleanup_event_count", "cleanup_target_count",
             "cleanup_ledger_pending_count", "cleanup_delete_tool_use_count", "cleanup_get_tool_use_count",
             "cleanup_failure_event_count", "cleanup_delete_http_status", "cleanup_get_http_status",
