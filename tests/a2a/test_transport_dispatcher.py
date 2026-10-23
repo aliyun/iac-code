@@ -2579,6 +2579,53 @@ async def test_message_stream_pending_permission_boundary_aclose_without_generat
 
 
 @pytest.mark.asyncio
+async def test_inactive_input_response_projects_final_reply_and_consumed_permission() -> None:
+    call_context = ServerCallContext()
+    task = Task(
+        id="task-reply", context_id="ctx-reply",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                          message=Message(role=Role.ROLE_AGENT, parts=[Part(text="permission needed")])),
+    )
+    ParseDict({"iac_code": {"input": {"kind": "permission"}}}, task.metadata)
+    store = A2ATaskStore()
+    await store.save(task, call_context)
+
+    class RequestContextBuilder:
+        async def build(self, **_kwargs):
+            return SimpleNamespace(call_context=call_context)
+
+    class Executor:
+        async def execute(self, _request_context, event_queue):
+            final = TaskStatusUpdateEvent(
+                task_id=task.id, context_id=task.context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_WORKING,
+                                  message=Message(role=Role.ROLE_AGENT, parts=[Part(text="final reply")])),
+            )
+            ParseDict({"iac_code": {"assistantFinal": {"complete": True}}}, final.metadata)
+            await event_queue.enqueue_event(final)
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(
+                task_id=task.id, context_id=task.context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+            ))
+
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = Executor()
+    handler._request_context_builder = RequestContextBuilder()
+    handler._detached_message_producers = set()
+    params = SimpleNamespace(message=SimpleNamespace(task_id=task.id, context_id=task.context_id),
+                             configuration=None)
+
+    events = await _collect_async(handler._on_inactive_input_response_send_stream(params, call_context, task=task))
+
+    projected = await store.get(task.id, call_context)
+    assert projected is not None and len(events) == 2
+    assert projected.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert any(part.text == "final reply" for message in projected.history for part in message.parts)
+    assert "input" not in dict(projected.metadata["iac_code"])
+
+
+@pytest.mark.asyncio
 async def test_detached_permission_response_finalizes_after_terminal_producer_drains() -> None:
     call_context = ServerCallContext()
     request_context = SimpleNamespace(call_context=call_context)
@@ -2627,6 +2674,8 @@ async def test_detached_permission_response_finalizes_after_terminal_producer_dr
 
     await asyncio.wait_for(finalized.wait(), timeout=1)
     await asyncio.gather(*handler._detached_message_producers)
+    projected = await handler.task_store.get(task.id, call_context)
+    assert projected is not None and projected.status.state == TaskState.TASK_STATE_COMPLETED
 
 
 @pytest.mark.asyncio

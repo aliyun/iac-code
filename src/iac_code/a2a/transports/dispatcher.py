@@ -17,6 +17,7 @@ from a2a.server.events.event_queue import EventQueue
 from a2a.server.events.event_queue_v2 import QueueShutDown
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_jsonrpc_routes
+from a2a.server.tasks import TaskManager
 from a2a.server.tasks.inmemory_task_store import DEFAULT_LIST_TASKS_PAGE_SIZE, decode_page_token, encode_page_token
 from a2a.types import (
     CancelTaskRequest,
@@ -138,10 +139,15 @@ class _ASGIResponseChunk:
 class _DetachedPermissionEventQueue(EventQueue):
     """Minimal producer queue for resuming an already-persisted A2A task."""
 
-    def __init__(self, queue: asyncio.Queue[Any]) -> None:
+    def __init__(self, queue: asyncio.Queue[Any], task_manager: TaskManager) -> None:
         self._queue = queue
+        self._task_manager = task_manager
 
     async def enqueue_event(self, event: Any) -> None:
+        # This direct continuation bypasses DefaultRequestHandler's consumer.
+        # Keep GetTask in sync even when a nonstream caller discards the events
+        # or the response disconnects after its decision was committed.
+        await self._task_manager.process(event)
         await self._queue.put(event)
 
 
@@ -1014,7 +1020,14 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         async def run_permission_response() -> None:
             nonlocal request_context
             try:
-                event_queue = _DetachedPermissionEventQueue(queue)
+                task_manager = TaskManager(
+                    task_id=task.id,
+                    context_id=task.context_id,
+                    task_store=self.task_store,
+                    context=context,
+                    initial_message=None,
+                )
+                event_queue = _DetachedPermissionEventQueue(queue, task_manager)
                 RecoverableInputAdmissionCarrier.acknowledge_enqueued(request_context, asyncio.current_task())
                 try:
                     await self.agent_executor.execute(request_context, event_queue)

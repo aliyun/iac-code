@@ -132,6 +132,7 @@ def test_handoff_is_limited_to_planning_and_leaves_normal_prompts_alone(executor
     context = PipelineContext(executor._pipeline.context_dependencies)
     prompts = [executor._build_full_system_prompt(step, context) for step in executor._pipeline.steps]
     assert "ROS console override" in prompts[0]
+    assert prompts[0].index("ROS console override") > prompts[0].index("## Pipeline 交接约束")
     assert all("ROS console override" not in prompt for prompt in prompts[1:])
     assert "ROS console override" not in build_system_prompt(cwd=str(tmp_path))
     assert "Keep deployment architecture/cost tradeoffs here" in prompts[0]
