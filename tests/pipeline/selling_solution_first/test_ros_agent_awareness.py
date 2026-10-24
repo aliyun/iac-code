@@ -4,6 +4,7 @@ import asyncio
 import re
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlencode
 
 import pytest
 
@@ -69,7 +70,10 @@ def test_enabled_awareness_uses_session_region(monkeypatch, value):
         supplement = build_prompt_context()["ros_agent_awareness"]
     assert "[AI Assistant](https://ros.console.aliyun.com/cn-shanghai/chat)" in supplement
     assert "{ai_assistant_destination}" not in supplement
-    assert len(supplement) <= 550, "Keep the optional guidance short"
+    assert len(supplement) <= 800, "Keep the optional guidance short"
+    assert "`?prompt=` INSIDE its URL" in supplement
+    assert "standalone user question with needed context" in supplement
+    assert "encode reserved characters" in supplement
     assert re.search(r"[\u4e00-\u9fff]", supplement) is None
 
 
@@ -159,7 +163,9 @@ async def test_guidance_is_visible_and_finishes_the_real_pipeline_without_candid
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
     monkeypatch.setenv("ALIBABA_CLOUD_REGION_ID", "cn-hangzhou")
-    guidance = "请前往 [AI 助手](https://ros.console.aliyun.com/cn-beijing/chat) 咨询按量付费。"
+    question = "ECS 实例 web+a&b#1 按量付费怎么计费？"
+    destination = "https://ros.console.aliyun.com/cn-beijing/chat?" + urlencode({"prompt": question})
+    guidance = f"请前往 [AI 助手]({destination}) 咨询按量付费。"
 
     class Model:
         def get_model_name(self):
@@ -187,7 +193,7 @@ async def test_guidance_is_visible_and_finishes_the_real_pipeline_without_candid
         cwd=str(tmp_path),
     )
     with use_aliyun_credential(AliyunCredential(region_id="cn-beijing")):
-        events = [event async for event in flow.run("按量付费怎么计费？")]
+        events = [event async for event in flow.run(question)]
     assert "".join(event.text for event in events if isinstance(event, TextDeltaEvent)) == guidance
     tools = [event.name for event in events if isinstance(event, ToolUseStartEvent)]
     assert tools == ["complete_step"]
