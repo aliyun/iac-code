@@ -12,12 +12,14 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 import uuid
 from contextlib import aclosing
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 
 @dataclass(frozen=True)
@@ -26,11 +28,12 @@ class Scenario:
     region: str | None = "cn-beijing"
     enabled: bool = True
     handoff: bool = True
+    expected_context: str = ""
 
 
 SCENARIOS = {
     "promotions": Scenario("阿里云现在有什么优惠活动和优惠券？我只想咨询，暂时不部署资源。"),
-    "renewal": Scenario("已有的 ECS 快到期了，续费有折扣吗？"),
+    "renewal": Scenario("已有 ECS 实例名 web+a&b#1，快到期了，续费有折扣吗？", expected_context="web+a&b#1"),
     "billing": Scenario("按量付费的 ECS 是如何计费的？欠费后怎么办？"),
     "billing-explicit": Scenario("我只咨询已有 ECS 的按量账单，不打算部署或创建资源。按量付费如何计费，欠费后怎么办？"),
     "gpu-availability": Scenario("北京地域的 GPU 实例现在有哪些库存和单价？暂时不部署。", region="cn-shanghai"),
@@ -123,6 +126,16 @@ async def run(args: argparse.Namespace) -> dict:
         "no deployment selected": flow.context.get_conclusion("selected_plan") is None,
     }
     if scenario.handoff:
+        links = re.findall(r"https://ros\.console\.aliyun\.com/[^\s)<>\]]+", visible)
+        handoff_prompts = []
+        for link in links:
+            parsed = urlsplit(link)
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            values = query.get("prompt", [])
+            if parsed.fragment or set(query) != {"prompt"} or len(values) != 1:
+                continue
+            if values[0].strip() and not any(marker in values[0] for marker in ("<", ">", "{", "}")):
+                handoff_prompts.append(values[0])
         checks.update(
             {
                 "same-region assistant link is visible": url in visible,
@@ -133,6 +146,13 @@ async def run(args: argparse.Namespace) -> dict:
                 and conclusion.get("continue_pipeline") is False
                 and url in conclusion.get("rejection_reason", ""),
                 "handoff skips deployment questions and candidates": tools == ["complete_step"] and not asked_question,
+                "every handoff link carries one complete prompt": bool(links)
+                and len(handoff_prompts) == len(links),
+                "handoff preserves the relevant request context": all(
+                    scenario.expected_context in prompt for prompt in handoff_prompts
+                ),
+                "the same actionable link is persisted": bool(links)
+                and all(link in conclusion.get("rejection_reason", "") for link in links),
             }
         )
     elif scenario.enabled:
