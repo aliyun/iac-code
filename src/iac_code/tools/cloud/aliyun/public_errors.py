@@ -171,6 +171,12 @@ def public_aliyun_error(
                 parameters=parameter,
             )
         return _("Alibaba Cloud API {operation} is missing required parameters.").format(operation=operation)
+    if code == "conflicting_parameter_alias":
+        parameter = _safe_parameter(getattr(error, "parameter", None), _("the requested parameter"))
+        return _(
+            "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. "
+            "Keep only the canonical parameter."
+        ).format(operation=operation, parameter=parameter)
     if code.startswith("invalid_parameter_type:"):
         parameter = _safe_parameter(getattr(error, "parameter", None), _("the requested parameter"))
         expected = _safe_type(getattr(error, "expected_type", None))

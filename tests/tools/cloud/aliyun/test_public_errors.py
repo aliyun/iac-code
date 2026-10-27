@@ -127,6 +127,8 @@ def test_aliyun_public_error_templates_are_directly_extractable(tmp_path: Path) 
         "Alibaba Cloud API {operation} is missing required parameters.",
         "Alibaba Cloud API {operation} parameter {parameter} is not an allowed value.",
         "Alibaba Cloud API {operation} parameter {parameter} expects {expected} but received {actual}.",
+        "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. "
+        "Keep only the canonical parameter.",
         "Alibaba Cloud API {operation} requires parameters {parameters}.",
         "Alibaba Cloud API {operation} requires body_file for its binary request body.",
         "Alibaba Cloud API {operation} parameter {parameter} is reserved for request signing and cannot be set.",
@@ -232,6 +234,18 @@ def test_pipeline_write_forbidden_error_requires_pipeline_specific_tool() -> Non
     ) == (
         "Alibaba Cloud API ros/UpdateTemplate cannot modify cloud resources from a pipeline step. "
         "Use a pipeline-specific tool for this operation."
+    )
+
+
+def test_conflicting_parameter_alias_error_names_canonical_key_without_values() -> None:
+    message = public_aliyun_error(
+        ApiContractError("conflicting_parameter_alias", parameter="SystemDisk.Size"),
+        product="Ecs",
+        action="DescribePrice",
+    )
+    assert message == (
+        "Alibaba Cloud API Ecs/DescribePrice received conflicting values for parameter SystemDisk.Size and its alias. "
+        "Keep only the canonical parameter."
     )
 
 

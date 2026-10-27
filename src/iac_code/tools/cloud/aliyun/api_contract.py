@@ -1008,6 +1008,9 @@ class RequestBuilder:
                 actual_type=_json_type_name(params),
             )
         params = copy.deepcopy(dict(params))
+        from iac_code.tools.cloud.aliyun.api_hooks import normalize_parameters
+
+        normalize_parameters(contract.product, contract.action, params, contract=contract)
         metadata = {parameter.name: parameter for parameter in contract.parameters}
         body_present = "body" in tool_input
         file_present = "body_file" in tool_input

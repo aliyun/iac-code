@@ -2170,6 +2170,50 @@ def test_roa_concrete_path_matches_typed_metadata_parameters(pathname, params, e
     assert metadata.matches_pathname(pathname, params) is expected
 
 
+@pytest.mark.asyncio
+async def test_ecs_price_query_accepts_metadata_integer_text_without_mutating_input() -> None:
+    api = contract(
+        parameter("SystemDisk.Size", "query", schema={"type": "integer"}),
+        parameter("Period", "query", schema={"type": "integer", "enum": [1, 2]}),
+        parameter("ImageId", "query", schema={"type": "string"}),
+        replace(parameter("Untyped", "query"), schema=None),
+        action="DescribePrice",
+    )
+    tool_input = {"params": {"SystemDisk.Size": "40", "Period": "1", "ImageId": "00123", "Untyped": "040"}}
+    original = copy.deepcopy(tool_input)
+
+    built = await RequestBuilder().build(api, tool_input)
+
+    assert dict(built.canonical_query) == {"SystemDisk.Size": "40", "Period": "1", "ImageId": "00123", "Untyped": "040"}
+    assert tool_input == original
+    with pytest.raises(ApiContractError, match="^invalid_parameter_enum:Period$"):
+        await RequestBuilder().build(api, {"params": {"Period": "3"}})
+
+
+@pytest.mark.parametrize("value", ["40.5", "40 GiB", "4e1", " 40", "040", "-0", "9" * 100, True, 40.5])
+@pytest.mark.asyncio
+async def test_ecs_price_integer_compatibility_does_not_guess_or_round(value) -> None:
+    api = contract(parameter("SystemDisk.Size", "query", schema={"type": "integer"}), action="DescribePrice")
+
+    with pytest.raises(ApiContractError, match="^invalid_parameter_type:SystemDisk.Size$"):
+        await RequestBuilder().build(api, {"params": {"SystemDisk.Size": value}})
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [{"action": "RunInstances"}, {"product": "Vpc"}, {"style": "ROA"}],
+)
+@pytest.mark.asyncio
+async def test_integer_text_compatibility_is_limited_to_ecs_price_rpc(changes) -> None:
+    api = contract(
+        parameter("SystemDisk.Size", "query", schema={"type": "integer"}),
+        **({"action": "DescribePrice"} | changes),
+    )
+
+    with pytest.raises(ApiContractError, match="^invalid_parameter_type:SystemDisk.Size$"):
+        await RequestBuilder().build(api, {"params": {"SystemDisk.Size": "40"}})
+
+
 @pytest.mark.parametrize(
     ("pathname", "expected"),
     [("/items/demo/copy/demo", True), ("/items/demo/copy/other", False)],

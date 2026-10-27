@@ -15131,3 +15131,8 @@ msgstr "Après l’inventaire, indique uniquement le sous-total des frais fixes 
 
 msgid "total_cost must be a non-empty cost estimate including its period."
 msgstr "total_cost doit être une estimation non vide des coûts incluant sa période."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. Keep only the canonical parameter."
+msgstr "L’API Alibaba Cloud {operation} a reçu des valeurs contradictoires pour le paramètre {parameter} et son alias. Conservez uniquement le paramètre canonique."

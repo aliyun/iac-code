@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from unittest.mock import Mock
+
 from iac_code.tools.base import ToolContext
+from iac_code.tools.cloud.aliyun import api_hooks
+from iac_code.tools.cloud.aliyun.api_contract import CanonicalWireContract
 from iac_code.tools.cloud.aliyun.api_hooks import _ensure_loaded, _hooks, before_call, run_hooks
 from iac_code.tools.cloud.aliyun.ros_validation.model import (
     Category,
@@ -110,6 +114,48 @@ class TestBeforeCallList:
         assert blocking_context.ros_preflight_outcome.report.diagnostics[0].code == "ROSE"
         assert blocking is not None and blocking.is_error
         assert blocking.metadata["ros_validation"]["diagnostics"][0]["code"] == "ROSE"
+
+
+def test_parameter_normalizers_dispatch_by_product_and_action_without_running_pre_call_hooks(monkeypatch) -> None:
+    _ensure_loaded()
+    monkeypatch.setattr(api_hooks, "_parameter_normalizers", {})
+    calls = []
+
+    @api_hooks.parameter_normalizer("Example", ["ReadA", "ReadB"])
+    def normalizer(product, action, params):
+        calls.append((product, action))
+        params["canonical"] = params.pop("alias")
+
+    params = {"alias": "value"}
+    api_hooks.normalize_parameters("EXAMPLE", "ReadA", params)
+    assert params == {"canonical": "value"}
+    assert calls == [("EXAMPLE", "ReadA")]
+    params = {"alias": "value"}
+    api_hooks.normalize_parameters("example", "ReadB", params)
+    assert params == {"canonical": "value"}
+    assert len(calls) == 2
+
+    untouched = {"alias": "value"}
+    api_hooks.normalize_parameters("Other", "ReadA", untouched)
+    api_hooks.normalize_parameters("Example", "WriteA", untouched)
+    assert run_hooks("Example", "ReadA", untouched) is None
+    assert untouched == {"alias": "value"}
+    assert len(calls) == 2
+
+
+def test_parameter_normalizer_receives_optional_metadata(monkeypatch) -> None:
+    _ensure_loaded()
+    monkeypatch.setattr(api_hooks, "_parameter_normalizers", {})
+    seen = []
+
+    @api_hooks.parameter_normalizer("Example", "ReadA")
+    def normalizer(product, action, params, *, contract=None):
+        seen.append(contract)
+
+    api_hooks.normalize_parameters("Example", "ReadA", {})
+    metadata = Mock(spec=CanonicalWireContract)
+    api_hooks.normalize_parameters("Example", "ReadA", {}, contract=metadata)
+    assert seen == [None, metadata]
 
 
 def test_real_ros_stage_zero_hook_chain_is_read_only_and_preserves_parameter_semantics() -> None:

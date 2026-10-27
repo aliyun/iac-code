@@ -3097,6 +3097,80 @@ async def test_expired_serial_snapshot_rejects_forged_concurrent_execution_class
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("product", ["ecs", "ComputeAlias"])
+@pytest.mark.parametrize(
+    "params", [{"SystemDisk.1.Size": "40"}, {"SystemDiskSize": "40"}, {"SystemDisk": {"Size": "40"}}]
+)
+async def test_ecs_price_aliases_execute_with_original_permission_binding(product: str, params) -> None:
+    contract = _canonical_contract(
+        action="DescribePrice",
+        parameters=(
+            ParameterMetadata(
+                "SystemDisk.Size", "query", False, None, None, MappingProxyType({"type": "integer"}), None, None
+            ),
+        ),
+    )
+    tool, runtime = _execution_runtime(contract)
+    runtime.request_builder = RequestBuilder()
+    tool_input = {
+        "product": product,
+        "version": "2014-05-26",
+        "action": "DescribePrice",
+        "region_id": "cn-hangzhou",
+        "params": {**params, "DataDisk.1.Size": 100},
+    }
+    original = copy.deepcopy(tool_input)
+    _, context = await _approved_execution_context(tool, tool_input)
+
+    result = await tool.execute(tool_input=tool_input, context=context)
+
+    assert not result.is_error
+    assert tool_input == original
+    assert context.invocation_binding.canonical_input_sha256 == canonical_input_sha256(original)
+    assert dict(runtime.transport_router.requests[0].canonical_query) == {
+        "SystemDisk.Size": "40",
+        "DataDisk.1.Size": "100",
+    }
+    assert runtime.contract_store.size == 0
+
+
+@pytest.mark.asyncio
+async def test_ecs_price_alias_cannot_rewrite_an_already_approved_invocation() -> None:
+    tool, runtime = _execution_runtime(_canonical_contract(action="DescribePrice"))
+    tool_input = {
+        "product": "ecs",
+        "action": "DescribePrice",
+        "region_id": "cn-hangzhou",
+        "params": {"SystemDisk.1.Size": 40},
+    }
+    _, context = await _approved_execution_context(tool, tool_input)
+
+    result = await tool.execute(tool_input={**tool_input, "params": {"SystemDisk.Size": 40}}, context=context)
+
+    assert result.is_error
+    assert result.content == _expected_public_error("aliyun_invocation_binding_mismatch", tool_input)
+    assert runtime.transport_router.requests == []
+
+
+@pytest.mark.asyncio
+async def test_ecs_price_alias_conflict_is_rejected_before_credentials_or_transport() -> None:
+    calls: list[str] = []
+    tool, _ = _execution_runtime(_canonical_contract(action="DescribePrice"), calls=calls)
+    tool_input = {
+        "product": "ecs",
+        "action": "DescribePrice",
+        "region_id": "cn-hangzhou",
+        "params": {"SystemDisk.1.Size": 40, "SystemDisk.Size": 80},
+    }
+
+    result = await tool.check_permissions(tool_input, _bound_context(tool_input))
+
+    assert result.behavior == "deny"
+    assert "SystemDisk.Size" in result.message
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_public_runtime_requires_and_consumes_binding_snapshot_digest_once() -> None:
     tool_input = {
         "product": "ecs",

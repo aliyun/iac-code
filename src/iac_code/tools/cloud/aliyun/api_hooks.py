@@ -1,4 +1,4 @@
-"""Pre-call hooks for AliyunApi with decorator registration and auto-discovery."""
+"""Parameter normalization and pre-call hooks with registration and auto-discovery."""
 
 from __future__ import annotations
 
@@ -7,14 +7,19 @@ import importlib
 import inspect
 import pkgutil
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.ros_validation.outcome import RosPreflightOutcome
 
+if TYPE_CHECKING:
+    from iac_code.tools.cloud.aliyun.api_contract import CanonicalWireContract
+
 HookFn = Callable[..., ToolResult | RosPreflightOutcome | None]
+ParameterNormalizer = Callable[..., None]
 
 _hooks: dict[tuple[str, str], list[HookFn]] = {}
+_parameter_normalizers: dict[tuple[str, str], list[ParameterNormalizer]] = {}
 _loaded = False
 
 
@@ -31,6 +36,39 @@ def before_call(product: str, action: str | list[str]):
         return fn
 
     return decorator
+
+
+def parameter_normalizer(product: str, action: str | list[str]):
+    """Register a pure parameter adapter, separate from blocking pre-call hooks."""
+
+    def decorator(fn: ParameterNormalizer) -> ParameterNormalizer:
+        actions = action if isinstance(action, list) else [action]
+        for api_action in actions:
+            _parameter_normalizers.setdefault((product.casefold(), api_action), []).append(fn)
+        return fn
+
+    return decorator
+
+
+def normalize_parameters(
+    product: str,
+    action: str,
+    params: dict[str, Any],
+    *,
+    contract: CanonicalWireContract | None = None,
+) -> None:
+    """Normalize copied params before permission shapes and again before encoding.
+
+    Adapters must be deterministic and idempotent, with no external operations.
+    Structural normalization must not depend on metadata. Contract-dependent changes
+    are limited to wire-equivalent scalar coercion before schema validation.
+    """
+    _ensure_loaded()
+    for normalizer in _parameter_normalizers.get((product.casefold(), action), []):
+        if "contract" in inspect.signature(normalizer).parameters:
+            normalizer(product, action, params, contract=contract)
+        else:
+            normalizer(product, action, params)
 
 
 def run_hooks(

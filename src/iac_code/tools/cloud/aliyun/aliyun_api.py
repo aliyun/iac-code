@@ -662,6 +662,9 @@ def _normalize_runtime_input(
     if not _runtime_json_shape_is_valid(normalized["params"], allow_sentinel=allow_internal_shape):
         raise ApiContractError("invalid_params")
     canonical_product = _PRODUCT_CANONICAL.get(product.lower(), product)
+    from iac_code.tools.cloud.aliyun.api_hooks import normalize_parameters
+
+    normalize_parameters(canonical_product, str(normalized.get("action") or ""), normalized["params"])
     if canonical_product == "ros":
         from iac_code.tools.cloud.aliyun.hooks.ros_parameters import normalize_ros_parameters
 
@@ -737,9 +740,15 @@ def _with_canonical_runtime_product(input: Mapping[str, Any], product: str) -> d
     normalized = dict(input)
     normalized["product"] = product
     params = normalized.get("params")
-    if product.casefold() != "ros" or not isinstance(params, Mapping):
+    if not isinstance(params, Mapping):
         return normalized
-    canonical_params = dict(params)
+    canonical_params = copy.deepcopy(dict(params))
+    from iac_code.tools.cloud.aliyun.api_hooks import normalize_parameters
+
+    normalize_parameters(product, str(normalized.get("action") or ""), canonical_params)
+    normalized["params"] = canonical_params
+    if product.casefold() != "ros":
+        return normalized
     from iac_code.tools.cloud.aliyun.hooks.ros_parameters import normalize_ros_parameters
 
     normalize_ros_parameters(str(normalized.get("action") or ""), canonical_params)
@@ -2780,8 +2789,15 @@ class AliyunApi(BaseCloudApi):
         product = tool_input.get("product", "")
         product = _PRODUCT_CANONICAL.get(product.lower(), product)
         action = tool_input.get("action", "")
-        params = tool_input.get("params") or {}
+        params = copy.deepcopy(tool_input.get("params") or {})
         region = self._resolve_region(tool_input)
+
+        from iac_code.tools.cloud.aliyun.api_hooks import normalize_parameters
+
+        try:
+            normalize_parameters(product, action, params)
+        except ApiContractError as error:
+            return ToolResult.error(public_aliyun_error(error, product=product, action=action, region_id=region))
 
         # ROS: TemplateURL as local file path → read into TemplateBody
         if product == "ros":

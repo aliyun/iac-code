@@ -13698,3 +13698,8 @@ msgstr "完成明细后，只给出固定费用合计及周期。用量费用即
 
 msgid "total_cost must be a non-empty cost estimate including its period."
 msgstr "total_cost 必须是包含估算周期的非空费用估算。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. Keep only the canonical parameter."
+msgstr "阿里云 API {operation} 的参数 {parameter} 与其别名取值冲突。请只保留标准参数。"
