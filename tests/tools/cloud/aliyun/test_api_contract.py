@@ -2170,8 +2170,9 @@ def test_roa_concrete_path_matches_typed_metadata_parameters(pathname, params, e
     assert metadata.matches_pathname(pathname, params) is expected
 
 
+@pytest.mark.parametrize("disk_key", ["SystemDisk.Size", "SystemDisk.Capacity"])
 @pytest.mark.asyncio
-async def test_ecs_price_query_accepts_metadata_integer_text_without_mutating_input() -> None:
+async def test_ecs_price_query_accepts_metadata_integer_text_without_mutating_input(disk_key: str) -> None:
     api = contract(
         parameter("SystemDisk.Size", "query", schema={"type": "integer"}),
         parameter("Period", "query", schema={"type": "integer", "enum": [1, 2]}),
@@ -2179,7 +2180,7 @@ async def test_ecs_price_query_accepts_metadata_integer_text_without_mutating_in
         replace(parameter("Untyped", "query"), schema=None),
         action="DescribePrice",
     )
-    tool_input = {"params": {"SystemDisk.Size": "40", "Period": "1", "ImageId": "00123", "Untyped": "040"}}
+    tool_input = {"params": {disk_key: "40", "Period": "1", "ImageId": "00123", "Untyped": "040"}}
     original = copy.deepcopy(tool_input)
 
     built = await RequestBuilder().build(api, tool_input)
