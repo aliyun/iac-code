@@ -260,7 +260,8 @@ def _candidate_from_outline_and_detail(
         "resource_inventory": inventory,
         "rough_cost": {
             "currency": "CNY",
-            "cost_range": outline["total_cost"],
+            # Older persisted details have no total; new details supersede the early outline estimate.
+            "cost_range": str(detail.get("total_cost") or outline["total_cost"]).strip(),
             "items": _cost_items_from_inventory(inventory),
             "assumptions": copy.deepcopy(detail.get("cost_assumptions") or []),
             "exclusions": copy.deepcopy(detail.get("cost_exclusions") or []),

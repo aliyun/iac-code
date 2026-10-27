@@ -34,7 +34,7 @@ class ShowCandidateDetailTool(Tool):
         return _(
             "Display the rich detail for exactly one candidate from the latest show_architecture_plan batch. "
             "Call once per model turn in candidate index order. Include resource lifecycle intent, topology graph, "
-            "resource inventory, cost assumptions and decision notes; do not repeat summary or cost total."
+            "resource inventory, updated cost total, cost assumptions and decision notes; do not repeat summary."
         )
 
     @property
@@ -130,7 +130,7 @@ class ShowCandidateDetailTool(Tool):
                             "rough_cost": {
                                 "type": "string",
                                 "description": (
-                                    "Rough cost including its period, matching the outline's unit and duration."
+                                    "Rough cost including its period, matching the detail total's unit and duration."
                                 ),
                             },
                             "lifecycle": {
@@ -156,6 +156,14 @@ class ShowCandidateDetailTool(Tool):
                         "tradeoffs": {"type": "array", "items": {"type": "string"}},
                     },
                 },
+                "total_cost": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": _(
+                        "After the inventory, give only its fixed-charge subtotal and period. "
+                        "Exclude usage charges even if estimated; mark them as extra without including another total."
+                    ),
+                },
             },
             "required": [
                 "candidate_index",
@@ -168,6 +176,7 @@ class ShowCandidateDetailTool(Tool):
                 "cost_exclusions",
                 "cost_confidence",
                 "decision_notes",
+                "total_cost",
             ],
         }
 
@@ -222,6 +231,10 @@ class ShowCandidateDetailTool(Tool):
                 metadata={"candidate_set_id": batch.candidate_set_id},
             )
 
+        total_cost = tool_input.get("total_cost")
+        if not isinstance(total_cost, str) or not total_cost.strip():
+            return ToolResult.error(_("total_cost must be a non-empty cost estimate including its period."))
+
         try:
             mermaid_source, architecture_context, graph, warnings = render_architecture_graph(
                 tool_input.get("topology_graph")
@@ -242,7 +255,7 @@ class ShowCandidateDetailTool(Tool):
                     candidate_name=expected_name,
                     summary=outline["summary"],
                     cost_items=cost_items,
-                    total_monthly_cost=outline["total_cost"],
+                    total_monthly_cost=total_cost.strip(),
                     candidate_index=expected_index,
                     candidate_set_id=batch.candidate_set_id,
                     detail_stage="detail",

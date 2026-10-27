@@ -38,6 +38,7 @@ OUTLINE = {
 DETAIL = {
     "candidate_index": 0,
     "candidate_name": NAME,
+    "total_cost": "CNY 900-1300/month",
     "applicable_scenarios": ["Managed relational database"],
     "resource_intents": [{"product": "RDS", "action": "create", "role": "database"}],
     "topology_graph": {"nodes": [{"id": "rds", "label": "RDS", "product": "RDS"}], "edges": []},
@@ -47,7 +48,7 @@ DETAIL = {
             "product": "RDS",
             "purpose": "database",
             "quantity": 1,
-            "rough_cost": "CNY 800-1200/month",
+            "rough_cost": "CNY 900-1300/month",
             "lifecycle": "create",
         }
     ],
@@ -104,7 +105,8 @@ class PlanningModel:
         ]
         if self.calls == len(script) - 1 and "第二步" in system:
             assert all(key not in system for key in ("monthly_range", "rough_monthly_cost", "monthly_cost"))
-            assert "CNY 800-1200/month" in system
+            assert "CNY 900-1300/month" in system
+            assert "CNY 800-1200/month" not in system
             self.materialization_inspected = True
             yield MessageStartEvent(message_id="materialization-prompt-checked")
             return
@@ -154,6 +156,7 @@ async def test_idempotent_outline_survives_selection_resume(tmp_path, monkeypatc
     assert results[REPEAT_ID].metadata["candidate_set_id"] == BATCH_ID
     saved = flow.context.get_conclusion("solution_selection")
     assert saved["status"] == "awaiting_selection"
+    assert saved["candidates"][0]["rough_cost"]["cost_range"] == DETAIL["total_cost"]
     assert saved["candidate_set_id"] == BATCH_ID
     assert any(
         isinstance(event, PipelineEvent) and event.type == PipelineEventType.USER_INPUT_REQUIRED for event in events

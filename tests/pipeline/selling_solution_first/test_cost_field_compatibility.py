@@ -111,7 +111,7 @@ async def test_neutral_tools_keep_costs_in_the_existing_display_event_contract()
     queue = asyncio.Queue()
     result = await ShowCandidateDetailTool(state).execute(
         tool_input={
-            "candidate_name": "GPU", "candidate_index": 0,
+            "candidate_name": "GPU", "candidate_index": 0, "total_cost": "¥240/8小时",
             "topology_graph": {"nodes": [{"id": "gpu", "label": "GPU", "product": "ECS"}], "edges": []},
             "resource_inventory": [{"resource_id": "gpu", "product": "ECS", "rough_cost": "¥240/8小时"}],
         }, context=ToolContext(event_queue=queue, tool_use_id="detail"),
