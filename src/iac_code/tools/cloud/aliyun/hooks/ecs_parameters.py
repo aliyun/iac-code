@@ -15,6 +15,7 @@ _SYSTEM_DISK_ALIASES = {
     "SystemDisk.1.Category": "SystemDisk.Category",
     "SystemDisk.1.Size": "SystemDisk.Size",
     "SystemDisk.1.PerformanceLevel": "SystemDisk.PerformanceLevel",
+    "SystemDisk.Capacity": "SystemDisk.Size",
     "SystemDiskCategory": "SystemDisk.Category",
     "SystemDiskSize": "SystemDisk.Size",
     "SystemDiskPerformanceLevel": "SystemDisk.PerformanceLevel",
