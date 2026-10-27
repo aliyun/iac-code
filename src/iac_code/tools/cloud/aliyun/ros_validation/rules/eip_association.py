@@ -18,6 +18,10 @@ from iac_code.tools.cloud.aliyun.ros_validation.model import (
 _PARSED_TEMPLATE = "parsed-template"
 _EIP_ASSOCIATION_TYPES = frozenset({"ALIYUN::VPC::EIPAssociation"})
 _ECS_TYPES = frozenset({"ALIYUN::ECS::Instance", "ALIYUN::ECS::InstanceGroup"})
+_LEGACY_EIP_REPLACEMENTS = {
+    "ALIYUN::ECS::EIP": "ALIYUN::VPC::EIP",
+    "ALIYUN::ECS::EIPAssociation": "ALIYUN::VPC::EIPAssociation",
+}
 
 
 def _path(*parts: Any) -> tuple:
@@ -47,6 +51,46 @@ def _resource_references(value: Any) -> set[str]:
 
 def _is_explicit_false(value: Any) -> bool:
     return value is False
+
+
+@dataclass(frozen=True)
+class LegacyEipTypeCheck:
+    """Reject legacy EIP types before sending a ROS template to the cloud."""
+
+    def check(self, context: Any) -> tuple[Diagnostic, ...]:
+        parsed = context.fact_store.get_required(_PARSED_TEMPLATE)
+        template = parsed.data
+        if not isinstance(template, Mapping):
+            return ()
+        resources = template.get("Resources")
+        if not isinstance(resources, Mapping):
+            return ()
+
+        diagnostics: list[Diagnostic] = []
+        for resource_name, definition in resources.items():
+            if not isinstance(resource_name, str) or not isinstance(definition, Mapping):
+                continue
+            resource_type = definition.get("Type")
+            replacement = _LEGACY_EIP_REPLACEMENTS.get(resource_type) if isinstance(resource_type, str) else None
+            if replacement is None:
+                continue
+            diagnostics.append(
+                make_diagnostic(
+                    code="ROS5105",
+                    severity=Severity.ERROR,
+                    category=Category.COMPATIBILITY,
+                    summary=_("Legacy EIP resource type {} is not supported.").format(resource_type),
+                    detail="",
+                    path=_path("Resources", resource_name, "Type"),
+                    source_map=parsed.source_map,
+                    subject=resource_name,
+                    stable_args=(resource_type, replacement),
+                    expected=replacement,
+                    actual=resource_type,
+                    suggestion=_("Use {} and validate the template again.").format(replacement),
+                )
+            )
+        return tuple(diagnostics)
 
 
 @dataclass(frozen=True)
@@ -160,7 +204,8 @@ class ResourceRelationshipRule:
     phase: RulePhase = RulePhase.STRUCTURE
     requires: frozenset[str] = frozenset({_PARSED_TEMPLATE})
     optional_requires: frozenset[str] = frozenset()
-    checks: tuple[EipAssociationCheck | EcsVSwitchNetworkCheck, ...] = (
+    checks: tuple[LegacyEipTypeCheck | EipAssociationCheck | EcsVSwitchNetworkCheck, ...] = (
+        LegacyEipTypeCheck(),
         EipAssociationCheck(),
         EcsVSwitchNetworkCheck(),
     )

@@ -14914,3 +14914,22 @@ msgstr "O usuário solicitou {expected} planos candidatos; foram enviados {actua
 #: src/iac_code/agent/agent_loop.py
 msgid "The model reached its output token limit. Increase the max output tokens setting and try again."
 msgstr "O modelo atingiu o limite de tokens de saída. Aumente o limite máximo de tokens de saída e tente novamente."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "Legacy EIP resource type {} is not supported."
+msgstr "O tipo de recurso EIP legado {} não é compatível."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "Use {} and validate the template again."
+msgstr "Use {} e valide o modelo novamente."
+
+msgid "Display the rich detail for exactly one candidate from the latest show_architecture_plan batch. Call once per model turn in candidate index order. Include resource lifecycle intent, topology graph, resource inventory, updated cost total, cost assumptions and decision notes; do not repeat summary."
+msgstr "Mostre os detalhes completos de uma única proposta do último conjunto de show_architecture_plan. Chame uma vez por turno do modelo, por ordem de índice. Inclua o ciclo de vida dos recursos, a topologia, o inventário, o custo total atualizado, os pressupostos de custos e os motivos da decisão; não repita o resumo."
+
+msgid "After the inventory, give only its fixed-charge subtotal and period. Exclude usage charges even if estimated; mark them as extra without including another total."
+msgstr "Após o inventário, indique apenas o subtotal dos encargos fixos e o respetivo período. Exclua os encargos de utilização, mesmo que estimados; indique que são cobrados à parte sem apresentar outro total."
+
+msgid "total_cost must be a non-empty cost estimate including its period."
+msgstr "total_cost deve ser uma estimativa de custos não vazia que inclua o seu período."

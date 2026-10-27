@@ -26,7 +26,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLOUD_REFRESH_SECONDS = 600
-LLM_ONLY_RUNNERS = frozenset({"smoke", "ros_awareness", "promotional_offer_followup"})
+LLM_ONLY_RUNNERS = frozenset({"smoke", "ros_awareness", "promotional_offer_followup", "plan_cost_refresh"})
 SAFE_LIVE_AUDIT_NOTE = re.compile(
     r"credential audit: source=(?:llm|cloud); "
     r"location=(?:logs|artifacts|workspace|templates|other); "
@@ -318,6 +318,10 @@ LIVE_CASES = tuple(
     Case(
         "promotional-offer-followup-a2a", "scripts/ci/run_promotional_offer_followup_a2a.py", (), 1200, "live",
         live_runner="promotional_offer_followup", group="readonly",
+    ),
+    Case(
+        "plan-cost-refresh-a2a", "scripts/ci/run_plan_cost_refresh_a2a.py", (), 1800, "live",
+        live_runner="plan_cost_refresh", group="readonly",
     ),
     Case(
         "coupon-budget-a2a", "scripts/ci/run_coupon_budget_a2a.py", (), 1800, "live",
@@ -1539,7 +1543,7 @@ def run_case(
                     command.extend(("--provider", "dashscope"))
         if case.live_runner not in LLM_ONLY_RUNNERS and cloud_credential_helper is not None:
             _prepare_cloud_credentials(cloud_credential_helper, source_config_dir, cloud_credential_python)
-        if case.live_runner in {"ros_awareness", "promotional_offer_followup"}:
+        if case.live_runner in {"ros_awareness", "promotional_offer_followup", "plan_cost_refresh"}:
             command.append("--allow-real-llm")
         elif case.live_runner not in LLM_ONLY_RUNNERS:
             command.append("--allow-real-cloud")

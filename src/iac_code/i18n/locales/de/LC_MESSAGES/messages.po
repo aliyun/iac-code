@@ -15162,3 +15162,22 @@ msgstr "Der Benutzer hat {expected} Planungsvorschläge angefordert; {actual} wu
 #: src/iac_code/agent/agent_loop.py
 msgid "The model reached its output token limit. Increase the max output tokens setting and try again."
 msgstr "Das Modell hat das Limit für Ausgabetokens erreicht. Erhöhen Sie die maximale Anzahl an Ausgabetokens und versuchen Sie es erneut."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "Legacy EIP resource type {} is not supported."
+msgstr "Der veraltete EIP-Ressourcentyp {} wird nicht unterstützt."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "Use {} and validate the template again."
+msgstr "Verwenden Sie {} und validieren Sie die Vorlage erneut."
+
+msgid "Display the rich detail for exactly one candidate from the latest show_architecture_plan batch. Call once per model turn in candidate index order. Include resource lifecycle intent, topology graph, resource inventory, updated cost total, cost assumptions and decision notes; do not repeat summary."
+msgstr "Zeige die vollständigen Details genau eines Vorschlags aus dem neuesten show_architecture_plan-Satz an. Rufe das Tool pro Modellrunde einmal in der Reihenfolge der Vorschläge auf. Gib Ressourcenlebenszyklus, Topologie, Ressourcenliste, aktualisierte Gesamtkosten, Kostenannahmen und Entscheidungsgründe an; wiederhole die Zusammenfassung nicht."
+
+msgid "After the inventory, give only its fixed-charge subtotal and period. Exclude usage charges even if estimated; mark them as extra without including another total."
+msgstr "Gib nach der Ressourcenliste nur die Summe der festen Gebühren und den Zeitraum an. Schließe Nutzungskosten auch bei vorhandenen Schätzungen aus; kennzeichne sie als zusätzliche Kosten, ohne eine zweite Gesamtsumme anzugeben."
+
+msgid "total_cost must be a non-empty cost estimate including its period."
+msgstr "total_cost muss eine nicht leere Kostenschätzung einschließlich ihres Zeitraums sein."

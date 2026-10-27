@@ -192,6 +192,7 @@ def _planning_records(
                 {
                     "candidate_index": index,
                     "candidate_name": str(candidate.get("name") or ""),
+                    "total_cost": str(rough_cost.get("cost_range") or ""),
                     "applicable_scenarios": copy.deepcopy(candidate.get("applicable_scenarios") or []),
                     "resource_intents": copy.deepcopy(candidate.get("resource_intents") or []),
                     "topology_graph": copy.deepcopy(candidate.get("topology_graph") or {}),

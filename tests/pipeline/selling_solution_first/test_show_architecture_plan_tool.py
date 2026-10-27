@@ -30,6 +30,7 @@ def _tool_input(**overrides):
     payload = {
         "candidate_name": "方案A：经典三层",
         "candidate_index": 0,
+        "total_cost": "¥200～¥400/月",
         "applicable_scenarios": ["生产站点"],
         "resource_intents": [{"product": "ECS", "action": "create"}],
         "topology_graph": {"nodes": nodes, "edges": edges},
@@ -115,6 +116,7 @@ class TestMetadata:
         graph = detail_schema["properties"]["topology_graph"]
         assert graph["required"] == ["nodes", "edges"]
         assert "summary" not in detail_schema["properties"]
+        assert "total_cost" in detail_schema["required"]
 
     @pytest.mark.asyncio
     async def test_outline_call_emits_one_refining_card_per_candidate(self):
@@ -913,3 +915,56 @@ async def test_detail_correction_still_requires_actual_outline_index_and_name(in
         tool_input=_tool_input(candidate_index=index, candidate_name=name), context=ToolContext(event_queue=queue))
     assert result.is_error
     assert queue.empty()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('total', ['¥6.5～¥12.5/2天（流量另计）', 'CNY 10-20/hour', '待确认', '¥0/月'])
+async def test_detail_refreshes_outline_total_without_parsing_or_adding_cost_text(total):
+    from iac_code.pipeline.selling_solution_first.hooks.solution_planning_and_selection import (
+        _candidate_from_outline_and_detail,
+    )
+
+    outline = {'candidate_name': '方案A：经典三层', 'summary': 'A',
+               'total_cost': '¥999/月', 'key_tradeoff': 'A'}
+    state = {'tool_result_records': [{
+        'tool_name': 'show_architecture_plan', 'input': {'candidates': [outline]},
+        'is_error': False, 'sequence': 1, 'record_id': 'batch',
+    }]}
+    queue = asyncio.Queue()
+    detail = _tool_input(total_cost='  ' + total + '  ')
+    result = await ShowCandidateDetailTool(state).execute(tool_input=detail, context=ToolContext(event_queue=queue))
+    assert not result.is_error
+    event = queue.get_nowait()
+    assert isinstance(event, CandidateDetailEvent)
+    assert event.total_monthly_cost == total
+    assert event.cost_items[0]['monthly_cost'] == detail['resource_inventory'][0]['rough_cost']
+    candidate = _candidate_from_outline_and_detail(outline, detail)
+    assert candidate['rough_cost']['cost_range'] == event.total_monthly_cost
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('value', [None, '', '   ', 12, [], {}])
+async def test_invalid_detail_total_emits_no_price_update(value):
+    outline = {'candidate_name': '方案A：经典三层', 'summary': 'A',
+               'total_cost': '¥999/月', 'key_tradeoff': 'A'}
+    state = {'tool_result_records': [{
+        'tool_name': 'show_architecture_plan', 'input': {'candidates': [outline]},
+        'is_error': False, 'sequence': 1, 'record_id': 'batch',
+    }]}
+    queue = asyncio.Queue()
+    result = await ShowCandidateDetailTool(state).execute(
+        tool_input=_tool_input(total_cost=value), context=ToolContext(event_queue=queue),
+    )
+    assert result.is_error
+    assert queue.empty()
+
+
+def test_legacy_detail_records_without_total_keep_original_outline_price():
+    from iac_code.pipeline.selling_solution_first.hooks.solution_planning_and_selection import (
+        _candidate_from_outline_and_detail,
+    )
+
+    outline = {'candidate_name': 'A', 'summary': 'A', 'total_cost': '¥240/8小时'}
+    detail = _tool_input()
+    del detail['total_cost']
+    assert _candidate_from_outline_and_detail(outline, detail)['rough_cost']['cost_range'] == '¥240/8小时'
