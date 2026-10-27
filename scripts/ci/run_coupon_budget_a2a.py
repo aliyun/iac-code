@@ -207,6 +207,10 @@ def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
                 for call in calls if call["name"] == "show_architecture_plan"
                 for candidate in call["input"].get("candidates", [])
             ]
+            outline_costs.extend(
+                str(call["input"].get("total_cost", ""))
+                for call in calls if call["name"] == "show_candidate_detail"
+            )
             detail_costs = [
                 str(resource.get("rough_cost", resource.get("rough_monthly_cost", "")))
                 for call in calls if call["name"] == "show_candidate_detail"

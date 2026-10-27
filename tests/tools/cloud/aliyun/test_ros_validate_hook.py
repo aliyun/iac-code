@@ -232,6 +232,43 @@ class TestValidateStructure:
 
 
 class TestCheckTemplate:
+    @pytest.mark.parametrize("action", ["ValidateTemplate", "PreviewStack", "GetTemplateEstimateCost", "CreateStack"])
+    @pytest.mark.parametrize("kind", ["EIP", "EIPAssociation"])
+    def test_legacy_eip_type_is_blocked_with_replacement(self, action, kind) -> None:
+        legacy_type = "ALIYUN::ECS::" + kind
+        replacement = "ALIYUN::VPC::" + kind
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Resources": {"PublicEntry": {"Type": legacy_type}},
+        }
+        params = {"TemplateBody": body}
+
+        result = check_template("ros", action, params)
+
+        assert result is not None and result.blocking_result is not None
+        assert result.report.counts_by_code["ROS5105"] == 1
+        diagnostic = next(item for item in result.report.diagnostics if item.code == "ROS5105")
+        assert diagnostic.severity.value == "ERROR"
+        assert diagnostic.actual == legacy_type
+        assert diagnostic.expected == replacement
+        assert legacy_type in result.blocking_result.content
+        assert replacement in result.blocking_result.content
+        assert "$.Resources.PublicEntry.Type" in result.blocking_result.content
+        assert body["Resources"]["PublicEntry"]["Type"] == legacy_type
+
+    @pytest.mark.parametrize("kind", ["EIP", "EIPAssociation", "VPC"])
+    def test_supported_network_types_are_not_blocked_as_legacy_eip(self, kind) -> None:
+        resource_type = ("ALIYUN::ECS::" if kind == "VPC" else "ALIYUN::VPC::") + kind
+        body = {
+            "ROSTemplateFormatVersion": "2015-09-01",
+            "Resources": {"Network": {"Type": resource_type}},
+        }
+
+        result = check_template("ros", "ValidateTemplate", {"TemplateBody": body})
+
+        assert result is not None and result.blocking_result is None
+        assert "ROS5105" not in result.report.counts_by_code
+
     def test_no_template_body_returns_none(self) -> None:
         result = check_template("ros", "ValidateTemplate", {})
         assert result is not None

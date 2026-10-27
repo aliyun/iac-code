@@ -13675,3 +13675,22 @@ msgstr "requested_candidate_count 必须为正整数或 null"
 #: src/iac_code/pipeline/selling/hooks/architecture_planning.py
 msgid "The user requested {expected} candidate plans; {actual} were submitted. Correct the candidates or ask for clarification; do not silently change the requested count."
 msgstr "用户要求 {expected} 个候选方案，但提交了 {actual} 个。请修正候选方案或向用户澄清；不要擅自更改要求的数量。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "Legacy EIP resource type {} is not supported."
+msgstr "不支持旧版 EIP 资源类型 {}。"
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "Use {} and validate the template again."
+msgstr "请使用 {} 并重新校验模板。"
+
+msgid "Display the rich detail for exactly one candidate from the latest show_architecture_plan batch. Call once per model turn in candidate index order. Include resource lifecycle intent, topology graph, resource inventory, updated cost total, cost assumptions and decision notes; do not repeat summary."
+msgstr "展示最新 show_architecture_plan 批次中一个候选方案的完整详情。按候选下标顺序，每个模型轮次调用一次。包含资源生命周期意图、拓扑图、资源清单、更新后的总费用、费用假设和决策说明；不要重复摘要。"
+
+msgid "After the inventory, give only its fixed-charge subtotal and period. Exclude usage charges even if estimated; mark them as extra without including another total."
+msgstr "完成明细后，只给出固定费用合计及周期。用量费用即使有估算也不计入；注明另计，不再写另一个总价。"
+
+msgid "total_cost must be a non-empty cost estimate including its period."
+msgstr "total_cost 必须是包含估算周期的非空费用估算。"

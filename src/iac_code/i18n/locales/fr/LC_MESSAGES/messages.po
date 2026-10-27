@@ -15108,3 +15108,22 @@ msgstr "requested_candidate_count doit être un entier positif ou null"
 #: src/iac_code/pipeline/selling/hooks/architecture_planning.py
 msgid "The user requested {expected} candidate plans; {actual} were submitted. Correct the candidates or ask for clarification; do not silently change the requested count."
 msgstr "L’utilisateur a demandé {expected} propositions ; {actual} ont été soumises. Corrigez les propositions ou demandez des précisions ; ne modifiez pas discrètement le nombre demandé."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "Legacy EIP resource type {} is not supported."
+msgstr "Le type de ressource EIP hérité {} n’est pas pris en charge."
+
+#: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
+#, python-brace-format
+msgid "Use {} and validate the template again."
+msgstr "Utilisez {} et validez à nouveau le modèle."
+
+msgid "Display the rich detail for exactly one candidate from the latest show_architecture_plan batch. Call once per model turn in candidate index order. Include resource lifecycle intent, topology graph, resource inventory, updated cost total, cost assumptions and decision notes; do not repeat summary."
+msgstr "Affiche les détails complets d’une seule proposition du dernier lot de show_architecture_plan. Appelle cet outil une fois par tour du modèle, dans l’ordre des indices. Inclus le cycle de vie des ressources, la topologie, l’inventaire, le coût total actualisé, les hypothèses de coûts et les motifs de décision ; ne répète pas le résumé."
+
+msgid "After the inventory, give only its fixed-charge subtotal and period. Exclude usage charges even if estimated; mark them as extra without including another total."
+msgstr "Après l’inventaire, indique uniquement le sous-total des frais fixes et sa période. Exclus les frais d’utilisation, même estimés ; indique qu’ils sont en supplément sans ajouter un autre total."
+
+msgid "total_cost must be a non-empty cost estimate including its period."
+msgstr "total_cost doit être une estimation non vide des coûts incluant sa période."

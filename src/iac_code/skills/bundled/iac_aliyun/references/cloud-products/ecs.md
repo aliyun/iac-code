@@ -104,6 +104,12 @@
 - ECS 公网能力按场景最小化：普通 ECS 无明确公网需求时不创建 EIP，并显式设置 `AllocatePublicIP: false`；网站、公开 API 等场景配置一种必要的公网入口；通过 EIP 或公网负载均衡提供入口时，后端 ECS 同样设置 `AllocatePublicIP: false`，避免重复公网入口。EIP 绑定约束由模板校验硬门禁强制执行。
 - `ALIYUN::ECS::Instance` 和 `ALIYUN::ECS::InstanceGroup` 必须在 `Properties` 中显式设置 `VSwitchId`（引用新建或已有交换机），不得省略后回退到经典网络，此约束由模板校验硬门禁强制执行。
 
+## 费用估算
+
+- 通过 `aliyun_api` 调用 [DescribePrice](https://help.aliyun.com/zh/ecs/developer-reference/api-ecs-2014-05-26-describeprice)（`ResourceType: instance`），按目标地域、规格、镜像和磁盘配置查价，计费方式与周期须与方案一致。
+- 系统盘参数使用 `SystemDisk.*`；核对总价是否已含计算与磁盘费用，避免漏算或重复计费。
+- 采用本账号 `TradePrice`，`OriginalPrice` 单列参考；按量月费默认按 720 小时并注明假设，用户给定时长时按其时长估算。公网费用另计，未知费用待确认。
+
 ## 安全组最佳实践
 
 **默认不开 22/3389**——用 RunCommand/Invocation 部署即可，业务只开必要端口（Web → 80/443，层间通信 → `SourceGroupId`）。
