@@ -13955,3 +13955,8 @@ msgstr "リソース明細を完成させてから、固定費の合計と対象
 
 msgid "total_cost must be a non-empty cost estimate including its period."
 msgstr "total_cost は見積期間を含む空でない費用見積もりである必要があります。"
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. Keep only the canonical parameter."
+msgstr "Alibaba Cloud API {operation} のパラメーター {parameter} とそのエイリアスに矛盾する値が指定されています。正式なパラメーターのみを残してください。"

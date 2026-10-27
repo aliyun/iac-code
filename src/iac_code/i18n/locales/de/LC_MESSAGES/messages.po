@@ -15181,3 +15181,8 @@ msgstr "Gib nach der Ressourcenliste nur die Summe der festen Gebühren und den 
 
 msgid "total_cost must be a non-empty cost estimate including its period."
 msgstr "total_cost muss eine nicht leere Kostenschätzung einschließlich ihres Zeitraums sein."
+
+#: src/iac_code/tools/cloud/aliyun/public_errors.py
+#, python-brace-format
+msgid "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. Keep only the canonical parameter."
+msgstr "Die Alibaba Cloud API {operation} hat widersprüchliche Werte für den Parameter {parameter} und dessen Alias erhalten. Behalten Sie nur den kanonischen Parameter bei."
