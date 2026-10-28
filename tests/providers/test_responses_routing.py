@@ -18,11 +18,11 @@ def create(key, model, config=None):
     return create_provider(model, {key: "fake"}, provider_key_override=key, provider_config_override=config or {})
 
 
-@pytest.mark.parametrize("model", ["gpt-6-astra", "gpt-6-sol", "gpt-6-luna"])
+@pytest.mark.parametrize("model", ["gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"])
 def test_gpt6_default_protocol_and_capabilities(model):
     assert type(create("openai", model)) is ResponsesProvider
     assert get_context_window_config(model).context_window == 1_050_000
-    assert ("none" in get_thinking_spec("openai", model).effort_values) == (model != "gpt-6-astra")
+    assert ("none" in get_thinking_spec("openai", model).effort_values) == (model not in {"gpt-6-astra", "gpt-6.1-sol"})
 
 
 def test_only_explicit_qwen_model_switches_protocol():
@@ -111,6 +111,12 @@ def test_responses_reuses_local_provider_default_api_key(key, default_key):
     "model,effort,allowed",
     [
         ("gpt-6-astra", None, False),
+        ("gpt-6.1-sol", None, False),
+        ("gpt-6.1-sol", "none", False),
+        ("gpt-6.1-sol", "high", False),
+        ("gpt-6.1-terra", None, False),
+        ("gpt-6.1-terra", "none", False),
+        ("gpt-6.1-terra", "high", False),
         ("gpt-6-astra", "none", False),
         ("gpt-6-astra", "high", False),
         ("gpt-6-sol", None, False),
@@ -176,6 +182,8 @@ def test_chat_tool_restrictions_follow_model_configuration(monkeypatch, tool_eff
         ("openai", "test-unknown-model"),
         ("openai_compatible", "gpt-6-astra"),
         ("azure_openai", "gpt-6-astra"),
+        ("openai_compatible", "gpt-6.1-sol"),
+        ("azure_openai", "gpt-6.1-terra"),
     ],
 )
 def test_chat_tool_restrictions_do_not_affect_other_models_or_providers(key, model):
@@ -194,6 +202,8 @@ def test_gpt6_astra_responses_cannot_disable_reasoning():
     "key,model,expected",
     [
         ("openai", "gpt-6-astra", "medium"),
+        ("openai", "gpt-6.1-sol", "medium"),
+        ("openai", "gpt-6.1-terra", "medium"),
         ("openai", "gpt-6-sol", "medium"),
         ("openai", "gpt-6-luna", "medium"),
         ("openai", "gpt-5.6-sol", "medium"),

@@ -112,7 +112,6 @@ class TestDashScopeBuildThinkingKwargs:
     def test_stepfun_uses_its_documented_effort_values(self):
         p = DashScopeProvider(model="stepfun/step-3.7-flash", api_key="k", effort="medium")
         assert p._build_thinking_kwargs() == {
-            "extra_body": {"enable_thinking": True},
             "reasoning_effort": "medium",
         }
 

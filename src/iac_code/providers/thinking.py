@@ -67,6 +67,7 @@ class ThinkingFamily(Enum):
     KIMI = "kimi"  # K3 uses reasoning_effort; K2.7-code is always-on; older K2 uses extra_body.thinking
     MINIMAX = "minimax"  # Anthropic-compatible thinking.type=adaptive for MiniMax-M3
     ZHIPU = "zhipu"  # extra_body.thinking.type=enabled
+    VOLCENGINE = "volcengine"  # thinking.type + reasoning_effort; opaque encrypted_content
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,9 @@ class ThinkingSpec:
     supports_disable: bool = True
     thinking_enabled_by_default: bool = False
     disable_forbidden_efforts: tuple[EffortLevel, ...] = ()
+    disabled_thinking_type: str = "disabled"
+    bind_thinking_to_prefix: bool = False
+    effort_aliases: tuple[tuple[str, str], ...] = ()
 
     @property
     def supports_effort(self) -> bool:
@@ -312,9 +316,11 @@ _DASHSCOPE_HOSTED_KIMI_K3_SPEC = ThinkingSpec(
 )
 
 _DASHSCOPE_STEP37_SPEC = ThinkingSpec(
-    ThinkingFamily.DASHSCOPE,
+    ThinkingFamily.OPENAI,
     (EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH),
     uses_reasoning_effort_param=True,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
 )
 
 _DASHSCOPE_ZHIPU_GLM53_SPEC = ThinkingSpec(
@@ -366,6 +372,7 @@ _ANTHROPIC_FABLE51_SPEC = ThinkingSpec(
     EffortLevel.HIGH,
     adaptive_always_on=True,
     supports_disable=False,
+    bind_thinking_to_prefix=True,
 )
 
 _OPENAI_GPT56_SPEC = ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_GPT56_EFFORTS, EffortLevel.MEDIUM)
@@ -386,6 +393,22 @@ _DASHSCOPE_DEEPSEEK_V41_SPEC = ThinkingSpec(
     thinking_enabled_by_default=True,
 )
 _KIMI_K3_SPEC = ThinkingSpec(ThinkingFamily.KIMI, _KIMI_K3_EFFORTS, EffortLevel.MAX)
+_KIMI_K31_SPEC = ThinkingSpec(
+    ThinkingFamily.KIMI,
+    _KIMI_K3_EFFORTS,
+    EffortLevel.MAX,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
+    use_max_completion_tokens=True,
+)
+_KIMI_CODE_K31_SPEC = ThinkingSpec(
+    ThinkingFamily.KIMI,
+    _KIMI_K3_EFFORTS,
+    EffortLevel.HIGH,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
+    use_max_completion_tokens=True,
+)
 _KIMI_CODE_K3_SPEC = ThinkingSpec(
     ThinkingFamily.KIMI,
     _KIMI_K3_EFFORTS,
@@ -408,6 +431,63 @@ _MINIMAX_ALWAYS_ON_SPEC = ThinkingSpec(
     supports_disable=False,
     thinking_enabled_by_default=True,
 )
+_MINIMAX_M31_SPEC = ThinkingSpec(
+    ThinkingFamily.MINIMAX,
+    _OPENAI_GPT6_EFFORTS,
+    EffortLevel.MAX,
+    supports_disable=False,
+    thinking_enabled_by_default=True,
+)
+_VOLCENGINE_SEED_SPEC = ThinkingSpec(
+    ThinkingFamily.VOLCENGINE,
+    (EffortLevel.NONE, EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH),
+    EffortLevel.HIGH,
+    use_max_completion_tokens=True,
+    thinking_enabled_by_default=True,
+    effort_aliases=(("minimal", "none"), ("xhigh", "high"), ("max", "high")),
+)
+_VOLCENGINE_SEED20_SPEC = ThinkingSpec(
+    ThinkingFamily.VOLCENGINE,
+    (EffortLevel.NONE, EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH),
+    EffortLevel.MEDIUM,
+    use_max_completion_tokens=True,
+    thinking_enabled_by_default=True,
+    effort_aliases=(("minimal", "none"), ("xhigh", "high"), ("max", "high")),
+)
+_VOLCENGINE_DEEPSEEK_SPEC = ThinkingSpec(
+    ThinkingFamily.VOLCENGINE,
+    (EffortLevel.NONE, *_DEEPSEEK_EFFORTS),
+    EffortLevel.HIGH,
+    use_max_completion_tokens=True,
+    thinking_enabled_by_default=True,
+    effort_aliases=(("minimal", "none"), ("medium", "low"), ("xhigh", "high")),
+)
+_VOLCENGINE_DEEPSEEK41_SPEC = ThinkingSpec(
+    ThinkingFamily.VOLCENGINE,
+    (EffortLevel.NONE, *_DEEPSEEK_EFFORTS),
+    EffortLevel.HIGH,
+    use_max_completion_tokens=True,
+    thinking_enabled_by_default=True,
+    effort_aliases=(("minimal", "low"), ("medium", "high"), ("xhigh", "high"), ("ultra", "max")),
+)
+_VOLCENGINE_GLM_SPEC = ThinkingSpec(
+    ThinkingFamily.VOLCENGINE,
+    _ZHIPU_GLM53_EFFORTS,
+    EffortLevel.MAX,
+    supports_disable=False,
+    use_max_completion_tokens=True,
+    thinking_enabled_by_default=True,
+    effort_aliases=(("none", "low"), ("minimal", "low"), ("medium", "high"), ("xhigh", "max")),
+)
+_VOLCENGINE_KIMI_SPEC = ThinkingSpec(
+    ThinkingFamily.VOLCENGINE,
+    _KIMI_K3_EFFORTS,
+    EffortLevel.MAX,
+    supports_disable=False,
+    use_max_completion_tokens=True,
+    thinking_enabled_by_default=True,
+    effort_aliases=(("medium", "high"), ("xhigh", "max")),
+)
 _ZHIPU_GLM52_SPEC = ThinkingSpec(
     ThinkingFamily.ZHIPU,
     _ZHIPU_GLM52_EFFORTS,
@@ -427,6 +507,32 @@ _ZHIPU_GLM53_SPEC = ThinkingSpec(
 MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
     "anthropic": {
         "claude-fable-5-1": _ANTHROPIC_FABLE51_SPEC,
+        "claude-opus-5-5": ThinkingSpec(
+            ThinkingFamily.ANTHROPIC_ADAPTIVE,
+            _OPENAI_GPT6_EFFORTS,
+            EffortLevel.MEDIUM,
+            adaptive_always_on=True,
+            supports_disable=False,
+            thinking_enabled_by_default=True,
+            bind_thinking_to_prefix=True,
+        ),
+        "claude-sonnet-5-5": ThinkingSpec(
+            ThinkingFamily.ANTHROPIC_ADAPTIVE,
+            _OPENAI_GPT6_EFFORTS,
+            EffortLevel.HIGH,
+            thinking_enabled_by_default=True,
+            disabled_thinking_type="between_tools",
+            disable_forbidden_efforts=(EffortLevel.XHIGH, EffortLevel.MAX),
+            bind_thinking_to_prefix=True,
+        ),
+        "claude-haiku-5-5": ThinkingSpec(
+            ThinkingFamily.ANTHROPIC_ADAPTIVE,
+            _OPENAI_GPT6_EFFORTS,
+            EffortLevel.MEDIUM,
+            thinking_enabled_by_default=True,
+            disable_forbidden_efforts=(EffortLevel.XHIGH, EffortLevel.MAX),
+            bind_thinking_to_prefix=True,
+        ),
         "claude-fable-5": _ANTHROPIC_ADAPTIVE_ALWAYS_ON_SPEC,
         "claude-opus-5": _ANTHROPIC_OPUS5_SPEC,
         "claude-sonnet-5": _ANTHROPIC_ADAPTIVE_SPEC,
@@ -443,6 +549,19 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         ),
     },
     "openai": {
+        "gpt-6.1-sol": ThinkingSpec(
+            ThinkingFamily.OPENAI,
+            _OPENAI_GPT6_EFFORTS,
+            EffortLevel.MEDIUM,
+            supports_disable=False,
+            thinking_enabled_by_default=True,
+        ),
+        "gpt-6.1-terra": ThinkingSpec(
+            ThinkingFamily.OPENAI,
+            (EffortLevel.NONE, *_OPENAI_GPT6_EFFORTS),
+            EffortLevel.MEDIUM,
+            thinking_enabled_by_default=True,
+        ),
         "gpt-6-astra": ThinkingSpec(ThinkingFamily.OPENAI, _OPENAI_GPT6_EFFORTS, EffortLevel.MEDIUM),
         "gpt-6-sol": ThinkingSpec(ThinkingFamily.OPENAI, (EffortLevel.NONE, *_OPENAI_GPT6_EFFORTS), EffortLevel.MEDIUM),
         "gpt-6-luna": ThinkingSpec(
@@ -463,18 +582,26 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "o4-mini": _OPENAI_O_SERIES_SPEC,
     },
     "deepseek": {
+        "deepseek-flash": _DEEPSEEK_SPEC,
         "deepseek-v4-pro": _DEEPSEEK_SPEC,
         "deepseek-v4-flash": _DEEPSEEK_SPEC,
         "deepseek-v4-flash-vision-exp": _DEEPSEEK_SPEC,
     },
     "dashscope": {
         "glm-5.3-prime": ThinkingSpec(
-            ThinkingFamily.DASHSCOPE, _ZHIPU_GLM53_EFFORTS, EffortLevel.LOW,
-            uses_reasoning_effort_param=True, supports_disable=False, thinking_enabled_by_default=True,
+            ThinkingFamily.DASHSCOPE,
+            _ZHIPU_GLM53_EFFORTS,
+            EffortLevel.LOW,
+            uses_reasoning_effort_param=True,
+            supports_disable=False,
+            thinking_enabled_by_default=True,
         ),
         "qwen3.8-omni-flash": ThinkingSpec(
-            ThinkingFamily.DASHSCOPE, _GLM_EFFORTS, EffortLevel.XHIGH,
-            uses_reasoning_effort_param=True, thinking_enabled_by_default=True,
+            ThinkingFamily.DASHSCOPE,
+            _GLM_EFFORTS,
+            EffortLevel.XHIGH,
+            uses_reasoning_effort_param=True,
+            thinking_enabled_by_default=True,
         ),
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.8-max-0902": _DASHSCOPE_QWEN38_SPEC,
@@ -500,11 +627,16 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "kimi-k2.7-code": _DASHSCOPE_KIMI_K27_CODE_SPEC,
         "kimi-k3": _DASHSCOPE_HOSTED_KIMI_K3_SPEC,
         "kimi/kimi-k3": _DASHSCOPE_KIMI_K3_SPEC,
+        "kimi/kimi-k3.1-pro": _DASHSCOPE_KIMI_K3_SPEC,
+        "kimi/kimi-k3.1-pro-highspeed": _DASHSCOPE_KIMI_K3_SPEC,
+        "glm-5.3": _DASHSCOPE_ZHIPU_GLM53_SPEC,
         "glm-5.2-fast-preview": _DASHSCOPE_GLM52_SPEC,
         "glm-5.2": _DASHSCOPE_GLM52_SPEC,
         "glm-5.1": _DASHSCOPE_GLM51_SPEC,
         "ZHIPU/GLM-5.3": _DASHSCOPE_ZHIPU_GLM53_SPEC,
         "ZHIPU/GLM-5.3-Flash": _DASHSCOPE_ZHIPU_GLM53_SPEC,
+        "ZHIPU/GLM-5.3-FlashX": _DASHSCOPE_ZHIPU_GLM53_SPEC,
+        "MiniMax/MiniMax-M3.1-Flash": _MINIMAX_M31_SPEC,
         "MiniMax-M2.5": ThinkingSpec(ThinkingFamily.DASHSCOPE),
         "MiniMax/MiniMax-M3": ThinkingSpec(ThinkingFamily.MINIMAX),
         "MiniMax/MiniMax-M2.7": _MINIMAX_ALWAYS_ON_SPEC,
@@ -514,7 +646,26 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
             ThinkingFamily.DASHSCOPE,
             thinking_enabled_by_default=True,
         ),
+        "xiaomi/mimo-v2.6-pro-ultraspeed": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            thinking_enabled_by_default=True,
+        ),
         "stepfun/step-3.7-flash": _DASHSCOPE_STEP37_SPEC,
+        "stepfun/step-5-preview": _DASHSCOPE_STEP37_SPEC,
+        "vanchin/deepseek-v4.1-flash": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            _DEEPSEEK_EFFORTS,
+            EffortLevel.HIGH,
+            uses_reasoning_effort_param=True,
+            thinking_enabled_by_default=True,
+        ),
+        "deepseek-v4.1-flash-1017": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            _DEEPSEEK_EFFORTS,
+            EffortLevel.HIGH,
+            uses_reasoning_effort_param=True,
+            thinking_enabled_by_default=True,
+        ),
         "deepseek-v4-pro": ThinkingSpec(
             ThinkingFamily.DASHSCOPE,
             _DASHSCOPE_DEEPSEEK_EFFORTS,
@@ -542,6 +693,14 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "deepseek-v4.1-flash": _DASHSCOPE_DEEPSEEK_V41_SPEC,
     },
     "dashscope_token_plan": {
+        "glm-5.3": _DASHSCOPE_ZHIPU_GLM53_SPEC,
+        "deepseek-v4.1-flash-1017": ThinkingSpec(
+            ThinkingFamily.DASHSCOPE,
+            _DEEPSEEK_EFFORTS,
+            EffortLevel.HIGH,
+            uses_reasoning_effort_param=True,
+            thinking_enabled_by_default=True,
+        ),
         "qwen3.8-max": _DASHSCOPE_QWEN38_SPEC,
         "qwen3.8-flash": _DASHSCOPE_QWEN_HYBRID_SPEC,
         "qwen3.8-max-preview": _DASHSCOPE_QWEN38_PREVIEW_SPEC,
@@ -564,6 +723,13 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "glm-5.2": _DASHSCOPE_GLM52_SPEC,
     },
     "gemini": {
+        "gemini-4-argon": ThinkingSpec(
+            ThinkingFamily.GEMINI,
+            _GEMINI_37_EFFORTS,
+            EffortLevel.MEDIUM,
+            supports_disable=False,
+            thinking_enabled_by_default=True,
+        ),
         "gemini-3.8-flash": ThinkingSpec(
             ThinkingFamily.GEMINI,
             _GEMINI_37_EFFORTS,
@@ -636,6 +802,8 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         ),
     },
     "kimi_cn": {
+        "kimi-k3.1-pro": _KIMI_K31_SPEC,
+        "kimi-k3.1-pro-highspeed": _KIMI_K31_SPEC,
         "kimi-k3": _KIMI_K3_SPEC,
         "kimi-k2.6": ThinkingSpec(ThinkingFamily.KIMI),
         "kimi-k2.5": ThinkingSpec(ThinkingFamily.KIMI),
@@ -643,12 +811,15 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "kimi-k2.7-code-highspeed": _KIMI_ALWAYS_ON_SPEC,
     },
     "kimi_code": {
+        "k3.1-pro": _KIMI_CODE_K31_SPEC,
+        "k3.1-pro-highspeed": _KIMI_CODE_K31_SPEC,
         "k3": _KIMI_CODE_K3_SPEC,
         "k3-256k": _KIMI_CODE_K3_SPEC,
         "kimi-for-coding": _KIMI_CODE_K28_SPEC,
         "kimi-for-coding-highspeed": _KIMI_ALWAYS_ON_SPEC,
     },
     "minimax_cn": {
+        "MiniMax-M3.1-Flash": _MINIMAX_M31_SPEC,
         "MiniMax-M3": ThinkingSpec(ThinkingFamily.MINIMAX),
         "MiniMax-M2.7": ThinkingSpec(ThinkingFamily.MINIMAX),
         "MiniMax-M2.7-highspeed": ThinkingSpec(ThinkingFamily.MINIMAX),
@@ -656,6 +827,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "MiniMax-M2.5-highspeed": ThinkingSpec(ThinkingFamily.MINIMAX),
     },
     "zhipu_cn": {
+        "glm-5.3-flashx": _ZHIPU_GLM53_SPEC,
         "glm-5.3": _ZHIPU_GLM53_SPEC,
         "glm-5.3-flash": _ZHIPU_GLM53_SPEC,
         "glm-5.2": _ZHIPU_GLM52_SPEC,
@@ -673,12 +845,45 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
         "glm-4.5-flash": ThinkingSpec(ThinkingFamily.ZHIPU),
     },
     "zhipu_cn_codingplan": {
+        # Standard Model API has FlashX; the subscription does not.
+        "glm-5.3-flashx": _NONE_SPEC,
         "glm-5.3": _ZHIPU_GLM53_SPEC,
         "glm-5.3-flash": _ZHIPU_GLM53_SPEC,
         "glm-5.2": _ZHIPU_GLM52_SPEC,
         "glm-5-turbo": ThinkingSpec(ThinkingFamily.ZHIPU),
         "glm-4.7": ThinkingSpec(ThinkingFamily.ZHIPU),
         "glm-4.5-air": ThinkingSpec(ThinkingFamily.ZHIPU),
+    },
+    "volcengine_cn": {
+        "doubao-seed-evolving": _VOLCENGINE_SEED_SPEC,
+        "doubao-seed-2-1-pro-260915": _VOLCENGINE_SEED_SPEC,
+        "doubao-seed-2-1-lite-260915": _VOLCENGINE_SEED_SPEC,
+        "doubao-seed-2-1-turbo-260628": _VOLCENGINE_SEED_SPEC,
+        "doubao-seed-2-0-pro-260215": _VOLCENGINE_SEED20_SPEC,
+        "doubao-seed-2-0-lite-260428": _VOLCENGINE_SEED20_SPEC,
+        "doubao-seed-2-0-code-preview-260215": _VOLCENGINE_SEED20_SPEC,
+        "deepseek-v4-1-flash-261017": _VOLCENGINE_DEEPSEEK41_SPEC,
+        "deepseek-v4-1-flash-economy-261017": _VOLCENGINE_DEEPSEEK41_SPEC,
+        "deepseek-v4-pro-ga-260813": _VOLCENGINE_DEEPSEEK_SPEC,
+        "deepseek-v4-flash-ga-260731": _VOLCENGINE_DEEPSEEK_SPEC,
+        "glm-5-3-flash-260828": _VOLCENGINE_GLM_SPEC,
+        "kimi-k3-1-pro-261024": _VOLCENGINE_KIMI_SPEC,
+    },
+    "volcengine_cn_codingplan": {
+        "doubao-seed-evolving": _VOLCENGINE_SEED_SPEC,
+        "doubao-seed-2.1-pro": _VOLCENGINE_SEED_SPEC,
+        "doubao-seed-2.1-lite": _VOLCENGINE_SEED_SPEC,
+        "doubao-seed-2.0-mini": _VOLCENGINE_SEED20_SPEC,
+        "deepseek-v4.1-flash": _VOLCENGINE_DEEPSEEK41_SPEC,
+        "deepseek-v4.1-flash-economy": _VOLCENGINE_DEEPSEEK41_SPEC,
+        "deepseek-v4-pro": _VOLCENGINE_DEEPSEEK_SPEC,
+        "deepseek-v4-flash": _VOLCENGINE_DEEPSEEK_SPEC,
+        "glm-5.3": _VOLCENGINE_GLM_SPEC,
+        "glm-5.3-flash": _VOLCENGINE_GLM_SPEC,
+        "kimi-k3.1-pro": _VOLCENGINE_KIMI_SPEC,
+        # The plan documents these IDs, but not their complete thinking controls.
+        "kimi-k3": _NONE_SPEC,
+        "kimi-k2.8-preview": _NONE_SPEC,
     },
 }
 
@@ -763,6 +968,10 @@ def resolve_thinking_active(
     # DashScope disable-effort tokens force thinking off even when configured on.
     if spec.family is ThinkingFamily.DASHSCOPE and normalized_effort in _THINKING_DISABLE_EFFORTS:
         return False
+    if spec.family is ThinkingFamily.VOLCENGINE and normalized_effort is not None:
+        effective_effort = dict(spec.effort_aliases).get(normalized_effort, normalized_effort)
+        if effective_effort == "none" and spec.supports_disable:
+            return False
     if thinking_enabled is True:
         return True
     # thinking_enabled is None (not configured): use the family default.

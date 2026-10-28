@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from iac_code.ui.core.key_event import KeyEvent
 from iac_code.ui.dialogs.model_picker import (
     _EFFORT_ORDER,
@@ -88,6 +90,29 @@ def make_picker(
         on_select=on_select,
         on_cancel=on_cancel,
     )
+
+
+@pytest.mark.parametrize(
+    "provider,model,default",
+    [
+        ("openai", "gpt-6.1-sol", EffortLevel.MEDIUM),
+        ("anthropic", "claude-opus-5-5", EffortLevel.MEDIUM),
+        ("gemini", "gemini-4-argon", EffortLevel.MEDIUM),
+        ("kimi_code", "k3.1-pro", EffortLevel.HIGH),
+        ("minimax_intl", "MiniMax-M3.1-Flash", EffortLevel.MAX),
+        ("volcengine_cn", "doubao-seed-evolving", EffortLevel.HIGH),
+    ],
+)
+def test_current_models_can_be_focused_and_effort_selected(provider, model, default):
+    from iac_code.providers.thinking import get_thinking_spec
+
+    picker = make_picker(initial_model=model, configured_providers=[provider])
+    pair = (provider, model)
+    assert picker._focused_pair() == pair
+    assert picker._efforts[pair] is default
+    allowed = get_thinking_spec(provider, model).allowed_efforts
+    picker._cycle_effort(pair, -1)
+    assert picker._efforts[pair] is allowed[max(allowed.index(default) - 1, 0)]
 
 
 class TestModelPickerCreate:

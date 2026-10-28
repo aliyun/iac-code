@@ -41,10 +41,9 @@ class KimiProvider(OpenAIProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.KIMI:
             return {}
-        effort_models = {"kimi-k3", "k3", "k3-256k", "kimi-for-coding"}
-        if self._model in effort_models:
+        if spec.supports_effort:
             if self._thinking_disabled():
-                if self._PROVIDER_KEY == "kimi_code":
+                if self._PROVIDER_KEY == "kimi_code" and spec.supports_disable:
                     return {"extra_body": {"thinking": {"type": "disabled"}}}
                 return {}
             effort = self._effective_effort(spec)

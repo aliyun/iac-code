@@ -2539,14 +2539,14 @@ class TestProviderManagerCompleteRetry:
                 )
 
         def fake_create_provider(model, credentials, **kwargs):
-            if model == "xiaomi/mimo-v2.5-pro":
+            if model == "xiaomi/mimo-v2.6-pro-ultraspeed":
                 return PrimaryProvider()
             assert model == "qwen3.8-flash"
             return FallbackQwenProvider()
 
         monkeypatch.setattr("iac_code.providers.manager.create_provider", fake_create_provider)
         manager = ProviderManager(
-            model="xiaomi/mimo-v2.5-pro",
+            model="xiaomi/mimo-v2.6-pro-ultraspeed",
             credentials={"dashscope": "key"},
             retry_config=RetryConfig(max_retries=0, base_delay=0, jitter_factor=0),
         )
@@ -2900,6 +2900,8 @@ def test_token_plan_hides_qwen36_plus_but_keeps_legacy_fallback():
 
 def test_kimi_code_fallbacks_stay_on_the_subscription_endpoint():
     assert _PROVIDER_MODEL_FALLBACK_MAP["kimi_code"] == {
+        "k3.1-pro": "k3",
+        "k3.1-pro-highspeed": "k3.1-pro",
         "k3": "kimi-for-coding",
         "k3-256k": "kimi-for-coding",
         "kimi-for-coding-highspeed": "kimi-for-coding",

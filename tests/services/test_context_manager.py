@@ -26,6 +26,29 @@ from iac_code.services.context_manager import (
 
 
 class TestContextWindowConfig:
+    @pytest.mark.parametrize(
+        "model,window,output",
+        [
+            ("gpt-6.1-sol", 1_050_000, 128_000),
+            ("gpt-6.1-terra", 1_050_000, 128_000),
+            ("claude-opus-5-5", 1_000_000, 128_000),
+            ("claude-sonnet-5-5", 1_000_000, 128_000),
+            ("claude-haiku-5-5", 1_000_000, 128_000),
+            ("gemini-4-argon", 1_048_576, 65_536),
+            ("deepseek-flash", 1_000_000, 393_216),
+            ("deepseek-v4.1-flash-1017", 1_000_000, 393_216),
+            ("doubao-seed-evolving", 1_048_576, 262_144),
+            ("doubao-seed-2.1-pro", 1_048_576, 262_144),
+            ("glm-5.3-flashx", 1_000_000, 128_000),
+            ("ZHIPU/GLM-5.3-FlashX", 1_048_576, 131_072),
+            ("xiaomi/mimo-v2.6-pro-ultraspeed", 1_048_576, 131_072),
+            ("stepfun/step-5-preview", 1_048_576, 1_048_576),
+        ],
+    )
+    def test_current_models_keep_endpoint_specific_capacity(self, model, window, output):
+        config = get_context_window_config(model)
+        assert (config.context_window, config.max_output_tokens) == (window, output)
+
     def test_claude_model(self):
         config = get_context_window_config("claude-3-opus")
         assert config.context_window == 200_000

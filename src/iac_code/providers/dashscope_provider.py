@@ -169,9 +169,16 @@ class DashScopeProvider(OpenAIProvider):
             # original-vendor models always think and reject that switch, so
             # keep their server default by omitting the extension entirely.
             if not spec.supports_disable:
+                if spec.supports_effort:
+                    effort = self._effective_effort(spec)
+                    if effort is not None:
+                        selected = effort if effort in spec.effort_values else spec.default_effort_value
+                        return {"reasoning_effort": selected} if selected is not None else {}
                 return {}
             thinking_type = "disabled" if self._thinking_disabled() else "adaptive"
             return {"extra_body": {"thinking": {"type": thinking_type}}}
+        if spec.family is ThinkingFamily.OPENAI:
+            return super()._build_thinking_kwargs()
         if spec.family is not ThinkingFamily.DASHSCOPE:
             return {}
         effort = normalize_effort(self._effort)
@@ -183,7 +190,7 @@ class DashScopeProvider(OpenAIProvider):
                 return {"reasoning_effort": "none"}
             selected = effort if effort in allowed else spec.default_effort_value
             return {"reasoning_effort": selected} if selected is not None else {}
-        if self._model in {"kimi/kimi-k3", "qwen3.8-max-preview"}:
+        if self._model.startswith("kimi/kimi-k3") or self._model == "qwen3.8-max-preview":
             kwargs: dict[str, Any] = {"extra_body": {"preserve_thinking": True}}
             if self._thinking_disabled():
                 return kwargs

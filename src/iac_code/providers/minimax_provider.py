@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from iac_code.providers.anthropic_provider import AnthropicProvider
-from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec
+from iac_code.providers.thinking import ThinkingFamily, get_thinking_spec, normalize_effort
 
 
 class MiniMaxProvider(AnthropicProvider):
@@ -41,6 +41,16 @@ class MiniMaxProvider(AnthropicProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.MINIMAX:
             return {}
+        if spec.supports_effort:
+            kwargs: dict[str, Any] = {"thinking": {"type": "adaptive"}}
+            effort = normalize_effort(self._effort)
+            if effort in {None, "auto"}:
+                effort = spec.default_effort_value if self._thinking_forced() else None
+            if effort is not None:
+                selected = effort if effort in spec.effort_values else spec.default_effort_value
+                if selected is not None:
+                    kwargs["output_config"] = {"effort": selected}
+            return kwargs
         if self._thinking_disabled():
             return {"thinking": {"type": "disabled"}}
         if self._model == "MiniMax-M3":

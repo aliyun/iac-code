@@ -55,10 +55,12 @@ class TestProvidersMetadata:
             "qwen3.7-plus",
             "qwen3.6-flash",
             "deepseek-v4.1-flash",
+            "deepseek-v4.1-flash-1017",
             "deepseek-v4-pro",
             "deepseek-v4-pro-0813",
             "deepseek-v4-flash-0731",
             "glm-5.2",
+            "glm-5.3",
         ]
 
     def test_kimi_code_entry_exposes_k28_and_effort_models(self):
@@ -67,4 +69,11 @@ class TestProvidersMetadata:
         assert entry["display_name"] == "Kimi Code"
         assert entry["api_base"] == "https://api.kimi.com/coding/v1"
         assert entry["default_model"] == "kimi-for-coding"
-        assert entry["models"] == ["kimi-for-coding", "k3", "k3-256k", "kimi-for-coding-highspeed"]
+        assert entry["models"] == [
+            "kimi-for-coding",
+            "k3.1-pro",
+            "k3.1-pro-highspeed",
+            "k3",
+            "k3-256k",
+            "kimi-for-coding-highspeed",
+        ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -151,7 +152,7 @@ class AnthropicProvider(Provider):
                     f"Anthropic thinking cannot be disabled for {self._model} at {effort} effort; use high or lower"
                 )
             if spec.supports_disable:
-                kwargs["thinking"] = {"type": "disabled"}
+                kwargs["thinking"] = {"type": spec.disabled_thinking_type}
         elif not spec.adaptive_always_on and (effort is not None or self._thinking_forced()):
             kwargs["thinking"] = {"type": "adaptive"}
         if effort is None:
@@ -207,6 +208,7 @@ class AnthropicProvider(Provider):
         max_tokens: int = 8192,
     ) -> AsyncGenerator[StreamEvent, None]:
         kwargs = self._build_kwargs(messages, system, tools, max_tokens)
+        prefix_metadata = self._request_prefix_metadata(kwargs)
 
         log_provider_request_policy(
             self._PROVIDER_KEY,
@@ -240,7 +242,7 @@ class AnthropicProvider(Provider):
                         initial_thinking = getattr(block, "thinking", "") or ""
                         signature = getattr(block, "signature", "") or ""
                         if initial_thinking or signature:
-                            metadata = self._provider_metadata()
+                            metadata = self._provider_metadata(**prefix_metadata)
                             if signature:
                                 metadata["signature"] = signature
                             yield ThinkingDeltaEvent(
@@ -254,7 +256,7 @@ class AnthropicProvider(Provider):
                             text="",
                             block_index=block_index,
                             block_type="redacted_thinking",
-                            provider_metadata=self._provider_metadata(data=data),
+                            provider_metadata=self._provider_metadata(data=data, **prefix_metadata),
                         )
 
                 elif event.type == "content_block_delta":
@@ -276,7 +278,7 @@ class AnthropicProvider(Provider):
                         yield ThinkingDeltaEvent(
                             text="",
                             block_index=block_index,
-                            provider_metadata=self._provider_metadata(signature=delta.signature),
+                            provider_metadata=self._provider_metadata(signature=delta.signature, **prefix_metadata),
                         )
 
                 elif event.type == "content_block_stop":
@@ -308,6 +310,7 @@ class AnthropicProvider(Provider):
         cache_policy: str = "default",
     ) -> NonStreamingResponse:
         kwargs = self._build_kwargs(messages, system, tools, max_tokens)
+        prefix_metadata = self._request_prefix_metadata(kwargs)
         log_provider_request_policy(
             self._PROVIDER_KEY,
             self._model,
@@ -328,7 +331,7 @@ class AnthropicProvider(Provider):
             elif block.type == "thinking":
                 thinking = block.thinking or ""
                 thinking_parts.append(thinking)
-                metadata = self._provider_metadata()
+                metadata = self._provider_metadata(**prefix_metadata)
                 signature = getattr(block, "signature", "") or ""
                 if signature:
                     metadata["signature"] = signature
@@ -338,7 +341,7 @@ class AnthropicProvider(Provider):
                 thinking_blocks.append(
                     {
                         "type": "redacted_thinking",
-                        "provider_metadata": self._provider_metadata(data=data),
+                        "provider_metadata": self._provider_metadata(data=data, **prefix_metadata),
                     }
                 )
 
@@ -367,14 +370,15 @@ class AnthropicProvider(Provider):
         effective_max_tokens = self._adjust_max_tokens(max_tokens)
 
         model_id, extra_betas = self._wire_model()
+        api_tools = self._convert_tools(tools) if tools else None
         kwargs: dict[str, Any] = {
             "model": model_id,
             "max_tokens": effective_max_tokens,
             "system": system,
-            "messages": self._convert_messages(messages),
+            "messages": self._convert_messages(messages, system=system, tools=api_tools),
         }
         if tools:
-            kwargs["tools"] = self._convert_tools(tools)
+            kwargs["tools"] = api_tools
         kwargs.update(thinking_kwargs)
         provider_headers = {"anthropic-beta": ",".join(extra_betas)} if extra_betas else {}
         headers = merge_provider_request_headers(provider_headers, get_provider_request_headers())
@@ -382,11 +386,15 @@ class AnthropicProvider(Provider):
             kwargs["extra_headers"] = headers
         return kwargs
 
-    def _convert_messages(self, messages: list[Message]) -> list[dict[str, Any]]:
+    def _convert_messages(
+        self, messages: list[Message], *, system: str | None = None, tools: list[dict[str, Any]] | None = None
+    ) -> list[dict[str, Any]]:
         """Convert internal ``Message`` list to Anthropic API format."""
         result: list[dict[str, Any]] = []
+        binding = system is not None and get_thinking_spec(self._PROVIDER_KEY, self._model).bind_thinking_to_prefix
         for msg in messages:
-            content = self._convert_message_content(msg.content)
+            prefix = self._thinking_prefix(system, tools, result) if binding else None
+            content = self._convert_message_content(msg.content, prefix=prefix)
             if isinstance(content, list) and not content:
                 continue
             converted = {"role": msg.role, "content": content}
@@ -396,13 +404,37 @@ class AnthropicProvider(Provider):
                 result.append(converted)
         return result
 
-    def _convert_message_content(self, content: Any) -> Any:
+    def _convert_message_content(self, content: Any, *, prefix: str | None = None) -> Any:
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            converted = [self._convert_content_block(block) for block in content]
+            converted = [
+                self._convert_content_block(block)
+                for block in content
+                if prefix is None
+                or block.type not in {"thinking", "redacted_thinking"}
+                or block.provider_metadata.get("prefix") == prefix
+            ]
             return [block for block in converted if block is not None]
         return content
+
+    @staticmethod
+    def _thinking_prefix(system: str | None, tools: Any, messages: Any) -> str:
+        # Claude 5.5 binds signed thinking to its preceding system/tools/history.
+        # A local digest lets compaction or tool changes drop stale blocks without
+        # enabling a beta API or exposing the original prefix in metadata.
+        prefix = json.dumps(
+            {"system": system, "tools": tools, "messages": messages},
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(prefix.encode("utf-8")).hexdigest()
+
+    def _request_prefix_metadata(self, kwargs: dict[str, Any]) -> dict[str, str]:
+        if not get_thinking_spec(self._PROVIDER_KEY, self._model).bind_thinking_to_prefix:
+            return {}
+        return {"prefix": self._thinking_prefix(kwargs["system"], kwargs.get("tools"), kwargs["messages"])}
 
     @classmethod
     def _merge_message_content(cls, left: Any, right: Any) -> str | list[dict[str, Any]]:

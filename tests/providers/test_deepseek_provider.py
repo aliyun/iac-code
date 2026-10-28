@@ -202,11 +202,10 @@ class TestProviderDefinitions:
         deepseek = next(p for p in PROVIDERS if p["name"] == "DeepSeek")
         assert deepseek["key_name"] == "deepseek"
         assert deepseek["api_base"] == DEEPSEEK_BASE_URL
-        assert deepseek["default_model"] == "deepseek-v4-flash"
+        assert deepseek["default_model"] == "deepseek-flash"
         assert set(deepseek["models"]) == {
-            "deepseek-v4-flash",
+            "deepseek-flash",
             "deepseek-v4-pro",
-            "deepseek-v4-flash-vision-exp",
         }
 
     def test_deepseek_model_capabilities(self):
