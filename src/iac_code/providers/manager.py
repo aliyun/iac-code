@@ -368,6 +368,28 @@ def _error_event_from_exception(exc: BaseException) -> ErrorEvent:
 
 
 MODEL_FALLBACK_MAP = {
+    "claude-opus-5-5": "claude-sonnet-5-5",
+    "claude-sonnet-5-5": "claude-haiku-5-5",
+    "claude-haiku-5-5": "claude-haiku-4-5-20251001",
+    "gpt-6.1-sol": "gpt-6.1-terra",
+    "gpt-6.1-terra": "gpt-6-luna",
+    "kimi-k3.1-pro": "kimi-k3",
+    "kimi-k3.1-pro-highspeed": "kimi-k3.1-pro",
+    "glm-5.3-flashx": "glm-5.3-flash",
+    "MiniMax-M3.1-Flash": "MiniMax-M3",
+    "MiniMax/MiniMax-M3.1-Flash": "MiniMax/MiniMax-M3",
+    "kimi/kimi-k3.1-pro": "kimi/kimi-k3",
+    "kimi/kimi-k3.1-pro-highspeed": "kimi/kimi-k3.1-pro",
+    "xiaomi/mimo-v2.6-pro-ultraspeed": "qwen3.8-flash",
+    "stepfun/step-5-preview": "stepfun/step-3.7-flash",
+    "doubao-seed-evolving": "doubao-seed-2-1-pro-260915",
+    "doubao-seed-2-1-pro-260915": "doubao-seed-2-1-lite-260915",
+    "doubao-seed-2-1-turbo-260628": "doubao-seed-2-1-lite-260915",
+    "deepseek-v4-1-flash-261017": "deepseek-v4-1-flash-economy-261017",
+    "deepseek-v4-1-flash-economy-261017": "doubao-seed-2-1-lite-260915",
+    "deepseek-v4-pro-ga-260813": "deepseek-v4-flash-ga-260731",
+    "glm-5-3-flash-260828": "doubao-seed-2-1-lite-260915",
+    "kimi-k3-1-pro-261024": "doubao-seed-2-1-pro-260915",
     "claude-fable-5": "claude-opus-4-8",
     "claude-opus-5": "claude-opus-4-8",
     "claude-opus-4-8": "claude-sonnet-5",
@@ -379,6 +401,7 @@ MODEL_FALLBACK_MAP = {
     "gpt-5.6-sol": "gpt-5.6-terra",
     "gpt-5.6": "gpt-5.6-terra",
     "gpt-5.6-terra": "gpt-5.6-luna",
+    "o4-mini": "gpt-5.6-terra",
     "gpt-5.5": "gpt-5.4",
     "gpt-5.4": "gpt-5.4-mini",
     "qwen3.8-max": "qwen3.7-plus",
@@ -399,7 +422,7 @@ MODEL_FALLBACK_MAP = {
     "deepseek-v4-pro": "deepseek-v4-flash",
     "deepseek-v4-pro-0813": "deepseek-v4-pro",
     "deepseek-v4-flash-0731": "deepseek-v4-flash",
-    "xiaomi/mimo-v2.5-pro": "qwen3.8-flash",
+    "xiaomi/mimo-v2.5-pro": "xiaomi/mimo-v2.6-pro-ultraspeed",
     "stepfun/step-3.7-flash": "qwen3.8-flash",
 }
 
@@ -411,6 +434,10 @@ _MODEL_REFUSAL_FALLBACK_MAP = {
 
 _PROVIDER_MODEL_FALLBACK_MAP = {
     "dashscope": {
+        "deepseek-v4.1-flash-1017": "deepseek-v4.1-flash",
+        "vanchin/deepseek-v4.1-flash": "deepseek-v4.1-flash-1017",
+        "ZHIPU/GLM-5.3-FlashX": "ZHIPU/GLM-5.3-Flash",
+        "glm-5.3": "glm-5.2",
         "qwen3.8-max-0902": "qwen3.8-max",
         "qwen3.8-flash": "qwen3.7-flash",
         "deepseek-v4.1-flash": "qwen3.8-flash",
@@ -418,6 +445,8 @@ _PROVIDER_MODEL_FALLBACK_MAP = {
         "qwen3.6-plus": "qwen3.6-flash",
     },
     "dashscope_token_plan": {
+        "deepseek-v4.1-flash-1017": "deepseek-v4.1-flash",
+        "glm-5.3": "glm-5.2",
         "qwen3.8-flash": "qwen3.6-flash",
         # Keep retry compatibility for sessions saved before qwen3.6-plus
         # left the current Token Plan selector catalog.
@@ -428,15 +457,36 @@ _PROVIDER_MODEL_FALLBACK_MAP = {
         "glm-5.2": "qwen3.6-flash",
     },
     "anthropic": {"claude-fable-5-1": "claude-fable-5"},
-    "gemini": {"gemini-3.8-flash": "gemini-3.7-flash"},
-    "openai": {"gpt-6-astra": "gpt-5.6-sol"},
+    "gemini": {
+        "gemini-4-argon": "gemini-3.8-flash",
+        "gemini-3.8-flash": "gemini-3.6-flash",
+        "gemini-3.7-flash": "gemini-3.8-flash",
+        "gemini-3.5-flash": "gemini-3.6-flash",
+    },
+    "openai": {"gpt-6-astra": "gpt-6.1-sol"},
+    "deepseek": {
+        "deepseek-v4-pro": "deepseek-flash",
+        "deepseek-v4-flash": "deepseek-flash",
+        "deepseek-v4-flash-vision-exp": "deepseek-flash",
+    },
     "kimi_code": {
+        "k3.1-pro": "k3",
+        "k3.1-pro-highspeed": "k3.1-pro",
         "k3": "kimi-for-coding",
         "k3-256k": "kimi-for-coding",
         "kimi-for-coding-highspeed": "kimi-for-coding",
     },
-    "aliyun_codingplan": {"qwen3.6-plus": "qwen3.5-plus"},
-    "aliyun_codingplan_intl": {"qwen3.6-plus": "qwen3.5-plus"},
+    "aliyun_codingplan": {"qwen3.7-plus": "qwen3.6-plus", "qwen3.6-plus": "qwen3.5-plus"},
+    "aliyun_codingplan_intl": {"qwen3.7-plus": "qwen3.6-plus", "qwen3.6-plus": "qwen3.5-plus"},
+    "volcengine_cn_codingplan": {
+        "kimi-k3": "kimi-k2.8-preview",
+        "doubao-seed-evolving": "doubao-seed-2.1-pro",
+        "doubao-seed-2.1-pro": "doubao-seed-2.1-lite",
+        "doubao-seed-2.1-lite": "doubao-seed-2.0-mini",
+        "deepseek-v4.1-flash": "deepseek-v4.1-flash-economy",
+        "deepseek-v4.1-flash-economy": "doubao-seed-2.1-lite",
+        "glm-5.3-flash": "doubao-seed-2.1-lite",
+    },
 }
 
 _LEGACY_DISABLE_EFFORTS = {"none", "off", "disable", "disabled", "false", "0"}
@@ -588,8 +638,8 @@ def create_provider(
         if not issubclass(provider_cls, OpenAIProvider):
             raise ResponsesConfigurationError("Responses API requires an OpenAI-style provider.")
         validate_responses_endpoint(effective_base_url)
-        uses_dashscope_responses = (
-            wire_provider_key in DASHSCOPE_WIRE_PROVIDER_KEYS or is_bailian_compatible_endpoint(effective_base_url)
+        uses_dashscope_responses = wire_provider_key in DASHSCOPE_WIRE_PROVIDER_KEYS or is_bailian_compatible_endpoint(
+            effective_base_url
         )
         responses_cls = DashScopeResponsesProvider if uses_dashscope_responses else ResponsesProvider
     elif _should_use_qwen_provider(provider_cls, model):

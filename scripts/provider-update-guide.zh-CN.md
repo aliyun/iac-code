@@ -566,3 +566,83 @@ git diff HEAD -- iac-code-rs
 | MiniMax 直连 / 百炼原厂直供 | MiniMax 中国/国际直连仍以 `MiniMax-M3` 为默认。百炼原厂直供使用带命名空间的 `MiniMax/MiniMax-M3`、`MiniMax/MiniMax-M2.7`、`MiniMax/MiniMax-M2.5`、`MiniMax/MiniMax-M2.1`，不能与直连 `MiniMax-*` 混用；百炼 `MiniMax/MiniMax-M3` 的多模态、adaptive thinking 和 1,048,576 context 必须按其模型信息页单独声明 | `registry.py`、`thinking.py`、`minimax_provider.py`、context/telemetry 与目录测试 | [MiniMax official models](https://platform.minimax.io/docs/guides/models-intro)、[百炼 MiniMax M3](https://help.aliyun.com/zh/model-studio/minimax-m3) |
 | 百炼智谱直供 | `ZHIPU/GLM-5.3-Flash` 原生支持 Image、Video、File 输入；当前附件适配器可发送其支持的 Base64 Data URL，因此必须声明图片能力。其 fallback 也必须保持图片能力，不能降级到纯文本 `ZHIPU/GLM-5.3` | `registry.py`、`manager.py`、multimodal capability 与 fallback 测试 | [ZHIPU/GLM-5.3-Flash](https://help.aliyun.com/zh/model-studio/glm-5-3-flash-by-zhipu) |
 | 终端 / Web effort 交互 | effort 选择器统一消费 provider/model capability 的标准枚举，Web 设置接口和会话选择器同步支持；若未来出现超长范围，则按前文使用可滚动选择器或分组子菜单。新增 `ultra` 后补齐 `messages` 与 `webui` 的全部 locale 翻译，并对 Web 静态模块更新 cache-bust token | `commands/effort.py`、`ui/dialogs/model_picker.py`、`web/settings.py`、`web/static/`、两套翻译域及终端/Web 回归测试 | 仓库 UI/i18n 约束与上述逐端点能力证据 |
+
+### 2026-10-28 全量复核
+
+基线为 `50b15774` 的 28 个 registry provider。以下表格逐 key 记录官方文档复核结果；所有行的核验日期
+均为 2026-10-28。此次未读取用户凭据、未调用真实模型或私有 Workspace；表中的可用性来自公开文档，
+不代表某个账号或套餐已经取得访问权限。需要账号授权的模型仍可通过自定义 model/base URL 配置。
+
+| provider_key | 原目录/默认项 | 区域、端点与官方目录复核 | 决定及证据 |
+| --- | --- | --- | --- |
+| dashscope | Qwen3.8、DeepSeek V4.1、Kimi K3、GLM5.3、MiniMax M3 | 北京公共兼容端点与 `{WorkspaceId}.cn-beijing.maas.aliyuncs.com/compatible-mode/v1`；新增托管快照、原厂直供模型各自核验 | 加入 `deepseek-v4.1-flash-1017`、`glm-5.3`、`ZHIPU/GLM-5.3-FlashX`、`MiniMax/MiniMax-M3.1-Flash`、`xiaomi/mimo-v2.6-pro-ultraspeed`、`stepfun/step-5-preview`、`vanchin/deepseek-v4.1-flash`、两款 `kimi/kimi-k3.1-pro*`；移除已下线 MiMo 2.5，保留 Qwen 默认。[模型目录](https://help.aliyun.com/zh/model-studio/model-list-text-generation/)、[更新记录](https://help.aliyun.com/zh/model-studio/newly-released-models) |
+| dashscope_token_plan | qwen3.8-max | 北京 Token Plan 独立目录 | 加入 `deepseek-v4.1-flash-1017`、`glm-5.3`；保持默认，不复制标准百炼第三方命名空间模型。[个人版目录](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview) |
+| openai | gpt-5.6-sol | 官方 Responses；6.1 两款均须用 Responses 调工具 | 加入 `gpt-6.1-sol`、`gpt-6.1-terra`，默认升级到保持 Sol 工作定位的 `gpt-6.1-sol`，保留 GPT-6 Astra 旗舰选择。[模型页](https://developers.openai.com/api/docs/models/gpt-6.1-sol)、[Terra](https://developers.openai.com/api/docs/models/gpt-6.1-terra)、[迁移指南](https://developers.openai.com/api/docs/guides/latest-model) |
+| anthropic | claude-fable-5-1 | 官方 Messages；新增三款 5.5 | 加入 Opus/Sonnet/Haiku 5.5，维持 Fable 旗舰默认；补齐各自默认 effort 和关闭语义。[目录](https://platform.claude.com/docs/en/models/overview)、[effort](https://platform.claude.com/docs/en/build-with-claude/effort) |
+| deepseek | deepseek-v4-flash | `https://api.deepseek.com/v1`；新版 Flash 统一 API ID | 默认改为带视觉能力的 `deepseek-flash`；旧 Flash ID 只留兼容配置和遥测。[模型与别名](https://api-docs.deepseek.com/quick_start/pricing/)、[思考](https://api-docs.deepseek.com/guides/thinking_mode/)、[视觉](https://api-docs.deepseek.com/guides/vision/) |
+| openai_compatible | 自定义目录 | 用户配置的 Chat/Responses 端点 | 已核验、无静态目录变更；不将 OpenAI 官方的新模型限制外推到自定义端点。[Chat](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)、[Responses](https://developers.openai.com/api/reference/resources/responses/methods/create) |
+| anthropic_compatible | 自定义目录 | 用户配置的 Messages 端点 | 已核验、无静态目录变更；保留自定义 ID。[Messages](https://platform.claude.com/docs/en/api/messages) |
+| gemini | gemini-3.8-flash | Google OpenAI 兼容 Chat；新增稳定版 `gemini-4-argon` | 加入 Argon；保持 Flash 默认定位。3.7/3.5 Flash 已成为自动转发别名，从选择器移除、兼容配置保留。[Argon](https://ai.google.dev/gemini-api/docs/models/gemini-4-argon)、[兼容接口](https://ai.google.dev/gemini-api/docs/openai)、[生命周期](https://ai.google.dev/gemini-api/docs/deprecations) |
+| kimi_cn | kimi-k3 | 中国公共 Chat，和 Kimi Code 单独建模 | 加入 `kimi-k3.1-pro`、`kimi-k3.1-pro-highspeed`，默认升级 Pro；公开目录为统一文档，未实测中国账号权限。[目录](https://platform.kimi.ai/docs/models)、[K3.1 API](https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart) |
+| kimi_intl | kimi-k3 | `https://api.moonshot.ai/v1` 公共 Chat | 同样登记两款公共 API 精确 ID，默认 Pro。[K3.1 API](https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart) |
+| kimi_code | kimi-for-coding | `https://api.kimi.com/coding/v1`；套餐版 ID 与公共 API 不同 | 加入 `k3.1-pro`、`k3.1-pro-highspeed`；套餐权限存在差异，保留现有默认。[套餐规格与接口](https://www.kimi.com/code/docs/kimi-code/models.html) |
+| minimax_cn | MiniMax-M3 及 M2.x | 中国 Anthropic 兼容接口当前只列 M3.1 Flash/M3 | 加入并默认 `MiniMax-M3.1-Flash`，选择器移除 M2.x；既有自定义配置仍可读取。[中国接口](https://platform.minimax.cn/docs/api-reference/text-anthropic-api) |
+| minimax_intl | MiniMax-M3 及 M2.x | `https://api.minimax.io/anthropic`；独立核对国际文档 | 同样升级默认并收敛到该协议支持的 M3 系列。[国际接口](https://platform.minimax.io/docs/api-reference/text-anthropic-api) |
+| zhipu_cn | glm-5.3 | 中国 Model API；FlashX 已上线 | 加入多模态 `glm-5.3-flashx`，默认不变；企业申请制 Legal 不收录。[中国模型页](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash) |
+| zhipu_intl | glm-5.3 | 国际 Model API | 加入 `glm-5.3-flashx`，默认不变。[国际模型页](https://docs.z.ai/guides/vlm/glm-5.3-flash) |
+| volcengine_cn | Seed 2.0 Code Preview | 标准 `/api/v3` 使用带日期、连字符的 Model ID | 加入 Seed Evolving、2.1、当前托管 DeepSeek/GLM/Kimi；移除即将下线的 Code Preview 默认，默认 Evolving。[标准目录](https://console.volcengine.com/ark/region:cn-beijing/docs/model-list)、[思考协议](https://console.volcengine.com/ark/region:cn-beijing/docs/deep-thinking) |
+| siliconflow_cn | 动态/自定义目录 | 中国 `/v1/models` 按账号返回可用模型 | 已核验、保持动态目录，不复制厂商直连 ID。[中国模型接口](https://docs.siliconflow.cn/docs/api/models-get) |
+| siliconflow_intl | 动态/自定义目录 | 国际 `/v1/models` | 已核验、保持动态目录。[国际模型接口](https://docs.siliconflow.com/en/api-reference/models/get-model-list) |
+| ollama | 本机安装模型 | 本地 OpenAI 兼容 API | 已核验、无静态目录变更；模型取决于安装情况。[本地协议](https://docs.ollama.com/api/openai-compatibility) |
+| lmstudio | 本机加载模型 | 本地 OpenAI 兼容 API | 已核验、无静态目录变更。[本地协议](https://lmstudio.ai/docs/developer/openai-compat) |
+| openrouter | 动态/自定义目录 | 聚合平台模型 ID 和可用路由 | 已核验、保持动态目录。[模型接口](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties) |
+| azure_openai | 用户 deployment | Azure v1；部署名由用户创建 | 已核验、保持空静态目录，不复制 OpenAI ID。[部署文档](https://learn.microsoft.com/en-us/azure/foundry-classic/openai/how-to/create-resource?view=foundry-classic) |
+| modelscope | Qwen/Qwen3.5-122B-A10B | ModelScope 模型页决定 API-Inference 可用性 | 新版模型页为动态内容，未取得新 ID 的推理可用性证据，保留当前目录；不从权重发布推断托管服务。[API-Inference](https://www.modelscope.cn/docs/model-service/API-Inference/intro)、[现有模型](https://modelscope.cn/models/Qwen/Qwen3.5-122B-A10B) |
+| aliyun_codingplan | qwen3.6-plus | 北京 Coding Plan 当前精确目录 | 默认升级 `qwen3.7-plus`，按中国套餐页收敛到六款，不复制 Token Plan 或国际目录。[中国套餐](https://help.aliyun.com/zh/model-studio/coding-plan) |
+| aliyun_codingplan_intl | qwen3.6-plus | 国际 Coding Plan 另列旧 coder/GLM 等模型 | 默认升级 `qwen3.7-plus`，保留国际支持项并补 `qwen3-max-2026-01-23`。[国际套餐](https://www.alibabacloud.com/help/en/model-studio/coding-plan) |
+| zhipu_cn_codingplan | glm-5.3 | 中国 Coding Plan 暂不开放 FlashX | 已核验、目录无变化；不复制标准 API 的 FlashX。[中国套餐边界](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash) |
+| zhipu_intl_codingplan | glm-5.3 | 国际 Coding Plan 暂不开放 FlashX | 已核验、目录无变化。[国际套餐边界](https://docs.z.ai/guides/vlm/glm-5.3-flash) |
+| volcengine_cn_codingplan | Seed 2.0 日期 ID、旧第三方模型 | `/api/coding/v3` 使用 `doubao-seed-2.1-pro` 等套餐别名 | 按当前套餐精确列表更新，默认 Evolving；禁止把标准日期 ID 填入套餐列表。[套餐配置](https://console.volcengine.com/ark/region:cn-beijing/docs/coding-plan-personal-get-started) |
+
+新增模型的端点级能力与实现约束：
+
+- GPT-6.1 Sol 为 1,050,000/128,000，effort 为 `low/medium/high/xhigh/max`、默认 `medium`；
+  Terra 另接受 `none`。两者默认 Responses，Chat 工具 effort 集合为空。Sol → Terra → Luna
+  在同一 provider 内降级；Azure 和自定义网关不继承工具限制。
+  `o4-mini` 已于 2026-10-23 下线，从可选目录移除，旧配置保留能力声明与到 `gpt-5.6-terra`
+  的降级映射；`o3` 尚未到下线日期，保留为非默认项。[官方弃用公告](https://developers.openai.com/api/docs/deprecations)。
+- Claude 5.5 三款均为 1,000,000/128,000，effort 为五档。Opus 默认 `medium` 且始终思考；
+  Sonnet 默认 `high`，关闭前置思考必须用 `between_tools`；Haiku 默认 `medium`，用 `disabled`。
+  Sonnet/Haiku 在 `xhigh/max` 下不接受关闭。签名按 provider、endpoint、model 隔离保存；
+  另保存请求前缀的摘要，system、tools 或历史被压缩/修改后丢弃失效思考块，保留正文与工具轮次。
+  模型和前缀绑定见 [5.5 变更说明](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5)。
+- Gemini 4 Argon 的 1,048,576 是输入、思考和输出共享窗口；当前同步 Chat adapter 的输出上限为
+  65,536，不能把原生后台长解码的 1M 上限用在这里。UI effort 仅展示 `low/medium/high`，默认
+  `medium`；兼容接口将 `minimal` 映射到 `low`，不作为额外 UI 档位。
+- 公共 Kimi K3.1 的 effort 为 `low/high/max`、默认 `max`，仅思考，支持 Base64 图片；
+  Kimi Code 同名系列的默认为 `high`，ID 不含 `kimi-`。百炼 `kimi/` 命名空间仅支持 `max`，
+  图片传输能力独立核验，未确认前保持纯文本选择标记。[百炼月之暗面接口](https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai)。
+- MiniMax M3.1 Flash 直连使用 `output_config.effort`，百炼使用 `reasoning_effort`；均为五档、
+  默认 `max`，不发送关闭思考字段。百炼不发送 `enable_thinking`；完整回传思考和工具历史。
+  已确认 1M context，最大输出未有端点级精确上限时维持保守值。
+- 百炼 `glm-5.3` 与 `ZHIPU/GLM-5.3-FlashX` 使用 `enable_thinking` 和 `low/high/max`，
+  不是 Z.AI 的 `thinking.type`。[托管 GLM](https://help.aliyun.com/zh/model-studio/glm)、
+  [智谱直供](https://help.aliyun.com/zh/model-studio/glm-zhipu)。Token Plan 仅新增其套餐列出的 ID。
+- `deepseek-v4.1-flash-1017`、`vanchin/deepseek-v4.1-flash` 各按端点文档登记三档
+  `low/high/max`、默认 `high`，不外推旧 Workspace 的七档结论。MiMo 2.6 取代 2026-10-21
+  已下线的 2.5，context/output 为 1,048,576/131,072；Step 5 Preview 为可选项，始终思考、
+  三档 effort，不成为默认。[MiniMax](https://help.aliyun.com/zh/model-studio/minimax-api-by-minimax)、
+  [MiMo](https://help.aliyun.com/zh/model-studio/mimo)、[Step](https://help.aliyun.com/zh/model-studio/stepfun)、
+  [万擎](https://help.aliyun.com/zh/model-studio/deepseek-api-by-vanchin)。
+- 火山 Seed Evolving/2.1 的 UI 档位为 `none/low/medium/high`，服务端另接受的映射值留在
+  transport。默认思考摘要伴随 `encrypted_content`，必须流式/非流式保存并按 provider、endpoint、
+  model 原样回传；不能把密文当作可见思考，也不能回传给其他模型或写进公开日志。
+  DeepSeek V4 的 `minimal/medium` 分别映射 `none/low`，V4.1 则映射 `low/high`，不能共用
+  同一别名表。Kimi K3.1 文档对 `none/minimal` 的关闭行为与“始终开启”说明存在冲突，当前仅展示
+  无争议的 `low/high/max`，不声明关闭能力；需端点实测后再扩展。
+
+验证记录：首次 `make test` 为 20,914 passed、173 skipped、14 failed：一项旧多模态目录断言未同步，
+另 13 项因新 worktree 缺少本地 `messages.pot`。同步断言并按 Makefile 的提取参数生成该忽略文件后，
+最终完整重跑为 **20,942 passed、172 skipped**（Python 3.14），`make lint` 的 ruff/ty 均通过。
+独立 Python 3.10 环境的 provider、context 和 multimodal 回归为 **1,280 passed**。本次没有真实 API
+smoke test；新 model ID 的公开文档核验、离线协议测试与账号实际可用性仍是不同证据层级。

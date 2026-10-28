@@ -60,6 +60,30 @@ def test_get_providers_returns_capabilities_and_active_summary_without_secret(mo
     assert "sk-" not in response.text
 
 
+def test_current_models_and_thinking_defaults_are_available_through_web_api(monkeypatch, tmp_path):
+    with TestClient(_app(monkeypatch, tmp_path)) as client:
+        response = client.get("/api/providers")
+    assert response.status_code == 200
+    providers = {p["key"]: p for p in response.json()["providers"]}
+    for key, model, effort in (
+        ("openai", "gpt-6.1-sol", "medium"),
+        ("anthropic", "claude-haiku-5-5", "medium"),
+        ("gemini", "gemini-4-argon", "medium"),
+        ("kimi_cn", "kimi-k3.1-pro", "max"),
+        ("minimax_cn", "MiniMax-M3.1-Flash", "max"),
+        ("volcengine_cn", "doubao-seed-evolving", "high"),
+    ):
+        entry = next(m for m in providers[key]["models"] if m["id"] == model)
+        assert entry["supportsMultimodal"] is True
+        assert entry["defaultEffort"] == effort
+        assert entry["thinkingDefault"] is True
+        assert "ultra" not in entry["efforts"]
+    assert providers["openai"]["defaultModel"] == "gpt-6.1-sol"
+    assert providers["deepseek"]["defaultModel"] == "deepseek-flash"
+    assert providers["aliyun_codingplan"]["defaultModel"] == "qwen3.7-plus"
+    assert "glm-5.3-flashx" not in [m["id"] for m in providers["zhipu_intl_codingplan"]["models"]]
+
+
 def test_put_active_provider_persists_fake_values_and_exposes_saved_key_for_local_view(monkeypatch, tmp_path) -> None:
     app = _app(monkeypatch, tmp_path)
 
@@ -861,6 +885,8 @@ def test_kimi_code_payload_exposes_k28_models_and_exact_efforts(_isolate_config)
     assert provider["defaultModel"] == "kimi-for-coding"
     assert [model["id"] for model in provider["models"]] == [
         "kimi-for-coding",
+        "k3.1-pro",
+        "k3.1-pro-highspeed",
         "k3",
         "k3-256k",
         "kimi-for-coding-highspeed",
@@ -870,6 +896,9 @@ def test_kimi_code_payload_exposes_k28_models_and_exact_efforts(_isolate_config)
     assert by_id["kimi-for-coding"]["defaultEffort"] == "max"
     assert by_id["k3"]["efforts"] == ["low", "high", "max"]
     assert by_id["k3"]["defaultEffort"] == "high"
+    assert by_id["k3.1-pro"]["efforts"] == ["low", "high", "max"]
+    assert by_id["k3.1-pro"]["defaultEffort"] == "high"
+    assert by_id["k3.1-pro-highspeed"]["thinkingDefault"] is True
     assert by_id["k3-256k"]["defaultEffort"] == "high"
     assert by_id["kimi-for-coding-highspeed"]["efforts"] == []
     assert by_id["kimi-for-coding-highspeed"]["thinkingDefault"] is True
@@ -907,7 +936,7 @@ def test_model_payload_exposes_family_aware_thinking_default(_isolate_config):
         return next((m for m in entry["models"] if m["default"]), entry["models"][0])
 
     assert _default_model("dashscope")["thinkingDefault"] is True
-    assert _default_model("openai")["thinkingDefault"] is False
+    assert _default_model("openai")["thinkingDefault"] is True
 
 
 def test_model_payload_reflects_thinking_budget_capability(_isolate_config):

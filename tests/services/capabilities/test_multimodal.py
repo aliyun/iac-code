@@ -49,7 +49,7 @@ def test_builtin_set_includes_registry_flagged_models():
     assert "gemini-2.5-pro" in builtin
     assert "qwen3.6-plus" in builtin
     assert "kimi-k2.6" in builtin
-    assert "deepseek-v4-flash-vision-exp" in builtin
+    assert "deepseek-flash" in builtin
     assert "ZHIPU/GLM-5.3-Flash" in builtin
     assert "kimi-for-coding" in builtin
     assert "k3-256k" in builtin

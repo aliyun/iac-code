@@ -62,7 +62,7 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
         "MiniMax/MiniMax-M2.5",
         "MiniMax/MiniMax-M2.1",
         "MiniMax-M2.5",
-        "xiaomi/mimo-v2.5-pro",
+        "xiaomi/mimo-v2.6-pro-ultraspeed",
         "stepfun/step-3.7-flash",
     ):
         assert model_id in models
@@ -99,7 +99,8 @@ def test_dashscope_models_match_researched_bailian_catalog() -> None:
     ):
         assert _model_entry("dashscope", model_id).support_multimodal
     assert not _model_entry("dashscope", "qwen3.8-2.4t-a95b").support_multimodal
-    assert not _model_entry("dashscope", "xiaomi/mimo-v2.5-pro").support_multimodal
+    assert "xiaomi/mimo-v2.5-pro" not in models
+    assert _model_entry("dashscope", "xiaomi/mimo-v2.6-pro-ultraspeed").support_multimodal
     assert not _model_entry("dashscope", "deepseek-v4-pro-0813").support_multimodal
     assert not _model_entry("dashscope", "ZHIPU/GLM-5.3").support_multimodal
     assert _model_entry("dashscope", "ZHIPU/GLM-5.3-Flash").support_multimodal
@@ -117,10 +118,12 @@ def test_dashscope_token_plan_uses_exact_supported_chat_models() -> None:
         "qwen3.7-plus",
         "qwen3.6-flash",
         "deepseek-v4.1-flash",
+        "deepseek-v4.1-flash-1017",
         "deepseek-v4-pro",
         "deepseek-v4-pro-0813",
         "deepseek-v4-flash-0731",
         "glm-5.2",
+        "glm-5.3",
     ]
 
     assert "glm-5-turbo" not in models
@@ -155,7 +158,7 @@ def test_openai_azure_anthropic_and_gemini_models_are_updated() -> None:
         assert responses_only_model not in _model_ids("openai")
         assert get_thinking_spec("openai", responses_only_model).family is ThinkingFamily.NONE
 
-    assert PROVIDER_REGISTRY["openai"].default_model == "gpt-5.6-sol"
+    assert PROVIDER_REGISTRY["openai"].default_model == "gpt-6.1-sol"
     gpt6 = get_thinking_spec("openai", "gpt-6-astra")
     assert gpt6.allowed_efforts == (
         EffortLevel.LOW,
@@ -190,7 +193,7 @@ def test_openai_azure_anthropic_and_gemini_models_are_updated() -> None:
 
     for model_id in (
         "gemini-3.8-flash",
-        "gemini-3.7-flash",
+        "gemini-4-argon",
         "gemini-3.6-flash",
         "gemini-3.5-flash-lite",
         "gemini-3.1-pro-preview-customtools",
@@ -210,7 +213,7 @@ def test_openai_azure_anthropic_and_gemini_models_are_updated() -> None:
 
 def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
     for provider_key in ("kimi_cn", "kimi_intl"):
-        assert PROVIDER_REGISTRY[provider_key].default_model == "kimi-k3"
+        assert PROVIDER_REGISTRY[provider_key].default_model == "kimi-k3.1-pro"
         assert "kimi-k3" in _model_ids(provider_key)
         assert "kimi-k2.7-code" in _model_ids(provider_key)
         assert "kimi-k2.7-code-highspeed" in _model_ids(provider_key)
@@ -223,7 +226,14 @@ def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
     kimi_code = PROVIDER_REGISTRY["kimi_code"]
     assert kimi_code.base_url == "https://api.kimi.com/coding/v1"
     assert kimi_code.default_model == "kimi-for-coding"
-    assert kimi_code.model_ids == ["kimi-for-coding", "k3", "k3-256k", "kimi-for-coding-highspeed"]
+    assert kimi_code.model_ids == [
+        "kimi-for-coding",
+        "k3.1-pro",
+        "k3.1-pro-highspeed",
+        "k3",
+        "k3-256k",
+        "kimi-for-coding-highspeed",
+    ]
     for model_id in kimi_code.model_ids:
         assert _model_entry("kimi_code", model_id).support_multimodal
         assert get_thinking_spec("kimi_code", model_id).family is ThinkingFamily.KIMI
@@ -238,7 +248,7 @@ def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
     assert get_thinking_spec("kimi_code", "kimi-for-coding-highspeed").supports_disable is False
 
     for provider_key in ("minimax_cn", "minimax_intl"):
-        assert PROVIDER_REGISTRY[provider_key].default_model == "MiniMax-M3"
+        assert PROVIDER_REGISTRY[provider_key].default_model == "MiniMax-M3.1-Flash"
         assert _model_entry(provider_key, "MiniMax-M3").support_multimodal
         assert "MiniMax-M2.1" not in _model_ids(provider_key)
         assert get_thinking_spec(provider_key, "MiniMax-M3").family is ThinkingFamily.MINIMAX
@@ -257,14 +267,14 @@ def test_direct_kimi_minimax_and_zhipu_models_are_updated() -> None:
 
 
 def test_direct_deepseek_uses_documented_v4_model_ids() -> None:
-    assert PROVIDER_REGISTRY["deepseek"].default_model == "deepseek-v4-flash"
+    assert PROVIDER_REGISTRY["deepseek"].default_model == "deepseek-flash"
     assert _model_ids("deepseek") == [
-        "deepseek-v4-flash",
+        "deepseek-flash",
         "deepseek-v4-pro",
-        "deepseek-v4-flash-vision-exp",
     ]
-    assert not _model_entry("deepseek", "deepseek-v4-flash").support_multimodal
-    assert _model_entry("deepseek", "deepseek-v4-flash-vision-exp").support_multimodal
+    assert _model_entry("deepseek", "deepseek-flash").support_multimodal
+    assert "deepseek-v4-flash" not in _model_ids("deepseek")
+    assert "deepseek-v4-flash-vision-exp" not in _model_ids("deepseek")
     assert get_thinking_spec("deepseek", "deepseek-v4-flash").family is ThinkingFamily.OPENAI
     assert get_thinking_spec("deepseek", "deepseek-v4-flash-vision-exp").family is ThinkingFamily.OPENAI
     assert "deepseek-v4.1-flash" not in _model_ids("deepseek")
@@ -530,7 +540,6 @@ def test_dashscope_new_model_protocols_are_not_flattened() -> None:
         api_key="k",
         effort="high",
     )._build_thinking_kwargs() == {
-        "extra_body": {"enable_thinking": True},
         "reasoning_effort": "high",
     }
 
