@@ -204,7 +204,10 @@ def decode_response(
         if item["type"] == "function_call":
             calls.append(_call(item, names))
         elif item["type"] == "reasoning":
-            thinking.extend(part.get("text", "") for part in item.get("summary", []) if isinstance(part, dict))
+            # OpenAI returns summary parts; DeepSeek returns plain reasoning
+            # content. The terminal text must match the reasoning_text deltas.
+            parts = item.get("summary") or item.get("content") or []
+            thinking.extend(part.get("text", "") for part in parts if isinstance(part, dict))
         else:
             for part in item.get("content", []):
                 if part.get("type") == "output_text":

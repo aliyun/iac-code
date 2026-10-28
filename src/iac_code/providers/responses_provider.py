@@ -61,7 +61,14 @@ class ResponsesProvider(OpenAIProvider):
             effort = "none"
         elif effort in {None, "auto"}:
             effort = spec.default_effort_value
-        if effort is not None and spec.effort_values and effort not in spec.effort_values:
+        else:
+            effort = dict(spec.effort_aliases).get(effort, effort)
+        if (
+            effort is not None
+            and spec.effort_values
+            and effort not in spec.effort_values
+            and effort != spec.responses_disable_effort
+        ):
             if effort == "none":
                 raise ResponsesConfigurationError(
                     "The selected reasoning effort is not supported by this Responses model."

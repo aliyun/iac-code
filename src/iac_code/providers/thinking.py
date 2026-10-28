@@ -86,6 +86,8 @@ class ThinkingSpec:
     disabled_thinking_type: str = "disabled"
     bind_thinking_to_prefix: bool = False
     effort_aliases: tuple[tuple[str, str], ...] = ()
+    # Responses can use an effort value where Chat uses a separate disable switch.
+    responses_disable_effort: str | None = None
 
     @property
     def supports_effort(self) -> bool:
@@ -385,6 +387,8 @@ _DEEPSEEK_SPEC = ThinkingSpec(
     _DEEPSEEK_EFFORTS,
     EffortLevel.HIGH,
     thinking_enabled_by_default=True,
+    effort_aliases=(("minimal", "low"), ("medium", "high"), ("xhigh", "high"), ("ultra", "max")),
+    responses_disable_effort="none",
 )
 _DASHSCOPE_DEEPSEEK_V41_SPEC = ThinkingSpec(
     ThinkingFamily.DASHSCOPE,
@@ -729,6 +733,7 @@ MODEL_THINKING: dict[str, dict[str, ThinkingSpec]] = {
             EffortLevel.MEDIUM,
             supports_disable=False,
             thinking_enabled_by_default=True,
+            effort_aliases=(("minimal", "low"),),
         ),
         "gemini-3.8-flash": ThinkingSpec(
             ThinkingFamily.GEMINI,
