@@ -224,6 +224,10 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
 - 仅在 CN/Intl 或套餐版协议完全一致时使用 `_THINKING_FALLBACK` 复用。
 - 未确认的组合应保持 `ThinkingFamily.NONE`，不要猜测“新版本应该兼容旧参数”。
 - 区分 UI 标准枚举与 wire alias；选择器只展示标准值，adapter 可按明确证据映射兼容 alias。
+- 使用 `ThinkingSpec.effort_aliases` 登记已核验的兼容值，并在 Chat 和 Responses 两条请求路径中
+  先映射再校验标准枚举；不能把 `minimal/ultra` 等合法 alias 静默回落到默认 effort。
+  当 Responses 的关闭值与 Chat 的独立开关不同，使用 `responses_disable_effort` 单独声明，
+  不必把协议专属的关闭值加入 UI effort 列表。
 - effort 超过可视阈值时，使用可滚动选择器或分组子菜单；终端和 Web 都要验证滚动、键盘选择及当前值回显。
 
 特别注意：能力声明只描述“支持什么”，实际请求格式由 provider adapter 组装。
@@ -672,3 +676,26 @@ smoke test；新 model ID 的公开文档核验、离线协议测试与账号实
 复查后的最终验证：完整 `make test` **20,954 passed、172 skipped**（Python 3.14）；独立 Python 3.10
 的 provider、agent 消息/循环及 Web 会话测试 **1,374 passed**；`make lint` 的 ruff/ty 通过，修改文件
 的格式检查和 `git diff --check` 通过。仍未调用真实模型 API。
+
+### 2026-10-28 最终复查
+
+在 `104e8350` 上补充检查协议切换与连续工具历史，发现并修正两类遗漏：
+
+- effort alias：Gemini 4 Argon 的 `minimal → low`，DeepSeek 直连的 `minimal → low`、
+  `medium/xhigh → high`、`ultra → max` 均在标准值校验前处理；Chat/Responses 共享已核验映射，
+  UI 仍只展示标准档位。不将 DeepSeek 直连映射外推到百炼或万擎。
+  [Gemini 兼容接口](https://ai.google.dev/gemini-api/docs/openai)、
+  [DeepSeek 思考参数](https://api-docs.deepseek.com/guides/thinking_mode/)
+- DeepSeek Responses：独立声明 `reasoning.effort=none` 的关闭能力；读取 `reasoning.content` 中的
+  明文思考，避免非流式漏掉内容或流式终帧因只读取 `summary` 而报协议不一致。用真实 OpenAI SDK
+  配合 HTTP MockTransport 验证流式/非流式两轮 Function Calling 和原生 reasoning item 回传，
+  不访问网络。默认 Chat 协议保持不变。
+  [DeepSeek Responses 文档](https://api-docs.deepseek.com/guides/responses_api/)
+
+修正前新增场景运行结果为 9 failed、18 passed。另已验证四款绑定思考签名的 Claude 模型经过三轮
+工具调用及会话 JSON 保存/恢复后，未修改的签名仍完整保留；并非靠清空所有 thinking 来避免报错。
+
+最终验证：完整 `make test` **20,971 passed、172 skipped**（Python 3.14）；同组聚焦回归在 Python
+3.14 与独立 Python 3.10 环境中均为 **1,402 passed**；ruff、ty、格式和 diff 检查通过。独立遍历
+28 个 provider 的 220 个目录项及其完整降级链，未发现重复 ID、多个默认项、循环或图片能力丢失。
+所有 SDK 请求均使用离线模拟，未调用真实模型 API。

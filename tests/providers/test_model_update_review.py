@@ -5,7 +5,7 @@ import pytest
 from iac_code.providers.anthropic_provider import AnthropicProvider
 from iac_code.providers.base import ContentBlock, Message
 from iac_code.providers.manager import create_provider
-from iac_code.providers.thinking import resolve_thinking_active
+from iac_code.providers.thinking import get_thinking_spec, resolve_thinking_active
 from iac_code.types.stream_events import ThinkingDeltaEvent
 from tests.providers._fakes import FakeAnthropicClient, ns
 
@@ -105,3 +105,166 @@ async def test_claude_drops_signed_thinking_when_its_own_assistant_turn_is_edite
     history[1] = Message(role="assistant", content=[blocks[1], blocks[0], blocks[2]])
     changed = provider._build_kwargs(history, "system", None, 8192)
     assert [block["type"] for block in changed["messages"][1]["content"]] == ["text", "tool_use"]
+
+
+@pytest.mark.parametrize("api_mode", ["chat_completions", "responses"])
+@pytest.mark.parametrize(
+    "effort,expected", [("minimal", "low"), ("medium", "high"), ("xhigh", "high"), ("ultra", "max")]
+)
+def test_deepseek_documented_effort_aliases_reach_both_api_surfaces(api_mode, effort, expected):
+    provider = create_provider(
+        "deepseek-flash",
+        {"deepseek": "fake"},
+        provider_key_override="deepseek",
+        provider_config_override={"models": {"deepseek-flash": {"apiMode": api_mode, "effort": effort}}},
+    )
+    if api_mode == "responses":
+        request = provider._build_responses_kwargs([Message.user("test")], "system", None, 8192, streaming=False)
+        assert request["reasoning"] == {"effort": expected}
+    else:
+        assert provider._build_thinking_kwargs() == {
+            "reasoning_effort": expected,
+            "extra_body": {"thinking": {"type": "enabled"}},
+        }
+
+
+def test_argon_minimal_alias_remains_low_instead_of_becoming_default_medium():
+    provider = create_provider(
+        "gemini-4-argon",
+        {"gemini": "fake"},
+        provider_key_override="gemini",
+        provider_config_override={"effort": "minimal"},
+    )
+    assert provider._build_thinking_kwargs() == {"reasoning_effort": "low"}
+
+
+@pytest.mark.parametrize("model", ["deepseek-flash", "deepseek-v4-pro"])
+def test_deepseek_responses_can_disable_thinking_without_adding_none_to_chat_efforts(model):
+    assert get_thinking_spec("deepseek", model).effort_values == ("low", "high", "max")
+    provider = create_provider(
+        model,
+        {"deepseek": "fake"},
+        provider_key_override="deepseek",
+        provider_config_override={"models": {model: {"apiMode": "responses", "thinkingEnabled": False}}},
+    )
+    request = provider._build_responses_kwargs([Message.user("test")], "system", None, 8192, streaming=False)
+    assert request["reasoning"] == {"effort": "none"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model", ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"])
+async def test_claude_keeps_valid_signatures_across_three_serialized_tool_turns(model):
+    from iac_code.agent.agent_loop import AgentLoop
+    from iac_code.agent.message import Message as AgentMessage
+    from iac_code.agent.message import TextBlock, ThinkingBlock, ToolUseBlock
+
+    client = FakeAnthropicClient()
+    provider = AnthropicProvider(model=model, client=client)
+    history = [Message.user("inspect template")]
+    for turn in range(3):
+        client.messages._create_response = ns(
+            id=f"message-{turn}",
+            content=[
+                ns(type="thinking", thinking="", signature=f"signed-{turn}"),
+                ns(type="text", text=f"turn {turn}"),
+                ns(type="tool_use", id=f"call-{turn}", name="read_file", input={"path": f"{turn}.tf"}),
+            ],
+            stop_reason="tool_use",
+            usage=ns(input_tokens=10, output_tokens=20),
+        )
+        response = await provider.complete(history, "system")
+        wire_assistants = [
+            message for message in client.messages.create_calls[-1]["messages"] if message["role"] == "assistant"
+        ]
+        assert [message["content"][0]["signature"] for message in wire_assistants] == [
+            f"signed-{previous}" for previous in range(turn)
+        ]
+        saved = AgentMessage(
+            role="assistant",
+            content=[
+                ThinkingBlock(thinking="", provider_metadata=response.thinking_blocks[0]["provider_metadata"]),
+                TextBlock(text=response.text),
+                ToolUseBlock(id=f"call-{turn}", name="read_file", input={"path": f"{turn}.tf"}),
+            ],
+        )
+        restored = AgentMessage.model_validate_json(saved.model_dump_json())
+        history.extend(
+            [
+                AgentLoop._provider_message_from_api(restored.to_api_format()),
+                Message.tool_result(tool_use_id=f"call-{turn}", content=f"result {turn}"),
+            ]
+        )
+    wire = provider._build_kwargs(history, "system", None, 8192)
+    assert (
+        sum(
+            block["type"] == "thinking"
+            for message in wire["messages"]
+            for block in message["content"]
+            if isinstance(block, dict)
+        )
+        == 3
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_deepseek_responses_plain_reasoning_survives_two_tool_turns_with_real_sdk(streaming):
+    import json
+
+    import httpx
+    from openai import AsyncOpenAI
+
+    from iac_code.providers.base import ToolDefinition
+    from iac_code.providers.responses_provider import ResponsesProvider
+    from iac_code.types.stream_events import ToolUseEndEvent
+    from tests.providers._responses_fakes import call, message, response, terminal
+
+    tools = [
+        ToolDefinition("lookup", "Look up a value", {"type": "object", "properties": {"value": {"type": "integer"}}})
+    ]
+    raw_reasoning = {
+        "type": "reasoning",
+        "id": "rs1",
+        "summary": [],
+        "content": [{"type": "reasoning_text", "text": "inspect"}],
+    }
+    first = response([raw_reasoning, call()])
+    second = response([message("done")])
+    requests = []
+
+    def handle(request):
+        requests.append(json.loads(request.content))
+        data = first if len(requests) == 1 else second
+        if not streaming:
+            return httpx.Response(200, json=data)
+        events = [{"type": "response.reasoning_text.delta", "delta": "inspect"}] if len(requests) == 1 else []
+        events.append(terminal(data))
+        body = "".join("data: " + json.dumps(event) + "\n\n" for event in events)
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, text=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as http_client:
+        async with AsyncOpenAI(api_key="fake", base_url="https://api.deepseek.com", http_client=http_client) as sdk:
+            provider = ResponsesProvider(model="deepseek-flash", provider_key="deepseek", client=sdk)
+            history = [Message.user("inspect template")]
+            if streaming:
+                events = [event async for event in provider.stream(history, "system", tools)]
+                assert "".join(event.text for event in events if isinstance(event, ThinkingDeltaEvent)) == "inspect"
+                assert any(isinstance(event, ToolUseEndEvent) for event in events)
+                result = events[-1]
+            else:
+                result = await provider.complete(history, "system", tools)
+                assert result.thinking == "inspect"
+            metadata = json.loads(json.dumps(result.provider_metadata))
+            history.extend(
+                [
+                    Message(role="assistant", metadata=metadata),
+                    Message.tool_result(tool_use_id="call1", content="found"),
+                ]
+            )
+            if streaming:
+                events = [event async for event in provider.stream(history, "system", tools)]
+                assert events[-1].stop_reason == "end_turn"
+            else:
+                result = await provider.complete(history, "system", tools)
+                assert result.text == "done"
+    assert [item for item in requests[1]["input"] if item.get("type") == "reasoning"] == [raw_reasoning]

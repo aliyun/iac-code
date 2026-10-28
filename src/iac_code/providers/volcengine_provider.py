@@ -73,8 +73,6 @@ class VolcengineProvider(OpenAIProvider):
         effort = self._effective_effort(spec)
         if effort is None:
             return {}
-        # Alias efforts are accepted only by this endpoint, never added to the UI.
-        effort = dict(spec.effort_aliases).get(effort, effort)
         selected = effort if effort in spec.effort_values else spec.default_effort_value
         return {"reasoning_effort": selected} if selected is not None else {}
 

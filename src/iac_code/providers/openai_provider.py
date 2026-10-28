@@ -193,7 +193,7 @@ class OpenAIProvider(Provider):
         effort = normalize_effort(self._effort)
         if effort in {None, "auto"}:
             return spec.default_effort.value if self._thinking_forced() and spec.default_effort is not None else None
-        return effort
+        return dict(spec.effort_aliases).get(effort, effort)
 
     def get_model_name(self) -> str:
         return self._model
