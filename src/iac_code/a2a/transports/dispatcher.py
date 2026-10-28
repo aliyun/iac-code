@@ -51,6 +51,12 @@ from iac_code.a2a.agent_card import build_agent_card, build_extended_agent_card
 from iac_code.a2a.app import normalize_v03_jsonrpc_version
 from iac_code.a2a.artifacts import A2AArtifactStore
 from iac_code.a2a.backup import SessionBackupCoordinator
+from iac_code.a2a.event_filter_sets import (
+    A2AEventDeliveryFilter,
+    filter_set_message_request,
+    message_event_filter_set,
+    task_event_filter_set,
+)
 from iac_code.a2a.events import make_text_part
 from iac_code.a2a.execution_control import (
     NaturalCompletionGenerationCarrier,
@@ -859,6 +865,18 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             await self._release_untransferred_recovery(params, context)
 
     async def on_message_send_stream(self, params: SendMessageRequest, context):
+        filter_set = message_event_filter_set(params)
+        delivery = A2AEventDeliveryFilter(filter_set)
+        stream = self._on_message_send_stream_unfiltered(filter_set_message_request(params, filter_set), context)
+        try:
+            async for event in stream:
+                projected = delivery.project(event)
+                if projected is not None:
+                    yield projected
+        finally:
+            await stream.aclose()
+
+    async def _on_message_send_stream_unfiltered(self, params: SendMessageRequest, context):
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
         permission_response = parse_permission_response(params.message)
@@ -1685,6 +1703,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         task = await self.task_store.get(params.id, context)
         if task is None:
             raise TaskNotFoundError(f"Task {params.id} not found")
+        delivery = A2AEventDeliveryFilter(task_event_filter_set(task))
         if isinstance(self.task_store, A2ATaskStore) and not await self.task_store.is_task_active(params.id):
             raise TaskNotFoundError(f"Task {params.id} is not active")
         active_task_registry = getattr(self, "_active_task_registry", None)
@@ -1694,7 +1713,9 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         async for event in super().on_subscribe_to_task(params, context):
             event_state = _task_event_state(event)
             terminal_state_seen = terminal_state_seen or event_state in TERMINAL_TASK_STATES
-            yield event
+            projected = delivery.project(event)
+            if projected is not None:
+                yield projected
             if terminal_state_seen:
                 break
             if event_state in INTERRUPTED_TASK_STATES:
@@ -1708,7 +1729,9 @@ class IacCodeRequestHandler(DefaultRequestHandler):
                 await active_task._is_finished.wait()
             final_task = await self.task_store.get(params.id, context)
             if final_task is not None and final_task.status.state in TERMINAL_TASK_STATES:
-                yield final_task
+                projected = delivery.project(final_task)
+                if projected is not None:
+                    yield projected
         # Settle any natural completion the delivered executor turn registered. Draining
         # the accepted request first ensures the executor turn's finally has registered
         # its natural-completion generation, so the finalize claims and settles the
