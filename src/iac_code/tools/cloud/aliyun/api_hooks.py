@@ -1,4 +1,4 @@
-"""Parameter normalization and pre-call hooks with registration and auto-discovery."""
+"""API hooks with registration and auto-discovery."""
 
 from __future__ import annotations
 
@@ -17,10 +17,24 @@ if TYPE_CHECKING:
 
 HookFn = Callable[..., ToolResult | RosPreflightOutcome | None]
 ParameterNormalizer = Callable[..., None]
+StepResultProjector = Callable[[dict[str, Any], Any], Any]
 
 _hooks: dict[tuple[str, str], list[HookFn]] = {}
 _parameter_normalizers: dict[tuple[str, str], list[ParameterNormalizer]] = {}
+_action_aliases: dict[tuple[str, str], str] = {}
+_step_result_projectors: dict[tuple[str, str], StepResultProjector] = {}
 _loaded = False
+
+
+def register_action_alias(product: str, alias: str, action: str) -> None:
+    """Register an exact, product-scoped API action alias."""
+    _action_aliases[(product.casefold(), alias.casefold())] = action
+
+
+def normalize_action(product: str, action: str) -> str:
+    """Resolve a registered alias before permissions, metadata and execution."""
+    _ensure_loaded()
+    return _action_aliases.get((product.casefold(), action.casefold()), action)
 
 
 def before_call(product: str, action: str | list[str]):
@@ -50,6 +64,23 @@ def parameter_normalizer(product: str, action: str | list[str]):
     return decorator
 
 
+def step_result_projector(product: str, action: str):
+    """Register a pure projection of one API's model-facing Step result."""
+
+    def decorator(fn: StepResultProjector) -> StepResultProjector:
+        _step_result_projectors[(product.casefold(), action)] = fn
+        return fn
+
+    return decorator
+
+
+def project_step_result(product: str, action: str, params: dict[str, Any], body: Any) -> Any:
+    """Project a public Step result without mutating the request or raw response."""
+    action = normalize_action(product, action)
+    projector = _step_result_projectors.get((product.casefold(), action))
+    return projector(params, body) if projector is not None else body
+
+
 def normalize_parameters(
     product: str,
     action: str,
@@ -63,7 +94,7 @@ def normalize_parameters(
     Structural normalization must not depend on metadata. Contract-dependent changes
     are limited to wire-equivalent scalar coercion before schema validation.
     """
-    _ensure_loaded()
+    action = normalize_action(product, action)
     for normalizer in _parameter_normalizers.get((product.casefold(), action), []):
         if "contract" in inspect.signature(normalizer).parameters:
             normalizer(product, action, params, contract=contract)

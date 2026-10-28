@@ -374,8 +374,11 @@ class ApiContractResolver:
             raise ApiContractError("unsupported_signature_scheme")
 
     async def resolve(self, call: ApiCallShape, *, allow_fallback: bool) -> CanonicalWireContract:
+        from iac_code.tools.cloud.aliyun.api_hooks import normalize_action
+
         self._validate_call(call)
         product, candidates, product_resolution = await self._resolve_product_versions(call)
+        call = replace(call, action=normalize_action(product, call.action))
         if not candidates:
             raise ApiContractError("invalid_or_missing_version", product=product)
         version_map = _VERSION_MAP.get(product.casefold()) if call.version is None else None

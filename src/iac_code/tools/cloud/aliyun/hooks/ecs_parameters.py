@@ -6,7 +6,7 @@ import re
 from typing import TYPE_CHECKING, Any
 
 from iac_code.tools.cloud.aliyun.api_contract import ApiContractError
-from iac_code.tools.cloud.aliyun.api_hooks import parameter_normalizer
+from iac_code.tools.cloud.aliyun.api_hooks import parameter_normalizer, register_action_alias
 
 if TYPE_CHECKING:
     from iac_code.tools.cloud.aliyun.api_contract import CanonicalWireContract
@@ -22,6 +22,8 @@ _SYSTEM_DISK_ALIASES = {
 }
 _SYSTEM_DISK_FIELDS = {"Category", "Size", "PerformanceLevel"}
 
+register_action_alias("ecs", "DescribePrices", "DescribePrice")
+
 
 @parameter_normalizer("ecs", "DescribePrice")
 def normalize_ecs_price_parameters(
@@ -33,6 +35,11 @@ def normalize_ecs_price_parameters(
 ) -> None:
     """Normalize known DescribePrice aliases on the caller's copied parameters."""
     del product, action
+    units = [
+        "Month" if params[key] == "Monthly" else params[key] for key in ("PriceUnit", "PeriodType") if key in params
+    ]
+    if len(units) == 2 and (type(units[0]) is not type(units[1]) or units[0] != units[1]):
+        raise ApiContractError("conflicting_parameter_alias", parameter="PriceUnit")
     aliases = [
         (alias, canonical, params[alias]) for alias, canonical in _SYSTEM_DISK_ALIASES.items() if alias in params
     ]
@@ -50,6 +57,9 @@ def normalize_ecs_price_parameters(
     for alias, canonical, value in aliases:
         params.pop(alias, None)
         params[canonical] = value
+    if units:
+        params.pop("PeriodType", None)
+        params["PriceUnit"] = units[0]
 
     if contract is None or contract.style != "RPC":
         return

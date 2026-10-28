@@ -1579,6 +1579,7 @@ async def _production_execute(
     cwd: str = "",
     event_queue: asyncio.Queue | None = None,
     tool_use_id: str | None = "production-call",
+    pipeline_mode: bool = False,
 ) -> Any:
     tool_input = tool.prepare_invocation_input(tool_input)
     binding = InvocationBinding(
@@ -1603,6 +1604,7 @@ async def _production_execute(
             cwd=cwd,
             event_queue=event_queue,
             tool_use_id=tool_use_id,
+            pipeline_mode=pipeline_mode,
             trusted_read_directories=[cwd] if cwd else [],
             invocation_binding=binding,
             snapshot_id=permission.snapshot_id,
@@ -1811,6 +1813,165 @@ async def test_canonical_product_rechecks_deny_rules_after_alias_resolution() ->
     assert permission.behavior == "deny"
     assert permission.audit is not None and permission.audit.rule == "Ecs:*"
     assert ("api", "Ecs", "2014-05-26", "DescribeInstances") in openmeta.calls
+    assert endpoint_resolver.calls == []
+    assert transport.calls == []
+
+
+@pytest.fixture
+def ecs_price_services():
+    services, openmeta, endpoint_resolver, transport = _production_services()
+    openmeta.documents[("ecs", "2014-05-26", "describeprice")] = _production_raw_api(
+        "Ecs",
+        "2014-05-26",
+        "DescribePrice",
+        parameters=[
+            {"name": "PriceUnit", "in": "query", "schema": {"type": "string", "enum": ["Hour", "Month"]}},
+            {"name": "Period", "in": "query", "schema": {"type": "integer"}},
+        ],
+    )
+    return services, openmeta, endpoint_resolver, transport
+
+
+@pytest.mark.parametrize("product", ["Ecs", "ElasticComputeService"])
+@pytest.mark.parametrize("unit_key", ["PeriodType", "PriceUnit"])
+@pytest.mark.asyncio
+async def test_price_aliases_share_permission_contract_and_final_request(ecs_price_services, product, unit_key) -> None:
+    services, openmeta, _, transport = ecs_price_services
+    tool_input = {
+        "product": product,
+        "action": "DescribePrices",
+        "region_id": "cn-hangzhou",
+        "params": {unit_key: "Monthly", "Period": 1},
+    }
+
+    result = await _production_execute(AliyunApi(services=services), tool_input)
+
+    assert result.is_error is False
+    assert json.loads(result.content)["Action"] == "DescribePrice"
+    assert ("api", "Ecs", "2014-05-26", "DescribePrice") in openmeta.calls
+    assert not any(call[-1] == "DescribePrices" for call in openmeta.calls)
+    assert transport.calls[-1]["contract"].action == "DescribePrice"
+    assert dict(transport.calls[-1]["request"].canonical_query) == {"PriceUnit": "Month", "Period": "1"}
+    assert tool_input["action"] == "DescribePrices"
+    assert tool_input["params"][unit_key] == "Monthly"
+
+
+@pytest.mark.asyncio
+async def test_price_action_alias_loads_the_canonical_api_document(ecs_price_services) -> None:
+    services, openmeta, _, transport = ecs_price_services
+
+    result = await AliyunApiDoc(services).execute(
+        tool_input={"product": "Ecs", "action": "DescribePrices"},
+        context=ToolContext(tool_use_id="price-alias-doc"),
+    )
+
+    assert result.is_error is False
+    assert json.loads(result.content)["action"] == "DescribePrice"
+    assert not any(call[-1] == "DescribePrices" for call in openmeta.calls)
+    assert transport.calls == []
+
+
+@pytest.mark.asyncio
+async def test_public_step_price_projection_leaves_normal_handoff_and_raw_response_intact(
+    ecs_price_services,
+    ecs_price_body,
+    monkeypatch,
+) -> None:
+    services, _, _, transport = ecs_price_services
+    transport.responses["DescribePrice"] = NormalizedApiResponse(
+        200,
+        MappingProxyType({}),
+        ecs_price_body,
+        "application/json",
+        None,
+        1000,
+    )
+    tool = AliyunApi(services=services)
+    tool_input = {"product": "ElasticComputeService", "action": "DescribePrices", "params": {"PeriodType": "Monthly"}}
+    # The process may remain in pipeline mode after handoff; only the invocation context is authoritative.
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+
+    step = await _production_execute(tool, tool_input, pipeline_mode=True)
+    normal_handoff = await _production_execute(tool, tool_input, pipeline_mode=False)
+    step_again = await _production_execute(tool, tool_input, pipeline_mode=True)
+
+    assert not step.is_error and not normal_handoff.is_error and not step_again.is_error
+    projected = json.loads(step.content)
+    assert projected["TradePrice"] == 152.75
+    assert projected["PriceUnit"] == "Month" and projected["Period"] == 1
+    assert projected["DetailInfos"]["DetailInfo"][1] == {"Resource": "systemDisk", "TradePrice": 4.15}
+    assert "DiscountPrice" not in step.content
+    assert json.loads(normal_handoff.content) == ecs_price_body
+    assert json.loads(step_again.content) == projected
+    assert tool._last_result is ecs_price_body
+    assert ecs_price_body["PriceInfo"]["Price"]["DiscountPrice"] == 444.21
+    assert step.metadata[ALIYUN_HTTP_METADATA_KEY]["action"] == "DescribePrice"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pipeline_mode", [False, True])
+async def test_internal_price_call_never_projects_the_business_body(ecs_price_services, ecs_price_body, pipeline_mode):
+    from iac_code.tools.cloud.aliyun.runtime import bind_aliyun_internal_caller
+
+    services, _, _, transport = ecs_price_services
+    transport.responses["DescribePrice"] = NormalizedApiResponse(
+        200,
+        MappingProxyType({}),
+        ecs_price_body,
+        "application/json",
+        None,
+        1000,
+    )
+    caller = bind_aliyun_internal_caller(AliyunApi(services=services))
+
+    result = await caller.call(
+        tool_input={"product": "Ecs", "action": "DescribePrice", "params": {"PriceUnit": "Month"}},
+        context=ToolContext(pipeline_mode=pipeline_mode),
+    )
+
+    assert not result.is_error
+    assert json.loads(result.content) == ecs_price_body
+
+
+@pytest.mark.asyncio
+async def test_step_price_transport_errors_keep_the_actionable_error(ecs_price_services) -> None:
+    services, _, _, transport = ecs_price_services
+    transport.responses["DescribePrice"] = NormalizedApiResponse(
+        400,
+        MappingProxyType({}),
+        {"Code": "InvalidParameter", "Message": "Invalid instance type"},
+        "application/json",
+        None,
+        100,
+    )
+
+    result = await _production_execute(
+        AliyunApi(services=services),
+        {"product": "Ecs", "action": "DescribePrice"},
+        pipeline_mode=True,
+    )
+
+    assert result.is_error
+    assert "InvalidParameter" in result.content
+    assert "TradePrice" not in result.content
+
+
+@pytest.mark.parametrize("product", ["Ecs", "ElasticComputeService"])
+@pytest.mark.parametrize("action", ["DescribePrice", "DescribePrices"])
+@pytest.mark.parametrize("denied_action", ["DescribePrice", "DescribePrices", "describeprices"])
+@pytest.mark.asyncio
+async def test_price_action_alias_cannot_bypass_a_deny_rule(ecs_price_services, product, action, denied_action) -> None:
+    services, _, endpoint_resolver, transport = ecs_price_services
+    tool = AliyunApi(services=services)
+    tool_input = tool.prepare_invocation_input({"product": product, "action": action, "params": {}})
+    binding = InvocationBinding("runtime", "session", "price-alias", "aliyun_api", canonical_input_sha256(tool_input))
+
+    permission = await tool.check_permissions(
+        tool_input,
+        ToolPermissionContext(invocation_binding=binding, deny_rules={"session": [f"aliyun_api(Ecs:{denied_action})"]}),
+    )
+
+    assert permission.behavior == "deny"
     assert endpoint_resolver.calls == []
     assert transport.calls == []
 

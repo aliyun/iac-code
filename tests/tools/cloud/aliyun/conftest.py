@@ -29,3 +29,27 @@ def fake_ecs_runtime(monkeypatch: pytest.MonkeyPatch) -> FakeEcsRuntime:
     handle.runtime = runtime_module.AliyunCredentialRuntime(provider_factory=factory)
     monkeypatch.setattr(runtime_module, "_runtime", handle.runtime, raising=False)
     return handle
+
+
+@pytest.fixture
+def ecs_price_body() -> dict:
+    return {
+        "RequestId": "price-request",
+        "PriceInfo": {
+            "Price": {
+                "Currency": "CNY",
+                "OriginalPrice": 596.96,
+                "DiscountPrice": 444.21,
+                "TradePrice": 152.75,
+                "DetailInfos": {
+                    "DetailInfo": [
+                        {"Resource": "instanceType", "OriginalPrice": 336.96, "TradePrice": 134.78},
+                        {"Resource": "systemDisk", "OriginalPrice": 60, "DiscountPrice": 55.85, "TradePrice": 4.15},
+                        {"Resource": "dataDisk", "OriginalPrice": 200, "DiscountPrice": 186.18, "TradePrice": 13.82},
+                        {"Resource": "image", "OriginalPrice": 0, "TradePrice": 0},
+                    ]
+                },
+                "Promotions": {"Promotion": [{"Name": "example promotion"}]},
+            }
+        },
+    }
