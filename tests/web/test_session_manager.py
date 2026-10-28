@@ -1938,6 +1938,25 @@ def test_to_dict_thinking_effective_reasoning_family_unset_is_off(tmp_path, monk
     assert session.to_dict()["thinkingEffective"] is True
 
 
+@pytest.mark.parametrize("enabled", [None, True])
+def test_terra_none_effort_is_reported_as_thinking_off(tmp_path, monkeypatch, enabled) -> None:
+    from iac_code.web import session_manager as sm
+
+    monkeypatch.setattr(sm, "_provider_thinking_config", lambda provider, model: None)
+    monkeypatch.setattr(
+        sm,
+        "_runtime_settings_payload",
+        lambda: {"provider": None, "model": None, "effort": None, "activeProvider": {}, "cloud": {}},
+    )
+    manager = WebSessionManager(projects_dir=tmp_path / "projects")
+    session = manager.create_session(cwd=str(tmp_path / "project"), mode="normal")
+    session.provider = "openai"
+    session.model = "gpt-6.1-terra"
+    session.effort = "none"
+    session.thinking_enabled = enabled
+    assert session.to_dict()["thinkingEffective"] is False
+
+
 def test_context_usage_payload_injects_cached_overhead() -> None:
     # /status 据持久化消息重建的 ContextManager 没有系统提示与工具定义,get_usage 会少算这两项;
     # 调用方传入本会话缓存的开销后,重载/状态用量须与 composer 实时圆环口径一致(见问题 #1)。

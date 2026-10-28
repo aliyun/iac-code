@@ -43,7 +43,7 @@ def test_seed_effort_and_disable_stay_on_ark_wire_format(key, model):
         ("deepseek-v4-1-flash-261017", "ultra", "max", True),
         ("glm-5-3-flash-260828", "none", "low", True),
         ("glm-5-3-flash-260828", "medium", "high", True),
-        ("kimi-k3-1-pro-261024", "medium", "high", True),
+        ("kimi-k3-1-pro-261024", "medium", "low", True),
         ("kimi-k3-1-pro-261024", "xhigh", "max", True),
     ],
 )

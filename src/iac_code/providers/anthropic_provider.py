@@ -298,6 +298,17 @@ class AnthropicProvider(Provider):
 
             # After the stream ends, emit the final message event
             final = await stream.get_final_message()
+            if prefix_metadata:
+                final_content = getattr(final, "content", [])
+                response_digest = self._response_content_digest(final_content)
+                for index, block in enumerate(final_content):
+                    if block.type in {"thinking", "redacted_thinking"}:
+                        yield ThinkingDeltaEvent(
+                            text="",
+                            block_index=index,
+                            block_type=block.type,
+                            provider_metadata={"response_digest": response_digest},
+                        )
             usage = _anthropic_usage(final.usage)
             yield MessageEndEvent(stop_reason=final.stop_reason or "end_turn", usage=usage)
 
@@ -318,6 +329,8 @@ class AnthropicProvider(Provider):
             kwargs,
         )
         response = await self._client.messages.create(**kwargs)
+        if prefix_metadata:
+            prefix_metadata["response_digest"] = self._response_content_digest(response.content)
 
         text_parts: list[str] = []
         tool_uses: list[dict[str, Any]] = []
@@ -408,15 +421,49 @@ class AnthropicProvider(Provider):
         if isinstance(content, str):
             return content
         if isinstance(content, list):
-            converted = [
-                self._convert_content_block(block)
-                for block in content
-                if prefix is None
-                or block.type not in {"thinking", "redacted_thinking"}
-                or block.provider_metadata.get("prefix") == prefix
+            converted = [(block, self._convert_content_block(block)) for block in content]
+            digest = self._content_digest([wire for _, wire in converted if wire is not None]) if prefix else None
+            return [
+                wire
+                for block, wire in converted
+                if wire is not None
+                and (
+                    prefix is None
+                    or block.type not in {"thinking", "redacted_thinking"}
+                    or (
+                        block.provider_metadata.get("prefix") == prefix
+                        and block.provider_metadata.get("response_digest") == digest
+                    )
+                )
             ]
-            return [block for block in converted if block is not None]
         return content
+
+    @staticmethod
+    def _content_digest(content: list[dict[str, Any]]) -> str:
+        serialized = json.dumps(content, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _response_content_digest(cls, content: Any) -> str:
+        # Regrouping text/tools can move content before a bound block in the
+        # same assistant turn. Validate its returned layout as well as history.
+        fields = {
+            "text": ("text",),
+            "tool_use": ("id", "name", "input"),
+            "thinking": ("thinking", "signature"),
+            "redacted_thinking": ("data",),
+        }
+        wire = [
+            {
+                "type": block.type,
+                **{
+                    name: getattr(block, name, None) or ({} if name == "input" else "")
+                    for name in fields.get(block.type, ())
+                },
+            }
+            for block in content
+        ]
+        return cls._content_digest(wire)
 
     @staticmethod
     def _thinking_prefix(system: str | None, tools: Any, messages: Any) -> str:
