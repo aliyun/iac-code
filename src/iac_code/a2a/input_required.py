@@ -1106,6 +1106,9 @@ class PermissionInputRegistry:
         pending.backup_service = backup_service
         pending.backup_metrics = metrics
         pending.before_claim_backup = before_claim_backup
+        control = current_execution_control()
+        if control is not None:
+            await control.register_permission_pause_boundary(store, record)
 
         if perform_backup:
             if before_backup is not None:
@@ -1266,7 +1269,7 @@ class PermissionInputRegistry:
                     await result
 
         control = current_execution_control()
-        if control is not None and current.get("permissionClass") == "normal":
+        if control is not None and (current.get("permissionClass") == "normal" or control.permission_pause_enabled):
             control.bind_recoverable_permission_boundary(store, str(current["boundaryId"]))
         coordinator.register_live(
             record=current,

@@ -36,6 +36,7 @@ from iac_code.a2a.backup import (
 from iac_code.a2a.execution_owner import ExecutionOwnerIdentity
 from iac_code.a2a.input_handoff import HandoffCommitResult, InputHandoffStore, RecoverableInputHandoffProof
 from iac_code.a2a.permission_handoff import SuspendedPermissionHandoff
+from iac_code.a2a.permission_pause import PendingPermissionPauseReferences
 from iac_code.services.permission_wait import PermissionWaitCheckpointStore
 from iac_code.services.session_backup import BackupReason, BackupResult
 from iac_code.services.session_storage import SessionStorage
@@ -334,8 +335,11 @@ class _NaturalHandoffBeginAuthority:
 class _RecoverableInputAdmissionStore:
     """One-request reservation store with a cross-process file fence when persistence is enabled."""
 
-    def __init__(self, persistence_root: Path | None) -> None:
+    def __init__(
+        self, persistence_root: Path | None, permission_pause_references: PendingPermissionPauseReferences | None = None
+    ) -> None:
         self._root = persistence_root / "execution-control" if persistence_root is not None else None
+        self._permission_pause_references = permission_pause_references
         self._by_token: dict[str, _RecoverableInputAdmission] = {}
         self._token_by_context: dict[str, str] = {}
 
@@ -405,6 +409,8 @@ class _RecoverableInputAdmissionStore:
             persisted_snapshot["persistedRevision"] = revision
             control_path = self._root / f"{admission.context_id}.json"
             previous_control = self._load_document(control_path)
+            if self._permission_pause_references is not None:
+                self._permission_pause_references.retire_released(previous_control)
             atomic_write_json(control_path, persisted_snapshot)
         return _PersistedControlActivation(
             previous_control=previous_control,
@@ -495,6 +501,8 @@ class _RecoverableInputAdmissionStore:
             revision = int(control_snapshot["revision"])
             persisted_snapshot = dict(control_snapshot)
             persisted_snapshot["persistedRevision"] = revision
+            if self._permission_pause_references is not None:
+                self._permission_pause_references.retire_released(previous_control)
             atomic_write_json(control_path, persisted_snapshot)
         return _PersistedControlActivation(
             previous_control=previous_control,
@@ -1056,6 +1064,7 @@ class ExecutionController:
         execution_mode: str = "normal",
         owner_generation: int = 1,
         backup_coordinator: Any | None = None,
+        permission_pause_references: PendingPermissionPauseReferences | None = None,
     ) -> None:
         if execution_mode not in {"normal", "pipeline"}:
             raise ValueError("execution_mode must be normal or pipeline")
@@ -1109,6 +1118,7 @@ class ExecutionController:
         self._pending_natural_backup_job: SessionBackupJob | None = None
         self._natural_retry_authority: _NaturalHandoffBeginAuthority | None = None
         self._persistence_path = persistence_path
+        self._permission_pause_references = permission_pause_references
         self._backup_service = backup_service
         self._backup_coordinator = backup_coordinator
         self._natural_handoff: dict[str, Any] | None = None
@@ -1135,6 +1145,23 @@ class ExecutionController:
         self._pending_explicit_termination_reason: str | None = None
         self._termination_generation = 0
 
+    async def register_permission_pause_boundary(
+        self, store: PermissionWaitCheckpointStore, record: dict[str, Any]
+    ) -> None:
+        references = self._permission_pause_references
+        if references is not None:
+            await asyncio.to_thread(
+                references.register,
+                checkpoint_path=store.paths.permission_waits_dir / f"{record['boundaryId']}.json",
+                cwd=str(store.cwd),
+                record=record,
+                control=self.snapshot(),
+            )
+
+    @property
+    def permission_pause_enabled(self) -> bool:
+        return self._permission_pause_references is not None
+
     def bind_session(self, session_id: str) -> None:
         self.session_id = session_id
 
@@ -1145,7 +1172,7 @@ class ExecutionController:
         self._durable_input_handoff_enabled = False
 
     def bind_recoverable_permission_boundary(self, store: PermissionWaitCheckpointStore, boundary_id: str) -> None:
-        if self.execution_mode == "normal":
+        if self.execution_mode == "normal" or self.permission_pause_enabled:
             # A recovered turn may reach a second permission card. Its new
             # resident continuation must not inherit the previous handoff.
             self.disable_durable_input_handoff()
@@ -3272,11 +3299,14 @@ class ExecutionControlService:
     ) -> None:
         self.server_instance_id = "instance-" + uuid.uuid4().hex
         self._persistence_root = persistence_root
+        self._permission_pause_references = PendingPermissionPauseReferences.enabled(persistence_root)
         self._backup_service = backup_service
         self._backup_coordinator = backup_coordinator
         self._controls: dict[str, ExecutionController] = {}
         self._context_start_locks: dict[str, asyncio.Lock] = {}
-        self._recoverable_input_admissions = _RecoverableInputAdmissionStore(persistence_root)
+        self._recoverable_input_admissions = _RecoverableInputAdmissionStore(
+            persistence_root, self._permission_pause_references
+        )
         self._termination_cleanup: Callable[[str, str, str], Awaitable[str | None]] | None = None
         self._on_resume: Callable[[str], None] | None = None
         self._owner_generation = 0
@@ -3493,6 +3523,7 @@ class ExecutionControlService:
                     execution_mode=execution_mode,
                     owner_generation=self._owner_generation,
                     backup_coordinator=self._backup_coordinator,
+                    permission_pause_references=self._permission_pause_references,
                 )
             assert control is not None
             if admission is not None and not reuse:
