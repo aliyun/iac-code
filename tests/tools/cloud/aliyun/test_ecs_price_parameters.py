@@ -129,3 +129,75 @@ def test_metadata_resolved_ecs_product_normalizes_a_copy() -> None:
 
     assert normalized == {"product": "Ecs", "action": "DescribePrice", "params": {"SystemDisk.Size": 40}}
     assert tool_input == original
+
+
+@pytest.mark.parametrize("product", ["ecs", "Ecs", "ECS"])
+def test_price_action_alias_normalizes_with_parameters_on_a_copy(product: str) -> None:
+    tool_input = {
+        "product": product,
+        "action": "DescribePrices",
+        "region_id": "cn-hangzhou",
+        "params": {"SystemDisk.Capacity": 60, "PeriodType": "Monthly", "Period": 1},
+    }
+    original = copy.deepcopy(tool_input)
+
+    normalized = _normalize_runtime_input(tool_input)
+
+    assert normalized["action"] == "DescribePrice"
+    assert normalized["params"] == {"SystemDisk.Size": 60, "PriceUnit": "Month", "Period": 1}
+    assert _normalize_runtime_input(normalized) == normalized
+    assert tool_input == original
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"PeriodType": "Monthly"},
+        {"PeriodType": "Month"},
+        {"PriceUnit": "Monthly"},
+        {"PeriodType": "Monthly", "PriceUnit": "Monthly"},
+        {"PeriodType": "Monthly", "PriceUnit": "Month"},
+        {"PeriodType": "Month", "PriceUnit": "Monthly"},
+    ],
+)
+def test_price_period_aliases_share_the_canonical_month_unit(params) -> None:
+    normalize_parameters("ecs", "DescribePrice", params)
+    assert params == {"PriceUnit": "Month"}
+
+
+@pytest.mark.parametrize("period_type", ["Monthly", "Year", None])
+def test_conflicting_period_alias_does_not_partially_normalize_disk_params(period_type) -> None:
+    params = {"SystemDisk.Capacity": 60, "PeriodType": period_type, "PriceUnit": "Hour"}
+    original = copy.deepcopy(params)
+
+    with pytest.raises(ApiContractError, match="^conflicting_parameter_alias$") as raised:
+        normalize_parameters("ecs", "DescribePrice", params)
+
+    assert raised.value.parameter == "PriceUnit"
+    assert params == original
+
+
+@pytest.mark.parametrize(("product", "action"), [("vpc", "DescribePrices"), ("ecs", "RunInstances")])
+def test_price_action_and_period_aliases_do_not_affect_other_operations(product: str, action: str) -> None:
+    tool_input = {"product": product, "action": action, "params": {"PeriodType": "Monthly"}}
+    normalized = _normalize_runtime_input(tool_input)
+    assert normalized["action"] == action
+    assert normalized["params"] == tool_input["params"]
+
+
+def test_metadata_resolved_ecs_product_normalizes_action_and_period_aliases() -> None:
+    tool_input = {"product": "ComputeAlias", "action": "DescribePrices", "params": {"PeriodType": "Monthly"}}
+    original = copy.deepcopy(tool_input)
+
+    normalized = _with_canonical_runtime_product(tool_input, "Ecs")
+
+    assert normalized == {"product": "Ecs", "action": "DescribePrice", "params": {"PriceUnit": "Month"}}
+    assert tool_input == original
+
+
+def test_conflicting_disk_alias_does_not_partially_normalize_period_params() -> None:
+    params = {"SystemDisk.Capacity": 60, "SystemDisk.Size": 40, "PeriodType": "Monthly"}
+    original = copy.deepcopy(params)
+    with pytest.raises(ApiContractError, match="^conflicting_parameter_alias$"):
+        normalize_parameters("ecs", "DescribePrice", params)
+    assert params == original

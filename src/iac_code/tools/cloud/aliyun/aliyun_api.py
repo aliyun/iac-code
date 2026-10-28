@@ -609,7 +609,9 @@ def _safe_operation_identifiers(input: dict) -> tuple[str, str] | None:
     canonical_product = _canonical_product(product)
     if not (_safe_exact_identifier(canonical_product) and _safe_exact_identifier(action)):
         return None
-    return canonical_product, action
+    from iac_code.tools.cloud.aliyun.api_hooks import normalize_action
+
+    return canonical_product, normalize_action(canonical_product, action)
 
 
 def _is_roa_style(input: dict) -> bool:
@@ -662,8 +664,9 @@ def _normalize_runtime_input(
     if not _runtime_json_shape_is_valid(normalized["params"], allow_sentinel=allow_internal_shape):
         raise ApiContractError("invalid_params")
     canonical_product = _PRODUCT_CANONICAL.get(product.lower(), product)
-    from iac_code.tools.cloud.aliyun.api_hooks import normalize_parameters
+    from iac_code.tools.cloud.aliyun.api_hooks import normalize_action, normalize_parameters
 
+    normalized["action"] = normalize_action(canonical_product, identity.action)
     normalize_parameters(canonical_product, str(normalized.get("action") or ""), normalized["params"])
     if canonical_product == "ros":
         from iac_code.tools.cloud.aliyun.hooks.ros_parameters import normalize_ros_parameters
@@ -737,14 +740,15 @@ def _validate_runtime_endpoint(endpoint: Any) -> None:
 
 
 def _with_canonical_runtime_product(input: Mapping[str, Any], product: str) -> dict[str, Any]:
+    from iac_code.tools.cloud.aliyun.api_hooks import normalize_action, normalize_parameters
+
     normalized = dict(input)
     normalized["product"] = product
+    normalized["action"] = normalize_action(product, str(normalized.get("action") or ""))
     params = normalized.get("params")
     if not isinstance(params, Mapping):
         return normalized
     canonical_params = copy.deepcopy(dict(params))
-    from iac_code.tools.cloud.aliyun.api_hooks import normalize_parameters
-
     normalize_parameters(product, str(normalized.get("action") or ""), canonical_params)
     normalized["params"] = canonical_params
     if product.casefold() != "ros":
@@ -1330,6 +1334,8 @@ class AliyunApi(BaseCloudApi):
         require_exact: bool = False,
         permission_profile: AliyunPermissionRuleProfile = _ALIYUN_API_PERMISSION_PROFILE,
     ) -> _AliyunPermissionRuleMatch | None:
+        from iac_code.tools.cloud.aliyun.api_hooks import normalize_action
+
         operation = _safe_operation_identifiers(input)
         if operation is None:
             return None
@@ -1350,6 +1356,7 @@ class AliyunApi(BaseCloudApi):
                 product_pattern, action_pattern, rule_content, inherited = parsed
                 if not fnmatch.fnmatchcase(canonical_product.lower(), product_pattern.lower()):
                     continue
+                action_pattern = normalize_action(canonical_product, action_pattern)
                 if not fnmatch.fnmatchcase(action.lower(), action_pattern.lower()):
                     continue
                 if require_exact and (
@@ -2712,7 +2719,15 @@ class AliyunApi(BaseCloudApi):
                     public_error = f"{public_error} Response: {target_error_detail}"
                 return ToolResult.error(public_error)
             assert response is not None
-            business_content, body_format = serialize_business_result(response, request, contract)
+            business_response = response
+            if trust_path == "public" and context.pipeline_mode:
+                from iac_code.tools.cloud.aliyun.api_hooks import project_step_result
+
+                business_response = replace(
+                    response,
+                    body=project_step_result(contract.product, contract.action, params, response.body),
+                )
+            business_content, body_format = serialize_business_result(business_response, request, contract)
             aliyun_http = build_aliyun_http_metadata(
                 response,
                 request,
@@ -2792,9 +2807,10 @@ class AliyunApi(BaseCloudApi):
         params = copy.deepcopy(tool_input.get("params") or {})
         region = self._resolve_region(tool_input)
 
-        from iac_code.tools.cloud.aliyun.api_hooks import normalize_parameters
+        from iac_code.tools.cloud.aliyun.api_hooks import normalize_action, normalize_parameters
 
         try:
+            action = normalize_action(product, action)
             normalize_parameters(product, action, params)
         except ApiContractError as error:
             return ToolResult.error(public_aliyun_error(error, product=product, action=action, region_id=region))
@@ -2948,6 +2964,10 @@ class AliyunApi(BaseCloudApi):
                         )
                     )
 
+            if context.pipeline_mode:
+                from iac_code.tools.cloud.aliyun.api_hooks import project_step_result
+
+                body = project_step_result(product, action, params, body)
             return ToolResult.success(json.dumps(body, ensure_ascii=False, indent=2))
         except Exception as e:
             self._last_action = ""

@@ -117,6 +117,23 @@ async def test_canonical_product_drives_the_builtin_version_fallback_after_alias
     assert openmeta.calls == [("api", "Ecs", "2014-05-26", "DescribeInstances")]
 
 
+@pytest.mark.parametrize("requested_product", ["Ecs", "ElasticComputeService"])
+@pytest.mark.asyncio
+async def test_ecs_price_action_alias_is_resolved_before_loading_api_metadata(requested_product: str) -> None:
+    openmeta = FakeOpenMeta(
+        raw_api(action="DescribePrice", security=[{"AK": []}]),
+        product=ProductMetadata("Ecs", None, (), None),
+    )
+    resolved = await ApiContractResolver(openmeta).resolve(
+        shape(product=requested_product, action="DescribePrices"),
+        allow_fallback=False,
+    )
+
+    assert resolved.action == "DescribePrice"
+    assert ("api", "Ecs", "2014-05-26", "DescribePrice") in openmeta.calls
+    assert not any(call[-1] == "DescribePrices" for call in openmeta.calls)
+
+
 @pytest.mark.asyncio
 async def test_unknown_product_with_explicit_version_continues_to_exact_api_metadata() -> None:
     class UnknownProductOpenMeta:
@@ -2189,6 +2206,24 @@ async def test_ecs_price_query_accepts_metadata_integer_text_without_mutating_in
     assert tool_input == original
     with pytest.raises(ApiContractError, match="^invalid_parameter_enum:Period$"):
         await RequestBuilder().build(api, {"params": {"Period": "3"}})
+
+
+@pytest.mark.parametrize("unit_key", ["PeriodType", "PriceUnit"])
+@pytest.mark.asyncio
+async def test_ecs_price_monthly_alias_is_encoded_as_the_canonical_month_unit(unit_key: str) -> None:
+    api = contract(
+        parameter("PriceUnit", "query", schema={"type": "string", "enum": ["Hour", "Month", "Year", "Week"]}),
+        action="DescribePrice",
+    )
+    tool_input = {"params": {unit_key: "Monthly"}}
+    original = copy.deepcopy(tool_input)
+
+    built = await RequestBuilder().build(api, tool_input)
+
+    assert dict(built.canonical_query) == {"PriceUnit": "Month"}
+    assert tool_input == original
+    with pytest.raises(ApiContractError, match="^invalid_parameter_enum:PriceUnit$"):
+        await RequestBuilder().build(api, {"params": {unit_key: "Daily"}})
 
 
 @pytest.mark.parametrize("value", ["40.5", "40 GiB", "4e1", " 40", "040", "-0", "9" * 100, True, 40.5])

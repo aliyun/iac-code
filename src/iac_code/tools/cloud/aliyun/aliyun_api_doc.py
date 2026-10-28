@@ -193,8 +193,11 @@ class AliyunApiDoc(Tool):
                 )
             )
 
+        from iac_code.tools.cloud.aliyun.api_hooks import normalize_action
+
         canonical_product = contract.product
         version = contract.version
+        action = normalize_action(canonical_product, action)
         fetch_for_selection = getattr(self._services.openmeta, "get_api_for_version_selection", None)
         if callable(fetch_for_selection):
             metadata_fetch = await fetch_for_selection(canonical_product, version, action)
