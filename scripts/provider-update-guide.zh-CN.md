@@ -638,11 +638,37 @@ git diff HEAD -- iac-code-rs
   transport。默认思考摘要伴随 `encrypted_content`，必须流式/非流式保存并按 provider、endpoint、
   model 原样回传；不能把密文当作可见思考，也不能回传给其他模型或写进公开日志。
   DeepSeek V4 的 `minimal/medium` 分别映射 `none/low`，V4.1 则映射 `low/high`，不能共用
-  同一别名表。Kimi K3.1 文档对 `none/minimal` 的关闭行为与“始终开启”说明存在冲突，当前仅展示
-  无争议的 `low/high/max`，不声明关闭能力；需端点实测后再扩展。
+  同一别名表。Kimi K3.1 仅展示 `low/high/max`；2026-10-28 官方深度思考文档已统一为始终开启，
+  `medium` 映射 `low`，`xhigh` 映射 `max`，不声明关闭能力。
 
 验证记录：首次 `make test` 为 20,914 passed、173 skipped、14 failed：一项旧多模态目录断言未同步，
 另 13 项因新 worktree 缺少本地 `messages.pot`。同步断言并按 Makefile 的提取参数生成该忽略文件后，
 最终完整重跑为 **20,942 passed、172 skipped**（Python 3.14），`make lint` 的 ruff/ty 均通过。
 独立 Python 3.10 环境的 provider、context 和 multimodal 回归为 **1,280 passed**。本次没有真实 API
 smoke test；新 model ID 的公开文档核验、离线协议测试与账号实际可用性仍是不同证据层级。
+
+### 2026-10-28 提交后复查
+
+在 `b6b04b0e` 上重新核对目录、生命周期与实际 provider 创建、工具轮次和 Web 会话路径，补充修正：
+
+- 火山 Kimi K3.1 的 `medium` 按当前端点文档映射为 `low`，并同时验证标准与套餐 ID。
+  [火山思考参数](https://console.volcengine.com/ark/region:cn-beijing/docs/deep-thinking)
+- 通用配置归一化不得将已明确声明的 effort alias 当作旧版关闭指令消费；火山 GLM 的 `none → low`
+  需要经过 `create_provider()` 后仍实际发送到请求中，不能只测试 adapter 私有方法。
+- GPT-6.1 Terra 的 `effort=none` 应在 Web 会话中显示思考关闭，即使 `thinkingEnabled=true`。
+  [Terra effort](https://developers.openai.com/api/docs/models/gpt-6.1-terra)
+- Kimi K3.1 不支持关闭思考时，保留已选 effort 和 `max_completion_tokens` 字段，不能因旧配置的
+  `thinkingEnabled=false` 丢掉 effort 或切回 `max_tokens`。
+  [公共 API 参数](https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart)
+- Claude 的绑定检查同时保存 assistant 返回块序列的摘要，防止同一条消息内的块重排、删改绕过此前
+  只校验历史前缀的逻辑。流式在最终内容完整后附加摘要；摘要与签名只用于私有历史回传。
+  对修改过的 assistant turn 保守移除该 turn 的思考块，正文和工具结果仍保留。
+  [Preserved thinking](https://platform.claude.com/docs/en/build-with-claude/preserved-thinking)
+
+补充回归先在修正前运行，9 个案例全部失败，证实原测试遗漏了这些路径；修正后覆盖 provider 创建、
+流式/非流式签名回传及 Web 会话状态。中国 Coding Plan 以当前概述正文的六款为准，搜索摘要和旧版
+带查询参数页面仍包含的四款旧模型不作为当前支持证据。
+
+复查后的最终验证：完整 `make test` **20,954 passed、172 skipped**（Python 3.14）；独立 Python 3.10
+的 provider、agent 消息/循环及 Web 会话测试 **1,374 passed**；`make lint` 的 ruff/ty 通过，修改文件
+的格式检查和 `git diff --check` 通过。仍未调用真实模型 API。

@@ -172,9 +172,9 @@ class OpenAIProvider(Provider):
         limit = self._output_token_limit(max_tokens)
         if limit is None:
             return {}
-        if self._thinking_disabled():
-            return {"max_tokens": limit}
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
+        if self._thinking_disabled() and spec.supports_disable:
+            return {"max_tokens": limit}
         if not spec.use_max_completion_tokens:
             return {"max_tokens": limit}
         # use_max_completion_tokens 家族:该参数限制「含推理」的总生成量,思考预算另经

@@ -512,7 +512,7 @@ def _normalize_configured_effort(
         from iac_code.providers.thinking import get_thinking_spec
 
         spec = get_thinking_spec(provider_key, model)
-        if normalized_effort in spec.effort_values:
+        if normalized_effort in spec.effort_values or normalized_effort in dict(spec.effort_aliases):
             return normalized_effort, thinking_enabled
     return None, False
 

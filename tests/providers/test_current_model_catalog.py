@@ -163,7 +163,7 @@ def test_kimi31_never_disables_thinking_and_keeps_endpoint_defaults(key, model, 
     assert p._build_thinking_kwargs() == {"reasoning_effort": "high"}
     assert get_thinking_spec(key, model).default_effort_value == default
     p._thinking_enabled = False
-    assert p._build_thinking_kwargs() == {}
+    assert p._build_thinking_kwargs() == {"reasoning_effort": "high"}
 
 
 @pytest.mark.parametrize("model", ["stepfun/step-3.7-flash", "stepfun/step-5-preview"])
@@ -204,7 +204,10 @@ async def test_claude_bound_thinking_survives_tool_loop_but_not_prefix_changes(m
     client = FakeAnthropicClient(
         create_response=ns(
             id="message-1",
-            content=[ns(type="thinking", thinking="", signature="opaque-signed-block")],
+            content=[
+                ns(type="thinking", thinking="", signature="opaque-signed-block"),
+                ns(type="tool_use", id="call-1", name="read_file", input={}),
+            ],
             stop_reason="tool_use",
             usage=ns(input_tokens=10, output_tokens=20),
         )
@@ -250,21 +253,33 @@ async def test_claude_stream_binds_signed_and_redacted_blocks_to_request_prefix(
             ns(type="content_block_start", index=0, content_block=ns(type="thinking", thinking="", signature="")),
             ns(type="content_block_delta", index=0, delta=ns(type="signature_delta", signature="signed")),
             ns(type="content_block_start", index=1, content_block=ns(type="redacted_thinking", data="opaque")),
+            ns(type="content_block_start", index=2, content_block=ns(type="text", text="")),
+            ns(type="content_block_delta", index=2, delta=ns(type="text_delta", text="done")),
         ],
-        stream_final=ns(stop_reason="end_turn", usage=ns(input_tokens=10, output_tokens=20)),
+        stream_final=ns(
+            content=[
+                ns(type="thinking", thinking="", signature="signed"),
+                ns(type="redacted_thinking", data="opaque"),
+                ns(type="text", text="done"),
+            ],
+            stop_reason="end_turn",
+            usage=ns(input_tokens=10, output_tokens=20),
+        ),
     )
     p = AnthropicProvider(model="claude-opus-5-5", client=client)
     user = Message.user("inspect template")
     events = [event async for event in p.stream([user], "system") if isinstance(event, ThinkingDeltaEvent)]
-    assert len(events) == 2
-    assert events[0].provider_metadata["prefix"] == events[1].provider_metadata["prefix"]
+    metadata = {}
+    for event in events:
+        metadata.setdefault(event.block_index, {}).update(event.provider_metadata or {})
+    assert metadata[0]["prefix"] == metadata[1]["prefix"]
     history = [
         user,
         Message(
             role="assistant",
             content=[
-                ContentBlock(type="thinking", text="", provider_metadata=events[0].provider_metadata),
-                ContentBlock(type="redacted_thinking", provider_metadata=events[1].provider_metadata),
+                ContentBlock(type="thinking", text="", provider_metadata=metadata[0]),
+                ContentBlock(type="redacted_thinking", data="opaque", provider_metadata=metadata[1]),
                 ContentBlock(type="text", text="done"),
             ],
         ),

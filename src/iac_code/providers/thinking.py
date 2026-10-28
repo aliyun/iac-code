@@ -486,7 +486,7 @@ _VOLCENGINE_KIMI_SPEC = ThinkingSpec(
     supports_disable=False,
     use_max_completion_tokens=True,
     thinking_enabled_by_default=True,
-    effort_aliases=(("medium", "high"), ("xhigh", "max")),
+    effort_aliases=(("medium", "low"), ("xhigh", "max")),
 )
 _ZHIPU_GLM52_SPEC = ThinkingSpec(
     ThinkingFamily.ZHIPU,
@@ -967,6 +967,8 @@ def resolve_thinking_active(
         return normalized_effort in forbidden
     # DashScope disable-effort tokens force thinking off even when configured on.
     if spec.family is ThinkingFamily.DASHSCOPE and normalized_effort in _THINKING_DISABLE_EFFORTS:
+        return False
+    if spec.family is ThinkingFamily.OPENAI and normalized_effort == "none" and "none" in spec.effort_values:
         return False
     if spec.family is ThinkingFamily.VOLCENGINE and normalized_effort is not None:
         effective_effort = dict(spec.effort_aliases).get(normalized_effort, normalized_effort)

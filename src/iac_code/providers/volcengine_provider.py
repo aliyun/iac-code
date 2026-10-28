@@ -68,8 +68,8 @@ class VolcengineProvider(OpenAIProvider):
         spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
         if spec.family is not ThinkingFamily.VOLCENGINE:
             return {}
-        if self._thinking_disabled():
-            return {"extra_body": {"thinking": {"type": "disabled"}}} if spec.supports_disable else {}
+        if self._thinking_disabled() and spec.supports_disable:
+            return {"extra_body": {"thinking": {"type": "disabled"}}}
         effort = self._effective_effort(spec)
         if effort is None:
             return {}
