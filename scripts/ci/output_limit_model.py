@@ -129,6 +129,20 @@ class _Handler(BaseHTTPRequestHandler):
                 },
                 "response.function_call_arguments.delta",
             )
+            self._event(
+                {
+                    "type": "response.function_call_arguments.done",
+                    "output_index": 0,
+                    "item_id": "fc-discarded",
+                    "arguments": output[0]["arguments"],
+                },
+                "response.function_call_arguments.done",
+            )
+            output[0]["status"] = "incomplete"
+            self._event(
+                {"type": "response.output_item.done", "output_index": 0, "item": output[0]},
+                "response.output_item.done",
+            )
         elif text:
             output.append(
                 {

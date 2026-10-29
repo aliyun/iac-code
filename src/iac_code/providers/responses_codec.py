@@ -265,8 +265,16 @@ class ResponsesStreamAdapter:
         self.thinking = ""
         self.terminal: NonStreamingResponse | None = None
 
-    def _finish_call(self, item: dict[str, Any]) -> list[StreamEvent]:
-        call = _call(item, {tool.name for tool in self.tools or []})
+    def _finish_call(self, item: dict[str, Any], *, terminal: bool = False) -> list[StreamEvent]:
+        try:
+            call = _call(item, {tool.name for tool in self.tools or []})
+        except ResponsesProtocolError:
+            # Done events can close an interrupted call with partial JSON or an
+            # incomplete status. The terminal response determines whether this
+            # is an output-limit interruption or a malformed completed response.
+            if terminal:
+                raise
+            return []
         call_id = call["id"]
         if call_id in self.ended:
             if self.ended[call_id] != call:
@@ -327,7 +335,7 @@ class ResponsesStreamAdapter:
                                 self.started.add(call_id)
                                 events.append(ToolUseStartEvent(tool_use_id=call_id, name=name))
                         else:
-                            events.extend(self._finish_call(item))
+                            events.extend(self._finish_call(item, terminal=True))
             self.terminal = response
             return events
         if kind in {"response.failed", "error"}:

@@ -300,6 +300,34 @@ async def test_incomplete_text_has_no_native_history():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("arguments", ['{"value":', '{"value": 1}'])
+async def test_incomplete_tool_done_waits_for_terminal_response(arguments):
+    item = call(arguments=arguments, status="incomplete")
+    data = response([item], status="incomplete", incomplete_details={"reason": "max_output_tokens"})
+    client = FakeResponsesClient([*tool_events([item]), terminal(data)])
+
+    events = [event async for event in provider(client).stream([Message.user("go")], "system", TOOLS)]
+
+    assert events[-1].stop_reason == "max_tokens"
+    assert events[-1].provider_metadata == {}
+    assert client.streams[0].closed
+
+
+@pytest.mark.asyncio
+async def test_malformed_tool_done_still_fails_for_completed_response():
+    item = call(arguments='{"value":')
+    client = FakeResponsesClient([*tool_events([item]), terminal(response([item]))])
+    emitted = []
+
+    with pytest.raises(ResponsesProtocolError, match="complete JSON"):
+        async for event in provider(client).stream([Message.user("go")], "system", TOOLS):
+            emitted.append(event)
+
+    assert not any(isinstance(event, (MessageEndEvent, ToolUseEndEvent)) for event in emitted)
+    assert client.streams[0].closed
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "data",
     [
