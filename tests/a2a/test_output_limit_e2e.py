@@ -42,6 +42,12 @@ def _saved(tmp_path):
     return SessionStorage().load(context.cwd, context.session_id)
 
 
+def _assert_final_failure(events):
+    updates = [event["result"]["statusUpdate"] for event in events if "statusUpdate" in event.get("result", {})]
+    assert updates[-1]["status"]["state"] == "TASK_STATE_FAILED"
+    assert not any(update.get("metadata", {}).get("iac_code", {}).get("assistantFinal") for update in updates)
+
+
 @pytest.mark.parametrize("protocol", ["chat", "responses", "anthropic"])
 def test_text_continues_after_output_limit(tmp_path, monkeypatch, protocol):
     events, requests = _run(tmp_path, monkeypatch, protocol=protocol, scenario="text")
@@ -51,6 +57,18 @@ def test_text_continues_after_output_limit(tmp_path, monkeypatch, protocol):
     second_request = json.dumps(requests[1])
     assert "first fragment" in second_request
     assert CONTINUATION in second_request
+    final_updates = [
+        event.get("result", {}).get("statusUpdate", {})
+        for event in events
+        if event.get("result", {})
+        .get("statusUpdate", {})
+        .get("metadata", {})
+        .get("iac_code", {})
+        .get("assistantFinal", {})
+        .get("complete")
+    ]
+    assert len(final_updates) == 1
+    assert final_updates[0]["status"]["message"]["parts"][0]["text"] == "first fragmentsecond fragment"
     saved = _saved(tmp_path)
     assert sum(message.get_text() == "first fragment" for message in saved) == 1
     assert sum(message.get_text() == "second fragment" for message in saved) == 1
@@ -79,6 +97,7 @@ def test_repeated_output_limit_fails_with_bounded_requests(tmp_path, monkeypatch
     assert "TASK_STATE_FAILED" in output
     assert "output token limit" in output
     assert not (tmp_path / "executions.jsonl").exists()
+    _assert_final_failure(events)
 
 
 def test_output_limit_without_visible_text_fails_immediately(tmp_path, monkeypatch):
@@ -88,6 +107,7 @@ def test_output_limit_without_visible_text_fails_immediately(tmp_path, monkeypat
     assert len(requests) == 1
     assert "TASK_STATE_FAILED" in output
     assert "output token limit" in output
+    _assert_final_failure(events)
 
 
 def test_pipeline_does_not_complete_after_output_limit(tmp_path, monkeypatch):
@@ -100,3 +120,4 @@ def test_pipeline_does_not_complete_after_output_limit(tmp_path, monkeypatch):
     assert "TASK_STATE_FAILED" in output
     assert "pipeline_completed" not in output
     assert "complete_step" not in json.dumps([message.model_dump(mode="json") for message in _saved(tmp_path)])
+    _assert_final_failure(events)
