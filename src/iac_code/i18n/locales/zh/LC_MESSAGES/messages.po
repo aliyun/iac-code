@@ -13703,3 +13703,9 @@ msgstr "total_cost 必须是包含估算周期的非空费用估算。"
 #, python-brace-format
 msgid "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. Keep only the canonical parameter."
 msgstr "阿里云 API {operation} 的参数 {parameter} 与其别名取值冲突。请只保留标准参数。"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid ""
+"Changed candidates require a new show_architecture_plan batch before "
+"completion"
+msgstr "更改候选方案前须新建 show_architecture_plan 批次并完成提交"

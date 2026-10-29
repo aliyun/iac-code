@@ -112,6 +112,17 @@ def enrich_completion_input(
     saved_candidates = saved_candidates if isinstance(saved_candidates, list) else []
     saved_candidate_set_id = saved.get("candidate_set_id")
     batch = latest_candidate_outline_batch(tool_result_records)
+    guard_state = _ignored.get("completion_guard_state") or {}
+    current_records = tool_result_records[guard_state.get("followup_record_start", len(tool_result_records)):]
+    if (
+        saved_candidates
+        and batch is not None
+        and batch.candidate_set_id == saved_candidate_set_id
+        and any(record.get("tool_name") == "show_candidate_detail" for record in current_records)
+    ):
+        raise CompletionEnrichmentError(
+            "Changed candidates require a new show_architecture_plan batch before completion"
+        )
 
     if status == "selected":
         if batch is not None and batch.candidate_set_id != saved_candidate_set_id:

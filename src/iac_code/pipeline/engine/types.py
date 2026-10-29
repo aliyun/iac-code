@@ -46,6 +46,8 @@ class StepConfig:
     #: Opt-in: an explicit structured confirmation may carry parameter overrides that differ
     #: from the last quote input, and is still resolved deterministically in one shot.
     confirmation_accepts_parameter_overrides: bool = False
+    allow_empty_conclusion_on_resume: bool = False
+    empty_conclusion_mutation_tools: tuple[str, ...] = ()
 
 
 @dataclass
@@ -57,3 +59,4 @@ class StepResult:
     conclusion: dict | None = None
     rollback_request: tuple[str, str] | None = None
     error: str | None = None
+    conclusion_unchanged: bool = False

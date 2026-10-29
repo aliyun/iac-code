@@ -13960,3 +13960,9 @@ msgstr "total_cost は見積期間を含む空でない費用見積もりであ�
 #, python-brace-format
 msgid "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. Keep only the canonical parameter."
 msgstr "Alibaba Cloud API {operation} のパラメーター {parameter} とそのエイリアスに矛盾する値が指定されています。正式なパラメーターのみを残してください。"
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid ""
+"Changed candidates require a new show_architecture_plan batch before "
+"completion"
+msgstr "候補を変更する場合は、完了前に show_architecture_plan で新しい候補バッチを作成してください。"

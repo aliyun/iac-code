@@ -44,6 +44,7 @@ from iac_code.types.stream_events import (
     MessageEndEvent,
     ResourceObservedEvent,
     StreamEvent,
+    TextDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
@@ -205,6 +206,7 @@ class StepExecutor:
         resume_messages: list | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         resume_candidate_selection: bool = False,
+        completion_guard_state_seed: dict[str, Any] | None = None,
         resolved_step_result: StepResult | None = None,
         skip_completed_step_restore: bool = False,
         rollback_targets: list[str] | None = None,
@@ -244,6 +246,7 @@ class StepExecutor:
             transcript_id=transcript_id,
             resume_messages=resume_messages,
             precompleted_tools=precompleted_tools,
+            completion_guard_state_seed=completion_guard_state_seed,
             compact_candidate_selection=compact_candidate_selection,
             resume_candidate_selection=resume_candidate_selection,
             skip_completed_step_restore=skip_completed_step_restore,
@@ -323,7 +326,13 @@ class StepExecutor:
             nonlocal last_agent_stop_reason
             try:
                 async for event in stream:
-                    if isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
+                    if (
+                        isinstance(event, TextDeltaEvent)
+                        and event.text.strip()
+                        and "followup_visible_answer" in completion_guard_state
+                    ):
+                        completion_guard_state["followup_visible_answer"] = True
+                    elif isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
                         complete_step_ids.add(event.tool_use_id)
                     elif isinstance(event, ToolUseEndEvent):
                         pending_tool_inputs[event.tool_use_id] = {
@@ -624,12 +633,17 @@ class StepExecutor:
             completion_guard_state["successful_tools"].update(seed.get("successful_tools", set()))
             completion_guard_state["tool_results"].update(seed.get("tool_results", {}))
             completion_guard_state["tool_result_records"].extend(seed.get("tool_result_records", []))
+            if "followup_template_sha256" in seed:
+                completion_guard_state["followup_template_sha256"] = seed["followup_template_sha256"]
             owned_stack_ids = seed.get("ros_deploy_owned_stack_ids")
             if isinstance(owned_stack_ids, dict):
                 completion_guard_state.setdefault("ros_deploy_owned_stack_ids", {}).update(
                     copy.deepcopy(owned_stack_ids)
                 )
 
+        completion_guard_state["followup_record_start"] = len(completion_guard_state["tool_result_records"])
+        if step.config.get("allow_empty_conclusion_on_resume") is True:
+            completion_guard_state["followup_visible_answer"] = False
         build_tool_kwargs: dict[str, Any] = {
             "compact_candidate_selection": compact_candidate_selection,
             "rollback_targets": rollback_targets,
@@ -1278,6 +1292,10 @@ class StepExecutor:
             completion_context_paths=self._config_string_tuple(step.config.get("completion_context_paths")),
             confirmation_accepts_parameter_overrides=(
                 step.config.get("confirmation_accepts_parameter_overrides") is True
+            ),
+            allow_empty_conclusion_on_resume=step.config.get("allow_empty_conclusion_on_resume") is True,
+            empty_conclusion_mutation_tools=self._config_string_tuple(
+                step.config.get("empty_conclusion_mutation_tools")
             ),
         )
         guard_state = ensure_completion_guard_state(

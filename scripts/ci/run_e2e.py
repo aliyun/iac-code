@@ -230,7 +230,17 @@ CANDIDATE_BATCH_CASES = tuple(
     )
     for mode in ("same-process", "cold-recovery")
 )
-CASES = FAST_CASES + OUTPUT_LIMIT_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES
+STEP_FOLLOWUP_CASES = tuple(
+    Case(
+        f"ssf-{scenario}-followup-contract", "scripts/ci/run_step_followup_contract.py",
+        ("--scenario", scenario), 90, "full",
+    )
+    for scenario in ("step1", "step2")
+)
+CASES = (
+    FAST_CASES + OUTPUT_LIMIT_CASES + EXECUTION_CASES + PERMISSION_CASES
+    + CANDIDATE_BATCH_CASES + STEP_FOLLOWUP_CASES
+)
 LIVE_SCRIPT = "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py"
 SELLING_CIDR_POOLS = tuple(str(pool) for pool in ipaddress.IPv4Network("10.250.0.0/16").subnets(new_prefix=22))
 if len(SELLING_SCENARIOS) > len(SELLING_CIDR_POOLS):
@@ -245,6 +255,13 @@ def _selling_group(spec: Any) -> str:
 
 
 LIVE_CASES = tuple(
+    Case(
+        f"ssf-{scenario}-followup-a2a", "scripts/ci/run_step_followup_a2a.py",
+        ("--scenario", scenario), 1200 if scenario == "step1" else 2700, "live",
+        live_runner="step_followup", group="readonly",
+    )
+    for scenario in ("step1", "step2")
+) + tuple(
     Case(
         "ssf-" + spec.name, LIVE_SCRIPT,
         ("--scenario", spec.name, "--cidr-pool", SELLING_CIDR_POOLS[index]), 2700, "live",
@@ -439,7 +456,10 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
     if args.suite == "fast":
         return list(FAST_CASES) + [case for case in OUTPUT_LIMIT_CASES if case.suite == "fast"]
     if args.suite == "full":
-        return list(FAST_CASES + OUTPUT_LIMIT_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES)
+        return list(
+            FAST_CASES + OUTPUT_LIMIT_CASES + EXECUTION_CASES + PERMISSION_CASES
+            + CANDIDATE_BATCH_CASES + STEP_FOLLOWUP_CASES
+        )
     if args.suite == "live":
         return list(LIVE_CASES)
     if args.suite.startswith("live-"):
@@ -538,6 +558,7 @@ def _read_summary(case_dir: Path, source: str) -> dict[str, Any] | None:
 def _live_cleanup_status(case: Case, summary: dict[str, Any] | None) -> str:
     readonly_runners = {
         "selector", "agui_selector", "canary", "legacy_a2a_readonly", "coupon_budget", "coupon_budget_mock",
+        "step_followup",
     }
     if case.live_runner in readonly_runners | LLM_ONLY_RUNNERS:
         return "not-needed"

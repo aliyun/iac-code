@@ -3647,9 +3647,12 @@ class PipelineRunner:
     def _resume_messages_for_current_parent_step(self, step_id: str) -> list[Message]:
         attempt = self._current_parent_attempt(step_id)
         if attempt is not None:
-            resume_messages = self._load_repaired_resume_messages(attempt.get("transcript_id"))
+            evidence = attempt.get("completion_evidence")
+            source = evidence if isinstance(evidence, dict) else attempt
+            resume_messages = self._load_repaired_resume_messages(source.get("transcript_id"))
             if resume_messages is not None:
-                return list(resume_messages)
+                count = source.get("message_count")
+                return list(resume_messages[:count] if isinstance(count, int) else resume_messages)
         if self._session_storage is None or not hasattr(self._session_storage, "load"):
             return []
         loaded = self._session_storage.load(self._cwd, self._session_id)
@@ -4928,6 +4931,12 @@ class PipelineRunner:
                     "permission_checkpoint": permission_checkpoint if first_step else None,
                     "resource_selection_checkpoint": resource_selection_checkpoint if first_step else None,
                 }
+                if step.config.get("allow_empty_conclusion_on_resume") is True and existing_attempt:
+                    evidence = existing_attempt.get("completion_evidence")
+                    if isinstance(evidence, dict):
+                        execute_kwargs["completion_guard_state_seed"] = {
+                            "followup_template_sha256": evidence.get("template_sha256"),
+                        }
                 if step_precompleted_tools is not None:
                     execute_kwargs["precompleted_tools"] = step_precompleted_tools
                 if first_step and resolved_step_result is not None:
@@ -5094,6 +5103,26 @@ class PipelineRunner:
                     )
                 step_success_observed = True
 
+            if (
+                step.config.get("allow_empty_conclusion_on_resume") is True
+                and isinstance(step_result.conclusion, dict)
+                and str(step_result.conclusion.get("status", "")).startswith("awaiting_")
+            ):
+                if step_result.conclusion_unchanged and existing_attempt:
+                    attempt["completion_evidence"] = deepcopy(existing_attempt.get("completion_evidence"))
+                else:
+                    messages = self._load_repaired_resume_messages(attempt.get("transcript_id")) or []
+                    evidence = {"transcript_id": attempt.get("transcript_id"), "message_count": len(messages)}
+                    template_path = step_result.conclusion.get("template_url")
+                    if isinstance(template_path, str) and template_path:
+                        try:
+                            evidence["template_sha256"] = hashlib.sha256(
+                                (Path(self._cwd or os.getcwd()) / template_path).read_bytes()
+                            ).hexdigest()
+                        except OSError:
+                            pass  # Missing artifacts keep the existing confirmation/validation failure path.
+                    attempt["completion_evidence"] = evidence
+
             step_completed_event = PipelineEvent(
                 type=PipelineEventType.STEP_COMPLETED,
                 step_id=step.step_id,
@@ -5102,6 +5131,7 @@ class PipelineRunner:
                     "duration_s": elapsed,
                     "conclusion_field": step.conclusion_field,
                     "conclusion": step_result.conclusion,
+                    **({"conclusion_unchanged": True} if step_result.conclusion_unchanged else {}),
                 },
             )
 

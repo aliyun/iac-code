@@ -59,6 +59,8 @@ steps:
     ui_mode: candidate_selection
     config:
       accept_parameter_overrides: false
+      allow_empty_conclusion_on_resume: true
+      empty_conclusion_mutation_tools: [show_architecture_plan, show_candidate_detail]
       compact_completion_schema: true
       compact_completion_errors: true
       completion_validation_error_limit: 5
@@ -506,6 +508,8 @@ steps:
     ui_mode: deployment_confirmation
     config:
       deterministic_structured_confirmation: true
+      allow_empty_conclusion_on_resume: true
+      empty_conclusion_mutation_tools: [write_file, edit_file]
       compact_completion_schema: true
       compact_completion_errors: true
       completion_validation_error_limit: 5

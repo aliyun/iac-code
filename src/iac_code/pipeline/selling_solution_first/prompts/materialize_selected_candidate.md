@@ -54,6 +54,7 @@
 `selected_plan.status` 为 `awaiting_confirmation` 时，本轮消息是用户对当前完整方案的操作：
 
 - 可解析的结构化 `action` 必须按技能确定性处理；结构化 `confirm` 由 Python 直接完成，不会交给你判断。
+- 咨询当前方案时必须先给本轮可见答复，再调用 `complete_step`，参数仅为 `{"conclusion":{}}`（不补 status，不嵌套 conclusion），保留原模板、参数和价格并继续等待；比较查询不表示调整。实际修改或控制操作仍按下面的原分支提交，不能空提交。
 - 非结构化输入由 LLM 按技能区分确认、取消、当前参数调整、架构变化或全新部署目标。
 - 确认沿用当前模板、参数、Preview、询价和方案说明，只提交 `status: confirmed`；不得重新执行物化工具或再次等待确认。携带新参数覆盖的确认同样只需一次，由 Python 合并并校验参数。
 - 没有确认语义的参数调整请求留在本 Step，重新完成必要的参数约束、Preview、询价和方案说明后，再次提交 `status: awaiting_confirmation`。

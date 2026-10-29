@@ -202,3 +202,16 @@ ROS 可能返回成功的资源 `Order`（非零 CNY 金额），却缺少 `Orde
 和对应 pipeline attempt 证明；不向用户请求或图片注入测试 StackName，也不按名称前缀授权删除。
 查询、等待和继续已有 Stack 不构成新建证明。删除时仍核对实际 Stack ID、地域以及创建记录中的真实名称。
 在线报告仅保留问答计数、调用动作/参数是否符合约定、固定异常类别和源码位置，原始日志留在 worker。
+
+### Step1/Step2 续聊
+
+`ssf-step1-followup-contract`、`ssf-step2-followup-contract` 加入 `full`，运行生产引擎、工具、hook 和磁盘持久化的多轮测试，仅模型及云响应使用替身。覆盖连续空提交、新批次改案、比较报价证据隔离、调参、选择、确认、取消、重选及非法空提交。
+
+`ssf-step1-followup-a2a`、`ssf-step2-followup-a2a` 加入 `live-readonly`，使用真实 LLM、HTTP/SSE A2A 和只读云 API。自然咨询逐轮核对成功空提交、完整结论及无变化标记；实际调整必须改变候选或模板/有效参数。最终取消，不确认部署。
+
+```bash
+uv run python scripts/ci/run_e2e.py --case ssf-step1-followup-contract --case ssf-step2-followup-contract --retries 0
+uv run python scripts/ci/run_e2e.py --case ssf-step1-followup-a2a --case ssf-step2-followup-a2a --text-model glm-5.3-prime --credential-source-dir /path/to/test-config --jobs 2 --retries 0
+```
+
+四模型验收须分别指定四个文本模型运行以上两个真实 Case，共八次，不能把模型池的一次分配当作全覆盖。沿用 effort=low、fallback=false、隔离配置和报告；首次失败证据保留，私有原始日志不用于公共报告。

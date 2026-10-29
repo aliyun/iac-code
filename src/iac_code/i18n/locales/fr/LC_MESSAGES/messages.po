@@ -15136,3 +15136,9 @@ msgstr "total_cost doit être une estimation non vide des coûts incluant sa pé
 #, python-brace-format
 msgid "Alibaba Cloud API {operation} received conflicting values for parameter {parameter} and its alias. Keep only the canonical parameter."
 msgstr "L’API Alibaba Cloud {operation} a reçu des valeurs contradictoires pour le paramètre {parameter} et son alias. Conservez uniquement le paramètre canonique."
+
+#: src/iac_code/pipeline/selling_solution_first/hooks/solution_planning_and_selection.py
+msgid ""
+"Changed candidates require a new show_architecture_plan batch before "
+"completion"
+msgstr "Pour modifier les propositions, créez un nouveau lot avec show_architecture_plan avant de terminer cette étape."

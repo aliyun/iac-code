@@ -72,6 +72,8 @@ def _step_config(step) -> StepConfig:
         hard_constraint_evidence_contract=step.config.get("hard_constraint_evidence_contract"),
         completion_context_paths=tuple(step.config.get("completion_context_paths", [])),
         confirmation_accepts_parameter_overrides=(step.config.get("confirmation_accepts_parameter_overrides") is True),
+        allow_empty_conclusion_on_resume=step.config.get("allow_empty_conclusion_on_resume") is True,
+        empty_conclusion_mutation_tools=tuple(step.config.get("empty_conclusion_mutation_tools", [])),
     )
 
 
@@ -102,9 +104,15 @@ def _tool(
         "successful_tools": successful_tools,
         "tool_results": tool_results,
         "completion_record_contract": step.config.get("completion_record_contract"),
+        "followup_record_start": len(records),
     }
     if cwd is not None:
         state["cwd"] = str(cwd)
+        template = cwd / TEMPLATE_PATH
+        if template.is_file():
+            import hashlib
+
+            state["followup_template_sha256"] = hashlib.sha256(template.read_bytes()).hexdigest()
     return CompleteStepTool(
         _step_config(step),
         completion_guards=step.completion_guards,
@@ -1768,9 +1776,10 @@ def test_old_selling_steps_do_not_enable_completion_finalization():
     for step in selling.steps:
         if step.step_id in {"confirm_and_select", "architecture_planning"}:
             assert step.completion_enricher is not None
-            assert Path(step.completion_enricher.__code__.co_filename).resolve() == (
-                PIPELINE_DIR.parent / f"selling/hooks/{step.step_id}.py"
-            ).resolve()
+            assert (
+                Path(step.completion_enricher.__code__.co_filename).resolve()
+                == (PIPELINE_DIR.parent / f"selling/hooks/{step.step_id}.py").resolve()
+            )
         else:
             assert step.completion_enricher is None
     assert all(step.config.get("completion_record_contract") != "v2" for step in selling.steps)
@@ -1801,3 +1810,182 @@ def test_old_a2a_artifact_spec_positional_contract_is_unchanged():
     assert spec.media_type == "text/yaml"
     assert spec.role == "intermediate"
     assert spec.supersedes_path == "old.path"
+
+
+class TestUnchangedFollowup:
+    @pytest.mark.parametrize("payload", [{"conclusion": {}}, {"conclusion": {"conclusion": {}}}])
+    def test_step1_empty_keeps_authoritative_candidates(self, loaded, payload):
+        step = _step(loaded, "solution_planning_and_selection")
+        waiting = _finalize(
+            _tool(step, records=_planning_records([_candidate_semantics()])), _awaiting_selection_delta()
+        )
+        tool = _tool(step, context_snapshot={"solution_selection": waiting.conclusion}, user_message="解释一下费用")
+        validated = copy.deepcopy(payload)
+        valid, message = tool.validate_input(validated)
+        assert valid, message
+        assert validated == {"conclusion": {}}
+        result = _finalize(tool, payload)
+        assert result.conclusion == waiting.conclusion
+        assert result.conclusion is not waiting.conclusion
+        assert result.conclusion_unchanged is True
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {},
+            {"conclusion": None},
+            {"conclusion": {"status": None}},
+            {"conclusion": {"conclusion": {"status": "awaiting_selection"}}},
+            {"conclusion": {"conclusion": {"conclusion": {}}}},
+            {"conclusion": {"conclusion": {}, "status": "awaiting_selection"}},
+            {"conclusion": {"conclusion": {}}, "unexpected": True},
+        ],
+    )
+    def test_invalid_empty_forms_remain_invalid(self, loaded, payload):
+        step = _step(loaded, "solution_planning_and_selection")
+        waiting = _finalize(
+            _tool(step, records=_planning_records([_candidate_semantics()])), _awaiting_selection_delta()
+        )
+        tool = _tool(step, context_snapshot={"solution_selection": waiting.conclusion}, user_message="解释费用")
+        assert isinstance(tool.finalize_completion_input(payload), CompletionValidationError)
+
+    @pytest.mark.parametrize("payload", [{"conclusion": {}}, {"conclusion": {"conclusion": {}}}])
+    def test_first_completion_cannot_be_empty(self, loaded, payload):
+        step = _step(loaded, "solution_planning_and_selection")
+        assert isinstance(
+            _tool(step, user_message="部署 RDS").finalize_completion_input(payload),
+            CompletionValidationError,
+        )
+
+    @pytest.mark.parametrize("payload", [{"conclusion": {}}, {"conclusion": {"conclusion": {}}}])
+    def test_new_candidate_records_cannot_be_discarded(self, loaded, payload):
+        step = _step(loaded, "solution_planning_and_selection")
+        waiting = _finalize(
+            _tool(step, records=_planning_records([_candidate_semantics()])), _awaiting_selection_delta()
+        )
+        tool = _tool(step, context_snapshot={"solution_selection": waiting.conclusion}, user_message="修改配置")
+        tool._completion_guard_state["tool_result_records"].extend(
+            _planning_records([_candidate_semantics()], batch_id="new")
+        )
+        result = tool.finalize_completion_input(payload)
+        assert isinstance(result, CompletionValidationError)
+        assert "modified" in result.message
+
+    @pytest.mark.parametrize("payload", [{"conclusion": {}}, {"conclusion": {"conclusion": {}}}])
+    def test_step2_empty_preserves_saved_quote_not_comparison(self, loaded, tmp_path, payload):
+        step = _step(loaded, "materialize_selected_candidate")
+        _write_template(tmp_path)
+        selection = _selection()
+        records = _records()
+        waiting = _finalize(
+            _tool(step, context_snapshot={"solution_selection": selection}, records=records, cwd=tmp_path),
+            _waiting_delta(),
+        )
+        tool = _tool(
+            step,
+            context_snapshot={"solution_selection": selection, "selected_plan": waiting.conclusion},
+            records=records,
+            cwd=tmp_path,
+            user_message="只比较另一个磁盘容量，不修改方案",
+        )
+        comparison = copy.deepcopy(records[-1])
+        comparison["tool_name"] = "ros_estimate_template_cost"
+        comparison["input"]["parameters"] = {**PARAMETERS, "DBInstanceStorage": 300}
+        tool._completion_guard_state["tool_result_records"].append(comparison)
+        result = _finalize(tool, payload)
+        assert result.conclusion_unchanged is True
+        assert result.conclusion == waiting.conclusion
+        assert result.conclusion["effective_deployment_parameters"] == PARAMETERS
+
+    @pytest.mark.parametrize("payload", [{"conclusion": {}}, {"conclusion": {"conclusion": {}}}])
+    def test_changed_template_cannot_use_empty_completion(self, loaded, tmp_path, payload):
+        step = _step(loaded, "materialize_selected_candidate")
+        _write_template(tmp_path)
+        selection = _selection()
+        records = _records()
+        waiting = _finalize(
+            _tool(step, context_snapshot={"solution_selection": selection}, records=records, cwd=tmp_path),
+            _waiting_delta(),
+        )
+        tool = _tool(
+            step,
+            context_snapshot={"solution_selection": selection, "selected_plan": waiting.conclusion},
+            records=records,
+            cwd=tmp_path,
+            user_message="调整容量",
+        )
+        (tmp_path / TEMPLATE_PATH).write_text("Resources: {}\n", encoding="utf-8")
+        result = tool.finalize_completion_input(payload)
+        assert isinstance(result, CompletionValidationError)
+        assert "template" in result.message
+
+    @pytest.mark.parametrize("enabled,user_message", [(False, "解释费用"), (True, "")])
+    def test_nested_empty_requires_enabled_followup(self, loaded, enabled, user_message):
+        step = _step(loaded, "solution_planning_and_selection")
+        waiting = _finalize(
+            _tool(step, records=_planning_records([_candidate_semantics()])), _awaiting_selection_delta()
+        )
+        tool = _tool(step, context_snapshot={"solution_selection": waiting.conclusion}, user_message=user_message)
+        tool._step_config.allow_empty_conclusion_on_resume = enabled
+        payload = {"conclusion": {"conclusion": {}}}
+        assert not tool.validate_input(copy.deepcopy(payload))[0]
+        assert isinstance(tool.finalize_completion_input(payload), CompletionValidationError)
+
+    def test_status_only_reopen_keeps_original_semantics(self, loaded):
+        step = _step(loaded, "solution_planning_and_selection")
+        waiting = _finalize(
+            _tool(step, records=_planning_records([_candidate_semantics()])), _awaiting_selection_delta()
+        )
+        tool = _tool(step, context_snapshot={"solution_selection": waiting.conclusion}, user_message="重新选择方案")
+        result = _finalize(tool, {"conclusion": {"status": "awaiting_selection"}})
+        assert result.conclusion == waiting.conclusion
+        assert result.conclusion_unchanged is False
+
+
+@pytest.mark.parametrize("payload", [{"conclusion": {}}, {"conclusion": {"conclusion": {}}}])
+def test_unchanged_followup_requires_an_answer_but_can_correct_an_empty_attempt(loaded, payload):
+    step = _step(loaded, "solution_planning_and_selection")
+    waiting = _finalize(_tool(step, records=_planning_records([_candidate_semantics()])), _awaiting_selection_delta())
+    tool = _tool(step, context_snapshot={"solution_selection": waiting.conclusion}, user_message="Explain the cost")
+    state = tool._completion_guard_state
+    state["followup_visible_answer"] = False
+    assert isinstance(tool.finalize_completion_input(payload), CompletionValidationError)
+    state["tool_result_records"].append({"tool_name": "complete_step", "is_error": True, "input": {"conclusion": {}}})
+    state["followup_visible_answer"] = True
+    assert _finalize(tool, {"conclusion": {}}).conclusion_unchanged
+    for invalid_empty in ({"conclusion": {}}, {"status": "awaiting_selection"}):
+        state["tool_result_records"].append(
+            {"tool_name": "complete_step", "is_error": True, "input": {"conclusion": invalid_empty}}
+        )
+        assert _finalize(tool, {"conclusion": {}}).conclusion_unchanged
+    state["tool_result_records"].append(
+        {
+            "tool_name": "complete_step",
+            "is_error": True,
+            "input": {"conclusion": {"status": "awaiting_selection", "intent": {}}},
+        }
+    )
+    assert isinstance(tool.finalize_completion_input({"conclusion": {}}), CompletionValidationError)
+
+
+def test_nested_empty_cannot_replace_candidate_selection(loaded):
+    step = _step(loaded, "solution_planning_and_selection")
+    waiting = _finalize(_tool(step, records=_planning_records([_candidate_semantics()])), _awaiting_selection_delta())
+    tool = _tool(
+        step,
+        context_snapshot={"solution_selection": waiting.conclusion},
+        user_message=json.dumps({"selected_candidate_index": 0}),
+    )
+    error = _assert_error(tool, {"conclusion": {"conclusion": {}}}, "candidate selection")
+    assert error.phase == "runtime"
+
+
+def test_resumed_nonempty_update_keeps_specific_field_diagnostics(loaded):
+    step = _step(loaded, "solution_planning_and_selection")
+    waiting = _finalize(_tool(step, records=_planning_records([_candidate_semantics()])), _awaiting_selection_delta())
+    tool = _tool(step, context_snapshot={"solution_selection": waiting.conclusion}, user_message="Modify the plan")
+    valid, diagnostic = tool.validate_input({"conclusion": {"status": "awaiting_selection", "intent": "wrong-type"}})
+    assert not valid
+    error = json.loads(diagnostic)
+    assert error["path"] == "/intent"
+    assert error["validator"] == "type"
