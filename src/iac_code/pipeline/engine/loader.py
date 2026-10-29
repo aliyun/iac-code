@@ -503,6 +503,8 @@ def _bind_hooks(steps: list[StepSpec], pipeline_dir: Path) -> None:
         module = _load_module_from_file(hook_path, f"pipeline_hook_{step.step_id}")
         if hasattr(module, "on_enter"):
             step.on_enter = module.on_enter
+        if hasattr(module, "build_prompt_context"):
+            step.prompt_context_builder = module.build_prompt_context
         if hasattr(module, "on_exit"):
             step.on_exit = module.on_exit
         if hasattr(module, "enrich_completion_input"):

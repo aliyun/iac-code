@@ -25,13 +25,14 @@
 
 ### 选择恢复或回滚重规划
 
-上方状态为 `awaiting_selection` 时，用户已经看过候选。本轮消息只能按以下三类处理：
+上方状态为 `awaiting_selection` 时，用户已经看过候选。本轮消息按以下四类处理：
 
 1. **选择候选**：按候选坐标、唯一名称或自然语言偏好映射到已保存的候选，只提交下面的选择增量；不要重复 candidates、intent、options 或 selected_candidate。
 2. **修改当前架构**：结合用户新增要求重新规划，用一次新的 `show_architecture_plan` 提交修改后的完整摘要
    批次，再逐个细化；不得提交增量 patch，也不得把架构修改误报为已选择。
 3. **替换部署目标**：本轮最新输入成为新的权威需求，丢弃旧 `intent`、候选和产品组合，重新执行技能的
    意图、摘要批次和逐候选细化流程。新旧部署需求不得合并。
+4. **咨询当前方案**：配置、费用或用券适用性等追问先按事实可见答复，按需查询，并使用用户要求的表格等格式；不把咨询当成选择或取消部署。每次都先输出本轮可见答复，再调用 `complete_step`；只提交等待选择结论不能代替回答，重复提问或重新查询也不能省略答复。没有修改要求时保留候选并提交 `awaiting_selection`，不重新规划或进入实现。
 
 用户只要求“重新选择方案”且没有增加架构要求或替换部署目标时，不要重新生成、展示或重复提交候选；提交
 `{"conclusion":{"status":"awaiting_selection"}}`，Python 会从已保存的 `solution_selection` 恢复原候选并重新打开选择界面。
@@ -43,7 +44,6 @@
 本 Step 只选择架构，不接收部署参数。输入中的 `parameter_overrides`、`deployment_parameters` 或 `parameters` 不写入结论，部署参数统一交给下一步处理。
 
 选择分支的 `complete_step` 形状：
-
 `{"conclusion":{"status":"selected","selected_candidate_index":0}}`
 
 首次规划或用户明确修改架构/替换部署目标时须提交包含 `status` 和 `intent` 的
@@ -57,3 +57,4 @@
   candidate_id、output_path 和同序 options。
 - `complete_step` 参数必须是 `{"conclusion": {...}}`，不得把结论字段放到工具参数顶层。
 - 本 Step 不生成或写入模板、不做 ROS 精确询价、不执行云写操作。只读查询、记忆读取和展示的边界遵循技能与当前工具权限。
+{ros_agent_awareness}

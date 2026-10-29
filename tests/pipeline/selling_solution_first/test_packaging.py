@@ -22,7 +22,11 @@ PIPELINE_DIR = PROJECT_ROOT / "src" / "iac_code" / "pipeline" / "selling_solutio
 SELLING_REFERENCES = PROJECT_ROOT / "src" / "iac_code" / "pipeline" / "selling" / "references"
 SELLING_DEPLOYING_SKILL = PROJECT_ROOT / "src" / "iac_code" / "pipeline" / "selling" / "skills" / "iac-aliyun-deploying"
 BUNDLED_REFERENCES = PROJECT_ROOT / "src" / "iac_code" / "skills" / "bundled" / "iac_aliyun" / "references"
-SKILLS_WITH_REFERENCES = ("iac-aliyun-deploying", "iac-aliyun-materialize-selected-candidate")
+SKILLS_WITH_REFERENCES = (
+    "iac-aliyun-solution-first",
+    "iac-aliyun-deploying",
+    "iac-aliyun-materialize-selected-candidate",
+)
 # canonical 来源：只有 pipeline 自己的参数推荐规则来自 selling/references，其余来自 bundled 技能。
 CANONICAL_ROOTS = {
     "template-parameter-recommendation.md": SELLING_REFERENCES,
@@ -147,13 +151,9 @@ class TestSkillReferences:
             assert path.read_bytes() == canonical.read_bytes(), path
         assert len(relative_files) >= 11
 
-    def test_both_skills_resolve_the_same_reference_tree(self):
-        first, second = (
-            _reference_target(PIPELINE_DIR / "skills" / name / "references") for name in SKILLS_WITH_REFERENCES
-        )
-
-        assert first == SELLING_REFERENCES.resolve()
-        assert second == SELLING_REFERENCES.resolve()
+    def test_all_skills_resolve_the_same_reference_tree(self):
+        for name in SKILLS_WITH_REFERENCES:
+            assert _reference_target(PIPELINE_DIR / "skills" / name / "references") == SELLING_REFERENCES.resolve()
 
     @pytest.mark.parametrize("skill_name", SKILLS_WITH_REFERENCES)
     def test_every_reference_link_in_the_skill_resolves(self, skill_name):
@@ -168,12 +168,14 @@ class TestSkillReferences:
             relative = Path(link).relative_to("references")
             assert (references / relative).exists(), f"{skill_name}: {link}"
 
-    def test_step_one_skill_does_not_reference_template_references(self):
+    def test_step_one_links_product_guides_without_template_references(self):
         skill_dir = PIPELINE_DIR / "skills" / "iac-aliyun-solution-first"
+        text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        links = set(REFERENCE_LINK_PATTERN.findall(text))
 
-        # Step 1 不生成模板，因此不引用 references/，也不需要复制一份参考目录。
-        assert not (skill_dir / "references").exists()
-        assert "references/" not in (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        # Product knowledge is read on demand; template/pricing workflows stay in Step 2.
+        assert links == {"references/cloud-products/", "references/coupons.md"}
+        assert "OriginPrice" not in text
 
 
 class TestEncoding:

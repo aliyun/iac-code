@@ -7,6 +7,7 @@ This module deliberately has no engine-level state or persistence of its own.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 
@@ -71,8 +72,9 @@ def normalize_outline_candidates(value: Any) -> list[dict[str, str]] | None:
         if not isinstance(item, dict):
             return None
         candidate: dict[str, str] = {}
-        for field in ("candidate_name", "summary", "total_monthly_cost", "key_tradeoff"):
-            raw = item.get(field)
+        for field in ("candidate_name", "summary", "total_cost", "key_tradeoff"):
+            # Old persisted outline records remain readable, but schemas expose only total_cost.
+            raw = item.get(field, item.get("total_monthly_cost") if field == "total_cost" else None)
             if not isinstance(raw, str) or not raw.strip():
                 return None
             candidate[field] = raw.strip()
@@ -81,6 +83,52 @@ def normalize_outline_candidates(value: Any) -> list[dict[str, str]] | None:
         names.add(candidate["candidate_name"])
         normalized.append(candidate)
     return normalized
+
+
+def _rename_cost_field(value: dict[str, Any], old: str, new: str) -> None:
+    if old in value:
+        if new not in value:
+            value[new] = value[old]
+        del value[old]
+
+
+def normalize_inventory_costs(value: Any) -> Any:
+    """Copy legacy resource costs into the period-neutral planning contract."""
+    inventory = copy.deepcopy(value)
+    if isinstance(inventory, list):
+        for resource in inventory:
+            if isinstance(resource, dict):
+                _rename_cost_field(resource, "rough_monthly_cost", "rough_cost")
+    return inventory
+
+
+def normalize_candidate_costs(value: Any) -> Any:
+    """Migrate only known planning fields, preserving values and canonical-key precedence."""
+    candidate = copy.deepcopy(value)
+    if not isinstance(candidate, dict):
+        return candidate
+    if "resource_inventory" in candidate:
+        candidate["resource_inventory"] = normalize_inventory_costs(candidate["resource_inventory"])
+    cost = candidate.get("rough_cost")
+    if isinstance(cost, dict):
+        _rename_cost_field(cost, "monthly_range", "cost_range")
+        items = cost.get("items")
+        if isinstance(items, list):
+            for item in items:
+                if isinstance(item, dict):
+                    _rename_cost_field(item, "monthly_cost", "cost")
+    return candidate
+
+
+def normalize_solution_selection_costs(value: Any) -> None:
+    """Normalize restored candidates in place without changing context versions or stale flags."""
+    if not isinstance(value, dict):
+        return
+    candidates = value.get("candidates")
+    if isinstance(candidates, list):
+        value["candidates"] = [normalize_candidate_costs(candidate) for candidate in candidates]
+    if "selected_candidate" in value:
+        value["selected_candidate"] = normalize_candidate_costs(value["selected_candidate"])
 
 
 def latest_candidate_detail_records(
@@ -147,4 +195,7 @@ __all__ = [
     "latest_candidate_detail_records",
     "latest_candidate_outline_batch",
     "normalize_outline_candidates",
+    "normalize_inventory_costs",
+    "normalize_candidate_costs",
+    "normalize_solution_selection_costs",
 ]

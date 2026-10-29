@@ -173,7 +173,7 @@ auto_trigger:
 |------|------|
 | [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组（ROS/Terraform 共用） |
 | [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) | 已有 ROS 可部署模板的部署前参数推荐流程 |
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） |
+| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、swas.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） |
 | [references/ros-template.md](references/ros-template.md) | ROS 原生模板最佳实践：RunCommand、嵌套栈、条件部署 |
 | [references/terraform-template.md](references/terraform-template.md) | Terraform 最佳实践：文件组织、变量、Data Source、ROS 集成 |
 

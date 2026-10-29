@@ -10,6 +10,7 @@ from iac_code.i18n import _
 from iac_code.pipeline.selling_solution_first.tools.candidate_planning_records import (
     first_missing_candidate_detail_index,
     latest_candidate_outline_batch,
+    normalize_inventory_costs,
 )
 from iac_code.pipeline.selling_solution_first.tools.show_architecture_plan_tool import (
     render_architecture_graph,
@@ -33,7 +34,7 @@ class ShowCandidateDetailTool(Tool):
         return _(
             "Display the rich detail for exactly one candidate from the latest show_architecture_plan batch. "
             "Call once per model turn in candidate index order. Include resource lifecycle intent, topology graph, "
-            "resource inventory, cost assumptions and decision notes; do not repeat summary or monthly total."
+            "resource inventory, cost assumptions and decision notes; do not repeat summary or cost total."
         )
 
     @property
@@ -126,7 +127,12 @@ class ShowCandidateDetailTool(Tool):
                             "quantity": {"type": "integer", "minimum": 1},
                             "recommended_spec": {"type": "string"},
                             "billing_method": {"type": "string"},
-                            "rough_monthly_cost": {"type": "string"},
+                            "rough_cost": {
+                                "type": "string",
+                                "description": (
+                                    "Rough cost including its period, matching the outline's unit and duration."
+                                ),
+                            },
                             "lifecycle": {
                                 "type": "string",
                                 "enum": ["create", "use_existing", "reference", "forbid"],
@@ -236,7 +242,7 @@ class ShowCandidateDetailTool(Tool):
                     candidate_name=expected_name,
                     summary=outline["summary"],
                     cost_items=cost_items,
-                    total_monthly_cost=outline["total_monthly_cost"],
+                    total_monthly_cost=outline["total_cost"],
                     candidate_index=expected_index,
                     candidate_set_id=batch.candidate_set_id,
                     detail_stage="detail",
@@ -283,7 +289,8 @@ def _cost_items_from_inventory(value: Any) -> list[dict[str, str]]:
     if not isinstance(value, list):
         return []
     items: list[dict[str, str]] = []
-    for raw in value:
+    # CandidateDetailEvent is the compatibility boundary for existing UI clients.
+    for raw in normalize_inventory_costs(value):
         if not isinstance(raw, dict):
             continue
         product = str(raw.get("product") or raw.get("resource_id") or "").strip()
@@ -295,7 +302,7 @@ def _cost_items_from_inventory(value: Any) -> list[dict[str, str]]:
             {
                 "name": product,
                 "spec": spec,
-                "monthly_cost": str(raw.get("rough_monthly_cost") or "").strip(),
+                "monthly_cost": str(raw.get("rough_cost") or "").strip(),
             }
         )
     return items

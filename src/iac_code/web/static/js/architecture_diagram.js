@@ -1,5 +1,5 @@
 import { t } from "./i18n.js?v=web-repl-ui-277";
-import { renderMermaid } from "./mermaid_render.js?v=arch-diagram-v5";
+import { renderMermaid } from "./mermaid_render.js?v=cost-period-v6";
 import { getArchitectureDiagramRenderer } from "./api.js?v=web-repl-ui-313";
 
 const RENDERER_EVENT = "iac-code:architecture-renderer-changed";

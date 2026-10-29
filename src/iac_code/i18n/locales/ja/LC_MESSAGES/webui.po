@@ -4180,3 +4180,7 @@ msgstr "ローカルランタイムを再起動できませんでした。詳細
 #: src/iac_code/web/static/js/app.js
 msgid "Could not open the link. Please try again."
 msgstr "リンクを開けませんでした。もう一度お試しください。"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Estimated cost"
+msgstr "概算費用"

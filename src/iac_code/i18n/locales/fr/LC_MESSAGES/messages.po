@@ -6120,12 +6120,12 @@ msgstr ""
 msgid ""
 "Display one complete batch of lightweight candidate outlines before rich "
 "details are generated. Submit every current candidate in order with its "
-"name, summary, monthly estimate and key trade-off. Do not include "
-"topology nodes, resource inventory or detailed cost items."
+"name, summary, cost estimate and key trade-off. Do not include topology "
+"nodes, resource inventory or detailed cost items."
 msgstr ""
 "Affichez un lot complet de résumés légers des candidats avant de générer "
 "les détails. Soumettez chaque candidat actuel dans l’ordre avec son nom, "
-"son résumé, son estimation mensuelle et son principal compromis. "
+"son résumé, son estimation des coûts et son principal compromis. "
 "N’incluez ni nœuds de topologie, ni inventaire de ressources, ni postes "
 "de coût détaillés."
 
@@ -6146,8 +6146,12 @@ msgid "Short product combination and architecture summary"
 msgstr "Bref résumé de la combinaison de produits et de l’architecture"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
-msgid "Rough monthly range, such as ¥230～¥380/month"
-msgstr "Fourchette mensuelle approximative, par exemple ¥230～¥380/mois"
+msgid ""
+"Rough cost range including its period: monthly by default, or the user's "
+"requested unit and duration."
+msgstr ""
+"Fourchette de coûts approximative avec sa période : mensuelle par défaut,"
+" ou selon l’unité et la durée demandées par l’utilisateur."
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid "The most important cost, availability or complexity trade-off"
@@ -6158,10 +6162,10 @@ msgstr ""
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
 "candidates must be a non-empty array of unique outlines with "
-"candidate_name, summary, total_monthly_cost and key_tradeoff"
+"candidate_name, summary, total_cost and key_tradeoff"
 msgstr ""
 "candidates doit être un tableau non vide de résumés uniques contenant "
-"candidate_name, summary, total_monthly_cost et key_tradeoff"
+"candidate_name, summary, total_cost et key_tradeoff"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 #, python-brace-format
@@ -6260,14 +6264,14 @@ msgid ""
 "show_architecture_plan batch. Call once per model turn in candidate index"
 " order. Include resource lifecycle intent, topology graph, resource "
 "inventory, cost assumptions and decision notes; do not repeat summary or "
-"monthly total."
+"cost total."
 msgstr ""
 "Affichez les détails complets d’un seul candidat du dernier lot "
 "show_architecture_plan. Effectuez un appel par tour de modèle dans "
 "l’ordre des index de candidats. Incluez l’intention de cycle de vie des "
 "ressources, le graphe de topologie, l’inventaire des ressources, les "
 "hypothèses de coût et les notes de décision ; ne répétez ni le résumé ni "
-"le total mensuel."
+"le coût total."
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
 msgid "Zero-based index from the latest candidate outline batch"
@@ -7649,11 +7653,10 @@ msgstr ""
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
-"Alibaba Cloud API metadata for {operation} is temporarily unavailable; "
-"try again later."
-msgstr ""
-"Les métadonnées de l'API Alibaba Cloud pour {operation} sont "
-"temporairement indisponibles. Réessayez plus tard."
+"Alibaba Cloud API metadata for {operation} is temporarily unavailable. "
+"Retry the same tool call once after a short wait; if it still fails, "
+"report the temporary failure rather than treating the API as unsupported."
+msgstr "Les métadonnées de l’API Alibaba Cloud pour {operation} sont temporairement indisponibles. Réessayez une fois le même appel d’outil après une courte attente ; en cas de nouvel échec, signalez une panne temporaire plutôt que de considérer l’API comme non prise en charge."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

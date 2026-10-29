@@ -8,9 +8,11 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import sys
 import tempfile
+import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
@@ -25,6 +27,14 @@ import yaml
 
 from iac_code.a2a.backup import run_sync_fenced
 from iac_code.tools.cloud.aliyun.api_identifiers import is_safe_api_version
+from iac_code.tools.cloud.aliyun.retry_policy import (
+    RetryBudget,
+    RetryExhausted,
+    RetryReason,
+    map_httpx_retry_reason,
+    map_retryable_status,
+    retry_delay,
+)
 from iac_code.tools.cloud.aliyun.user_agent import build_user_agent
 from iac_code.utils.async_lifecycle import await_task_to_completion
 from iac_code.utils.file_security import ensure_private_dir
@@ -73,6 +83,7 @@ _PRODUCT_FRESH_TTL = timedelta(hours=24)
 _API_FRESH_TTL = timedelta(days=7)
 _STALE_TTL = timedelta(days=30)
 _NEGATIVE_TTL = timedelta(minutes=10)
+_REQUEST_TIMEOUT_SECONDS = 8.0
 
 logger = logging.getLogger(__name__)
 
@@ -1524,45 +1535,104 @@ class OpenMetaClient:
         *,
         max_bytes: int,
     ) -> tuple[_JsonPayload | None, OpenMetaError | None, str]:
+        budget = RetryBudget(deadline=time.monotonic() + _REQUEST_TIMEOUT_SECONDS, random=random.random)
+        started = time.monotonic()
+        path = httpx.URL(url).path
+        for _ in range(budget.max_attempts):
+            try:
+                await budget.acquire()
+                result = await budget.run_attempt(
+                    lambda: self._request_json_once(url, max_bytes=max_bytes),
+                    retryable_call=True,
+                )
+            except RetryExhausted:
+                logger.warning(
+                    "OpenMeta request deadline exhausted: path=%s attempt=%s elapsed_ms=%d",
+                    path,
+                    budget.attempts,
+                    (time.monotonic() - started) * 1000,
+                )
+                break
+            except httpx.HTTPError as error:
+                status = None
+                retry_after = None
+                reason = map_httpx_retry_reason(error)
+                if isinstance(error, httpx.HTTPStatusError):
+                    status = error.response.status_code
+                    retry_after = error.response.headers.get("Retry-After")
+                    reason = RetryReason.RETRYABLE_STATUS if status == 500 else map_retryable_status(status)
+                logger.warning(
+                    "OpenMeta request failed: path=%s attempt=%s status=%s error=%s elapsed_ms=%d",
+                    path,
+                    budget.attempts,
+                    status,
+                    type(error).__name__,
+                    (time.monotonic() - started) * 1000,
+                )
+                if reason is None or budget.attempts >= budget.max_attempts:
+                    break
+                try:
+                    delay = retry_delay(budget, failed_attempt=budget.attempts, retry_after=retry_after, reason=reason)
+                except RetryExhausted:
+                    break
+                await asyncio.sleep(delay)
+            else:
+                if budget.attempts > 1:
+                    logger.debug(
+                        "OpenMeta request completed: path=%s attempt=%s outcome=%s elapsed_ms=%d",
+                        path,
+                        budget.attempts,
+                        result[1] or "success",
+                        (time.monotonic() - started) * 1000,
+                    )
+                return result
+        return None, "temporarily_unavailable", url
+
+    async def _request_json_once(
+        self,
+        url: str,
+        *,
+        max_bytes: int,
+    ) -> tuple[_JsonPayload | None, OpenMetaError | None, str]:
         current = httpx.URL(url)
         for _ in range(3):
-            try:
-                async with self._client.stream("GET", current) as response:
-                    if response.status_code in {301, 302, 303, 307, 308}:
-                        location = response.headers.get("location")
-                        if location is None:
-                            return None, "temporarily_unavailable", str(current)
-                        candidate = current.join(location)
-                        if not _safe_redirect(candidate):
-                            return None, "temporarily_unavailable", str(current)
-                        current = candidate
-                        continue
-                    if response.status_code in {204, 404}:
-                        return None, "not_found", str(current)
-                    if response.status_code == 429 or response.status_code >= 500:
+            async with self._client.stream("GET", current) as response:
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    location = response.headers.get("location")
+                    if location is None:
                         return None, "temporarily_unavailable", str(current)
-                    if response.status_code != 200:
-                        return None, "protocol_error", str(current)
-                    content_length = response.headers.get("content-length")
-                    if content_length is not None:
-                        try:
-                            if int(content_length) > max_bytes:
-                                return None, "protocol_error", str(current)
-                        except ValueError:
-                            pass
-                    chunks: list[bytes] = []
-                    received = 0
-                    async for chunk in response.aiter_bytes():
-                        received += len(chunk)
-                        if received > max_bytes:
+                    candidate = current.join(location)
+                    if not _safe_redirect(candidate):
+                        return None, "temporarily_unavailable", str(current)
+                    current = candidate
+                    continue
+                if response.status_code in {204, 404}:
+                    return None, "not_found", str(current)
+                if response.status_code == 500 or map_retryable_status(response.status_code) is not None:
+                    response.raise_for_status()
+                if response.status_code == 429 or response.status_code >= 500:
+                    return None, "temporarily_unavailable", str(current)
+                if response.status_code != 200:
+                    return None, "protocol_error", str(current)
+                content_length = response.headers.get("content-length")
+                if content_length is not None:
+                    try:
+                        if int(content_length) > max_bytes:
                             return None, "protocol_error", str(current)
-                        chunks.append(chunk)
-            except httpx.HTTPError:
-                return None, "temporarily_unavailable", str(current)
+                    except ValueError:
+                        pass
+                chunks: list[bytes] = []
+                received = 0
+                async for chunk in response.aiter_bytes():
+                    received += len(chunk)
+                    if received > max_bytes:
+                        return None, "protocol_error", str(current)
+                    chunks.append(chunk)
             try:
                 async with self._decode_semaphore:
                     payload = await run_sync_fenced(json.loads, b"".join(chunks))
             except (json.JSONDecodeError, UnicodeDecodeError):
+                logger.warning("OpenMeta response is not valid JSON: path=%s", current.path)
                 return None, "temporarily_unavailable", str(current)
             if not isinstance(payload, Mapping | list):
                 return None, "protocol_error", str(current)
