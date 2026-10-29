@@ -17,6 +17,7 @@ Prerequisites:
 import argparse
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -342,27 +343,41 @@ def _normal_turn_completed(task: dict, *, timeout: float) -> bool:
 
 def _normal_turn_output(task: dict, cli_text: str, *, permission_submitted: bool) -> str:
     # A reply consumer may retain an old permission Task even after its owner
-    # finished. After the matching completion proof, accept only a whole ROS
+    # finished. After the matching completion proof, accept only a complete ROS
     # template from history or the just-finished CLI call, never a receipt.
     if not permission_submitted:
         # No reply/receipt call replaced the original sync output. Once that
         # task has released naturally, keep its own CLI reply for acceptance.
         return cli_text or _completed_task_text(task)
+    metadata = task.get('metadata')
+    iac = metadata.get('iac_code') if isinstance(metadata, dict) else None
+    input_resolved = not isinstance(iac, dict) or (
+        iac.get('input') is None and not iac.get('pendingPermissions')
+    )
     for text in (_completed_task_text(task), cli_text):
         wire = text.strip()
         lines = wire.splitlines()
         if len(lines) >= 3 and lines[0] in {'```', '```json'} and lines[-1] == '```':
             wire = '\n'.join(lines[1:-1])
-        try:
-            value = json.loads(wire)
-        except ValueError:
-            continue
-        resources = value.get('Resources') if isinstance(value, dict) else None
-        if isinstance(resources, dict) and any(
-            isinstance(resource, dict) and resource.get('Type') == 'ALIYUN::ECS::VPC'
-            for resource in resources.values()
-        ):
-            return text
+        candidates = [wire]
+        if input_resolved:
+            # A final reply may introduce its fenced template with prose. Do
+            # not extract snippets from a still-pending permission prompt.
+            candidates.extend(re.findall(
+                r'^[ \t]*```(?:json)?[ \t]*\r?\n(.*?)\r?\n[ \t]*```[ \t]*$',
+                text, flags=re.MULTILINE | re.DOTALL,
+            ))
+        for candidate in candidates:
+            try:
+                value = json.loads(candidate)
+            except ValueError:
+                continue
+            resources = value.get('Resources') if isinstance(value, dict) else None
+            if isinstance(resources, dict) and any(
+                isinstance(resource, dict) and resource.get('Type') == 'ALIYUN::ECS::VPC'
+                for resource in resources.values()
+            ):
+                return text
     return ''
 
 

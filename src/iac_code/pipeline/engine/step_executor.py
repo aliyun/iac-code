@@ -841,16 +841,19 @@ class StepExecutor:
         prompt_file = step.prompt_file_for_surface(self._surface)
         prompt_path = self._pipeline_dir / prompt_file
         step_prompt = prompt_path.read_text(encoding="utf-8") if prompt_file else ""
+        runtime_context = step.prompt_context_builder() if step.prompt_context_builder is not None else {}
         rendered_step_prompt = render_prompt(
             step_prompt,
             context,
             step.context_fields,
-            extra_context={"step_config": step.config},
+            extra_context={"step_config": step.config, **runtime_context},
         )
 
         skill_content = ""
         if step.skill:
             skill_content = self._resolve_skill_prompt(step.skill) or ""
+            if step.prompt_context_builder is not None:
+                skill_content = render_prompt(skill_content, context, [], extra_context=runtime_context)
 
         parts = [p for p in [base_prompt, skill_content, rendered_step_prompt] if p]
         return "\n\n---\n\n".join(parts)

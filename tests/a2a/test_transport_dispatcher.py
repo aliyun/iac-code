@@ -2579,6 +2579,53 @@ async def test_message_stream_pending_permission_boundary_aclose_without_generat
 
 
 @pytest.mark.asyncio
+async def test_inactive_input_response_projects_final_reply_and_consumed_permission() -> None:
+    call_context = ServerCallContext()
+    task = Task(
+        id="task-reply", context_id="ctx-reply",
+        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED,
+                          message=Message(role=Role.ROLE_AGENT, parts=[Part(text="permission needed")])),
+    )
+    ParseDict({"iac_code": {"input": {"kind": "permission"}}}, task.metadata)
+    store = A2ATaskStore()
+    await store.save(task, call_context)
+
+    class RequestContextBuilder:
+        async def build(self, **_kwargs):
+            return SimpleNamespace(call_context=call_context)
+
+    class Executor:
+        async def execute(self, _request_context, event_queue):
+            final = TaskStatusUpdateEvent(
+                task_id=task.id, context_id=task.context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_WORKING,
+                                  message=Message(role=Role.ROLE_AGENT, parts=[Part(text="final reply")])),
+            )
+            ParseDict({"iac_code": {"assistantFinal": {"complete": True}}}, final.metadata)
+            await event_queue.enqueue_event(final)
+            await event_queue.enqueue_event(TaskStatusUpdateEvent(
+                task_id=task.id, context_id=task.context_id,
+                status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+            ))
+
+    handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
+    handler.task_store = store
+    handler.agent_executor = Executor()
+    handler._request_context_builder = RequestContextBuilder()
+    handler._detached_message_producers = set()
+    params = SimpleNamespace(message=SimpleNamespace(task_id=task.id, context_id=task.context_id),
+                             configuration=None)
+
+    events = await _collect_async(handler._on_inactive_input_response_send_stream(params, call_context, task=task))
+
+    projected = await store.get(task.id, call_context)
+    assert projected is not None and len(events) == 2
+    assert projected.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
+    assert any(part.text == "final reply" for message in projected.history for part in message.parts)
+    assert "input" not in dict(projected.metadata["iac_code"])
+
+
+@pytest.mark.asyncio
 async def test_detached_permission_response_finalizes_after_terminal_producer_drains() -> None:
     call_context = ServerCallContext()
     request_context = SimpleNamespace(call_context=call_context)
@@ -2627,6 +2674,8 @@ async def test_detached_permission_response_finalizes_after_terminal_producer_dr
 
     await asyncio.wait_for(finalized.wait(), timeout=1)
     await asyncio.gather(*handler._detached_message_producers)
+    projected = await handler.task_store.get(task.id, call_context)
+    assert projected is not None and projected.status.state == TaskState.TASK_STATE_COMPLETED
 
 
 @pytest.mark.asyncio
@@ -6642,6 +6691,10 @@ class _PipelineStopModelHttp:
 class _PublicStoppedPipelineFixture:
     """Exercise full SDK dispatch and real Runner/Stop/durable successor claim."""
 
+    # Initial dispatch and recovery both construct real runners and persist
+    # session/backup state. They use the same integration readiness budget,
+    # separate from the five-second mock-stream delivery assertions.
+    model_ready_timeout = 20
     task_id = "task-public-stop"
     context_id = "ctx-public-stop"
     original_text = "Remember planning marker stopped-sdk and network 10.242.0.0/16."
@@ -6777,6 +6830,23 @@ class _PublicStoppedPipelineFixture:
         self.sending.append(sending)
         return sending
 
+    async def wait_for_model(self, ready, sending) -> None:
+        waiter = asyncio.create_task(ready.wait())
+        try:
+            done, _ = await asyncio.wait(
+                (waiter, sending), timeout=self.model_ready_timeout, return_when=asyncio.FIRST_COMPLETED
+            )
+            if sending in done:
+                # Preserve an early producer exception rather than reporting a
+                # misleading model-start timeout after the stream already died.
+                await sending
+                raise AssertionError("Pipeline stream ended before its blocked model call was reached")
+            assert waiter in done, "Pipeline did not reach its blocked model call within the readiness budget"
+            await waiter
+        finally:
+            waiter.cancel()
+            await asyncio.gather(waiter, return_exceptions=True)
+
     async def prepare_stopped(self) -> None:
         ctx = await self.store.get_or_create_context(
             context_id=self.context_id,
@@ -6791,7 +6861,7 @@ class _PublicStoppedPipelineFixture:
         )
         old_request = self.request(task_id=self.task_id, message_id="public-stop-first", text=self.original_text)
         first = self.send(old_request, close_at_canceled=True)
-        await asyncio.wait_for(self.model.first_model.wait(), timeout=_STREAM_TEST_TIMEOUT)
+        await self.wait_for_model(self.model.first_model, first)
         self.control = self.service.get_for_context(self.context_id)
         assert self.control is not None and self.control.task_id == self.task_id
         ctx = await self.store.get_context_record(self.context_id)
@@ -6885,9 +6955,7 @@ async def test_public_sdk_pipeline_stop_reentry_omitted_task_uses_real_stop_proo
             assert fixture.model.business_calls == 1
         else:
             sending = fixture.send(request)
-            # This path replays real Pipeline/SDK recovery and durable writes;
-            # Windows file IO can exceed the mock-stream tests' five seconds.
-            await asyncio.wait_for(fixture.model.resumed_model.wait(), timeout=20)
+            await fixture.wait_for_model(fixture.model.resumed_model, sending)
             successor = request.message.task_id
             assert successor and successor != fixture.task_id
             intent = intent_store.load(context_id=fixture.context_id)

@@ -77,6 +77,8 @@ class StepSpec:
     on_enter: Callable[[PipelineContext], None] | None = None
     on_exit: Callable[[PipelineContext, dict], None] | None = None
     completion_enricher: Callable[..., dict[str, Any]] | None = None
+    #: Per-step skill/prompt replacements; never added to base prompt sections.
+    prompt_context_builder: Callable[[], dict[str, Any]] | None = None
     on_resource_observed: Callable[..., object] | None = None
     on_rollback_cleanup_required: Callable[..., object] | None = None
     #: Optional pre-check for structured waiting-input payloads. Returning a message keeps the step waiting.

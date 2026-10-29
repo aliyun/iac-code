@@ -6158,14 +6158,14 @@ msgstr ""
 msgid ""
 "Display one complete batch of lightweight candidate outlines before rich "
 "details are generated. Submit every current candidate in order with its "
-"name, summary, monthly estimate and key trade-off. Do not include "
-"topology nodes, resource inventory or detailed cost items."
+"name, summary, cost estimate and key trade-off. Do not include topology "
+"nodes, resource inventory or detailed cost items."
 msgstr ""
 "Zeigen Sie vor der Erzeugung ausführlicher Details einen vollständigen "
 "Satz kompakter Kandidatenübersichten an. Übermitteln Sie jeden aktuellen "
-"Kandidaten der Reihe nach mit Name, Zusammenfassung, monatlicher "
-"Schätzung und wichtigster Abwägung. Fügen Sie keine Topologieknoten, "
-"Ressourcenbestände oder detaillierten Kostenpositionen hinzu."
+"Kandidaten der Reihe nach mit Name, Zusammenfassung, Kostenschätzung und "
+"wichtigster Abwägung. Fügen Sie keine Topologieknoten, Ressourcenbestände"
+" oder detaillierten Kostenpositionen hinzu."
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
@@ -6184,8 +6184,12 @@ msgid "Short product combination and architecture summary"
 msgstr "Kurze Zusammenfassung der Produktkombination und Architektur"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
-msgid "Rough monthly range, such as ¥230～¥380/month"
-msgstr "Ungefähre monatliche Spanne, z. B. ¥230～¥380/Monat"
+msgid ""
+"Rough cost range including its period: monthly by default, or the user's "
+"requested unit and duration."
+msgstr ""
+"Ungefähre Kostenspanne mit Zeitraum: standardmäßig monatlich oder in der "
+"vom Benutzer gewünschten Zeiteinheit und Dauer."
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid "The most important cost, availability or complexity trade-off"
@@ -6194,10 +6198,10 @@ msgstr "Wichtigste Abwägung bei Kosten, Verfügbarkeit oder Komplexität"
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
 "candidates must be a non-empty array of unique outlines with "
-"candidate_name, summary, total_monthly_cost and key_tradeoff"
+"candidate_name, summary, total_cost and key_tradeoff"
 msgstr ""
 "candidates muss ein nicht leeres Array eindeutiger Übersichten mit "
-"candidate_name, summary, total_monthly_cost und key_tradeoff sein"
+"candidate_name, summary, total_cost und key_tradeoff sein"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 #, python-brace-format
@@ -6296,14 +6300,14 @@ msgid ""
 "show_architecture_plan batch. Call once per model turn in candidate index"
 " order. Include resource lifecycle intent, topology graph, resource "
 "inventory, cost assumptions and decision notes; do not repeat summary or "
-"monthly total."
+"cost total."
 msgstr ""
 "Zeigen Sie die vollständigen Details für genau einen Kandidaten aus dem "
 "neuesten show_architecture_plan-Satz. Rufen Sie die Funktion einmal pro "
 "Modellrunde in der Reihenfolge der Kandidatenindizes auf. Geben Sie "
 "Ressourcenlebenszyklus, Topologiegraf, Ressourcenbestand, Kostenannahmen "
 "und Entscheidungshinweise an; wiederholen Sie weder Zusammenfassung noch "
-"Monatssumme."
+"Gesamtkosten."
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
 msgid "Zero-based index from the latest candidate outline batch"
@@ -7684,11 +7688,10 @@ msgstr ""
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
-"Alibaba Cloud API metadata for {operation} is temporarily unavailable; "
-"try again later."
-msgstr ""
-"Die Alibaba-Cloud-API-Metadaten für {operation} sind vorübergehend nicht "
-"verfügbar. Versuchen Sie es später erneut."
+"Alibaba Cloud API metadata for {operation} is temporarily unavailable. "
+"Retry the same tool call once after a short wait; if it still fails, "
+"report the temporary failure rather than treating the API as unsupported."
+msgstr "Die Alibaba-Cloud-API-Metadaten für {operation} sind vorübergehend nicht verfügbar. Wiederhole denselben Tool-Aufruf nach kurzer Wartezeit einmal. Falls er erneut fehlschlägt, melde die vorübergehende Störung, statt die API als nicht unterstützt einzustufen."
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

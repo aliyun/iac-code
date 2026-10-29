@@ -45,14 +45,14 @@ CANDIDATES = [
         "name": "方案A：单机经济型",
         "summary": "单台 ECS 自建 Nginx + 本地 MySQL",
         "output_path": "templates/1-single-ecs.yml",
-        "rough_cost": {"currency": "CNY", "monthly_range": "¥120 - ¥180", "confidence": "medium"},
+        "rough_cost": {"currency": "CNY", "cost_range": "¥120 - ¥180", "confidence": "medium"},
     },
     {
         "candidate_id": "cand-ha",
         "name": "方案B：高可用三层",
         "summary": "SLB + 2 台 ECS + RDS 高可用版",
         "output_path": "templates/2-high-availability-slb.yml",
-        "rough_cost": {"currency": "CNY", "monthly_range": "¥1,100 - ¥1,500", "confidence": "medium"},
+        "rough_cost": {"currency": "CNY", "cost_range": "¥1,100 - ¥1,500", "confidence": "medium"},
     },
 ]
 OPTIONS = [
@@ -794,7 +794,7 @@ class TestStepOneContract:
         rough_cost = candidate["properties"]["rough_cost"]
         assert set(rough_cost["required"]) == {
             "currency",
-            "monthly_range",
+            "cost_range",
             "items",
             "assumptions",
             "exclusions",
@@ -859,7 +859,7 @@ class TestStepOneContract:
         assert "`options[i].candidate_index == i`" in skill_text
         assert "`candidate_id`、`output_path`" in skill_text
         assert "由 Python" in skill_text
-        assert "`rough_cost.monthly_range`" in skill_text
+        assert "`rough_cost.cost_range`" in skill_text
         # decision_notes 现在是完整的说服力字段（见「方案说服力」），仍要支撑 Python 生成紧凑 options。
         assert "Python 生成紧凑 options" in skill_text
 

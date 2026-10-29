@@ -1327,8 +1327,8 @@ def test_solution_first_canonical_conclusion_keeps_full_candidate_in_snapshot() 
         ],
         "rough_cost": {
             "currency": "CNY",
-            "monthly_range": "¥100/月",
-            "items": [{"name": "ECS", "spec": "ecs.e-c1m1.large", "monthly_cost": "¥100/月"}],
+            "cost_range": "¥100/月",
+            "items": [{"name": "ECS", "spec": "ecs.e-c1m1.large", "cost": "¥100/月"}],
             "assumptions": ["杭州地域"],
             "exclusions": ["流量费"],
             "confidence": "medium",

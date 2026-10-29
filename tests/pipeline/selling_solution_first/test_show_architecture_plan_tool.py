@@ -40,7 +40,7 @@ def _tool_input(**overrides):
                 "purpose": "应用计算",
                 "quantity": 2,
                 "recommended_spec": "2 vCPU / 4 GiB",
-                "rough_monthly_cost": "¥200～¥400/月",
+                "rough_cost": "¥200～¥400/月",
                 "lifecycle": "create",
             }
         ],
@@ -69,7 +69,7 @@ async def _run(tool_input) -> tuple[object, list]:
                         {
                             "candidate_name": "方案A：经典三层",
                             "summary": "经典三层架构",
-                            "total_monthly_cost": "¥200～¥400/月",
+                            "total_cost": "¥200～¥400/月",
                             "key_tradeoff": "组件较多",
                         }
                     ]
@@ -110,7 +110,7 @@ class TestMetadata:
 
         assert outline_schema["required"] == ["candidates"]
         outline = outline_schema["properties"]["candidates"]["items"]
-        assert outline["required"] == ["candidate_name", "summary", "total_monthly_cost", "key_tradeoff"]
+        assert outline["required"] == ["candidate_name", "summary", "total_cost", "key_tradeoff"]
         assert "nodes" not in outline["properties"]
         graph = detail_schema["properties"]["topology_graph"]
         assert graph["required"] == ["nodes", "edges"]
@@ -126,13 +126,13 @@ class TestMetadata:
                     {
                         "candidate_name": "轻量方案",
                         "summary": "单机",
-                        "total_monthly_cost": "¥100～¥200/月",
+                        "total_cost": "¥100～¥200/月",
                         "key_tradeoff": "单点",
                     },
                     {
                         "candidate_name": "高可用方案",
                         "summary": "双机",
-                        "total_monthly_cost": "¥300～¥500/月",
+                        "total_cost": "¥300～¥500/月",
                         "key_tradeoff": "成本较高",
                     },
                 ]
@@ -155,7 +155,7 @@ class TestMetadata:
             {
                 "candidate_name": "轻量方案",
                 "summary": "单机",
-                "total_monthly_cost": "¥100～¥200/月",
+                "total_cost": "¥100～¥200/月",
                 "key_tradeoff": "单点",
             }
         ]
@@ -195,7 +195,7 @@ class TestMetadata:
                             {
                                 "candidate_name": "原方案",
                                 "summary": "单机",
-                                "total_monthly_cost": "¥100/月",
+                                "total_cost": "¥100/月",
                                 "key_tradeoff": "单点",
                             }
                         ]
@@ -213,13 +213,13 @@ class TestMetadata:
             {
                 "candidate_name": "原方案",
                 "summary": "单机",
-                "total_monthly_cost": "¥100/月",
+                "total_cost": "¥100/月",
                 "key_tradeoff": "单点",
             },
             {
                 "candidate_name": "新增方案",
                 "summary": "轻量服务器",
-                "total_monthly_cost": "¥200/月",
+                "total_cost": "¥200/月",
                 "key_tradeoff": "规格受限",
             },
         ]
@@ -241,7 +241,7 @@ class TestMetadata:
             {
                 "candidate_name": f"方案 {index}",
                 "summary": f"摘要 {index}",
-                "total_monthly_cost": f"¥{index + 1}00/月",
+                "total_cost": f"¥{index + 1}00/月",
                 "key_tradeoff": f"取舍 {index}",
             }
             for index in range(count)
@@ -263,13 +263,13 @@ class TestMetadata:
                 {
                     "candidate_name": "重复",
                     "summary": "a",
-                    "total_monthly_cost": "¥1/月",
+                    "total_cost": "¥1/月",
                     "key_tradeoff": "x",
                 },
                 {
                     "candidate_name": "重复",
                     "summary": "b",
-                    "total_monthly_cost": "¥2/月",
+                    "total_cost": "¥2/月",
                     "key_tradeoff": "y",
                 },
             ],
@@ -277,7 +277,7 @@ class TestMetadata:
                 {
                     "candidate_name": "方案",
                     "summary": " ",
-                    "total_monthly_cost": "¥1/月",
+                    "total_cost": "¥1/月",
                     "key_tradeoff": "x",
                 }
             ],
@@ -285,7 +285,7 @@ class TestMetadata:
                 {
                     "candidate_name": f"方案 {index}",
                     "summary": "摘要",
-                    "total_monthly_cost": "¥1/月",
+                    "total_cost": "¥1/月",
                     "key_tradeoff": "取舍",
                 }
                 for index in range(4)
@@ -325,13 +325,13 @@ class TestDetailOrderingGate:
                             {
                                 "candidate_name": "方案 A",
                                 "summary": "A",
-                                "total_monthly_cost": "¥1/月",
+                                "total_cost": "¥1/月",
                                 "key_tradeoff": "A 取舍",
                             },
                             {
                                 "candidate_name": "方案 B",
                                 "summary": "B",
-                                "total_monthly_cost": "¥2/月",
+                                "total_cost": "¥2/月",
                                 "key_tradeoff": "B 取舍",
                             },
                         ]
@@ -365,7 +365,7 @@ class TestDetailOrderingGate:
                             {
                                 "candidate_name": "旧方案",
                                 "summary": "旧",
-                                "total_monthly_cost": "¥1/月",
+                                "total_cost": "¥1/月",
                                 "key_tradeoff": "旧取舍",
                             }
                         ]
@@ -390,7 +390,7 @@ class TestDetailOrderingGate:
                             {
                                 "candidate_name": "新方案",
                                 "summary": "新",
-                                "total_monthly_cost": "¥2/月",
+                                "total_cost": "¥2/月",
                                 "key_tradeoff": "新取舍",
                             }
                         ]
@@ -423,13 +423,13 @@ class TestDetailOrderingGate:
                             {
                                 "candidate_name": "方案 A",
                                 "summary": "A",
-                                "total_monthly_cost": "¥1/月",
+                                "total_cost": "¥1/月",
                                 "key_tradeoff": "A 取舍",
                             },
                             {
                                 "candidate_name": "方案 B",
                                 "summary": "B",
-                                "total_monthly_cost": "¥2/月",
+                                "total_cost": "¥2/月",
                                 "key_tradeoff": "B 取舍",
                             },
                         ]
@@ -471,7 +471,7 @@ class TestDetailOrderingGate:
                             {
                                 "candidate_name": "同名方案",
                                 "summary": "旧摘要",
-                                "total_monthly_cost": "¥1/月",
+                                "total_cost": "¥1/月",
                                 "key_tradeoff": "旧取舍",
                             }
                         ]
@@ -488,7 +488,7 @@ class TestDetailOrderingGate:
                             {
                                 "candidate_name": "同名方案",
                                 "summary": "新摘要",
-                                "total_monthly_cost": "¥2/月",
+                                "total_cost": "¥2/月",
                                 "key_tradeoff": "新取舍",
                             }
                         ]
@@ -854,7 +854,7 @@ class TestWithoutEventQueue:
                             {
                                 "candidate_name": "方案A：经典三层",
                                 "summary": "经典三层架构",
-                                "total_monthly_cost": "¥200～¥400/月",
+                                "total_cost": "¥200～¥400/月",
                                 "key_tradeoff": "组件较多",
                             }
                         ]
@@ -877,7 +877,7 @@ async def test_same_outline_details_can_be_corrected_after_completion_guard_reje
     from iac_code.pipeline.engine.complete_step_tool import CompletionEnrichmentError
     from iac_code.pipeline.selling_solution_first.hooks.solution_planning_and_selection import enrich_completion_input
 
-    outline = {'candidate_name': '方案 A', 'summary': 'A', 'total_monthly_cost': '¥1/月', 'key_tradeoff': 'A'}
+    outline = {'candidate_name': '方案 A', 'summary': 'A', 'total_cost': '¥1/月', 'key_tradeoff': 'A'}
     detail = _tool_input(candidate_name='方案 A')
     records = [
         {'tool_name': 'show_architecture_plan', 'input': {'candidates': [outline]}, 'is_error': False,
@@ -902,7 +902,7 @@ async def test_same_outline_details_can_be_corrected_after_completion_guard_reje
 @pytest.mark.asyncio
 @pytest.mark.parametrize(('index', 'name'), [(1, '方案 A'), (True, '方案 A'), (-1, '方案 A'), (0, '旧方案')])
 async def test_detail_correction_still_requires_actual_outline_index_and_name(index, name):
-    outline = {'candidate_name': '方案 A', 'summary': 'A', 'total_monthly_cost': '¥1/月', 'key_tradeoff': 'A'}
+    outline = {'candidate_name': '方案 A', 'summary': 'A', 'total_cost': '¥1/月', 'key_tradeoff': 'A'}
     state = {'tool_result_records': [
         {'tool_name': 'show_architecture_plan', 'input': {'candidates': [outline]}, 'is_error': False, 'sequence': 1},
         {'tool_name': 'show_candidate_detail', 'input': _tool_input(candidate_name='方案 A'),

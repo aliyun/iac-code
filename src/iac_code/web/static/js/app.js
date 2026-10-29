@@ -8,14 +8,14 @@ import {
   deploymentConfirmationKey,
   renderDeploymentConfirmationPanel,
   renderPipelineWorkspace,
-} from "./components/pipeline.js?v=pipeline-solution-confirm-v16";
+} from "./components/pipeline.js?v=pipeline-solution-confirm-v17";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v26";
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v60";
-import { createOutputController, highlightTemplate } from "./components/output_panel.js?v=output-panel-v38";
+import { createOutputController, highlightTemplate } from "./components/output_panel.js?v=output-panel-v39";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-324";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
-import { renderMermaid } from "./mermaid_render.js?v=arch-diagram-v5";
+import { renderMermaid } from "./mermaid_render.js?v=cost-period-v6";
 
 const root = document.getElementById("iac-code-web-root");
 const DESKTOP_RUNTIME =
