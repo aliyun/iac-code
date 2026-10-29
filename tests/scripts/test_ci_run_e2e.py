@@ -168,9 +168,9 @@ def test_default_selection_is_allowlisted_and_credential_free() -> None:
 def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> None:
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
-    assert len(full) == 75
-    assert len(live) == 134
-    assert len(run_e2e.CASES) == 209
+    assert len(full) == 77
+    assert len(live) == 136
+    assert len(run_e2e.CASES) == 213
     assert {case.name for case in full if case.name.startswith("output-limit-")} == {
         "output-limit-" + scenario for scenario in run_e2e.OUTPUT_LIMIT_SCENARIOS
     }
@@ -197,7 +197,7 @@ def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> No
     assert len(unsupported) == 3
     assert not unsupported.intersection(case.name for case in live)
     assert all(case.script != "scripts/a2a/e2e/reconnect/run_qoder_mcp_reconnect.py" for case in live)
-    selling = [case for case in live if case.name.startswith("ssf-")]
+    selling = [case for case in live if case.live_runner == "selling"]
     assert len(selling) == 42
     pools = [ipaddress.IPv4Network(case.args[case.args.index("--cidr-pool") + 1]) for case in selling]
     assert len(set(pools)) == len(selling)
@@ -1431,3 +1431,13 @@ def test_public_smoke_permission_diagnostics_accept_only_closed_values(field, va
     assert public['diagnostics'] == {field: value}
     bad = run_e2e._public_live_summary({'diagnostics': {field: 'private-target-or-identity'}})
     assert 'diagnostics' not in bad
+
+
+def test_step_followup_cases_reuse_readonly_and_contract_suites():
+    contracts = [c for c in run_e2e.CASES if c.name.endswith("followup-contract")]
+    live = [c for c in run_e2e.LIVE_CASES if c.live_runner == "step_followup"]
+    assert {c.name for c in contracts} == {"ssf-step1-followup-contract", "ssf-step2-followup-contract"}
+    assert len(live) == 2
+    assert all(c.suite == "full" for c in contracts)
+    assert all(c.group == "readonly" and not c.cloud_write for c in live)
+    assert all(run_e2e._live_cleanup_status(c, None) == "not-needed" for c in live)

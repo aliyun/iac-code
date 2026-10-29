@@ -17,6 +17,7 @@
 规格族特点：
 - **经济型 e**：低成本共享型实例，适合轻量应用和开发测试，CPU 性能可能因资源竞争而波动。
 - **突发性能型 t 系列**：适合低平均负载、偶发高负载，通过 CPU 积分提供突发性能，需关注基准性能及积分费用。
+- **机密计算**：[SGX](https://help.aliyun.com/zh/ecs/user-guide/build-an-sgx-encrypted-computing-environment/) 保护应用 enclave，[TDX](https://help.aliyun.com/zh/ecs/user-guide/build-a-tdx-confidential-computing-environment) 保护整台虚拟机，二者不可替代；g7t/c7t/r7t 是 SGX 规格族。选型须按官方文档确认目标地域/可用区、规格与镜像的支持情况，不能仅凭规格名称判断。
 
 ### vCPU / 内存确定原则
 

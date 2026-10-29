@@ -194,10 +194,13 @@ class CompleteStepTool(Tool):
 
     @property
     def description(self) -> str:
-        return _(
+        description = _(
             "Complete the current step by calling this tool to submit the conclusion. "
             "If you need to roll back to an earlier step, set rollback_request."
         )
+        if self._empty_conclusion_baseline() is not None:
+            description += ' For an unchanged follow-up, submit exactly {"conclusion": {}} (no nested conclusion).'
+        return description
 
     @property
     def input_schema(self) -> dict[str, Any]:
@@ -227,6 +230,9 @@ class CompleteStepTool(Tool):
         return schema
 
     def _build_conclusion_property(self) -> dict[str, Any]:
+        if self._empty_conclusion_baseline() is not None:
+            original = self._project_model_input_schema(self._step_config.completion_input_schema)
+            return {"anyOf": [original, {"type": "object", "maxProperties": 0}]}
         if self._step_config.completion_input_schema:
             return self._project_model_input_schema(self._step_config.completion_input_schema)
         if self._step_config.conclusion_schema:
@@ -237,6 +243,71 @@ class CompleteStepTool(Tool):
             "type": "object",
             "description": _("Structured conclusion for the current step. Required and non-empty."),
         }
+
+    def _empty_conclusion_baseline(self) -> dict[str, Any] | None:
+        if not self._step_config.allow_empty_conclusion_on_resume or not self._user_message.strip():
+            return None
+        field = self._step_config.conclusion_merge_context_field
+        snapshot = self._completion_guard_state.get("context_snapshot") or {}
+        saved = self._resolve_dotted(snapshot, field) if field else None
+        if not isinstance(saved, dict) or not str(saved.get("status", "")).startswith("awaiting_"):
+            return None
+        baseline = copy.deepcopy(saved)
+        baseline.pop("user_input", None)  # Runner-only receipt, not a change to the saved plan.
+        return baseline
+
+    def _normalize_empty_conclusion_input(self, tool_input: dict[str, Any]) -> None:
+        """Accept one redundant empty wrapper only on an enabled waiting-state follow-up."""
+        if tool_input == {"conclusion": {"conclusion": {}}} and self._empty_conclusion_baseline() is not None:
+            tool_input["conclusion"] = {}
+
+    def _unchanged_completion_error(self, tool_input: dict[str, Any], baseline: dict[str, Any]) -> str | None:
+        if "rollback_request" in tool_input or parse_deployment_confirmation(self._user_message) is not None:
+            return "An explicit control action requires its original completion status, not an empty conclusion."
+        try:
+            structured = json.loads(self._user_message)
+        except (ValueError, TypeError):
+            structured = None
+        if isinstance(structured, dict) and any(
+            key in structured
+            for key in ("candidate_index", "selected_candidate_index", "selected_evaluated_candidate_index")
+        ):
+            return "A candidate selection requires the selected completion status."
+        state = self._completion_guard_state
+        if state.get("followup_visible_answer") is False:
+            return "Answer the user's question visibly before submitting an unchanged conclusion."
+        records = state.get("tool_result_records") or []
+        start = state.get("followup_record_start", 0)
+        # A malformed no-change submission may be corrected; a failed semantic update may not be discarded.
+        unchanged_attempts = ({}, {"conclusion": {}}, {"status": baseline.get("status")})
+        if any(
+            record.get("tool_name") == "complete_step"
+            and record.get("is_error")
+            and (record.get("input") or {}).get("conclusion")
+            and (record.get("input") or {}).get("conclusion") not in unchanged_attempts
+            for record in records[start:]
+        ):
+            return "Correct the failed completion before submitting an unchanged conclusion."
+        if any(
+            record.get("tool_name") in self._step_config.empty_conclusion_mutation_tools for record in records[start:]
+        ):
+            return (
+                "The plan was modified in this turn; submit the updated plan instead of an empty conclusion."
+            )
+        template_path = baseline.get("template_url")
+        if template_path:
+            expected = state.get("followup_template_sha256")
+            try:
+                from pathlib import Path
+
+                actual = hashlib.sha256(
+                    (Path(state.get("cwd") or os.getcwd()) / template_path).read_bytes()
+                ).hexdigest()
+            except (OSError, TypeError, ValueError):
+                actual = None
+            if not expected or actual != expected:
+                return "The committed template is unavailable or changed; validate and submit the updated plan."
+        return None
 
     @classmethod
     def _project_model_input_schema(cls, schema: Any) -> Any:
@@ -387,13 +458,16 @@ class CompleteStepTool(Tool):
 
     def validate_input(self, tool_input: dict[str, Any]) -> tuple[bool, str]:
         """Validate input and return a model-actionable schema hint on failure."""
+        self._normalize_empty_conclusion_input(tool_input)
         if self._step_config.completion_input_schema:
             rollback_target_error = self._validate_rollback_target_limit()
             if rollback_target_error is not None:
                 return False, rollback_target_error
             errors, truncated = self._schema_validation_errors(
                 tool_input,
-                self._raw_completion_input_schema(),
+                self._raw_completion_input_schema(
+                    allow_empty=tool_input.get("conclusion") == {} and self._empty_conclusion_baseline() is not None
+                ),
             )
             if not errors:
                 self._last_input_validation_error = None
@@ -415,14 +489,18 @@ class CompleteStepTool(Tool):
         except jsonschema.ValidationError as e:
             return False, self._format_input_validation_error(self._public_validation_error(e), tool_input)
 
-    def _raw_completion_input_schema(self) -> dict[str, Any]:
+    def _raw_completion_input_schema(self, *, allow_empty: bool = False) -> dict[str, Any]:
         schema = copy.deepcopy(self.input_schema)
         schema["description"] = _(
             'complete_step arguments must be {"conclusion": {...}}; keep all conclusion fields, '
             "including candidates, inside conclusion and do not submit them at the tool input top level."
         )
         properties = schema.get("properties")
-        if isinstance(properties, dict) and self._step_config.completion_input_schema:
+        if (
+            isinstance(properties, dict)
+            and self._step_config.completion_input_schema
+            and not allow_empty
+        ):
             properties["conclusion"] = copy.deepcopy(self._step_config.completion_input_schema)
         return schema
 
@@ -653,6 +731,11 @@ class CompleteStepTool(Tool):
             status_schema = properties.get("status") if isinstance(properties, dict) else None
             statuses = status_schema.get("enum") if isinstance(status_schema, dict) else None
             parts = [_('complete_step arguments must use the outer form {"conclusion": {...}}.')]
+            if self._empty_conclusion_baseline() is not None:
+                parts.append(
+                    'For an unchanged follow-up, submit exactly {"conclusion": {}}; '
+                    'the following requirements apply only to nonempty conclusions.'
+                )
             if statuses:
                 parts.append(_("Allowed status values: {statuses}.").format(statuses=", ".join(map(str, statuses))))
             if field_names:
@@ -1537,10 +1620,12 @@ class CompleteStepTool(Tool):
         """Project a raw completion delta into the one authoritative runtime result."""
 
         raw_tool_input = copy.deepcopy(tool_input)
+        self._normalize_empty_conclusion_input(raw_tool_input)
+        unchanged = raw_tool_input.get("conclusion") == {} and self._empty_conclusion_baseline() is not None
         if self._step_config.completion_input_schema:
             errors, truncated = self._schema_validation_errors(
                 raw_tool_input,
-                self._raw_completion_input_schema(),
+                self._raw_completion_input_schema(allow_empty=unchanged),
             )
             if errors:
                 return CompletionValidationError(
@@ -1549,9 +1634,17 @@ class CompleteStepTool(Tool):
                 )
 
         normalized_input = copy.deepcopy(raw_tool_input)
-        self.normalize_input(normalized_input)
+        if unchanged:
+            baseline = self._empty_conclusion_baseline()
+            assert baseline is not None
+            unchanged_error = self._unchanged_completion_error(normalized_input, baseline)
+            if unchanged_error:
+                return CompletionValidationError(unchanged_error, "runtime")
+            normalized_input["conclusion"] = baseline
+        else:
+            self.normalize_input(normalized_input)
         enricher = self._step_config.completion_enricher
-        if enricher is not None:
+        if enricher is not None and not unchanged:
             try:
                 enriched = enricher(
                     tool_input=copy.deepcopy(normalized_input),
@@ -1597,6 +1690,7 @@ class CompleteStepTool(Tool):
             status=StepStatus.COMPLETED,
             conclusion=conclusion,
             rollback_request=rollback_tuple,
+            conclusion_unchanged=unchanged,
         )
 
     def validate_completion_input(self, tool_input: dict[str, Any]) -> str | None:
