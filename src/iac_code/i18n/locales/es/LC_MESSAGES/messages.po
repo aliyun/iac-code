@@ -15049,3 +15049,7 @@ msgstr "requested_candidate_count debe ser un entero positivo o null"
 #: src/iac_code/pipeline/selling/hooks/architecture_planning.py
 msgid "The user requested {expected} candidate plans; {actual} were submitted. Correct the candidates or ask for clarification; do not silently change the requested count."
 msgstr "El usuario solicitó {expected} planes candidatos; se enviaron {actual}. Corrige los planes candidatos o pide una aclaración; no cambies la cantidad solicitada sin avisar."
+
+#: src/iac_code/agent/agent_loop.py
+msgid "The model reached its output token limit. Increase the max output tokens setting and try again."
+msgstr "El modelo alcanzó el límite de tokens de salida. Aumenta el ajuste de tokens máximos de salida y vuelve a intentarlo."
