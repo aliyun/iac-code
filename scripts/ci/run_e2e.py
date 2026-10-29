@@ -91,6 +91,7 @@ from scripts.a2a.e2e.run_recovery_scenarios import _SCENARIOS as A2A_RECOVERY_SC
 from scripts.a2a.e2e.run_recovery_scenarios import MULTIMODAL_SCENARIOS as A2A_MULTIMODAL_SCENARIOS  # noqa: E402
 from scripts.ci.live_diagnostics import collect_live_diagnostics  # noqa: E402
 from scripts.ci.model_pool import MULTIMODAL_MODELS, TEXT_MODELS, ModelAssignment, scheduled_cases  # noqa: E402
+from scripts.ci.run_output_limit_a2a import SCENARIOS as OUTPUT_LIMIT_SCENARIOS  # noqa: E402
 from scripts.ci.run_ros_agent_awareness import SCENARIOS as ROS_AWARENESS_SCENARIOS  # noqa: E402
 from scripts.pipeline.e2e.selling_solution_first.run_scenarios import SCENARIOS as SELLING_SCENARIOS  # noqa: E402
 from scripts.repl.e2e.run_pipeline_scenarios import _SCENARIOS as REPL_PIPELINE_SCENARIOS  # noqa: E402
@@ -129,6 +130,16 @@ FAST_CASES = (
     Case("repl-pipeline-contract", "scripts/repl/e2e/run_pipeline_contract_scenario.py", (), 360),
     # This checks the real Web HTTP/session path. Browser DOM acceptance needs Chrome and is kept manual.
     Case("web-api-contract", "scripts/web/e2e/run_contract_scenario.py", ("--skip-browser",), 360),
+)
+OUTPUT_LIMIT_CASES = tuple(
+    Case(
+        "output-limit-" + scenario,
+        "scripts/ci/run_output_limit_a2a.py",
+        ("--scenario", scenario),
+        120,
+        "fast" if scenario.startswith(("text-", "tool-")) else "full",
+    )
+    for scenario in OUTPUT_LIMIT_SCENARIOS
 )
 EXECUTION_CASES = tuple(
     Case(
@@ -219,7 +230,7 @@ CANDIDATE_BATCH_CASES = tuple(
     )
     for mode in ("same-process", "cold-recovery")
 )
-CASES = FAST_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES
+CASES = FAST_CASES + OUTPUT_LIMIT_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES
 LIVE_SCRIPT = "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py"
 SELLING_CIDR_POOLS = tuple(str(pool) for pool in ipaddress.IPv4Network("10.250.0.0/16").subnets(new_prefix=22))
 if len(SELLING_SCENARIOS) > len(SELLING_CIDR_POOLS):
@@ -422,9 +433,9 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
         chosen = set(args.case)
         return [case for case in CASES if case.name in chosen]
     if args.suite == "fast":
-        return list(FAST_CASES)
+        return list(FAST_CASES) + [case for case in OUTPUT_LIMIT_CASES if case.suite == "fast"]
     if args.suite == "full":
-        return list(FAST_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES)
+        return list(FAST_CASES + OUTPUT_LIMIT_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES)
     if args.suite == "live":
         return list(LIVE_CASES)
     if args.suite.startswith("live-"):

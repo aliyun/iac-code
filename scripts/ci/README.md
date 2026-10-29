@@ -13,7 +13,9 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite full --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --list --suite all
 ```
 
-`fast` 包含 7 个 A2A、REPL、Web API 确定性契约用例；`full` 共 66 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
+`fast` 包含 13 个 A2A、REPL、Web API 确定性契约用例；`full` 共 75 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
+
+`output-limit-text-{chat,responses,anthropic}` 验证三种生产 Provider 经本地 SSE 模型端点收到输出截断后，在同一 A2A 任务内保留正文并续写；`output-limit-tool-*` 验证截断的工具调用不执行、不进入下一次模型请求或会话记录。六条纳入 `fast`。`output-limit-{exhausted,empty,pipeline}` 纳入 `full`，分别验证连续截断的请求上限、无可见正文时的明确失败，以及真实 Pipeline 步骤不产生虚假结论。模型和工具均为离线替身，A2A 服务、Provider、AgentLoop 和 Pipeline 引擎使用生产实现。可用 `--case output-limit-tool-responses` 定向复现。
 
 权限批次新增四条 HTTP E2E，复用 `tests/a2a/test_permission_prompt_e2e.py`，仅模型与工具使用确定性替身。`permission-prompt-supersede-{same-process,after-restart}` 验证权限待确认时的新 prompt 取消整个未执行批次、补齐 tool_result，并阻止旧权限回复重新执行；`permission-confirmation-followup-{same-process,after-restart}` 验证连续正常确认权限后，工具只执行一次，下一条普通 prompt 正常处理，重复权限回复不会重跑工具。四条均纳入 `full`，也可单独执行：
 
@@ -149,7 +151,7 @@ REPL 旧场景的 PTY 等待每 10 秒检查一次，每 60 秒在单用例的 s
 
 先按 `report.md` 找到失败用例与首次失败检查，再看对应的 `ci-result.json`、场景 `summary.json`、日志和源码。Agent 应做有界复现，明确归类为产品缺陷、用例/断言缺陷、环境/凭证故障、云资源清理故障或超时，并写出证据、受影响场景和建议修复。配置的一次自动重跑之外，真实云用例再次复现前先核对残留资源与清理结果。报告里的“初步线索”只是索引，不能替代复盘结论。
 
-总入口目前登记 199 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
+总入口目前登记 208 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
 
 ### 验收边界
 

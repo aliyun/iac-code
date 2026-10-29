@@ -184,7 +184,11 @@ def encode_tools(tools: list[ToolDefinition] | None, *, strict: bool) -> list[di
 
 
 def decode_response(
-    response: Any, identity: dict[str, Any], tools: list[ToolDefinition] | None
+    response: Any,
+    identity: dict[str, Any],
+    tools: list[ToolDefinition] | None,
+    *,
+    allow_incomplete_tools: bool = False,
 ) -> NonStreamingResponse:
     data = plain(response)
     if not isinstance(data, dict) or not isinstance(data.get("output"), list) or not data.get("id"):
@@ -197,12 +201,18 @@ def decode_response(
     text: list[str] = []
     thinking: list[str] = []
     calls: list[dict[str, Any]] = []
+    incomplete_tool = False
     refusal = False
     for item in data["output"]:
         if not isinstance(item, dict) or item.get("type") not in _OUTPUT_TYPES:
             raise ResponsesProtocolError("Responses returned an unsupported output item type.")
         if item["type"] == "function_call":
-            calls.append(_call(item, names))
+            # An output-limit response can end inside function arguments. The
+            # agent will discard the entire turn, so no call needs parsing.
+            if incomplete:
+                incomplete_tool = True
+            else:
+                calls.append(_call(item, names))
         elif item["type"] == "reasoning":
             # OpenAI returns summary parts; DeepSeek returns plain reasoning
             # content. The terminal text must match the reasoning_text deltas.
@@ -219,8 +229,7 @@ def decode_response(
                     raise ResponsesProtocolError("Responses returned unsupported message content.")
     if len({call["id"] for call in calls}) != len(calls):
         raise ResponsesProtocolError("Responses returned duplicate function call IDs.")
-    if incomplete and calls:
-        # Only text-only truncation can be committed without native replay items.
+    if incomplete_tool and not allow_incomplete_tools:
         raise ResponsesProtocolError("Responses returned an incomplete tool turn.")
     if not data["output"] or (status == "completed" and not text and not calls and not refusal):
         raise ResponsesProtocolError("Responses returned no assistant content or function calls.")
@@ -277,7 +286,7 @@ class ResponsesStreamAdapter:
         if self.terminal is not None:
             raise ResponsesProtocolError("Responses sent events after its terminal response.")
         if kind in {"response.completed", "response.incomplete"}:
-            response = decode_response(data.get("response"), self.identity, self.tools)
+            response = decode_response(data.get("response"), self.identity, self.tools, allow_incomplete_tools=True)
             output = plain(data["response"])["output"]
             for index, previous in self.items.items():
                 if index < 0 or index >= len(output):
@@ -298,11 +307,27 @@ class ResponsesStreamAdapter:
             if response.thinking[len(self.thinking) :]:
                 events.append(ThinkingDeltaEvent(text=response.thinking[len(self.thinking) :]))
             if response.stop_reason != "refusal":
-                if not self.started.issubset({call["id"] for call in response.tool_uses}):
+                if response.stop_reason != "max_tokens" and not self.started.issubset(
+                    {call["id"] for call in response.tool_uses}
+                ):
                     raise ResponsesProtocolError("Responses terminal response dropped a streamed function call.")
                 for item in output:
                     if item.get("type") == "function_call":
-                        events.extend(self._finish_call(item))
+                        if response.stop_reason == "max_tokens":
+                            call_id, name = item.get("call_id"), item.get("name")
+                            if (
+                                not isinstance(call_id, str)
+                                or not call_id
+                                or name not in {tool.name for tool in self.tools or []}
+                            ):
+                                raise ResponsesProtocolError(
+                                    "Responses stream contains an invalid local function call."
+                                )
+                            if call_id not in self.started:
+                                self.started.add(call_id)
+                                events.append(ToolUseStartEvent(tool_use_id=call_id, name=name))
+                        else:
+                            events.extend(self._finish_call(item))
             self.terminal = response
             return events
         if kind in {"response.failed", "error"}:
