@@ -42,9 +42,11 @@ from iac_code.tools.result_storage import EXTERNALIZED_RESULT_PATH_METADATA_KEY
 from iac_code.types.stream_events import (
     ContextUsageEvent,
     MessageEndEvent,
+    MessageStartEvent,
     ResourceObservedEvent,
     StreamEvent,
     TextDeltaEvent,
+    TombstoneEvent,
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
@@ -282,6 +284,8 @@ class StepExecutor:
         if callable(prime_context_usage):
             yield ContextUsageEvent(usage=prime_context_usage())
         completion_guard_state = agent_context.completion_guard_state
+        visible_answer_message_ids: set[str | None] = set()
+        current_message_id: str | None = None
 
         complete_step_ids: set[str] = set()
         pending_tool_inputs: dict[str, dict[str, Any]] = {}
@@ -324,14 +328,21 @@ class StepExecutor:
             nonlocal last_complete_step_input
             nonlocal terminal_failed_step_result
             nonlocal last_agent_stop_reason
+            nonlocal current_message_id
             try:
                 async for event in stream:
-                    if (
+                    if isinstance(event, MessageStartEvent):
+                        current_message_id = event.message_id
+                    elif (
                         isinstance(event, TextDeltaEvent)
                         and event.text.strip()
                         and "followup_visible_answer" in completion_guard_state
                     ):
+                        visible_answer_message_ids.add(current_message_id)
                         completion_guard_state["followup_visible_answer"] = True
+                    elif isinstance(event, TombstoneEvent) and "followup_visible_answer" in completion_guard_state:
+                        visible_answer_message_ids.discard(event.message_id)
+                        completion_guard_state["followup_visible_answer"] = bool(visible_answer_message_ids)
                     elif isinstance(event, ToolUseStartEvent) and event.name == "complete_step":
                         complete_step_ids.add(event.tool_use_id)
                     elif isinstance(event, ToolUseEndEvent):
