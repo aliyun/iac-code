@@ -536,11 +536,16 @@ class ReplPty:
             *(extra_args or []),
         ]
         self.events.append({"type": "spawn", "command": command, "cwd": str(self.cwd), "at": _utc_now()})
+        child_env = self.env.copy()
+        # The runner owns an interactive PTY. CI's inherited TERM=dumb hides
+        # Rich Live controls even though their raw key reader is already ready.
+        if child_env.get("TERM", "") in {"", "dumb", "unknown"}:
+            child_env["TERM"] = "xterm-256color"
         self.child = pexpect.spawn(
             command[0],
             command[1:],
             cwd=str(self.cwd),
-            env=self.env,
+            env=child_env,
             encoding="utf-8",
             codec_errors="replace",
             timeout=self.args.timeout,

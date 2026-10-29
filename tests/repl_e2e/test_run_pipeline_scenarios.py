@@ -22,6 +22,32 @@ def _load_runner():
     return module
 
 
+@pytest.mark.parametrize('term,expected', [
+    (None, 'xterm-256color'), ('', 'xterm-256color'), ('dumb', 'xterm-256color'),
+    ('unknown', 'xterm-256color'), ('xterm-256color', 'xterm-256color'), ('screen', 'screen'),
+])
+def test_pty_spawn_supplies_interactive_terminal_without_changing_parent_env(monkeypatch, tmp_path, term, expected):
+    runner = _load_runner()
+    spawned = []
+    monkeypatch.setattr(runner, 'os', SimpleNamespace(name='posix'))
+    monkeypatch.setattr(runner, 'pexpect', SimpleNamespace(
+        spawn=lambda *_args, **kwargs: spawned.append(kwargs) or SimpleNamespace(),
+    ))
+    environment = {'TEST_MARKER': 'preserved'}
+    if term is not None:
+        environment['TERM'] = term
+    original = environment.copy()
+    args = SimpleNamespace(python='python', timeout=10, terminal_height=35, terminal_width=120)
+    pty = runner.ReplPty(args=args, run_dir=tmp_path, cwd=tmp_path, env=environment)
+
+    pty.spawn()
+    pty.spawn(extra_args=['--continue'])
+
+    assert all(call['env']['TERM'] == expected for call in spawned)
+    assert all(call['env']['TEST_MARKER'] == 'preserved' for call in spawned)
+    assert environment == original
+
+
 @pytest.mark.parametrize('reference,kind,resolved', [
     ('vpc-private-wrong', 'literal', 'vpc-private-wrong'),
     ({'Ref': 'VpcId'}, 'parameter', 'vpc-private-fixture'),

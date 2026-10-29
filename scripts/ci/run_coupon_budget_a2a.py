@@ -53,13 +53,33 @@ PROMPTS = (
 
 def hourly_costs_match(outlines: list[str], details: list[str]) -> bool:
     """Priced items need the requested unit; free topology resources have no rate."""
+    hour_unit = r"小时|(?<![a-z])(?:hours?|hourly|h)(?![a-z])"
+    period_pattern = rf"{hour_unit}|月|months?"
+
     def hourly(value: str) -> bool:
         # Check the stated estimate period, not a later explanation such as "非月费".
-        period = re.search(r"小时|hours?|月|months?", value, re.I)
-        return period is not None and period.group().casefold() in {"小时", "hour", "hours"}
+        period = re.search(period_pattern, value, re.I)
+        if period is None:
+            return False
+        if re.fullmatch(hour_unit, period.group(), re.I):
+            return True
+        # A monthly reference is valid only when followed by an explicit hourly quote.
+        converted = re.split(r"→|->|=>|折合|折算|换算", value, maxsplit=1)
+        return len(converted) == 2 and bool(re.search(
+            rf"(?:[¥￥]\s*\d+(?:\.\d+)?|\d+(?:\.\d+)?\s*元)\s*/\s*(?:\d+\s*)?(?:{hour_unit})",
+            converted[1], re.I,
+        ))
 
     def free(value: str) -> bool:
-        return bool(re.fullmatch(r"\s*(?:(?:[¥￥]\s*)?0(?:\.0+)?|免费|无费用)(?:\s*[（(].*[）)])?\s*", value))
+        amounts = re.findall(r"[¥￥]\s*(\d+(?:\.\d+)?)|(\d+(?:\.\d+)?)\s*元", value)
+        if amounts:
+            return all(Decimal(yen or yuan) == 0 for yen, yuan in amounts)
+        if re.search(r"月|months?|未包?含|不包?含|not\s+included", value, re.I):
+            return False
+        return bool(
+            re.fullmatch(r"\s*0(?:\.0+)?\s*", value)
+            or re.search(r"免费|无费用|免收|(?:包含|含)在|included\s+in", value, re.I)
+        )
 
     return bool(outlines) and all(hourly(value) for value in outlines) and all(
         hourly(value) or free(value) for value in details

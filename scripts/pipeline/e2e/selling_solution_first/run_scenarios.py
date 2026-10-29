@@ -4428,7 +4428,9 @@ def _repl_wait_confirmation_after_optional_parameter_asks(pty: Any, runtime: Sce
             if runtime.spec.profile == "step2_parameter":
                 _verify_required_parameter_confirmation(runtime, event.get("payload") or {})
             runtime.repl_confirmation_wait_count = confirmation_occurrence - 1
-            _repl_wait_confirmation(pty, runtime, require_input_ready=False)
+            # The durable event precedes the selector; wait for its current
+            # frame before sending navigation keys or free text.
+            _repl_wait_confirmation(pty, runtime, require_input_ready=True)
             return
         if event.get("type") == "candidate_selection_ready":
             if reselections >= 2:
