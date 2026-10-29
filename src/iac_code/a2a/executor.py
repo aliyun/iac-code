@@ -180,11 +180,14 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
 from iac_code.types.stream_events import (
     CloudResourceSelectionEvent,
+    ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
     PermissionWaitSuspended,
+    StreamEvent,
     TextDeltaEvent,
+    TombstoneEvent,
 )
 from iac_code.utils.file_security import atomic_write_text, ensure_private_dir, ensure_private_file
 from iac_code.utils.public_errors import sanitize_strict_text
@@ -196,6 +199,48 @@ _CANCEL_ACTIVE_TASK_DRAIN_TIMEOUT_SECONDS = 30
 _ERROR_TEXT_MAX_CHARS = 1000
 _DEFERRED_CLEANUP_PROMPTS_FILENAME = "cleanup-deferred-prompts.json"
 _CLEANUP_ONLY_METADATA_KEY = "cleanupOnly"
+
+
+class _AssistantFinalText:
+    """Join output-limit continuations while excluding tool turns and discarded messages."""
+
+    def __init__(self) -> None:
+        self._message_id: str | None = None
+        self._current: list[str] = []
+        self._messages: list[tuple[str | None, str, str]] = []
+        self.failed = False
+
+    def observe(self, event: StreamEvent) -> None:
+        if isinstance(event, MessageStartEvent):
+            self._message_id = event.message_id
+            self._current = []
+        elif isinstance(event, TextDeltaEvent):
+            self._current.append(event.text)
+        elif isinstance(event, MessageEndEvent):
+            self._messages.append((self._message_id, event.stop_reason, "".join(self._current)))
+            self._message_id = None
+            self._current = []
+        elif isinstance(event, TombstoneEvent):
+            self._messages = [message for message in self._messages if message[0] != event.message_id]
+            if self._message_id == event.message_id:
+                self._message_id = None
+                self._current = []
+        elif isinstance(event, ErrorEvent) and not event.is_retryable:
+            self.failed = True
+
+    @property
+    def text(self) -> str:
+        messages = self._messages
+        if self._current:
+            messages = [*messages, (self._message_id, "end_turn", "".join(self._current))]
+        if not messages or messages[-1][1] in {"tool_use", "tool_calls"}:
+            return ""
+        parts = [messages[-1][2]]
+        for _message_id, stop_reason, text in reversed(messages[:-1]):
+            if stop_reason != "max_tokens":
+                break
+            parts.append(text)
+        return "".join(reversed(parts))
 
 
 class SessionBackupNotReadyInvalidParamsError(InvalidParamsError):
@@ -1309,6 +1354,8 @@ async def _stream_a2a_normal_events(
         try:
             async for event in cleanup_stream:
                 yield event
+                if isinstance(event, ErrorEvent) and not event.is_retryable:
+                    return
         finally:
             close = getattr(cleanup_stream, "aclose", None)
             if close is not None:
@@ -1362,6 +1409,8 @@ async def _stream_a2a_normal_events(
         try:
             async for event in prompt_stream:
                 yield event
+                if isinstance(event, ErrorEvent) and not event.is_retryable:
+                    return
         finally:
             close = getattr(prompt_stream, "aclose", None)
             if close is not None:
@@ -2556,8 +2605,18 @@ class IacCodeA2AExecutor(AgentExecutor):
             self._task_store.mirror_task(task)
             self._task_store.mirror_context(ctx)
             normal_turn_finished = False
+            normal_turn_failed = False
+            normal_failure_finalized = False
 
             async def cancel_normal_turn(target_queue: EventQueue) -> None:
+                nonlocal normal_failure_finalized
+                if normal_turn_failed:
+                    if not normal_failure_finalized:
+                        normal_failure_finalized = True
+                        await await_fenced(
+                            self._finalize_failed_agent_stream(target_queue, task=task, ctx=ctx, cwd=cwd)
+                        )
+                    return
                 termination_reason = current_execution_termination_reason()
                 if termination_reason is not None and normal_turn_finished:
                     task.state = TASK_STATE_INPUT_REQUIRED
@@ -2682,18 +2741,21 @@ class IacCodeA2AExecutor(AgentExecutor):
                         cwd=cwd,
                         session_id=ctx.session_id,
                     )
-                    current_assistant_text: list[str] = []
-                    final_assistant_text = ""
+                    assistant_final = _AssistantFinalText()
                     detached_permission = None
                     detached_resource_selection: PendingResourceSelection | None = None
 
                     async def finalize_normal_turn(target_queue: EventQueue) -> None:
-                        nonlocal final_assistant_text, normal_turn_finished
+                        nonlocal normal_turn_finished, normal_failure_finalized
+                        if assistant_final.failed:
+                            normal_failure_finalized = True
+                            await await_fenced(
+                                self._finalize_failed_agent_stream(target_queue, task=task, ctx=ctx, cwd=cwd)
+                            )
+                            return
                         # The AgentLoop has finished. Cancellation of its backup
                         # must not reclassify the completed turn as canceled.
                         normal_turn_finished = True
-                        if current_assistant_text:
-                            final_assistant_text = "".join(current_assistant_text)
                         await publish_mcp_warnings(
                             target_queue,
                             task_id=task_id,
@@ -2716,7 +2778,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                             task_id=task_id,
                             context_id=context_id,
                             state=TaskState.TASK_STATE_WORKING,
-                            text=final_assistant_text or None,
+                            text=assistant_final.text or None,
                             metadata={"iac_code": final_metadata},
                             session_id=ctx.session_id,
                         )
@@ -2846,18 +2908,11 @@ class IacCodeA2AExecutor(AgentExecutor):
                             raise
 
                     async def consume_normal_stream_inner(target_queue: EventQueue) -> bool:
-                        nonlocal current_assistant_text, final_assistant_text
+                        nonlocal normal_turn_failed
                         nonlocal detached_permission
                         nonlocal detached_resource_selection
                         async for event in stream:
-                            if isinstance(event, MessageStartEvent):
-                                current_assistant_text = []
-                            elif isinstance(event, TextDeltaEvent):
-                                current_assistant_text.append(event.text)
-                            elif isinstance(event, MessageEndEvent):
-                                if event.stop_reason not in {"tool_use", "tool_calls"}:
-                                    final_assistant_text = "".join(current_assistant_text)
-                                current_assistant_text = []
+                            assistant_final.observe(event)
                             await publish_mcp_warnings(
                                 target_queue,
                                 task_id=task_id,
@@ -3026,6 +3081,8 @@ class IacCodeA2AExecutor(AgentExecutor):
                             )
                             if text_chunk:
                                 task.output_text.append(text_chunk)
+                            if assistant_final.failed:
+                                normal_turn_failed = True
                         return True
 
                     completed = await consume_normal_stream(event_queue)
@@ -3425,10 +3482,15 @@ class IacCodeA2AExecutor(AgentExecutor):
             },
             session_id=ctx.session_id,
         )
-        final_text = ""
+        assistant_final = _AssistantFinalText()
         detached_recovered_selection: PendingResourceSelection | None = None
 
         async def finish_recovered_stream(target_queue: EventQueue) -> None:
+            if assistant_final.failed:
+                await await_fenced(
+                    self._finalize_failed_agent_stream(target_queue, task=task, ctx=ctx, cwd=context_record.cwd)
+                )
+                return
             await backup_session_async(
                 self._backup_service,
                 context_record.cwd,
@@ -3443,7 +3505,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 task_id=response.task_id,
                 context_id=response.context_id,
                 state=TaskState.TASK_STATE_INPUT_REQUIRED,
-                text=final_text or None,
+                text=assistant_final.text or None,
                 session_id=ctx.session_id,
             )
             await self._notify_terminal_task(
@@ -3453,10 +3515,9 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
 
         async def consume_recovered_stream(target_queue: EventQueue, recovered_stream: Any) -> bool:
-            nonlocal detached_recovered_selection, final_text
+            nonlocal detached_recovered_selection
             async for event in recovered_stream:
-                if isinstance(event, TextDeltaEvent):
-                    final_text += event.text
+                assistant_final.observe(event)
                 if isinstance(event, CloudResourceSelectionEvent):
                     next_store = ResourceSelectionCheckpointStore(context_record.cwd, ctx.session_id)
                     next_pending = PendingResourceSelection(
@@ -4216,6 +4277,18 @@ class IacCodeA2AExecutor(AgentExecutor):
         normal_recovery_started = False
         previous_task_state = task_record.state
         normal_final_assistant_text: str | None = None
+        normal_stream_failed = False
+        normal_failure_finalized = False
+
+        def resolve_restored_boundary() -> None:
+            persisted_messages = SessionStorage().load(context_record.cwd, context_record.session_id)
+            result_digest = canonical_digest(persisted_messages[-1].to_dict()) if persisted_messages else ""
+            store.resolve(
+                boundary_id,
+                result_digest=result_digest,
+                ack={"decision": expected_value, "accepted": True},
+            )
+
         try:
             if normal_recovery:
                 context_record = await self._task_store.activate_restored_task(task_record, context_record)
@@ -4300,17 +4373,9 @@ class IacCodeA2AExecutor(AgentExecutor):
                             task_id=response.task_id,
                             context_id=response.context_id,
                         )
-                        current_assistant_text: list[str] = []
-                        normal_final_assistant_text = ""
+                        assistant_final = _AssistantFinalText()
                         async for event in runtime.agent_loop.resume_permission_boundary(record):
-                            if isinstance(event, MessageStartEvent):
-                                current_assistant_text = []
-                            elif isinstance(event, TextDeltaEvent):
-                                current_assistant_text.append(event.text)
-                            elif isinstance(event, MessageEndEvent):
-                                if event.stop_reason not in {"tool_use", "tool_calls"}:
-                                    normal_final_assistant_text = "".join(current_assistant_text)
-                                current_assistant_text = []
+                            assistant_final.observe(event)
                             text_chunk = await publish_stream_event(
                                 event_queue,
                                 task_id=response.task_id,
@@ -4328,30 +4393,32 @@ class IacCodeA2AExecutor(AgentExecutor):
                             )
                             if text_chunk:
                                 task.output_text.append(text_chunk)
-                        if current_assistant_text:
-                            normal_final_assistant_text = "".join(current_assistant_text)
-                        normal_turn_finished = True
+                            normal_stream_failed = assistant_final.failed
+                        normal_stream_failed = assistant_final.failed
+                        if not normal_stream_failed:
+                            normal_final_assistant_text = assistant_final.text
+                            normal_turn_finished = True
                 finally:
                     if runtime is not None:
                         await await_fenced(_close_runtime(runtime))
-            storage = SessionStorage()
-            persisted_messages = storage.load(context_record.cwd, context_record.session_id)
-            result_digest = canonical_digest(persisted_messages[-1].to_dict()) if persisted_messages else ""
-            store.resolve(
-                boundary_id,
-                result_digest=result_digest,
-                ack={"decision": expected_value, "accepted": True},
-            )
+            resolve_restored_boundary()
             task = await self._task_store.get_or_create_task(
                 task_id=response.task_id,
                 context_id=response.context_id,
             )
             # Pipeline owns its completed/canceled/failed state. Reopening a
             # completed Pipeline as input-required prevents natural release.
-            if normal_recovery:
+            if normal_recovery and not normal_stream_failed:
                 task.state = TASK_STATE_INPUT_REQUIRED
             self._task_store.mirror_task(task)
-            if normal_final_assistant_text is not None:
+            if normal_stream_failed:
+                normal_failure_finalized = True
+                await await_fenced(
+                    self._finalize_failed_agent_stream(
+                        event_queue, task=task, ctx=context_record, cwd=context_record.cwd
+                    )
+                )
+            elif normal_final_assistant_text is not None:
                 await self._publish_status(
                     event_queue,
                     task_id=response.task_id,
@@ -4398,6 +4465,16 @@ class IacCodeA2AExecutor(AgentExecutor):
             )
             return True
         except asyncio.CancelledError:
+            if normal_stream_failed:
+                if not normal_failure_finalized:
+                    resolve_restored_boundary()
+                    normal_failure_finalized = True
+                    await await_fenced(
+                        self._finalize_failed_agent_stream(
+                            event_queue, task=task_record, ctx=context_record, cwd=context_record.cwd
+                        )
+                    )
+                return True
             if not normal_recovery or current_execution_termination_reason() is None:
                 with contextlib.suppress(ValueError):
                     store.reconcile_deadline(
@@ -4825,6 +4902,34 @@ class IacCodeA2AExecutor(AgentExecutor):
         if status == 401:
             return _("Authentication required. Configure credentials and retry.")
         return _format_exception(exc)
+
+    async def _finalize_failed_agent_stream(self, event_queue: EventQueue, *, task: Any, ctx: Any, cwd: str) -> None:
+        """Seal an already published fatal stream error without publishing a successful final answer."""
+        task.state = TASK_STATE_FAILED
+        ctx.active_task_id = None
+        task.touch()
+        ctx.touch()
+        self._task_store.mirror_task(task)
+        self._task_store.mirror_context(ctx)
+        control = current_execution_control()
+        if control is not None:
+            await control.mark_execution_status(TASK_STATE_FAILED)
+        blocked = await self._publish_backup_blocked_after_terminal_backup_failure(
+            event_queue,
+            task=task,
+            ctx=ctx,
+            cwd=cwd,
+            task_id=task.task_id,
+            context_id=task.context_id,
+            reason=BackupReason.TERMINAL,
+            blocked_terminal_state=TASK_STATE_FAILED,
+        )
+        if not blocked:
+            await self._notify_terminal_task(task_id=task.task_id, context_id=task.context_id, state=task.state)
+        if control is not None and task.state != TASK_STATE_FAILED:
+            await control.mark_execution_status(task.state)
+        self._metrics.record_executor_error()
+        self._metrics.record_task_failed()
 
     async def _publish_backup_blocked_after_terminal_backup_failure(
         self,

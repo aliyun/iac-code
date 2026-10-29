@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from a2a.types import Message, Part, Role, Task, TaskState, TaskStatus
+from a2a.types import Message, Part, Role, Task, TaskState, TaskStatus, TaskStatusUpdateEvent
 from a2a.utils.errors import InvalidParamsError
 
 from iac_code.a2a.execution_control import (
@@ -42,9 +42,11 @@ from iac_code.services.session_storage import SessionStorage
 from iac_code.tools.base import ToolContext
 from iac_code.types.stream_events import (
     CloudResourceSelectionEvent,
+    ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
     TextDeltaEvent,
+    TombstoneEvent,
     Usage,
 )
 from iac_code.utils.state_io import atomic_write_json
@@ -496,9 +498,13 @@ async def test_executor_resource_answer_commits_and_activates_session_headers_be
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("continued", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
 async def test_normal_resource_selection_closes_original_stream_and_resumes_from_checkpoint(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    continued: bool,
+    failed: bool,
 ) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     event = selection_event(future=asyncio.get_running_loop().create_future())
@@ -529,9 +535,19 @@ async def test_normal_resource_selection_closes_original_stream_and_resumes_from
     class RecoveryLoop:
         async def resume_resource_selection_boundary(self, *_args, **_kwargs):
             resumed.set()
+            if continued:
+                yield MessageStartEvent(message_id="prefix")
+                yield TextDeltaEvent(text="Resource selected. ")
+                yield MessageEndEvent(stop_reason="max_tokens", usage=Usage())
+                yield MessageStartEvent(message_id="discarded")
+                yield TextDeltaEvent(text="discarded text")
+                yield MessageEndEvent(stop_reason="max_tokens", usage=Usage())
+                yield TombstoneEvent(message_id="discarded")
             yield MessageStartEvent(message_id="after-selection")
             yield TextDeltaEvent(text="selection accepted")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+            if failed:
+                yield ErrorEvent(error="output limit exhausted", is_retryable=False)
 
         async def run_streaming(self, _prompt):
             yield MessageStartEvent(message_id="next-turn")
@@ -566,7 +582,14 @@ async def test_normal_resource_selection_closes_original_stream_and_resumes_from
         assert not await executor._resource_selection_registry.has_pending_task("task-1")
         record = await executor._task_store.get_task_record("task-1")
         assert "selection accepted" in record.output_text
-        assert (BackupReason.NORMAL_TURN_END, False) in backup.calls
+        final_status = next(event for event in reversed(queue.events) if isinstance(event, TaskStatusUpdateEvent))
+        expected = (
+            "output limit exhausted" if failed else ("Resource selected. " if continued else "") + "selection accepted"
+        )
+        assert final_status.status.message.parts[0].text == expected
+        assert record.state == ("failed" if failed else "input-required")
+        reason = BackupReason.TERMINAL if failed else BackupReason.NORMAL_TURN_END
+        assert (reason, failed) in backup.calls
 
         await executor.execute(
             FakeRequestContext(

@@ -24,6 +24,7 @@ from iac_code.a2a.executor import (
     _cleanup_ledger_for_a2a_normal_chat,
     _load_a2a_deferred_cleanup_prompts,
     _normal_handoff_has_backup_ack,
+    _stream_a2a_normal_events,
 )
 from iac_code.a2a.exposure import A2AExposureType
 from iac_code.a2a.input_required import PermissionIdentityValidationError, PermissionResponse
@@ -68,10 +69,12 @@ from iac_code.skills.skill_definition import SkillDefinition
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory
 from iac_code.types.skill_source import SkillSource
 from iac_code.types.stream_events import (
+    ErrorEvent,
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
     TextDeltaEvent,
+    TombstoneEvent,
     ToolResultEvent,
     Usage,
 )
@@ -1533,6 +1536,131 @@ async def test_executor_publishes_only_last_assistant_message_as_authoritative_f
     ]
     assert len(final_events) == 1
     assert final_events[0]["status"]["message"]["parts"][0]["text"] == "VSwitch deployment completed."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "segments, expected",
+    [
+        ([("first", "A", "max_tokens"), ("final", "B", "end_turn")], "AB"),
+        ([("first", "A", "max_tokens"), ("second", "B", "max_tokens"), ("final", "C", "end_turn")], "ABC"),
+        (
+            [
+                ("first", "A", "max_tokens"),
+                ("discarded", "X", "max_tokens"),
+                ("discarded", "", "discard"),
+                ("final", "B", "end_turn"),
+            ],
+            "AB",
+        ),
+        (
+            [("first", "A", "max_tokens"), ("retry", "X", None), ("retry", "", "discard"), ("final", "B", None)],
+            "AB",
+        ),
+        ([("first", "A", "max_tokens"), ("tool", "planning", "tool_use"), ("final", "B", "end_turn")], "B"),
+    ],
+)
+async def test_executor_joins_output_limit_continuations_in_authoritative_final(
+    monkeypatch, tmp_path, segments, expected
+):
+    events = []
+    for message_id, text, stop_reason in segments:
+        if stop_reason == "discard":
+            events.append(TombstoneEvent(message_id=message_id))
+            continue
+        events.extend([MessageStartEvent(message_id=message_id), TextDeltaEvent(text=text)])
+        if stop_reason is not None:
+            events.append(MessageEndEvent(stop_reason=stop_reason, usage=Usage()))
+    runtime = FakeRuntime(agent_loop=FakeAgentLoop(events), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
+    queue = FakeEventQueue()
+
+    await IacCodeA2AExecutor(task_store=A2ATaskStore(metrics=NoOpA2AMetrics()), model="qwen3.6-plus").execute(
+        FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue
+    )
+
+    final_events = [
+        dump(event)
+        for event in queue.events
+        if isinstance(event, TaskStatusUpdateEvent)
+        and dump(event).get("metadata", {}).get("iac_code", {}).get("assistantFinal", {}).get("complete") is True
+    ]
+    assert len(final_events) == 1
+    assert final_events[0]["status"]["message"]["parts"][0]["text"] == expected
+
+
+@pytest.mark.asyncio
+async def test_fatal_stream_error_survives_cancellation_during_stream_close(monkeypatch, tmp_path):
+    closing = asyncio.Event()
+    release = asyncio.Event()
+
+    class FailingLoop:
+        async def run_streaming(self, _prompt):
+            try:
+                yield ErrorEvent(error="output limit exhausted", is_retryable=False)
+            finally:
+                closing.set()
+                await release.wait()
+
+    runtime = FakeRuntime(agent_loop=FailingLoop(), session_id="session-1")
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    executor = IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus")
+    queue = FakeEventQueue()
+    running = asyncio.create_task(
+        executor.execute(FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path)}}), queue)
+    )
+    try:
+        await asyncio.wait_for(closing.wait(), timeout=2)
+        running.cancel()
+        await asyncio.wait_for(running, timeout=2)
+    finally:
+        release.set()
+        if not running.done():
+            running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
+
+    updates = [dump(event) for event in queue.events if isinstance(event, TaskStatusUpdateEvent)]
+    states = [update["status"]["state"] for update in updates]
+    assert states[-1] == "TASK_STATE_FAILED"
+    assert "TASK_STATE_CANCELED" not in states
+    assert not any(update.get("metadata", {}).get("iac_code", {}).get("assistantFinal") for update in updates)
+    assert (await store.get_task_record("task-1")).state == "failed"
+
+
+@pytest.mark.asyncio
+async def test_fatal_error_stops_deferred_prompts_and_closes_stream(monkeypatch, tmp_path):
+    calls = []
+    closed = []
+
+    class FatalLoop:
+        async def run_streaming(self, prompt):
+            calls.append(prompt)
+            try:
+                yield ErrorEvent(error="output limit exhausted", is_retryable=False)
+            finally:
+                closed.append(prompt)
+
+    monkeypatch.setattr("iac_code.a2a.executor._a2a_cleanup_ledger_unavailable", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(
+        "iac_code.a2a.executor._a2a_prompts_after_cleanup", lambda **_kwargs: (["first", "second"], True)
+    )
+    events = [
+        event
+        async for event in _stream_a2a_normal_events(
+            runtime=FakeRuntime(agent_loop=FatalLoop()),
+            prompt="original",
+            prompt_text="original",
+            cleanup_ledger=None,
+            cleanup_publisher=None,
+            cleanup_only=False,
+            cwd=str(tmp_path),
+            session_id="session-1",
+        )
+    ]
+
+    assert len(events) == 1 and isinstance(events[0], ErrorEvent)
+    assert calls == closed == ["first"]
 
 
 @pytest.mark.asyncio
@@ -6218,15 +6346,25 @@ async def test_rejected_sideband_permission_does_not_replace_context_llm_headers
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("continued", [False, True])
+@pytest.mark.parametrize("failed", [False, True])
 async def test_normal_persisted_permission_recovery_publishes_final_and_terminal_state(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    continued: bool,
+    failed: bool,
 ) -> None:
     class RecoveryLoop:
         async def resume_permission_boundary(self, _checkpoint):
+            if continued:
+                yield MessageStartEvent(message_id="prefix")
+                yield TextDeltaEvent(text="The stack is gone. ")
+                yield MessageEndEvent(stop_reason="max_tokens", usage=Usage())
             yield MessageStartEvent(message_id="final")
             yield TextDeltaEvent(text="Cleanup completed.")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+            if failed:
+                yield ErrorEvent(error="output limit exhausted", is_retryable=False)
 
     checkpoint = {
         "boundaryId": "pwb-boundary1",
@@ -6355,16 +6493,21 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         if isinstance(event, TaskStatusUpdateEvent)
         and dump(event).get("metadata", {}).get("iac_code", {}).get("assistantFinal", {}).get("complete") is True
     ]
-    assert states[-1] == "TASK_STATE_INPUT_REQUIRED"
+    assert states[-1] == ("TASK_STATE_FAILED" if failed else "TASK_STATE_INPUT_REQUIRED")
     assert len(input_received_indices) == 1
-    assert input_received_indices[0] < final_indices[0]
-    assert final_events[0]["status"]["message"]["parts"][0]["text"] == "Cleanup completed."
-    assert "".join(task_record.output_text) == "Cleanup completed."
-    assert task_record.state == "input-required"
+    expected = ("The stack is gone. " if continued else "") + "Cleanup completed."
+    if failed:
+        assert not final_events
+    else:
+        assert input_received_indices[0] < final_indices[0]
+        assert final_events[0]["status"]["message"]["parts"][0]["text"] == expected
+    assert "".join(task_record.output_text) == expected
+    assert task_record.state == ("failed" if failed else "input-required")
     assert checkpoint["phase"] == "RESOLVED"
     assert len(resolved) == 1
     assert seen_access_key_ids == ["resume-sts-id"]
-    assert backup_service.calls == [(str(tmp_path), context_record.session_id, BackupReason.NORMAL_TURN_END, False)]
+    reason = BackupReason.TERMINAL if failed else BackupReason.NORMAL_TURN_END
+    assert backup_service.calls == [(str(tmp_path), context_record.session_id, reason, failed)]
 
 
 @pytest.mark.asyncio
