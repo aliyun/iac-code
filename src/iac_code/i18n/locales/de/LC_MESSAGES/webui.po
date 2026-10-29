@@ -4342,3 +4342,7 @@ msgstr ""
 #: src/iac_code/web/static/js/app.js
 msgid "Could not open the link. Please try again."
 msgstr "Der Link konnte nicht geöffnet werden. Bitte erneut versuchen."
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Estimated cost"
+msgstr "Geschätzte Kosten"

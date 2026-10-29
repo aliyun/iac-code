@@ -5753,9 +5753,9 @@ msgstr ""
 msgid ""
 "Display one complete batch of lightweight candidate outlines before rich "
 "details are generated. Submit every current candidate in order with its "
-"name, summary, monthly estimate and key trade-off. Do not include "
-"topology nodes, resource inventory or detailed cost items."
-msgstr "詳細情報を生成する前に、軽量な候補概要を完全な1バッチとして表示します。現在の各候補を順番に、名前、概要、月額見積もり、主なトレードオフとともに送信してください。トポロジーノード、リソース一覧、詳細な費用項目は含めないでください。"
+"name, summary, cost estimate and key trade-off. Do not include topology "
+"nodes, resource inventory or detailed cost items."
+msgstr "詳細情報を生成する前に、軽量な候補概要を完全な1バッチとして表示します。現在の各候補を順番に、名前、概要、費用見積もり、主なトレードオフとともに送信してください。トポロジーノード、リソース一覧、詳細な費用項目は含めないでください。"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
@@ -5772,8 +5772,10 @@ msgid "Short product combination and architecture summary"
 msgstr "製品構成とアーキテクチャの簡潔な概要"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
-msgid "Rough monthly range, such as ¥230～¥380/month"
-msgstr "月額のおおよその範囲（例: ¥230～¥380/月）"
+msgid ""
+"Rough cost range including its period: monthly by default, or the user's "
+"requested unit and duration."
+msgstr "期間を含む概算費用の範囲。既定では月額とし、ユーザーが時間単位と利用期間を指定した場合はそれに従います。"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid "The most important cost, availability or complexity trade-off"
@@ -5782,9 +5784,9 @@ msgstr "コスト、可用性、または複雑性に関する最も重要なト
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
 msgid ""
 "candidates must be a non-empty array of unique outlines with "
-"candidate_name, summary, total_monthly_cost and key_tradeoff"
+"candidate_name, summary, total_cost and key_tradeoff"
 msgstr ""
-"candidates は candidate_name、summary、total_monthly_cost、key_tradeoff "
+"candidates は candidate_name、summary、total_cost、key_tradeoff "
 "を含む、一意な概要の空でない配列である必要があります"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_architecture_plan_tool.py
@@ -5878,10 +5880,10 @@ msgid ""
 "show_architecture_plan batch. Call once per model turn in candidate index"
 " order. Include resource lifecycle intent, topology graph, resource "
 "inventory, cost assumptions and decision notes; do not repeat summary or "
-"monthly total."
+"cost total."
 msgstr ""
 "最新の show_architecture_plan "
-"バッチから候補を1つだけ選び、その詳細を表示します。モデルの各ターンで候補インデックス順に1回ずつ呼び出してください。リソースのライフサイクル意図、トポロジーグラフ、リソース一覧、費用の前提、判断メモを含め、概要や月額合計は繰り返さないでください。"
+"バッチから候補を1つだけ選び、その詳細を表示します。モデルの各ターンで候補インデックス順に1回ずつ呼び出してください。リソースのライフサイクル意図、トポロジーグラフ、リソース一覧、費用の前提、判断メモを含め、概要や費用合計は繰り返さないでください。"
 
 #: src/iac_code/pipeline/selling_solution_first/tools/show_candidate_detail_tool.py
 msgid "Zero-based index from the latest candidate outline batch"
@@ -7198,9 +7200,10 @@ msgstr "Alibaba Cloud API {operation} が見つかりません。プロダクト
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format
 msgid ""
-"Alibaba Cloud API metadata for {operation} is temporarily unavailable; "
-"try again later."
-msgstr "{operation} の Alibaba Cloud API メタデータは一時的に利用できません。後でもう一度お試しください。"
+"Alibaba Cloud API metadata for {operation} is temporarily unavailable. "
+"Retry the same tool call once after a short wait; if it still fails, "
+"report the temporary failure rather than treating the API as unsupported."
+msgstr "{operation} の Alibaba Cloud API メタデータは一時的に利用できません。少し待ってから同じツール呼び出しを一度再試行してください。それでも失敗する場合は、API がサポートされていないと判断せず、一時的な障害として報告してください。"
 
 #: src/iac_code/tools/cloud/aliyun/public_errors.py
 #, python-brace-format

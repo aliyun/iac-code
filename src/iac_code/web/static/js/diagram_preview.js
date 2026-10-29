@@ -1,4 +1,4 @@
-import { renderArchitectureDiagram } from "./architecture_diagram.js?v=eraser-browser-v14";
+import { renderArchitectureDiagram } from "./architecture_diagram.js?v=eraser-browser-v15";
 import {
   indexTemplateFiles,
   shuffledOtherTemplatePaths,

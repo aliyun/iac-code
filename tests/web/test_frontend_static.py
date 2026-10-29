@@ -1932,7 +1932,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-324" in html
-    assert "/static/js/app.js?v=web-repl-ui-382" in html
+    assert "/static/js/app.js?v=web-repl-ui-383" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1966,7 +1966,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-382" in index_html
+    assert "web-repl-ui-383" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-324" in app_source
@@ -11724,7 +11724,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-382" in html
+    assert "web-repl-ui-383" in html
     assert "web-repl-ui-343" not in html
 
 
@@ -12231,7 +12231,7 @@ def test_output_panel_module_exists_and_wired() -> None:
     assert "getOutputs" in source
     app_source = _source(APP_JS)
     assert "createOutputController" in app_source
-    assert "output_panel.js?v=output-panel-v38" in app_source
+    assert "output_panel.js?v=output-panel-v39" in app_source
 
 
 def test_desktop_resource_stack_links_use_native_external_opener() -> None:
@@ -12315,7 +12315,7 @@ def test_output_preview_and_highlight() -> None:
     assert "File no longer exists" in source
     assert "tok-" in source
     app_source = _source(APP_JS)
-    assert "output_panel.js?v=output-panel-v38" in app_source
+    assert "output_panel.js?v=output-panel-v39" in app_source
     assert "output_panel.js?v=output-panel-v23" not in app_source
 
 
@@ -12346,8 +12346,8 @@ def test_output_panel_uses_codex_dark_theme() -> None:
 
 def test_output_panel_renders_architecture_diagram_section() -> None:
     js = _source(OUTPUT_PANEL_JS)
-    assert 'from "../mermaid_render.js?v=arch-diagram-v5"' in js
-    assert 'from "../architecture_diagram.js?v=eraser-browser-v14"' in js
+    assert 'from "../mermaid_render.js?v=cost-period-v6"' in js
+    assert 'from "../architecture_diagram.js?v=eraser-browser-v15"' in js
     assert "renderDiagramRow" in js
     assert '"Architecture diagram"' in js
     # 计数把 diagrams 计入(驱动徽标/自动显隐/自动弹出)
@@ -12498,8 +12498,8 @@ def test_standalone_diagram_preview_supports_template_library_picker_drop_and_sh
     assert 'data-diagram-preview="corpus-select"' in html
     assert 'data-diagram-preview="random"' in html
     assert "/static/diagram-preview.css?v=diagram-preview-v2" in html
-    assert "/static/js/diagram_preview.js?v=diagram-preview-v7" in html
-    assert 'from "./architecture_diagram.js?v=eraser-browser-v14"' in source
+    assert "/static/js/diagram_preview.js?v=diagram-preview-v8" in html
+    assert 'from "./architecture_diagram.js?v=eraser-browser-v15"' in source
     assert 'from "./diagram_preview_library.js?v=template-library-v1"' in source
     assert '"/static/diagram-preview-corpus.json?v=visual-corpus-v1"' in source
     assert 'tokenFetch("/api/diagram-preview"' in source
@@ -12557,8 +12557,8 @@ def test_diagram_preview_library_indexes_repository_and_randomizes_only_other_te
 
 def test_pipeline_candidate_inline_diagram_uses_web_diagrams() -> None:
     js = _source(PIPELINE_JS)
-    assert 'from "../mermaid_render.js?v=arch-diagram-v5"' in js
-    assert 'from "../architecture_diagram.js?v=eraser-browser-v14"' in js
+    assert 'from "../mermaid_render.js?v=cost-period-v6"' in js
+    assert 'from "../architecture_diagram.js?v=eraser-browser-v15"' in js
     assert "webDiagrams" in js  # combinedDiagrams 合并 state.webDiagrams
     assert "pipeline-candidate-diagram" in js  # 每卡可折叠架构图
     assert "renderArchitectureDiagram" in js
@@ -12571,7 +12571,7 @@ def test_pipeline_js_import_is_versioned() -> None:
     # pipeline.js 之前是 app.js 里唯一无版本位的 import;内容改动(含本轮 index 优先
     # 匹配修复)在回访浏览器的 warm cache 下不会重新拉取。加版本位以确保修复落地。
     app_source = _source(APP_JS)
-    assert "./components/pipeline.js?v=pipeline-solution-confirm-v16" in app_source
+    assert "./components/pipeline.js?v=pipeline-solution-confirm-v17" in app_source
 
 
 def test_solution_first_deployment_confirmation_uses_compact_actual_options() -> None:
@@ -13158,7 +13158,7 @@ def test_app_regroups_pipeline_messages_before_render() -> None:
 
 def test_app_output_panel_import_bumped_for_desktop_external_links() -> None:
     js = _source(APP_JS)
-    assert "output-panel-v38" in js
+    assert "output-panel-v39" in js
     assert "output-panel-v24" not in js
 
 
@@ -13325,11 +13325,12 @@ def _run_mermaid_render_script(tmp_path, source):
     return out.stdout
 
 
-def test_render_diagram_price_with_cost(tmp_path):
+@pytest.mark.parametrize("estimate", ["¥120/月", "¥3～¥5/小时（8小时共¥24～¥40）", "¥1200/年"])
+def test_render_diagram_price_with_cost(tmp_path, estimate):
     out = _run_mermaid_render_script(
         tmp_path,
         "const { renderDiagramPrice } = await import('__MERMAID_MODULE__');\n"
-        "const el = renderDiagramPrice({ totalMonthlyCost: '¥120/月',"
+        f"const el = renderDiagramPrice({{ totalMonthlyCost: {json.dumps(estimate)},"
         " costItems: [{ name: 'ECS', spec: '2c4g', monthly_cost: '¥100' },"
         " { name: 'RDS', monthly_cost: '¥20' }] });\n"
         "function findClass(n, cls){ if((n.className||'')===cls) return n;"
@@ -13344,7 +13345,9 @@ def test_render_diagram_price_with_cost(tmp_path):
     )
     data = json.loads(out.strip().splitlines()[-1])
     assert data["hasTotal"] is True
-    assert "120" in data["totalText"]
+    assert estimate in data["totalText"]
+    assert "Estimated cost" in data["totalText"]
+    assert "Estimated monthly cost" not in data["totalText"]
     assert data["liCount"] == 2
     assert data["empty"] is False
 

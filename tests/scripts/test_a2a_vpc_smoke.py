@@ -236,6 +236,7 @@ def test_normal_turn_without_final_metadata_requires_natural_completion_proof(mo
 @pytest.mark.parametrize('cli_text, passed', [
     ('{"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}}', True),
     ('```json\n{"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}}\n```', True),
+    ('Template:\n```json\n{"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}}\n```', False),
     ('VPC permission accepted', False), ('{"kind":"permission_ack","target":"vpc.json"}', False),
 ])
 def test_finished_owner_with_stale_permission_requires_template_not_receipt(monkeypatch, tmp_path, cli_text, passed):
@@ -251,6 +252,33 @@ def test_finished_owner_with_stale_permission_requires_template_not_receipt(monk
     result = smoke.run_a2a_client_call('JSON only', cwd=str(tmp_path))
     assert (result.returncode == 0) is passed and len(calls) == 2
     assert result.stdout == (cli_text if passed else '')
+
+
+@pytest.mark.parametrize('text, passed', [
+    ('Template:\n```json\n{"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}}\n```\nDone.', True),
+    ('Template:\n```\n{"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}}\n```', True),
+    ('Template: {"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}}', False),
+    ('Template:\n```json\n{"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}\n```', False),
+    ('Template:\n```json\n{"Resources":{"Subnet":{"Type":"ALIYUN::ECS::VSwitch"}}}\n```', False),
+    ('Receipt:\n```json\n{"kind":"permission_ack","target":"vpc.json"}\n```', False),
+    ('Envelope:\n```json\n{"result":{"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}}}\n```', False),
+])
+def test_resolved_permission_accepts_complete_fenced_final_template(monkeypatch, tmp_path, text, passed):
+    task = _completed_task(text)
+    task['status']['state'] = 'TASK_STATE_INPUT_REQUIRED'
+    task['metadata'] = {'iac_code': {'input': None, 'pendingPermissions': []}}
+    calls, _probes, _clock = _task_flow(monkeypatch, [_permission_task(tmp_path), task])
+    monkeypatch.setattr(smoke, '_normal_turn_completed', lambda *args, **kwargs: True)
+    result = smoke.run_a2a_client_call('JSON only', cwd=str(tmp_path))
+    assert (result.returncode == 0) is passed and len(calls) == 2
+    assert result.stdout == (text if passed else '')
+
+
+def test_fenced_template_is_not_extracted_while_other_permissions_remain():
+    text = 'Template:\n```json\n{"Resources":{"VPC":{"Type":"ALIYUN::ECS::VPC"}}}\n```'
+    task = _completed_task(text)
+    task['metadata'] = {'iac_code': {'input': None, 'pendingPermissions': [{'toolUseId': 'other-tool'}]}}
+    assert smoke._normal_turn_output(task, text, permission_submitted=True) == ''
 
 
 @pytest.mark.parametrize('updates, completed', [

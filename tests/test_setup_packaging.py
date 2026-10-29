@@ -4,6 +4,7 @@ import importlib.util
 import shutil
 from pathlib import Path
 
+import pytest
 import setuptools
 
 try:
@@ -12,6 +13,9 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
 
 import iac_code
+from iac_code.tools.base import ToolContext
+from iac_code.tools.read_file import ReadFileTool
+from iac_code.types.permissions import ToolPermissionContext
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOLUTION_FIRST_SKILLS = PROJECT_ROOT / "src/iac_code/pipeline/selling_solution_first/skills"
@@ -60,7 +64,11 @@ def _assert_expanded_selling_references(package_root: Path, skill_names: tuple[s
 def _seed_solution_first_skill_files(package_root: Path) -> None:
     """Model build_py copying package data before setup materializes references."""
     target_skills = package_root / "pipeline" / "selling_solution_first" / "skills"
-    for skill_name in ("iac-aliyun-deploying", "iac-aliyun-materialize-selected-candidate"):
+    for skill_name in (
+        "iac-aliyun-solution-first",
+        "iac-aliyun-deploying",
+        "iac-aliyun-materialize-selected-candidate",
+    ):
         source = SOLUTION_FIRST_SKILLS / skill_name
         target = target_skills / skill_name
         target.mkdir(parents=True, exist_ok=True)
@@ -87,11 +95,47 @@ def _assert_expanded_solution_first_resources(package_root: Path, setup_module) 
         package_root,
         setup_module.SELLING_IAC_ALIYUN_SKILLS,
     )
-    for references in (deploying / "references", materialize_references):
+    for skill_name in setup_module.SELLING_SOLUTION_FIRST_REFERENCE_SKILLS:
+        references = skills / skill_name / "references"
         assert references.is_dir() and not references.is_symlink()
         assert (references / "ros-template.md").is_file()
         assert (references / "cloud-products" / "ecs.md").is_file()
         assert (references / "solutions" / "iac-code-web.ros.yml").is_file()
+        assert (references / "cloud-products" / "swas.md").read_bytes() == (
+            PROJECT_ROOT / "src/iac_code/skills/bundled/iac_aliyun/references/cloud-products/swas.md"
+        ).read_bytes()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("reference", "expected"), [
+    ("cloud-products/swas.md", ["OriginPrice", "包月价格"]),
+    ("coupons.md", ["DescribeCoupon", "DescribeCouponItemList"]),
+])
+async def test_installed_step_one_can_read_guides_from_an_unrelated_workspace(
+    tmp_path, monkeypatch, reference, expected,
+):
+    setup_module = _load_setup_module(monkeypatch)
+    package_root = tmp_path / "installed" / "iac_code"
+    _seed_solution_first_skill_files(package_root)
+    setup_module._copy_selling_skill_references_to_package_root(package_root)
+    skill_root = package_root / "pipeline/selling_solution_first/skills/iac-aliyun-solution-first"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    roots = [str(skill_root)]
+    tool_input = {"path": f"references/{reference}"}
+    tool = ReadFileTool()
+
+    permission = await tool.check_permissions(
+        tool_input,
+        ToolPermissionContext(cwd=str(workspace), trusted_read_directories=roots, relative_read_directories=roots),
+    )
+    assert permission.behavior == "allow"
+    result = await tool.execute(
+        tool_input=tool_input,
+        context=ToolContext(cwd=str(workspace), trusted_read_directories=roots, relative_read_directories=roots),
+    )
+    assert not result.is_error
+    assert all(value in result.content for value in expected)
 
 
 def test_selling_skill_references_are_expanded_for_installed_artifacts(monkeypatch, tmp_path):

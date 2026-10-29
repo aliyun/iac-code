@@ -11,7 +11,7 @@ user_invocable: false
 
 本流程只支持阿里云。用户明确要求 AWS、Azure、GCP、腾讯云、华为云等非阿里云平台时，不要输出对应平台资源，不要把它作为支持的基础设施需求继续推进；必须先澄清是否改为阿里云目标，或将其作为不支持/非阿里云需求结束。
 
-本步骤不生成模板、不询价、不执行任何云写操作。
+本步骤不生成模板、不做完整询价验证、不执行任何云写操作。
 
 ## 第一部分：意图分类
 
@@ -122,6 +122,8 @@ user_invocable: false
 
 ### 硬约束提取规则
 
+CPU、内存、磁盘、带宽等规格直接影响费用，必须准确区分用户的最低要求、推荐配置与固定要求，不得擅自升降规格或把推荐值提升为硬约束。同一规格同时有最低值和推荐值时，最低值作为约束下限，推荐值仅作选型偏好。
+
 每条硬约束是一个对象，字段为 `id`、`target`、`property`、`operator`、`value`、可选 `unit`、`verification_mode`、`source`、`source_text`：
 
 - `id`：当前请求内稳定且唯一的约束标识；用户修改同一约束时保持 ID，内容更新为最新要求。
@@ -136,7 +138,7 @@ user_invocable: false
 
 提取规则：
 
-- "2 核 4 GiB"可提取为同一目标的 `vcpu eq 2 count` 与 `memory eq 4 GiB` 两条约束；它们需要把实际产品规格映射到具体部署参数，因此使用 `verification_mode: tool`。这里只负责忠实表达，不选择具体实例规格或 API。
+- 用户明确固定为"2 核 4 GiB"时，提取 `vcpu eq 2 count` 与 `memory eq 4 GiB`；若同时说明"最低 2 GiB，推荐 4 GiB"，内存只提取 `memory gte 2 GiB`，不得再加 `memory eq/gte 4 GiB`。规格需要映射到具体部署参数，使用 `verification_mode: tool`；这里只忠实表达，不选择具体实例规格或 API。
 - 将用户口语单位规范化后写入结构化字段：CPU 的"核/核心/vCPU"统一为 `count`，内存语境中的 `g/G` 统一为 `GiB`、`m/M` 统一为 `MiB`；保留用户原始表达在 `source_text`，不要把内存单位误解为带宽单位。
 - "至少 100 GiB""带宽不超过 20 Mbps""只能用 8.0""不要公网 IP"分别使用 `gte`、`lte`、`in/eq`、`eq false` 等通用表达。
 - 实际值能从模板属性或最终部署参数直接定位时使用 `verification_mode: direct`；依赖云产品元数据、SKU 映射、库存或已有资源状态时使用 `verification_mode: tool`。
@@ -160,6 +162,10 @@ user_invocable: false
 - 对于 medium/low 置信度的判定，在 `additional_notes` 中说明哪些信息缺失
 
 ## 第二部分：详细架构规划
+
+规划、粗估或调用某个阿里云产品的 API 前，必须先用 `read_file` 读取 [references/cloud-products/](references/cloud-products/) 下该产品的对应文档，了解选型策略、配置限制和计费方式。同一上下文已完整读取时直接复用；只加载本次涉及产品的文档。
+
+产品与文件映射：云服务器 ECS → `ecs.md`；轻量应用服务器 SWAS → `swas.md`；云数据库 RDS → `rds.md`；云数据库 Redis → `redis.md`；负载均衡 SLB/CLB/ALB/NLB → `slb.md`；专有网络 VPC → `vpc.md`；对象存储 OSS → `oss.md`；全球加速 GA → `ga.md`。
 
 ### 核心原则：按需设计，不过度发挥
 
@@ -242,7 +248,7 @@ user_invocable: false
   "quantity": 2,
   "recommended_spec": "2 vCPU / 4 GiB，最终规格以库存和询价为准",
   "billing_method": "包年包月或按量付费",
-  "rough_monthly_cost": "¥400～¥700/月",
+  "rough_cost": "¥400～¥700/月",
   "lifecycle": "create"
 }
 ```
@@ -293,8 +299,8 @@ user_invocable: false
 ```json
 {
   "currency": "CNY",
-  "monthly_range": "¥1800～¥2600/月",
-  "items": [{"name": "ECS", "spec": "2 vCPU / 4 GiB × 2", "monthly_cost": "¥400～¥700/月"}],
+  "cost_range": "¥1800～¥2600/月",
+  "items": [{"name": "ECS", "spec": "2 vCPU / 4 GiB × 2", "cost": "¥400～¥700/月"}],
   "assumptions": ["地域 cn-hangzhou", "按量付费", "ECS 2 台"],
   "exclusions": ["公网流量费", "日志写入量", "跨地域流量"],
   "confidence": "low"
@@ -302,11 +308,17 @@ user_invocable: false
 ```
 
 - 只给区间，不要求精确到个位；费用估算基于阿里云公开定价的合理范围。
+- 默认按月估算；用户明确指定小时、天、周或年时，总价、资源明细和预算比较均使用该单位。另给出使用时长时，同时说明该时长的预计总费用；仅指定计费单位时，不擅自假定使用时长。
+- 用户修改周期或时长时，保留未改变的规格与部署目标，更新费用及其假设。不能用包月价直接推导按量单价，或拿不同周期的金额判断超预算。
+- 金额字符串必须明确标出实际估算周期，不能把小时、天或年费用显示为月费。
 - 必须在 `assumptions` 中说明地域、计费方式、数量和规格假设。
+- 套餐型产品可复用上下文中的目标地域套餐参考信息，信息不足时按需查询；粗估不额外验证活动资格或逐套餐询价。说明价格来源和购买时长，不凭假设的促销价使方案满足预算；用户提供的活动价注明适用条件尚未确认。
 - 不包含的费用必须显式列入 `exclusions`，例如公网流量、短信、日志写入量、跨地域流量。
 - 无法形成可信估计时，使用较宽区间并标记 `confidence: low`，不得伪造精确金额。
 - 有用户预算硬约束时，候选区间上限原则上不得超过预算；确实无法满足时先澄清或明确标记冲突，不得静默放宽预算。
 - 本阶段**不调用** `ros_estimate_template_cost`，也**不输出** `OriginalAmount`/`TradeAmount`。精确询价由实现步骤完成。
+
+部署需求涉及优惠券、代金券或用券预算时，先用 `read_file` 按需读取 [优惠券指南](references/coupons.md)，再识别与查询券的适用条件；同一上下文已读取时直接复用。此类问题留在部署流程内，不因提到优惠券而分流或拒绝部署。
 
 ### 方案说服力
 
@@ -358,7 +370,7 @@ user_invocable: false
 展示分两阶段执行：
 
 1. 先调用一次 `show_architecture_plan(candidates=[...])`，提交本轮**全部**轻量候选摘要。每项只包含
-   `candidate_name`、`summary`、`total_monthly_cost` 和 `key_tradeoff`。数组顺序定义 0 基候选坐标，
+   `candidate_name`、`summary`、`total_cost` 和 `key_tradeoff`。数组顺序定义 0 基候选坐标，
    不得在此工具中提交 `nodes`、`edges`、资源清单或详细价格项。用户要求增减方案时重新提交修改后的
    完整摘要数组，不提交增量 patch。
 2. 摘要批次成功后，按 0 基下标逐个调用 `show_candidate_detail`。每个模型轮次只细化一个候选，参数中的
@@ -377,12 +389,13 @@ user_invocable: false
 没有成功摘要批次时不得调用 `show_candidate_detail`；详情数量、下标或名称不完整时不得调用
 `complete_step`。某个详情失败时只修正并重试该候选。
 
-候选的 `summary`、`rough_cost.monthly_range` 和 `decision_notes` 应足够支持 Python 生成紧凑 options；不要只给泛化名称。
+候选的 `summary`、`rough_cost.cost_range` 和 `decision_notes` 应足够支持 Python 生成紧凑 options；不要只给泛化名称。
 
 ### 处理选择
 
 用户选择后本步骤会带着已保存的候选上下文恢复执行：
 
+- "为什么不能选……""这个能用吗"等适用性或价格追问不是选案确认。先回答问题；没有明确选择或修改要求时，不提交 `selected`、不进入实现，也不重新规划。
 - 结构化选择消息优先使用候选坐标 `selected_candidate_index` / `selected_evaluated_candidate_index`（两者一致，都是 0 基下标）。
 - 用户提供候选名称时按 `name` 匹配；名称重复时必须用下标消歧。
 - 本步骤只确定架构方案，不接收部署参数覆盖。结构化消息中的 `parameter_overrides`、`deployment_parameters` 或 `parameters` 不写入结论；模板生成后的部署参数统一由下一步处理。

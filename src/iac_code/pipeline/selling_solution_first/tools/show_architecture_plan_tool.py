@@ -49,7 +49,7 @@ class ShowArchitecturePlanTool(Tool):
     def description(self) -> str:
         return _(
             "Display one complete batch of lightweight candidate outlines before rich details are generated. "
-            "Submit every current candidate in order with its name, summary, monthly estimate and key trade-off. "
+            "Submit every current candidate in order with its name, summary, cost estimate and key trade-off. "
             "Do not include topology nodes, resource inventory or detailed cost items."
         )
 
@@ -79,10 +79,13 @@ class ShowArchitecturePlanTool(Tool):
                                 "minLength": 1,
                                 "description": _("Short product combination and architecture summary"),
                             },
-                            "total_monthly_cost": {
+                            "total_cost": {
                                 "type": "string",
                                 "minLength": 1,
-                                "description": _("Rough monthly range, such as ¥230～¥380/month"),
+                                "description": _(
+                                    "Rough cost range including its period: monthly by default, "
+                                    "or the user's requested unit and duration."
+                                ),
                             },
                             "key_tradeoff": {
                                 "type": "string",
@@ -90,7 +93,7 @@ class ShowArchitecturePlanTool(Tool):
                                 "description": _("The most important cost, availability or complexity trade-off"),
                             },
                         },
-                        "required": ["candidate_name", "summary", "total_monthly_cost", "key_tradeoff"],
+                        "required": ["candidate_name", "summary", "total_cost", "key_tradeoff"],
                     },
                 },
             },
@@ -110,7 +113,7 @@ class ShowArchitecturePlanTool(Tool):
             return ToolResult.error(
                 _(
                     "candidates must be a non-empty array of unique outlines with candidate_name, summary, "
-                    "total_monthly_cost and key_tradeoff"
+                    "total_cost and key_tradeoff"
                 )
             )
         records = self._completion_guard_state.get("tool_result_records")
@@ -134,7 +137,7 @@ class ShowArchitecturePlanTool(Tool):
                         candidate_name=candidate["candidate_name"],
                         summary=candidate["summary"],
                         cost_items=[],
-                        total_monthly_cost=candidate["total_monthly_cost"],
+                        total_monthly_cost=candidate["total_cost"],
                         candidate_index=candidate_index,
                         candidate_set_id=candidate_set_id,
                         detail_stage="outline",

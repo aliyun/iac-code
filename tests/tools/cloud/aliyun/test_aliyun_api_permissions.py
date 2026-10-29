@@ -2160,7 +2160,9 @@ class _RaisingRequestBuilder:
         ),
         (
             "metadata_unavailable",
-            "Alibaba Cloud API metadata for Ecs/DescribeInstances is temporarily unavailable; try again later.",
+            "Alibaba Cloud API metadata for Ecs/DescribeInstances is temporarily unavailable. "
+            "Retry the same tool call once after a short wait; if it still fails, "
+            "report the temporary failure rather than treating the API as unsupported.",
         ),
         (
             "invalid_or_missing_version",

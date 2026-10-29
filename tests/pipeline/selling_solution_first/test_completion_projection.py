@@ -133,8 +133,8 @@ def _candidate_semantics() -> dict[str, Any]:
         ],
         "rough_cost": {
             "currency": "CNY",
-            "monthly_range": "¥800～¥1200/月",
-            "items": [{"name": "RDS", "monthly_cost": "¥800～¥1200/月"}],
+            "cost_range": "¥800～¥1200/月",
+            "items": [{"name": "RDS", "cost": "¥800～¥1200/月"}],
             "assumptions": ["cn-hangzhou"],
             "exclusions": [],
             "confidence": "medium",
@@ -167,7 +167,7 @@ def _planning_records(
             {
                 "candidate_name": str(candidate.get("name") or ""),
                 "summary": str(candidate.get("summary") or ""),
-                "total_monthly_cost": str(rough_cost.get("monthly_range") or ""),
+                "total_cost": str(rough_cost.get("cost_range") or ""),
                 "key_tradeoff": (str(cons[0]).strip() if cons else "") or "待进一步评估",
             }
         )
@@ -627,6 +627,28 @@ class TestSchemaSeparation:
 
 
 class TestStepOneProjection:
+    def test_legacy_outline_and_detail_records_project_into_neutral_costs(self, loaded):
+        candidate = _candidate_semantics()
+        candidate["resource_inventory"][0]["rough_cost"] = "¥8～¥12/小时"
+        candidate["rough_cost"]["cost_range"] = "¥8～¥12/小时"
+        records = _planning_records([candidate])
+        for outline in records[0]["input"]["candidates"]:
+            outline["total_monthly_cost"] = outline.pop("total_cost")
+        for record in records[1:]:
+            for resource in record["input"].get("resource_inventory", []):
+                resource["rough_monthly_cost"] = resource.pop("rough_cost")
+        original = copy.deepcopy(records)
+
+        result = _finalize(
+            _tool(_step(loaded, "solution_planning_and_selection"), records=records),
+            _awaiting_selection_delta(),
+        )
+        projected = result.conclusion["candidates"][0]
+        assert projected["rough_cost"]["cost_range"] == "¥8～¥12/小时"
+        assert projected["rough_cost"]["items"][0]["cost"] == "¥8～¥12/小时"
+        assert projected["resource_inventory"][0]["rough_cost"] == "¥8～¥12/小时"
+        assert records == original, "Migration must not rewrite the historical audit records"
+
     def test_awaiting_and_selected_deltas_expand_to_authoritative_candidates(self, loaded):
         step = _step(loaded, "solution_planning_and_selection")
         records = _planning_records([_candidate_semantics()])
@@ -818,12 +840,13 @@ class TestStepOneProjection:
         error = _assert_error(_tool(step, records=records), _awaiting_selection_delta(), "fully detailed")
         assert "1 more error(s) omitted" in error.message
 
-    def test_option_summary_keeps_semicolon_prose_and_replaces_old_price_tail(self, loaded):
+    @pytest.mark.parametrize("unit", ["月", "小时", "天", "周", "年", "hour", "day", "week", "year"])
+    def test_option_summary_keeps_semicolon_prose_and_replaces_old_price_tail(self, loaded, unit):
         step = _step(loaded, "solution_planning_and_selection")
         candidate = _candidate_semantics()
         base = "复用现有网络；减少资源数量；适合测试环境"
-        candidate["summary"] = f"{base}；¥80～¥300/月；旧代价"
-        candidate["rough_cost"]["monthly_range"] = "¥100～¥360/月"
+        candidate["summary"] = f"{base}；¥80～¥300/{unit}；旧代价"
+        candidate["rough_cost"]["cost_range"] = f"¥100～¥360/{unit}"
         candidate["decision_notes"]["cons"] = ["新代价"]
 
         summary = _finalize(
@@ -831,7 +854,7 @@ class TestStepOneProjection:
             _awaiting_selection_delta(),
         ).conclusion["options"][0]["summary"]
 
-        assert summary == f"{base}；¥100～¥360/月；新代价"
+        assert summary == f"{base}；¥100～¥360/{unit}；新代价"
 
     def test_status_only_awaiting_delta_reopens_saved_candidates_but_cannot_create_them(self, loaded):
         step = _step(loaded, "solution_planning_and_selection")
