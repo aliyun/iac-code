@@ -2991,6 +2991,10 @@ def test_repl_running_step3_answers_native_question_before_original_deployment_f
         def send(self, text, *, label):
             calls.append(("send", text, label))
 
+        def expect_any(self, patterns, **kwargs):
+            assert kwargs["require_state_match"] is True
+            return patterns[0]
+
     runtime = SimpleNamespace(spec=SimpleNamespace(profile="running_step3", cloud_write=True),
         args=SimpleNamespace(stream_timeout=0.05), env={},
         paths=SimpleNamespace(config_dir=tmp_path, run_dir=tmp_path, workspace_dir=tmp_path),
@@ -3772,7 +3776,7 @@ def test_repl_post_rollback_confirmation_does_not_count_received_answers(
         args=argparse.Namespace(stream_timeout=0.01),
         checks={}, repl_confirmation_wait_count=1, repl_confirmation_action_count=0,
     )
-    pty = argparse.Namespace(events=[], drain_output=lambda: None)
+    pty = argparse.Namespace(events=[], drain_output=lambda: None, expect_any=lambda *_a, **_kw: None)
     monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
 
     for occurrence in (2, 3):
@@ -3794,8 +3798,9 @@ def test_repl_post_rollback_confirmation_does_not_count_received_answers(
     assert runtime.checks == {}
 
 
+@pytest.mark.parametrize("profile", ["rollback", "reselect_progress"])
 def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
-    runner: ModuleType, monkeypatch: pytest.MonkeyPatch
+    runner: ModuleType, monkeypatch: pytest.MonkeyPatch, profile: str
 ) -> None:
     calls: list[object] = []
     inputs = iter(
@@ -3815,7 +3820,7 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
 
     runtime = argparse.Namespace(
         args=argparse.Namespace(stream_timeout=9.0, cleanup_vpc_id="vpc-test"),
-        spec=argparse.Namespace(profile="rollback"),
+        spec=argparse.Namespace(profile=profile),
     )
     monkeypatch.setattr(
         runner, "_read_repl_display_events", lambda _runtime: [
@@ -3856,8 +3861,58 @@ def test_repl_post_rollback_confirmation_answers_parameter_ask_first(
         ("ask", "Step 2 parameter ask #1"),
         ("answer", "vpc-test", "step2-parameter-answer-1"),
         ("durable", 2),
-        ("confirmation", False),
+        ("confirmation", True),
     ]
+
+
+@pytest.mark.parametrize("already_captured", [False, True])
+def test_repl_reselection_waits_for_current_confirmation_before_typing(runner, monkeypatch, already_captured):
+    hint = "Use Up/Down to select. Type directly on the last row, then press Enter."
+    confirmation = {"type": "user_input_required", "step_id": runner.NEW_STEPS[1], "payload": {
+        "kind": "deployment_confirmation", "options": [
+            {"action": "confirm"}, {"action": "reselect"}, {"action": "cancel"},
+        ],
+    }}
+    monkeypatch.setattr(runner, "_read_repl_display_events", lambda *_: [
+        confirmation, {"type": "candidate_selection_submitted"},
+    ])
+    monkeypatch.setattr(runner, "_wait_repl_display_event", lambda *a, **kw: (confirmation, Path("display")))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+    pty = SimpleNamespace(
+        transcript=hint, _repl_confirmation_ready_offset=len(hint), events=[], drain_output=lambda: None,
+    )
+    if already_captured:
+        pty.transcript += "\n" + hint
+    calls = []
+
+    def expect(patterns, *, state_check, require_state_match, **kwargs):
+        assert require_state_match is True
+        if not already_captured:
+            # The durable event and previous confirmation's hint are insufficient.
+            assert state_check() is None
+            pty.transcript += "\n" + hint
+        assert state_check() == patterns[1]
+        calls.append("current selector ready")
+        return state_check()
+
+    pty.expect_any = expect
+    runtime = SimpleNamespace(
+        spec=SimpleNamespace(profile="reselect_progress"), args=SimpleNamespace(stream_timeout=9),
+        repl_confirmation_wait_count=1,
+    )
+    runner._repl_wait_confirmation_after_optional_parameter_asks(pty, runtime)
+    pty.send = lambda text, *, label: calls.append((label, text))
+    runner._repl_choose_direct_input(runtime, pty, "重新选择方案")
+
+    assert calls == [
+        "current selector ready",
+        ("confirmation-input-down-1", "\x1b[B"),
+        ("confirmation-input-down-2", "\x1b[B"),
+        ("confirmation-input-down-3", "\x1b[B"),
+        ("confirmation-direct-input-paste", "\x1b[200~重新选择方案\x1b[201~"),
+        ("confirmation-direct-input-enter", "\r"),
+    ]
+    assert runtime.repl_confirmation_wait_count == 2
 
 
 def test_repl_step2_wait_observes_native_question_outside_display_journal(
@@ -4084,7 +4139,8 @@ def test_normal_resume_follows_new_durable_selection_without_waiting_for_timeout
         paths=SimpleNamespace(config_dir=tmp_path, run_dir=tmp_path), checks={}, diagnostics={},
         repl_candidate_wait_count=1, repl_confirmation_wait_count=0,
         repl_confirmation_action_count=0, watchdog=None)
-    pty = SimpleNamespace(events=[], transcript="", drain_output=lambda: None)
+    pty = SimpleNamespace(events=[], transcript="", drain_output=lambda: None,
+                          expect_any=lambda *_a, **_kw: None)
 
     def select(_pty, **_kwargs):
         calls.append("submit")
@@ -4128,7 +4184,8 @@ def test_interrupt_rollback_initial_confirmation_follows_native_reselection(runn
         paths=SimpleNamespace(config_dir=tmp_path, run_dir=tmp_path), checks={}, diagnostics={},
         repl_candidate_wait_count=1, repl_confirmation_wait_count=0,
         repl_confirmation_action_count=0, watchdog=None)
-    pty = SimpleNamespace(events=[], transcript="", drain_output=lambda: None)
+    pty = SimpleNamespace(events=[], transcript="", drain_output=lambda: None,
+                          expect_any=lambda *_a, **_kw: None)
     selections = []
     monkeypatch.setattr(runner, "_repl_submit_initial_prompt", lambda *_: None)
     monkeypatch.setattr(runner, "_repl_wait_selection", lambda *_: None)
