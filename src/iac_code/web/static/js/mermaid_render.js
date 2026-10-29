@@ -108,7 +108,7 @@ export function renderDiagramPrice(item) {
   totalRow.className = "diagram-price-total";
   const label = document.createElement("span");
   label.className = "diagram-price-label";
-  label.textContent = t("Estimated monthly cost");
+  label.textContent = t("Estimated cost");
   const value = document.createElement("span");
   value.className = "diagram-price-value";
   value.textContent = total || "—";

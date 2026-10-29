@@ -26,6 +26,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLOUD_REFRESH_SECONDS = 600
+LLM_ONLY_RUNNERS = frozenset({"smoke", "ros_awareness", "promotional_offer_followup"})
 SAFE_LIVE_AUDIT_NOTE = re.compile(
     r"credential audit: source=(?:llm|cloud); "
     r"location=(?:logs|artifacts|workspace|templates|other); "
@@ -90,6 +91,7 @@ from scripts.a2a.e2e.run_recovery_scenarios import _SCENARIOS as A2A_RECOVERY_SC
 from scripts.a2a.e2e.run_recovery_scenarios import MULTIMODAL_SCENARIOS as A2A_MULTIMODAL_SCENARIOS  # noqa: E402
 from scripts.ci.live_diagnostics import collect_live_diagnostics  # noqa: E402
 from scripts.ci.model_pool import MULTIMODAL_MODELS, TEXT_MODELS, ModelAssignment, scheduled_cases  # noqa: E402
+from scripts.ci.run_ros_agent_awareness import SCENARIOS as ROS_AWARENESS_SCENARIOS  # noqa: E402
 from scripts.pipeline.e2e.selling_solution_first.run_scenarios import SCENARIOS as SELLING_SCENARIOS  # noqa: E402
 from scripts.repl.e2e.run_pipeline_scenarios import _SCENARIOS as REPL_PIPELINE_SCENARIOS  # noqa: E402
 from scripts.repl.e2e.run_pipeline_scenarios import MULTIMODAL_SCENARIOS as REPL_MULTIMODAL_SCENARIOS  # noqa: E402
@@ -209,7 +211,15 @@ PERMISSION_CASES += tuple(
     )
     for decision in ("allow_once", "deny", "prompt")
 )
-CASES = FAST_CASES + EXECUTION_CASES + PERMISSION_CASES
+CANDIDATE_BATCH_CASES = tuple(
+    Case(
+        "ssf-candidate-batch-" + mode,
+        "scripts/pipeline/e2e/run_candidate_batch_recovery.py",
+        ("--mode", mode), 90, "full",
+    )
+    for mode in ("same-process", "cold-recovery")
+)
+CASES = FAST_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES
 LIVE_SCRIPT = "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py"
 SELLING_CIDR_POOLS = tuple(str(pool) for pool in ipaddress.IPv4Network("10.250.0.0/16").subnets(new_prefix=22))
 if len(SELLING_SCENARIOS) > len(SELLING_CIDR_POOLS):
@@ -287,7 +297,25 @@ LIVE_CASES = tuple(
         "repl-aliyun-readonly-canary", "scripts/repl/e2e/run_real_aliyun_contract_canary.py",
         (), 900, "live", cleanup_grace=60, live_runner="canary", group="readonly",
     ),
+) + tuple(
+    Case(
+        "ros-awareness-" + scenario, "scripts/ci/run_ros_agent_awareness.py",
+        ("--scenario", scenario), 240, "live", live_runner="ros_awareness", group="readonly",
+    )
+    for scenario in ROS_AWARENESS_SCENARIOS
 ) + (
+    Case(
+        "promotional-offer-followup-a2a", "scripts/ci/run_promotional_offer_followup_a2a.py", (), 1200, "live",
+        live_runner="promotional_offer_followup", group="readonly",
+    ),
+    Case(
+        "coupon-budget-a2a", "scripts/ci/run_coupon_budget_a2a.py", (), 1800, "live",
+        live_runner="coupon_budget", group="readonly",
+    ),
+    Case(
+        "coupon-budget-mock-a2a", "scripts/ci/run_coupon_budget_mock_a2a.py", (), 3600, "live",
+        live_runner="coupon_budget_mock", group="readonly",
+    ),
     Case("smoke-a2a-vpc", "scripts/a2a/smoke/test_a2a_vpc.py", (), 800, "live", live_runner="smoke", group="smoke"),
     Case("smoke-acp-vpc", "scripts/acp/smoke/test_acp_vpc.py", (), 450, "live", live_runner="smoke", group="smoke"),
     Case(
@@ -373,7 +401,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             parser.error("--cloud-credential-python must name an existing Python interpreter")
         if args.cloud_credential_python is not None and args.cloud_credential_helper is None:
             parser.error("--cloud-credential-python requires --cloud-credential-helper")
-        needs_cloud = any(case.live_runner != "smoke" for case in selected)
+        needs_cloud = any(case.live_runner not in LLM_ONLY_RUNNERS for case in selected)
         required_files = [".credentials.yml", "settings.yml"]
         if needs_cloud and args.cloud_credential_helper is None:
             required_files.append(".cloud-credentials.yml")
@@ -396,7 +424,7 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
     if args.suite == "fast":
         return list(FAST_CASES)
     if args.suite == "full":
-        return list(FAST_CASES + EXECUTION_CASES + PERMISSION_CASES)
+        return list(FAST_CASES + EXECUTION_CASES + PERMISSION_CASES + CANDIDATE_BATCH_CASES)
     if args.suite == "live":
         return list(LIVE_CASES)
     if args.suite.startswith("live-"):
@@ -493,7 +521,10 @@ def _read_summary(case_dir: Path, source: str) -> dict[str, Any] | None:
 
 
 def _live_cleanup_status(case: Case, summary: dict[str, Any] | None) -> str:
-    if case.live_runner in {"selector", "agui_selector", "canary", "legacy_a2a_readonly", "smoke"}:
+    readonly_runners = {
+        "selector", "agui_selector", "canary", "legacy_a2a_readonly", "coupon_budget", "coupon_budget_mock",
+    }
+    if case.live_runner in readonly_runners | LLM_ONLY_RUNNERS:
         return "not-needed"
     if summary is None:
         return "unverified"
@@ -735,6 +766,7 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
             "text_exit_code", "text_output_length",
             "smoke_sync_output_length", "smoke_sync_task_count", "smoke_sync_trailing_agent_message_count",
             "smoke_sync_permission_response_count",
+            "coupon_visible_answer_followup_count",
             "cleanup_turn_event_count", "cleanup_turn_cleanup_event_count", "cleanup_target_count",
             "cleanup_ledger_pending_count", "cleanup_delete_tool_use_count", "cleanup_get_tool_use_count",
             "cleanup_failure_event_count", "cleanup_delete_http_status", "cleanup_get_http_status",
@@ -1479,7 +1511,8 @@ def run_case(
         )
         source_config_dir.mkdir(mode=0o700, exist_ok=True)
         filenames = (
-            (".credentials.yml", "settings.yml") if case.live_runner == "smoke" or cloud_credential_helper is not None
+            (".credentials.yml", "settings.yml")
+            if case.live_runner in LLM_ONLY_RUNNERS or cloud_credential_helper is not None
             else (".credentials.yml", ".cloud-credentials.yml", "settings.yml")
         )
         for filename in filenames:
@@ -1493,9 +1526,11 @@ def run_case(
                 command.extend(("--model", model_assignment.model))
                 if case.live_runner not in {"canary", "agui_selector"}:
                     command.extend(("--provider", "dashscope"))
-        if case.live_runner != "smoke" and cloud_credential_helper is not None:
+        if case.live_runner not in LLM_ONLY_RUNNERS and cloud_credential_helper is not None:
             _prepare_cloud_credentials(cloud_credential_helper, source_config_dir, cloud_credential_python)
-        if case.live_runner != "smoke":
+        if case.live_runner in {"ros_awareness", "promotional_offer_followup"}:
+            command.append("--allow-real-llm")
+        elif case.live_runner not in LLM_ONLY_RUNNERS:
             command.append("--allow-real-cloud")
         if case.live_runner == "selling":
             command.extend(
@@ -1510,7 +1545,9 @@ def run_case(
             command.extend(("--source-config-dir", str(source_config_dir)))
         elif case.live_runner == "repl":
             command.extend(("--source-config-dir", str(source_config_dir)))
-    if case in FAST_CASES or (case.suite == "live" and case.live_runner not in {"smoke", "agui_selector"}):
+    if case in FAST_CASES or (
+        case.suite == "live" and case.live_runner not in LLM_ONLY_RUNNERS | {"agui_selector"}
+    ):
         command.extend(("--python", sys.executable))
     case_env = _case_env(case_dir, case, case_user_id)
     case_env['IAC_CODE_E2E_CASES_DIR'] = str((run_dir / 'runs').resolve())
@@ -1521,7 +1558,7 @@ def run_case(
     if model_assignment is not None:
         case_env.update({"IAC_CODE_PROVIDER": "dashscope", "IAC_CODE_MODEL": model_assignment.model})
         case_env["IAC_CODE_E2E_DIAGNOSIS_LOCK"] = str(run_dir.resolve() / ".diagnosis-slot")
-    if case.live_runner == "smoke":
+    if case.live_runner in LLM_ONLY_RUNNERS:
         isolated_home = case_dir / "home"
         isolated_home.mkdir(mode=0o700, exist_ok=True)
         case_env["HOME"] = str(isolated_home)
@@ -1560,7 +1597,11 @@ def run_case(
                 start_new_session=os.name != "nt",
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
             )
-            if cloud_credential_helper is not None and case.suite == "live" and case.live_runner != "smoke":
+            if (
+                cloud_credential_helper is not None
+                and case.suite == "live"
+                and case.live_runner not in LLM_ONLY_RUNNERS
+            ):
                 refresh_thread = threading.Thread(target=refresh_cloud_credentials, daemon=True)
                 refresh_thread.start()
             try:

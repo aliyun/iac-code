@@ -38,7 +38,7 @@ def test_diagram_preview_page_uses_saved_theme_renderer_and_token_mode(tmp_path,
     assert '<html lang="en" data-theme="midnight">' in response.text
     assert 'data-architecture-diagram-renderer="mermaid"' in response.text
     assert 'data-token-mode="true"' in response.text
-    assert "/static/js/diagram_preview.js?v=diagram-preview-v7" in response.text
+    assert "/static/js/diagram_preview.js?v=diagram-preview-v8" in response.text
 
 
 def test_diagram_preview_serves_the_shared_30_template_corpus(tmp_path, monkeypatch) -> None:

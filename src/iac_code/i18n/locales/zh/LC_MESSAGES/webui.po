@@ -4172,3 +4172,7 @@ msgstr "本地运行时无法重新启动。请打开诊断目录查看详情。
 #: src/iac_code/web/static/js/app.js
 msgid "Could not open the link. Please try again."
 msgstr "无法打开链接，请重试。"
+
+#: src/iac_code/web/static/js/mermaid_render.js
+msgid "Estimated cost"
+msgstr "费用估算"

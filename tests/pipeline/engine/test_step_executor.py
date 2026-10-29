@@ -1650,6 +1650,44 @@ class TestStepExecutorSkillResolution:
 
 
 class TestStepExecutorBaseSections:
+    def test_step_runtime_facts_render_in_skill_and_step_without_entering_base_sections(self, tmp_path):
+        (tmp_path / "prompts").mkdir()
+        (tmp_path / "prompts/test.md").write_text("Task in {host.region}", encoding="utf-8")
+        calls = []
+
+        def runtime_facts():
+            calls.append(True)
+            return {"host": {"region": "cn-beijing"}}
+
+        step = StepSpec(
+            step_id="test",
+            conclusion_field="result",
+            forward=None,
+            prompt_file="prompts/test.md",
+            skill="test-skill",
+            prompt_context_builder=runtime_facts,
+        )
+        pipeline = LoadedPipeline(
+            name="test",
+            steps=[step],
+            context_dependencies={"result": []},
+            max_rollbacks=3,
+            skills={"test-skill": 'Skill in {host.region}; literal JSON: {"status": "ready"}'},
+            base_prompt_sections=IncludeExcludeConfig(include=["identity"]),
+        )
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=pipeline,
+            pipeline_dir=tmp_path,
+        )
+        prompt = executor._build_full_system_prompt(step, PipelineContext({"result": []}))
+        base, skill, task = prompt.split("\n\n---\n\n")
+        assert "cn-beijing" not in base
+        assert 'Skill in cn-beijing; literal JSON: {"status": "ready"}' in skill
+        assert task == "Task in cn-beijing"
+        assert calls == [True]
+
     def test_system_prompt_includes_base_sections(self, tmp_path):
         """Base sections appear before skill content in system prompt."""
         (tmp_path / "prompts").mkdir(exist_ok=True)

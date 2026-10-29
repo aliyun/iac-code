@@ -651,7 +651,9 @@ async def test_doc_and_execute_share_public_identity_validation_before_openmeta(
         (
             "temporarily_unavailable",
             "metadata_unavailable",
-            "Alibaba Cloud API metadata for Ecs/DescribeInstances is temporarily unavailable; try again later.",
+            "Alibaba Cloud API metadata for Ecs/DescribeInstances is temporarily unavailable. "
+            "Retry the same tool call once after a short wait; if it still fails, "
+            "report the temporary failure rather than treating the API as unsupported.",
         ),
         (
             "protocol_error",
@@ -932,7 +934,9 @@ async def test_unknown_parameter_style_uses_canonical_contract_reason() -> None:
         (
             None,
             "temporarily_unavailable",
-            "Alibaba Cloud API metadata for Ecs/Missing is temporarily unavailable; try again later.",
+            "Alibaba Cloud API metadata for Ecs/Missing is temporarily unavailable. "
+            "Retry the same tool call once after a short wait; if it still fails, "
+            "report the temporary failure rather than treating the API as unsupported.",
         ),
         (
             None,

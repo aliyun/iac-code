@@ -73,7 +73,7 @@
         {"name": "single_candidate", "check": "candidates 数组长度为 1"},
         {"name": "no_extra_resources", "check": "products 中只包含 VPC，不额外创建 VSwitch、SecurityGroup、ECS、RDS 或 SLB"},
         {"name": "still_awaits_selection", "check": "status 为 awaiting_selection，即使只有一个候选也要用户明确选择"},
-        {"name": "shows_outline_batch", "check": "先调用一次 show_architecture_plan，candidates 仅含 candidate_name、summary、total_monthly_cost、key_tradeoff"},
+        {"name": "shows_outline_batch", "check": "先调用一次 show_architecture_plan，candidates 仅含 candidate_name、summary、total_cost、key_tradeoff"},
         {"name": "shows_candidate_detail", "check": "再调用一次 show_candidate_detail，提交下标 0 的 topology_graph、resource_inventory、费用假设和 decision_notes"},
         {"name": "compact_completion", "check": "complete_step 只提交 status 和 intent，不提交完整 candidates"}
       ]
@@ -90,7 +90,7 @@
         {"name": "meaningful_diff", "check": "方案之间的 products 组合或 topology 有实质差异，不是仅规格不同"},
         {"name": "has_resource_inventory", "check": "每个候选的 resource_inventory 非空，且每条含 product、purpose、quantity、lifecycle"},
         {"name": "has_topology_graph", "check": "每个候选的 topology_graph.nodes 非空，且 edges 的 source/target 都引用已定义的节点 id"},
-        {"name": "has_rough_cost", "check": "每个候选的 rough_cost 含 monthly_range、assumptions 和 exclusions"},
+        {"name": "has_rough_cost", "check": "每个候选的 rough_cost 含 cost_range、assumptions 和 exclusions"},
         {"name": "no_exact_pricing", "check": "不调用 ros_estimate_template_cost，不输出 OriginalAmount/TradeAmount"}
       ]
     },
@@ -100,7 +100,7 @@
       "prompt": "部署一个API服务，月预算500元以内",
       "expected_behavior": "在预算约束下给出 1-2 个候选，rough_cost 区间上限不超过预算，assumptions 说明地域和计费方式",
       "assertions": [
-        {"name": "within_budget", "check": "所有候选 rough_cost.monthly_range 上限不超过 500 CNY"},
+        {"name": "within_budget", "check": "所有候选 rough_cost.cost_range 上限不超过 500 CNY"},
         {"name": "no_overengineering", "check": "不包含 SLB 集群、多可用区等超出预算的高可用配置"},
         {"name": "documents_assumptions", "check": "rough_cost.assumptions 说明地域、计费方式和数量假设"},
         {"name": "budget_recorded_as_constraint", "check": "预算写入 intent.budget_constraint，并作为硬约束快照传入候选"}
