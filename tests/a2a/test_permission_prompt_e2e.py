@@ -40,6 +40,7 @@ def _serve(
     host: str = "127.0.0.1",
     pipeline_dir: str | None = None,
     artifact_mode: bool = False,
+    max_turns: int = 3,
 ) -> None:
     """Only the model and tool are fake; restart kills the actual server process."""
     import uvicorn
@@ -174,7 +175,7 @@ def _serve(
                 session_id=options.session_id,
                 cwd=options.cwd,
                 resume_messages=options.resume_messages,
-                max_turns=3,
+                max_turns=max_turns,
             ),
         )
 

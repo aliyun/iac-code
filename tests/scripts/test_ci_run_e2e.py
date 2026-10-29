@@ -157,7 +157,9 @@ def test_public_live_summary_pending_state_uses_closed_vocabulary() -> None:
 
 def test_default_selection_is_allowlisted_and_credential_free() -> None:
     selected = run_e2e.select_cases(run_e2e.parse_args([]))
-    assert selected == list(run_e2e.FAST_CASES)
+    assert selected == list(run_e2e.FAST_CASES) + [
+        case for case in run_e2e.OUTPUT_LIMIT_CASES if case.suite == "fast"
+    ]
     assert len({case.name for case in run_e2e.CASES}) == len(run_e2e.CASES)
     assert all("--allow-real-cloud" not in case.args for case in run_e2e.CASES)
     assert len(run_e2e.select_cases(run_e2e.parse_args(["--suite", "full"]))) > len(selected)
@@ -166,9 +168,12 @@ def test_default_selection_is_allowlisted_and_credential_free() -> None:
 def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> None:
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
-    assert len(full) == 66
+    assert len(full) == 75
     assert len(live) == 133
-    assert len(run_e2e.CASES) == 199
+    assert len(run_e2e.CASES) == 208
+    assert {case.name for case in full if case.name.startswith("output-limit-")} == {
+        "output-limit-" + scenario for scenario in run_e2e.OUTPUT_LIMIT_SCENARIOS
+    }
     agui = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live-agui", "--list"]))
     assert {case.name for case in agui} == {"agui-selector-" + name for name in run_e2e.AGUI_SCENARIOS}
     assert len(agui) == 6
@@ -940,7 +945,7 @@ def test_unexpected_case_exception_still_writes_report(tmp_path: Path, monkeypat
     monkeypatch.setattr(run_e2e, "run_case", fail)
     assert run_e2e.main(["--suite", "fast", "--run-dir", str(tmp_path)]) == 1
     summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
-    assert summary["failedCount"] == len(run_e2e.FAST_CASES)
+    assert summary["failedCount"] == len(run_e2e.select_cases(run_e2e.parse_args(["--suite", "fast"])))
     assert (tmp_path / "report.md").is_file()
 
 

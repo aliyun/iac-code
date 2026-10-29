@@ -40,6 +40,7 @@ from iac_code.types.stream_events import (
     SubPipelineStreamEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
+    TombstoneEvent,
     ToolInputDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
@@ -399,6 +400,20 @@ async def publish_stream_event(
             },
             iac_code_session_id=iac_code_session_id,
         )
+        return None
+
+    if isinstance(event, TombstoneEvent):
+        if A2AExposureType.TOOL_TRACE not in enabled_exposure_types:
+            return None
+        for tool_use_id in event.affected_tool_use_ids:
+            await _enqueue_status(
+                event_queue,
+                task_id=task_id,
+                context_id=context_id,
+                state=TaskState.TASK_STATE_WORKING,
+                metadata={"iac_code": {"tool": {"status": "discarded", "toolUseId": tool_use_id}}},
+                iac_code_session_id=iac_code_session_id,
+            )
         return None
 
     if isinstance(event, ToolResultEvent):
