@@ -20,6 +20,7 @@ from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
     TextDeltaEvent,
+    TombstoneEvent,
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
@@ -130,6 +131,59 @@ async def consult(flow, model, field, prompt="Explain the current cost, without 
         )["completion_evidence"]
         == evidence
     )
+    assert not model.queue
+
+
+@pytest.mark.parametrize("visible_answer", ["none", "replacement", "previous"])
+async def test_followup_answer_evidence_ignores_retracted_messages(tmp_path, monkeypatch, visible_answer):
+    flow, model, _ = make_flow(tmp_path, monkeypatch)
+    plan_calls(model)
+    assert_wait([event async for event in flow.run("Plan one managed database")])
+    saved = copy.deepcopy(flow.context.get_conclusion("solution_selection"))
+    original_stream = model.stream
+
+    async def stream(messages, system, tools=None, max_tokens=8192):
+        kind, _ = model.queue[0]
+        if kind not in {"truncated", "silent", "previous"}:
+            async for event in original_stream(messages, system, tools=tools, max_tokens=max_tokens):
+                yield event
+            return
+        model.queue.pop(0)
+        model.calls += 1
+        message_id = f"call-{model.calls}"
+        yield MessageStartEvent(message_id=message_id)
+        if kind != "silent":
+            yield TextDeltaEvent(text="The current plan is retained; here is its explanation.")
+        if kind != "previous":
+            yield ToolUseStartEvent(tool_use_id=message_id, name="complete_step")
+            yield ToolUseEndEvent(tool_use_id=message_id, name="complete_step", input={"conclusion": {}})
+        yield MessageEndEvent(stop_reason="tool_use" if kind == "silent" else "max_tokens", usage=Usage())
+
+    monkeypatch.setattr(model, "stream", stream)
+    if visible_answer == "previous":
+        # Pure text continued after max_tokens stays visible; only the later
+        # truncated tool message is withdrawn by AgentLoop.
+        model.add(("previous", {}))
+    model.add(("truncated", {}))
+    if visible_answer == "replacement":
+        model.add(("complete_step", {"conclusion": {}}))
+    else:
+        model.add(("silent", {}))
+        if visible_answer == "none":
+            model.add(("complete_step", {"conclusion": {}}))
+    events = [event async for event in flow.resume("Explain the current plan without changing it")]
+    results = [event for event in events if isinstance(event, ToolResultEvent) and event.tool_name == "complete_step"]
+    assert len([event for event in events if isinstance(event, TombstoneEvent)]) == 1
+    assert [result.is_error for result in results] == ([True, False] if visible_answer == "none" else [False])
+    if visible_answer == "none":
+        assert "visibly before" in results[0].result
+    completed = [event for event in events
+                 if isinstance(event, PipelineEvent) and event.type == PipelineEventType.STEP_COMPLETED]
+    assert completed[-1].data["conclusion_unchanged"] is True
+    actual = copy.deepcopy(flow.context.get_conclusion("solution_selection"))
+    saved.pop("user_input", None)
+    actual.pop("user_input", None)
+    assert actual == saved
     assert not model.queue
 
 
