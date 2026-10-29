@@ -6,12 +6,13 @@ import json
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import pytest
@@ -240,37 +241,33 @@ async def test_default_sdk_clients_connect_with_bounded_concurrency_and_disconne
 async def test_mixed_stdio_and_http_servers_connect_concurrently(tmp_path: Path) -> None:
     script = _write_fastmcp_server(tmp_path)
     port = _free_port()
-    process = subprocess.Popen(
-        [sys.executable, str(script), "http", str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        _wait_for_port(port, process)
-        manager = MCPManager(
-            [
-                _scoped("local-e2e", {"command": sys.executable, "args": [str(script), "stdio"]}),
-                _scoped("remote-e2e", {"type": "http", "url": f"http://127.0.0.1:{port}/mcp"}),
-            ],
-            roots=[tmp_path],
-            max_concurrent_connections=2,
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file:
+        process = subprocess.Popen(
+            [sys.executable, str(script), "http", str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+            text=True,
         )
-
-        await manager.connect_all()
-
         try:
-            assert manager.connection_state("local-e2e") is MCPConnectionState.CONNECTED
-            assert manager.connection_state("remote-e2e") is MCPConnectionState.CONNECTED
+            _wait_for_port(port, process, stderr_file)
+            manager = MCPManager(
+                [
+                    _scoped("local-e2e", {"command": sys.executable, "args": [str(script), "stdio"]}),
+                    _scoped("remote-e2e", {"type": "http", "url": f"http://127.0.0.1:{port}/mcp"}),
+                ],
+                roots=[tmp_path],
+                max_concurrent_connections=2,
+            )
+
+            await manager.connect_all()
+
+            try:
+                assert manager.connection_state("local-e2e") is MCPConnectionState.CONNECTED
+                assert manager.connection_state("remote-e2e") is MCPConnectionState.CONNECTED
+            finally:
+                await manager.disconnect_all()
         finally:
-            await manager.disconnect_all()
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+            _stop_process(process)
 
 
 @pytest.mark.asyncio
@@ -284,30 +281,26 @@ async def test_mixed_stdio_and_http_servers_connect_concurrently(tmp_path: Path)
 async def test_remote_mcp_server_e2e_http_and_sse(tmp_path: Path, transport: str, path: str) -> None:
     script = _write_fastmcp_server(tmp_path)
     port = _free_port()
-    process = subprocess.Popen(
-        [sys.executable, str(script), transport, str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        _wait_for_port(port, process)
-        manager = MCPManager(
-            [_scoped("remote-e2e", {"type": transport, "url": f"http://127.0.0.1:{port}{path}"})],
-            roots=[tmp_path],
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file:
+        process = subprocess.Popen(
+            [sys.executable, str(script), transport, str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+            text=True,
         )
-        await manager.connect_all()
-        assert manager.connection_state("remote-e2e") is MCPConnectionState.CONNECTED
-        result = await manager.call_tool("remote-e2e", "echo", {"text": transport})
-        assert _first_text(result) == f"echo:{transport}"
-        await manager.disconnect_all()
-    finally:
-        process.terminate()
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+            _wait_for_port(port, process, stderr_file)
+            manager = MCPManager(
+                [_scoped("remote-e2e", {"type": transport, "url": f"http://127.0.0.1:{port}{path}"})],
+                roots=[tmp_path],
+            )
+            await manager.connect_all()
+            assert manager.connection_state("remote-e2e") is MCPConnectionState.CONNECTED
+            result = await manager.call_tool("remote-e2e", "echo", {"text": transport})
+            assert _first_text(result) == f"echo:{transport}"
+            await manager.disconnect_all()
+        finally:
+            _stop_process(process)
 
 
 @pytest.mark.asyncio
@@ -316,39 +309,37 @@ async def test_remote_mcp_server_e2e_oauth_bearer_token_connect(monkeypatch, tmp
     monkeypatch.setenv("IAC_CODE_MCP_DISABLE_KEYRING", "1")
     script = _write_auth_fastmcp_server(tmp_path)
     port = _free_port()
-    process = subprocess.Popen(
-        [sys.executable, str(script), str(port)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    try:
-        _wait_for_port(port, process)
-        scoped = _scoped(
-            "auth-remote",
-            {
-                "type": "http",
-                "url": f"http://127.0.0.1:{port}/mcp",
-                "oauth": {"clientId": "client-id"},
-            },
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as stderr_file:
+        process = subprocess.Popen(
+            [sys.executable, str(script), str(port)],
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+            text=True,
         )
-        storage = MCPSecretStorage()
-        set_oauth_storage_secret(scoped.config, storage, "access_token", "access-token", scope=MCPConfigScope.SESSION)
-        manager = MCPManager([scoped], roots=[tmp_path])
-
-        await manager.connect_all()
-
-        assert manager.connection_state("auth-remote") is MCPConnectionState.CONNECTED
-        result = await manager.call_tool("auth-remote", "echo", {"text": "oauth"})
-        assert _first_text(result) == "echo:oauth"
-        await manager.disconnect_all()
-    finally:
-        process.terminate()
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=5)
+            _wait_for_port(port, process, stderr_file)
+            scoped = _scoped(
+                "auth-remote",
+                {
+                    "type": "http",
+                    "url": f"http://127.0.0.1:{port}/mcp",
+                    "oauth": {"clientId": "client-id"},
+                },
+            )
+            storage = MCPSecretStorage()
+            set_oauth_storage_secret(
+                scoped.config, storage, "access_token", "access-token", scope=MCPConfigScope.SESSION
+            )
+            manager = MCPManager([scoped], roots=[tmp_path])
+
+            await manager.connect_all()
+
+            assert manager.connection_state("auth-remote") is MCPConnectionState.CONNECTED
+            result = await manager.call_tool("auth-remote", "echo", {"text": "oauth"})
+            assert _first_text(result) == "echo:oauth"
+            await manager.disconnect_all()
+        finally:
+            _stop_process(process)
 
 
 _OAUTH_TEST_STORAGE_KINDS = (
@@ -598,12 +589,16 @@ class _YuqueLikeServer:
     oauth_server: _YuqueOAuthHTTPServer
     oauth_thread: threading.Thread
     process: subprocess.Popen[str]
+    stderr_file: TextIO
 
     def close(self) -> None:
-        _stop_process(self.process)
-        self.oauth_server.shutdown()
-        self.oauth_server.server_close()
-        self.oauth_thread.join(timeout=5)
+        try:
+            _stop_process(self.process)
+        finally:
+            self.stderr_file.close()
+            self.oauth_server.shutdown()
+            self.oauth_server.server_close()
+            self.oauth_thread.join(timeout=5)
 
 
 def _start_yuque_like_server(tmp_path: Path) -> _YuqueLikeServer:
@@ -618,19 +613,25 @@ def _start_yuque_like_server(tmp_path: Path) -> _YuqueLikeServer:
     oauth_thread.start()
 
     script = _write_yuque_like_fastmcp_server(tmp_path)
-    process = subprocess.Popen(
-        [sys.executable, str(script), str(mcp_port), oauth_state.issuer],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+    stderr_file = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
+    process = None
     try:
-        _wait_for_port(mcp_port, process)
+        process = subprocess.Popen(
+            [sys.executable, str(script), str(mcp_port), oauth_state.issuer],
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+            text=True,
+        )
+        _wait_for_port(mcp_port, process, stderr_file)
     except Exception:
-        _stop_process(process)
-        oauth_server.shutdown()
-        oauth_server.server_close()
-        oauth_thread.join(timeout=5)
+        try:
+            if process is not None:
+                _stop_process(process)
+        finally:
+            stderr_file.close()
+            oauth_server.shutdown()
+            oauth_server.server_close()
+            oauth_thread.join(timeout=5)
         raise
     return _YuqueLikeServer(
         mcp_url=mcp_url,
@@ -639,6 +640,7 @@ def _start_yuque_like_server(tmp_path: Path) -> _YuqueLikeServer:
         oauth_server=oauth_server,
         oauth_thread=oauth_thread,
         process=process,
+        stderr_file=stderr_file,
     )
 
 
@@ -899,23 +901,25 @@ def _free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _wait_for_port(port: int, process: subprocess.Popen[str]) -> None:
+def _wait_for_port(port: int, process: subprocess.Popen[str], stderr_file: TextIO) -> None:
     deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            stderr = _read_process_stderr_if_exited(process)
+            stderr = _read_process_stderr_if_exited(process, stderr_file)
             raise RuntimeError(f"MCP e2e server exited early: {stderr}")
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.2):
                 return
         except OSError:
             time.sleep(0.05)
-    stderr = _read_process_stderr_if_exited(process)
-    detail = stderr if stderr else "stderr unavailable while process is still running"
+    _stop_process(process)
+    stderr = _read_process_stderr_if_exited(process, stderr_file)
+    detail = stderr if stderr else "stderr unavailable"
     raise TimeoutError(f"MCP e2e server did not listen on port {port}: {detail}")
 
 
-def _read_process_stderr_if_exited(process: subprocess.Popen[str]) -> str:
-    if process.poll() is None or process.stderr is None:
+def _read_process_stderr_if_exited(process: subprocess.Popen[str], stderr_file: TextIO) -> str:
+    if process.poll() is None:
         return ""
-    return process.stderr.read()
+    stderr_file.seek(0)
+    return stderr_file.read()

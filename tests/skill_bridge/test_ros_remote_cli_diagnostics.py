@@ -1400,6 +1400,95 @@ def test_debug_batch_bounds_memory_and_file(monkeypatch, tmp_path):
     assert records(tmp_path)[-1]["kind"] == "file-limit"
 
 
+@pytest.mark.parametrize("file_limit", [0, 2048])
+def test_debug_concurrent_process_batches_preserve_jsonl_with_short_writes(tmp_path, file_limit):
+    script = r"""
+import argparse
+import importlib.util
+import os
+import pathlib
+import sys
+import time
+from types import SimpleNamespace
+
+spec = importlib.util.spec_from_file_location("concurrent_debug_bridge", sys.argv[1])
+bridge = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(bridge)
+workspace = pathlib.Path(sys.argv[2])
+worker = sys.argv[3]
+write = os.write
+
+def short_write(descriptor, data):
+    written = write(descriptor, data[:31])
+    time.sleep(0.001)
+    return written
+
+bridge.os = SimpleNamespace(**dict(vars(os), write=short_write))
+log = bridge._RemoteCLIDebugLog(workspace, worker, False, "primary", argparse.Namespace(), record_start=False)
+if int(sys.argv[4]):
+    log.MAX_FILE_BYTES = int(sys.argv[4])
+(workspace / (worker + ".ready")).touch()
+deadline = time.monotonic() + 30
+while not (workspace / "start").exists():
+    if time.monotonic() >= deadline:
+        raise RuntimeError("The test did not release concurrent writers.")
+    time.sleep(0.01)
+with log.batch():
+    for sequence in range(4):
+        log.record("concurrent", sequence=sequence, text="冷启动日志" * 12)
+"""
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", script, str(BRIDGE_PATH), str(tmp_path), str(worker), str(file_limit)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        for worker in range(3)
+    ]
+    try:
+        deadline = time.monotonic() + 30
+        while not all((tmp_path / f"{worker}.ready").exists() for worker in range(3)):
+            assert all(process.poll() is None for process in processes)
+            assert time.monotonic() < deadline, "Concurrent debug writers did not become ready."
+            time.sleep(0.01)
+        (tmp_path / "start").touch()
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=30)
+            assert process.returncode == 0, (stdout, stderr)
+            assert not stderr
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+            process.communicate(timeout=30)
+    saved = records(tmp_path)
+    if file_limit:
+        assert (tmp_path / ".ros-agent-debug/remote-aliyun-results.jsonl").stat().st_size <= file_limit
+        assert any(row["kind"] == "file-limit" for row in saved)
+    else:
+        assert len(saved) == 12
+        assert {(row["invocationId"], row["sequence"]) for row in saved} == {
+            (str(worker), sequence) for worker in range(3) for sequence in range(4)
+        }
+    assert all(row["text"] == "冷启动日志" * 12 for row in saved if row["kind"] == "concurrent")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Creating symlinks requires Windows privileges.")
+def test_debug_rejects_symlinked_lock_without_modifying_target(tmp_path, capsys):
+    target = tmp_path / "target"
+    target.touch(mode=0o640)
+    original_mode = target.stat().st_mode
+    directory = tmp_path / ".ros-agent-debug"
+    directory.mkdir()
+    (directory / "remote-aliyun-results.lock").symlink_to(target)
+    log = bridge._RemoteCLIDebugLog(tmp_path, "invocation", False, "primary", args())
+    log.record("end")
+    assert target.read_bytes() == b""
+    assert target.stat().st_mode == original_mode
+    assert not log.path.exists()
+    assert capsys.readouterr().err.count("debug log unavailable") == 1
+
+
 @pytest.mark.parametrize("truncated", [False, True])
 def test_debug_parser_timing_excludes_input_wait_and_consumer_work(monkeypatch, tmp_path, truncated):
     clock = [0.0]
