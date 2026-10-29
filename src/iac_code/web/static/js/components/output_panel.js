@@ -3,8 +3,8 @@ import { t } from "../i18n.js?v=web-repl-ui-277";
 import {
   disposeArchitectureDiagram,
   renderArchitectureDiagram,
-} from "../architecture_diagram.js?v=eraser-browser-v14";
-import { renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v5";
+} from "../architecture_diagram.js?v=eraser-browser-v15";
+import { renderDiagramPrice } from "../mermaid_render.js?v=cost-period-v6";
 
 const STATUS_LABELS = { true: t("Success"), false: t("In progress / failed") };
 const DIAGRAM_PREVIEW_MIN_WIDTH = 560;

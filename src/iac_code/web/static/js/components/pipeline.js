@@ -2,8 +2,8 @@ import { t } from "../i18n.js?v=web-repl-ui-277";
 import {
   disposeArchitectureDiagram,
   renderArchitectureDiagram,
-} from "../architecture_diagram.js?v=eraser-browser-v14";
-import { renderDiagramPrice } from "../mermaid_render.js?v=arch-diagram-v5";
+} from "../architecture_diagram.js?v=eraser-browser-v15";
+import { renderDiagramPrice } from "../mermaid_render.js?v=cost-period-v6";
 
 function text(value) {
   return value === undefined || value === null ? "" : String(value);

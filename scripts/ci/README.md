@@ -13,7 +13,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite full --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --list --suite all
 ```
 
-`fast` 包含 7 个 A2A、REPL、Web API 确定性契约用例；`full` 共 64 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
+`fast` 包含 7 个 A2A、REPL、Web API 确定性契约用例；`full` 共 66 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
 
 权限批次新增四条 HTTP E2E，复用 `tests/a2a/test_permission_prompt_e2e.py`，仅模型与工具使用确定性替身。`permission-prompt-supersede-{same-process,after-restart}` 验证权限待确认时的新 prompt 取消整个未执行批次、补齐 tool_result，并阻止旧权限回复重新执行；`permission-confirmation-followup-{same-process,after-restart}` 验证连续正常确认权限后，工具只执行一次，下一条普通 prompt 正常处理，重复权限回复不会重跑工具。四条均纳入 `full`，也可单独执行：
 
@@ -35,7 +35,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite live --jobs 4 \
   --allow-cloud-write
 ```
 
-默认三文件模式下，凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 121 个：42 个 selling flow A2A/REPL 场景、20 个 A2A 只读资源选择（含 12 个重启恢复矩阵）、6 个 AGUI HTTP/SSE 资源选择、16 个 REPL 旧场景、33 个 A2A 恢复场景、3 个 VPC 模板 smoke、1 个只读云 API canary。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety`、`live-repl`、`live-smoke` 或 `live-agui`，也可用 `--case` 指定单个用例。AGUI 的 6 条覆盖普通聊天与 Pipeline 的选择、取消和直接输入，通过 HTTP/SSE 运行，不需要浏览器；使用文本模型池，查询已有 VPC，不创建资源，清理状态为“无需清理”。可单独运行 `--suite live-agui`，或指定 `--case agui-selector-normal-selected`。三个 VPC smoke 只接收 LLM 与 settings 配置，使用隔离的 HOME，不接收云凭证；它们验证生成模板，不创建 VPC。并行 selling 场景各用独立的 `10.250.0.0/16` 子网池，避免独立进程重复预留同一 VSwitch CIDR；原 runner 单独运行仍沿用原池。旧 A2A、REPL 和 selling 场景不强制测试 StackName；清理读取隔离会话中真实 CreateStack 接受回执，按实际 ID、名称和地域校验后删除。仅查询、等待或模型提及的资源不能授权删除；硬超时后由独立清理进程再次尝试。selling、REPL 旧用例和 A2A 恢复用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组。硬超时不代表清理成功，需检查报告和测试账号残留资源。
+默认三文件模式下，凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 130 个：42 个 selling flow A2A/REPL 场景、20 个 A2A 只读资源选择（含 12 个重启恢复矩阵）、6 个 AGUI HTTP/SSE 资源选择、16 个 REPL 旧场景、33 个 A2A 恢复场景、3 个 VPC 模板 smoke、1 个只读云 API canary、8 个 ROS 助手引导真实模型场景、1 个活动商品追问 A2A 场景。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety`、`live-repl`、`live-smoke` 或 `live-agui`，也可用 `--case` 指定单个用例。AGUI 的 6 条覆盖普通聊天与 Pipeline 的选择、取消和直接输入，通过 HTTP/SSE 运行，不需要浏览器；使用文本模型池，查询已有 VPC，不创建资源，清理状态为“无需清理”。可单独运行 `--suite live-agui`，或指定 `--case agui-selector-normal-selected`。三个 VPC smoke 只接收 LLM 与 settings 配置，使用隔离的 HOME，不接收云凭证；它们验证生成模板，不创建 VPC。并行 selling 场景各用独立的 `10.250.0.0/16` 子网池，避免独立进程重复预留同一 VSwitch CIDR；原 runner 单独运行仍沿用原池。旧 A2A、REPL 和 selling 场景不强制测试 StackName；清理读取隔离会话中真实 CreateStack 接受回执，按实际 ID、名称和地域校验后删除。仅查询、等待或模型提及的资源不能授权删除；硬超时后由独立清理进程再次尝试。selling、REPL 旧用例和 A2A 恢复用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组。硬超时不代表清理成功，需检查报告和测试账号残留资源。
 
 CI 可改用 `--cloud-credential-helper /path/to/helper.py`，此时源目录只需 LLM 凭证和 `settings.yml`。Helper 接口为 `cloud --output <目标 .cloud-credentials.yml 路径>`；它在每个真实云用例开始前调用，长用例每 10 分钟调用一次，异常清理前也会再次调用。若 helper 需要独立 Python 环境，传 `--cloud-credential-python /path/to/python`。Helper 必须原子地写入私有权限文件，且不得在标准输出或错误输出打印凭证。模板 smoke 不调用 helper。本地原有的三文件运行方式继续支持。
 
@@ -54,6 +54,31 @@ CI 可改用 `--cloud-credential-helper /path/to/helper.py`，此时源目录只
 `permission-pipeline-handoff-context-{same-process,cold-recovery}` 另增 2 条，复用真实 Pipeline 引擎：旧需求全文进入现有交接摘要的 `original_user_request`；Normal 模型上下文只接收摘要和新输入，原始展示历史保留。冷恢复同时覆盖权限等待期间和交接完成后的重启，两条均核对实际模型输入、摘要格式与安全要求、工具执行次数及旧权限回复失效。真实选择器重启矩阵也检查模型 HTTP 请求中旧需求已折叠。
 
 `live-readonly` 新增 `selector-restart-{normal,pipeline}-{sigterm,sigkill,released}-{selected,canceled}` 共 12 条，复用真实资源选择器重启脚本，查询已有 VPC，不创建云资源；隔离配置、模型分配、凭证刷新与安全报告沿用 selector runner。每条核对恢复后首个 SSE 帧的 execution 归属、消费回执以及下一轮普通 prompt。
+
+`ssf-candidate-batch-{same-process,cold-recovery}` 是 P18 的确定性回归/确认用例，纳入 `full`。使用生产 `selling_solution_first` 流程、AgentLoop、展示工具、会话文件和恢复逻辑，仅模型输出使用脚本替身：展示方案及详情 → 相同方案幂等重复展示 → 等待选择 → 用户选择方案。验证选择后直接进入模板生成阶段，保留原批次和所选方案，不再调用模型或要求重选；冷恢复用例重新构造 Runner/Storage 并从磁盘恢复，不模拟进程重启。用例在下一步骤启动时结束，不调用真实模型或云 API。
+
+```bash
+uv run --no-sync python scripts/ci/run_e2e.py \
+  --case ssf-candidate-batch-same-process \
+  --case ssf-candidate-batch-cold-recovery --jobs 1 --retries 0
+```
+
+`ros-awareness-*` 纳入 `live-readonly`，验证生产 Step 1 引擎和工具在真实模型下的分流：优惠、续费、计费、GPU 库存价格、流量抵扣、默认地域，以及开关关闭、部署成本咨询两个对照场景。计费保留自然问法 `ros-awareness-billing` 和明确不部署的问法 `ros-awareness-billing-explicit`，两者均须正确分流。验收用户可见链接、地域、持久化结束原因及澄清边界；不替换模型输出，不覆盖 HTTP/UI，不调用云 API。只复制 LLM 凭证和 settings，不接收云凭证或调用云凭证 helper。可定向运行：
+
+```bash
+uv run --no-sync python scripts/ci/run_e2e.py \
+  --case ros-awareness-renewal --case ros-awareness-default-region \
+  --case ros-awareness-disabled --case ros-awareness-deployment-pricing \
+  --credential-source-dir /path/to/test-config --jobs 2 --retries 0
+```
+
+`promotional-offer-followup-a2a` 通过生产 HTTP/SSE A2A Server 验证真实模型：先为“最低 2G、推荐 4G”的旅游 Agent 规划服务器，再保留会话追问活动商品，最后明确咨询活动购买资格。检查内存下限、部署上下文中的同地域助手引导，以及独立活动咨询的可见链接和持久化结束原因。测试不替换模型或工具结果、不选择部署方案，仅复制 LLM 凭证与 settings，不接收云凭证、不查询实际活动资格；首轮历史附图中的规格以文本复现。四模型覆盖需分别指定每个 `--text-model` 运行，不把单次调度当成四模型全覆盖。
+
+```bash
+uv run --no-sync python scripts/ci/run_e2e.py --case promotional-offer-followup-a2a \
+  --text-model deepseek-v4.1-flash --credential-source-dir /path/to/test-config \
+  --jobs 1 --retries 0
+```
 
 ## 真实用例的模型池与思考强度
 
@@ -81,7 +106,29 @@ uv run --no-sync python scripts/ci/run_e2e.py --case ssf-a2a-happy-multi-plan \
 
 ## CI 接入
 
-CI 调用同一个入口，并用 `--run-dir` 指定报告目录。`fast` 适合快速检查，`full` 适合完整确定性验收。真实场景必须提供测试专用配置目录和 `--allow-cloud-write`。配置文件内容应通过 CI 的 Secret 注入，且不要进入代码、作业输出或上传附件。
+`coupon-budget-a2a` 使用真实模型、HTTP/SSE A2A 和只读云 API，验证默认月费、明确小时与时长后的估价，以及当前部署中的优惠券查询不被分流。它也验证优惠券指南中的两条 API、字段与分页，不购买资源或实际使用优惠券：
+
+```bash
+uv run python scripts/ci/run_e2e.py --case coupon-budget-a2a --suite live \
+  --credential-source-dir /path/to/test-config --text-model glm-5.2-fast-preview
+
+# 仅验证指南 API，使用当前配置的云凭证，不调用模型
+uv run python scripts/ci/run_coupon_budget_a2a.py --api-only --allow-real-cloud \
+  --run-dir /tmp/coupon-api-check
+```
+
+API 验证需要账号内实际存在优惠券及可查询的商品记录；空列表不能作为券字段和商品查询已验证的证明。API/模型原始结果留在私有运行目录，不上传为公开报告。该用例验证只读识别与规划，不证明特定订单或账单一定能抵扣。
+
+`coupon-budget-mock-a2a` 补充没有真实可用券时的判断覆盖：A2A Server、模型和方案规划均使用真实实现，只在测试进程中替换 `DescribeCoupon`、`DescribeCouponItemList` 的业务返回；其它 BSS 操作在该测试进程中不开放。覆盖可用余额、余额不足、包年包月限制、GPU 排除、范围未知、过期、满减门槛、商品黑名单与查询失败九种情况。每种情况固定使用测试输入“8 小时 GPU 计算费 240 元”，核对模型表格中的抵扣额、需补现金及继续等待选案的流程状态；这不是 GPU 实时报价或实际结算证明。
+
+```bash
+uv run python scripts/ci/run_e2e.py --case coupon-budget-mock-a2a --suite live \
+  --credential-source-dir /path/to/test-config --text-model glm-5.2-fast-preview
+```
+
+Mock 入口只位于 `scripts/ci/`，不修改应用运行时，也没有生产环境开关。真实结果与模拟结果使用不同用例名、报告目录及 `coupon_api_mocked` 标记；不可把该用例当成真实账单抵扣通过。
+
+CI 调用同一个入口，并用 `--run-dir` 指定报告目录。`fast` 适合快速检查，`full` 适合完整确定性验收。真实场景必须提供测试专用配置目录；包含云写入的用例还需 `--allow-cloud-write`。配置文件内容应通过 CI 的 Secret 注入，且不要进入代码、作业输出或上传附件。
 
 `report.md` 是概要表，`report.html` 可展开每个用例，`summary.json` 和各用例 `ci-result.json` 是结构化详情，`junit.xml` 供 CI 测试报告展示。确定性套件可上传 stdout/stderr；真实套件仅上传筛选后的状态文件，不上传原始日志、凭证、工作目录或场景原始 summary。
 
@@ -102,7 +149,7 @@ REPL 旧场景的 PTY 等待每 10 秒检查一次，每 60 秒在单用例的 s
 
 先按 `report.md` 找到失败用例与首次失败检查，再看对应的 `ci-result.json`、场景 `summary.json`、日志和源码。Agent 应做有界复现，明确归类为产品缺陷、用例/断言缺陷、环境/凭证故障、云资源清理故障或超时，并写出证据、受影响场景和建议修复。配置的一次自动重跑之外，真实云用例再次复现前先核对残留资源与清理结果。报告里的“初步线索”只是索引，不能替代复盘结论。
 
-总入口目前登记 185 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
+总入口目前登记 199 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
 
 ### 验收边界
 

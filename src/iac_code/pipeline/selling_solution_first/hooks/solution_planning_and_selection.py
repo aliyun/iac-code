@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import os
 import re
+from pathlib import Path
 from typing import Any
 
 from iac_code.i18n import _
@@ -13,9 +15,33 @@ from iac_code.pipeline.selling_solution_first.tools.candidate_planning_records i
     detail_record_matches,
     latest_candidate_detail_records,
     latest_candidate_outline_batch,
+    normalize_candidate_costs,
+    normalize_inventory_costs,
 )
 
-__all__ = ["enrich_completion_input"]
+__all__ = ["build_prompt_context", "enrich_completion_input"]
+
+
+def build_prompt_context() -> dict[str, Any]:
+    """Inject the short skill supplement only when ROS awareness is enabled."""
+    enabled = os.environ.get("IAC_CODE_ROS_AGENT_AWARENESS", "").strip().casefold() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return {"ros_agent_awareness": ""}
+
+    from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredentials
+
+    # The credential loader prefers the current session's request-local override.
+    credential = AliyunCredentials.load()
+    region = (credential.region_id if credential is not None else "").strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region):
+        region = DEFAULT_REGION
+    destination = f"[AI Assistant](https://ros.console.aliyun.com/{region}/chat)"
+    supplement = (
+        Path(__file__).resolve().parents[1]
+        / "skills/iac-aliyun-solution-first/ros-agent-awareness.md"
+    ).read_text(encoding="utf-8").strip()
+    return {"ros_agent_awareness": "\n\n" + supplement.replace("{ai_assistant_destination}", destination)}
+
 
 # 说服力字段与各自的最少条目数。缺失或空数组时方案卡只剩一句概述，用户无从判断为什么该选它，
 # 因此这里和 completion_input_schema 一样把它们当硬要求，而不是可选补充。
@@ -26,15 +52,16 @@ _REQUIRED_DECISION_NOTES: tuple[tuple[str, int], ...] = (
     ("cons", 1),
 )
 
-_COMPOSED_MONTHLY_PRICE_RE = re.compile(
+_COST_PERIOD_RE = r"(?:小时|天|日|周|月|年|hours?|days?|weeks?|months?|years?)"
+_COMPOSED_PRICE_RE = re.compile(
     r"^\s*(?:约\s*)?(?:"
     r"[¥￥]\s*[\d,.]+(?:\s*(?:[-~～—–]|至|到)\s*(?:[¥￥]\s*)?[\d,.]+)?"
-    r"\s*(?:元|CNY|RMB)?\s*(?:(?:[/／]\s*)?月|每月)?"
+    rf"\s*(?:元|CNY|RMB)?\s*(?:(?:[/／]\s*|每)?{_COST_PERIOD_RE})?"
     r"|[\d,.]+(?:\s*(?:[-~～—–]|至|到)\s*(?:[¥￥]\s*)?[\d,.]+)?"
-    r"\s*(?:元\s*(?:(?:[/／]\s*)?月)?|(?:[/／]\s*)月|每月)"
+    rf"\s*(?:元\s*(?:(?:[/／]\s*|每)?{_COST_PERIOD_RE})?|[/／]\s*{_COST_PERIOD_RE}|每{_COST_PERIOD_RE})"
     r"|(?:CNY|RMB)\s*[\d,.]+(?:\s*(?:[-~～—–]|至|到)\s*(?:CNY|RMB)?\s*[\d,.]+)?"
-    r"\s*(?:(?:[/／]\s*)?月|每月)?"
-    r"|(?:免费|零费用|无费用)\s*(?:(?:[/／]\s*)?月|每月)?"
+    rf"\s*(?:(?:[/／]\s*|每)?{_COST_PERIOD_RE})?"
+    rf"|(?:免费|零费用|无费用)\s*(?:(?:[/／]\s*|每)?{_COST_PERIOD_RE})?"
     r")\s*$",
     re.IGNORECASE,
 )
@@ -222,7 +249,7 @@ def _candidate_from_outline_and_detail(
     outline: dict[str, str],
     detail: dict[str, Any],
 ) -> dict[str, Any]:
-    inventory = copy.deepcopy(detail.get("resource_inventory"))
+    inventory = normalize_inventory_costs(detail.get("resource_inventory"))
     inventory = inventory if isinstance(inventory, list) else []
     return {
         "name": outline["candidate_name"],
@@ -233,7 +260,7 @@ def _candidate_from_outline_and_detail(
         "resource_inventory": inventory,
         "rough_cost": {
             "currency": "CNY",
-            "monthly_range": outline["total_monthly_cost"],
+            "cost_range": outline["total_cost"],
             "items": _cost_items_from_inventory(inventory),
             "assumptions": copy.deepcopy(detail.get("cost_assumptions") or []),
             "exclusions": copy.deepcopy(detail.get("cost_exclusions") or []),
@@ -256,7 +283,7 @@ def _cost_items_from_inventory(inventory: list[Any]) -> list[dict[str, str]]:
             {
                 "name": str(raw.get("product") or raw.get("resource_id") or "").strip(),
                 "spec": spec,
-                "monthly_cost": str(raw.get("rough_monthly_cost") or "").strip(),
+                "cost": str(raw.get("rough_cost") or "").strip(),
             }
         )
     return items
@@ -278,7 +305,7 @@ def _normalize_candidate(
     if not isinstance(summary, str) or not summary.strip():
         raise CompletionEnrichmentError(_("candidates[{index}].summary must be non-empty").format(index=index))
 
-    normalized = copy.deepcopy(candidate)
+    normalized = normalize_candidate_costs(candidate)
     normalized["candidate_id"] = f"candidate-{index}"
     normalized["name"] = name.strip()
     normalized["summary"] = summary.strip()
@@ -396,7 +423,7 @@ def _topology_text(candidate: dict[str, Any]) -> str:
 
 
 def _candidate_option_summary(candidate: dict[str, Any]) -> str:
-    """Compose 「概述；月度价格；首要代价」, idempotently.
+    """Compose 「概述；当前周期价格；首要代价」, idempotently.
 
     重新规划时模型在自己的上下文里看到的是上一轮拼好的选项文案，会把它原样当成候选概述
     交回来，于是价格与代价在方案卡里出现两遍。价格前的分隔符是上一轮拼接留下的标记，
@@ -404,9 +431,9 @@ def _candidate_option_summary(candidate: dict[str, Any]) -> str:
     """
     summary = str(candidate.get("summary") or "")
     rough_cost = candidate.get("rough_cost")
-    monthly_range = rough_cost.get("monthly_range") if isinstance(rough_cost, dict) else None
+    cost_range = rough_cost.get("cost_range") if isinstance(rough_cost, dict) else None
     notes = candidate.get("cons")
-    price = str(monthly_range or "")
+    price = str(cost_range or "")
     tradeoff = str(notes[0]) if isinstance(notes, list) and notes else ""
     summary = _strip_composed_option_tail(summary, current_price=price)
     summary = summary.strip()
@@ -427,6 +454,6 @@ def _strip_composed_option_tail(summary: str, *, current_price: str) -> str:
     # A projected option always has content before the price and a trade-off after it.
     # Requiring a complete price-shaped segment avoids trimming ordinary prose that uses semicolons.
     for index in range(1, len(segments) - 1):
-        if _COMPOSED_MONTHLY_PRICE_RE.fullmatch(segments[index]):
+        if _COMPOSED_PRICE_RE.fullmatch(segments[index]):
             return "；".join(segments[:index])
     return summary
