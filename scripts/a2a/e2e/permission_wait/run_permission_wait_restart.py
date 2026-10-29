@@ -900,7 +900,16 @@ def run_scenario(
         )
         recovered = _iac_code_values(recovered_events, "permissionRecovered")
         if not recovered:
-            raise AssertionError("restarted server did not report permissionRecovered")
+            evidence = {
+                "event_count": len(recovered_events),
+                "rpc_errors": [value["error"] for value in recovered_events if isinstance(value.get("error"), dict)],
+                "identity_errors": _iac_code_values(recovered_events, "permissionIdentityError"),
+                "acknowledgements": _iac_code_values(recovered_events, "inputReceived"),
+                "task_states": _task_states(recovered_events),
+            }
+            raise AssertionError(
+                "restarted server did not report permissionRecovered: " + json.dumps(evidence, ensure_ascii=False)
+            )
         acknowledgements = [
             value for value in _iac_code_values(recovered_events, "inputReceived") if isinstance(value, dict)
         ]
