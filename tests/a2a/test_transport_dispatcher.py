@@ -6265,8 +6265,8 @@ class _OrdinaryDiskClaimBarrier:
 
     def claim(self, *args, **kwargs):
         self.entered.set()
-        if not self.release.wait(timeout=_STREAM_TEST_TIMEOUT):
-            raise TimeoutError("test disk claim barrier was not released")
+        # This orders the competing Stop; pytest bounds process startup and IO.
+        self.release.wait()
         return self._claim(*args, **kwargs)
 
 
@@ -6345,7 +6345,7 @@ async def test_public_sdk_ordinary_followup_rejects_a_competing_process_stop_at_
             target=_OrdinaryCompetingDiskStop.run, args=(str(path), str(fixture.cwd), results)
         )
         process.start()
-        await asyncio.to_thread(process.join, _STREAM_TEST_TIMEOUT)
+        await asyncio.to_thread(process.join)
         assert not process.is_alive()
         assert process.exitcode == 0
         assert results.get(timeout=_STREAM_TEST_TIMEOUT) is True

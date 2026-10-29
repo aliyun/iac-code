@@ -1607,14 +1607,21 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
                 args=(str(config), str(cwd), queue),
             )
             receiver.start()
-            await asyncio.to_thread(receiver.join, 10)
-            assert receiver.exitcode == 0
-            assert queue.get(timeout=2) == (
-                [("user", content) for content in expected_users],
-                [("user", content) for content in [*expected_users, _MODEL_FOLLOWUP_REQUEST]],
-            )
-            queue.close()
-            queue.join_thread()
+            try:
+                # Process exit waits for its Queue feeder, so drain the result first.
+                received = await asyncio.to_thread(queue.get, timeout=10)
+                await asyncio.to_thread(receiver.join, 10)
+                assert receiver.exitcode == 0
+                assert received == (
+                    [("user", content) for content in expected_users],
+                    [("user", content) for content in [*expected_users, _MODEL_FOLLOWUP_REQUEST]],
+                )
+            finally:
+                if receiver.is_alive():
+                    receiver.terminate()
+                await asyncio.to_thread(receiver.join, 10)
+                queue.close()
+                queue.join_thread()
             assert runner._execution["active_attempt_id"] == current_attempt_id
             assert runner.sidecar_status == "running" and _store(pipeline_dir).load().phase == "running"
             return

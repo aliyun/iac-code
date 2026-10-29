@@ -9,6 +9,7 @@ import os
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field, replace
 from enum import Enum
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -1086,7 +1087,14 @@ class IacCodeA2APipelineExecutor:
                 detached_resource_selection: _DetachedPipelineResourceSelection | None = None
 
                 async def release_detached_runtime() -> None:
-                    await self._task_store.discard_context_runtime(context_id)
+                    control = current_execution_control()
+                    if control is not None and control.permission_pause_enabled:
+                        control.set_permission_runtime_close_confirmation(
+                            partial(self._task_store.discard_context_runtime_for_input_handoff, context_id)
+                        )
+                        await control.confirm_permission_runtime_closed()
+                    else:
+                        await self._task_store.discard_context_runtime(context_id)
 
                 with self._request_context(session_id=ctx.session_id):
                     while True:

@@ -1,4 +1,4 @@
-"""Commit a drained Normal permission boundary without releasing its generation fence."""
+"""Commit a drained permission boundary without releasing its generation fence."""
 
 from __future__ import annotations
 
@@ -173,7 +173,7 @@ class SuspendedPermissionHandoff:
             and record.get("contextId") == snapshot.get("contextId")
             and record.get("taskId") == snapshot.get("taskId")
             and record.get("sessionId") == snapshot.get("sessionId")
-            and record.get("permissionClass") == "normal"
+            and record.get("permissionClass") in {"normal", "pipeline"}
             and record.get("phase") == "SUSPENDED"
             and isinstance(record.get("continuationFrame"), dict)
         )

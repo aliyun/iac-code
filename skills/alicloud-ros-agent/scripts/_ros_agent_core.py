@@ -1393,32 +1393,35 @@ class _RemoteCLIDebugLog(object):
         if not records:
             return
         try:
-            if self.path.parent.is_symlink() or self.path.is_symlink():
+            lock_path = self.path.with_suffix(".lock")
+            if self.path.parent.is_symlink() or self.path.is_symlink() or lock_path.is_symlink():
                 raise OSError("debug log symlinks are not allowed")
             _secure_directory(self.path.parent)
-            flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
-            descriptor = os.open(str(self.path), flags, 0o600)
-            try:
-                if os.name != "nt":
-                    os.fchmod(descriptor, 0o600)
-                size = os.fstat(descriptor).st_size
-                output = bytearray()
-                for encoded in records:
-                    if size + len(output) + len(encoded) > self.MAX_FILE_BYTES - 1024:
-                        encoded = self._file_limit_record()
-                        self.file_limited = True
-                        if size + len(output) + len(encoded) <= self.MAX_FILE_BYTES:
-                            output.extend(encoded)
-                        break
-                    output.extend(encoded)
-                remaining = memoryview(output)
-                while remaining:
-                    written = os.write(descriptor, remaining)
-                    if written <= 0:
-                        raise OSError("debug log write made no progress")
-                    remaining = remaining[written:]
-            finally:
-                os.close(descriptor)
+            # Separate CLI owners and the parser share this file; append may need multiple writes.
+            with StateLock(lock_path):
+                flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND | getattr(os, "O_NOFOLLOW", 0)
+                descriptor = os.open(str(self.path), flags, 0o600)
+                try:
+                    if os.name != "nt":
+                        os.fchmod(descriptor, 0o600)
+                    size = os.fstat(descriptor).st_size
+                    output = bytearray()
+                    for encoded in records:
+                        if size + len(output) + len(encoded) > self.MAX_FILE_BYTES - 1024:
+                            encoded = self._file_limit_record()
+                            self.file_limited = True
+                            if size + len(output) + len(encoded) <= self.MAX_FILE_BYTES:
+                                output.extend(encoded)
+                            break
+                        output.extend(encoded)
+                    remaining = memoryview(output)
+                    while remaining:
+                        written = os.write(descriptor, remaining)
+                        if written <= 0:
+                            raise OSError("debug log write made no progress")
+                        remaining = remaining[written:]
+                finally:
+                    os.close(descriptor)
         except Exception:
             self._warn()
 
