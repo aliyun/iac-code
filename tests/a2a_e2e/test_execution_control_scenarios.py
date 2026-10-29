@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -138,37 +137,37 @@ def test_shared_publication_wait_locks_the_payload_read_window(tmp_path: Path, m
     shared.write_state()
     scenario = shared.scenario(tmp_path)
     read_payload = scenario._shared_backup_text
-    reading = threading.Event()
-    publishing = threading.Event()
-    acquired = threading.Event()
-
-    def publish_next_capture() -> None:
-        reading.wait()
-        publishing.set()
-        service = SessionBackupService(SessionStorage(projects_dir=tmp_path / "config" / "projects"))
-        with service._shared_session_lock(
-            shared.root, project="fixture-project", session_id="fixture-session"
-        ):
-            acquired.set()
-            shared.write_marker()
+    lock_path = SessionBackupService._shared_session_lock_path(
+        shared.root, project="fixture-project", session_id="fixture-session"
+    )
+    probed = []
 
     def read_while_publishing(*args) -> str:
-        reading.set()
-        assert publishing.wait(1), "publisher did not attempt its shared lock"
-        assert not acquired.wait(0.05), "publisher changed the capture during the payload read"
+        # Probe contention directly: Windows' blocking lock retries need not
+        # finish within an arbitrary thread-join deadline after the read.
+        with lock_path.open("a+b") as contender:
+            if sys.platform == "win32":
+                import msvcrt
+
+                contender.seek(0)
+                with pytest.raises(OSError):
+                    msvcrt.locking(contender.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        probed.append(True)
         return read_payload(*args)
 
     monkeypatch.setattr(scenario, "_shared_backup_text", read_while_publishing)
-    publisher = threading.Thread(target=publish_next_capture)
-    publisher.start()
-    try:
-        joined = scenario._wait_shared_publication(shared.commit_id)
-        assert "complete fixture payload" in joined
-    finally:
-        reading.set()
-        publisher.join(2)
-    assert not publisher.is_alive()
-    assert acquired.is_set()
+    joined = scenario._wait_shared_publication(shared.commit_id)
+    assert "complete fixture payload" in joined
+    assert probed == [True]
+    service = SessionBackupService(SessionStorage(projects_dir=tmp_path / "config" / "projects"))
+    with service._shared_session_lock(shared.root, project="fixture-project", session_id="fixture-session"):
+        shared.write_marker()
+    assert (shared.session / ".backup-publication.json").is_file()
 
 
 def test_legacy_cancel_waits_for_drain_before_validating_idle_exit(monkeypatch, tmp_path: Path) -> None:
