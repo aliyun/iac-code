@@ -70,6 +70,7 @@ from iac_code.types.stream_events import (
     CompactionEvent,
     ErrorEvent,
     MessageEndEvent,
+    MessageStartEvent,
     PermissionRequestEvent,
     PermissionWaitOutcome,
     PermissionWaitSuspended,
@@ -108,6 +109,19 @@ class CompactResult:
 class _PendingInjection:
     content: str | list[ContentBlock]
     metadata: dict[str, Any]
+
+
+_MAX_OUTPUT_LIMIT_CONTINUATIONS = 3
+_OUTPUT_LIMIT_CONTINUATION_PROMPT = "Continue from where you stopped. Do not repeat completed work."
+
+
+def _output_limit_error_event() -> ErrorEvent:
+    message_id = "The model reached its output token limit. Increase the max output tokens setting and try again."
+    return ErrorEvent(
+        error=_("The model reached its output token limit. Increase the max output tokens setting and try again."),
+        is_retryable=False,
+        i18n_message_id=message_id,
+    )
 
 
 def _user_input_to_text(user_input: str | list[ContentBlock]) -> str:
@@ -2062,6 +2076,7 @@ class AgentLoop:
         from iac_code.services.telemetry.content_serializer import serialize_output_messages
         from iac_code.services.telemetry.names import GenAiAttr, GenAiOperationName, GenAiSpanKind, Spans
 
+        output_limit_continuations = 0
         for _turn in range(self._max_turns):
             # Pipeline interrupt/recovery can pause between LLM turns and
             # inject supplemental user text before the next provider call.
@@ -2130,6 +2145,7 @@ class AgentLoop:
                 text_chunks: list[str] = []
                 thinking_blocks_by_index: dict[int, dict[str, Any]] = {}
                 message_ended = False
+                message_id: str | None = None
                 turn_stop_reason = "stop"
                 turn_provider_metadata: dict[str, Any] = {}
 
@@ -2169,7 +2185,9 @@ class AgentLoop:
                             yield event
 
                         # Collect data from events
-                        if isinstance(event, TextDeltaEvent):
+                        if isinstance(event, MessageStartEvent):
+                            message_id = event.message_id
+                        elif isinstance(event, TextDeltaEvent):
                             text_chunks.append(event.text)
                             if self._pause_event is not None:
                                 self._current_turn_text += event.text
@@ -2248,6 +2266,30 @@ class AgentLoop:
                             )
                         )
                 full_text = "".join(text_chunks)
+                if turn_stop_reason == "max_tokens" and pending_tool_uses_by_id:
+                    # A truncated response cannot authorize any of its tool calls,
+                    # even if one call happened to have complete arguments.
+                    if message_id is not None:
+                        yield TombstoneEvent(message_id=message_id, affected_tool_use_ids=list(pending_tool_uses_by_id))
+                    if output_limit_continuations < _MAX_OUTPUT_LIMIT_CONTINUATIONS and _turn < self._max_turns - 1:
+                        output_limit_continuations += 1
+                        step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "max_tokens")
+                        continue
+                    self._accepting_injected_user_messages = False
+                    step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "max_tokens")
+                    yield _output_limit_error_event()
+                    break
+                if turn_stop_reason == "max_tokens" and not full_text:
+                    if message_id is not None:
+                        yield TombstoneEvent(message_id=message_id)
+                    self._accepting_injected_user_messages = False
+                    step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "max_tokens")
+                    yield _output_limit_error_event()
+                    break
+                if turn_stop_reason == "max_tokens":
+                    # Incomplete thinking may lack a valid signature for provider replay.
+                    assistant_blocks.clear()
+                    turn_provider_metadata.clear()
                 if full_text:
                     assistant_blocks.append(TextBlock(text=full_text))
                 if should_capture_content_on_span() and full_text:
@@ -2281,6 +2323,23 @@ class AgentLoop:
                             assistant_message,
                             git_branch=self._current_git_branch,
                         )
+
+                if turn_stop_reason == "max_tokens":
+                    if output_limit_continuations < _MAX_OUTPUT_LIMIT_CONTINUATIONS and _turn < self._max_turns - 1:
+                        output_limit_continuations += 1
+                        continuation = self.context_manager.add_user_message(_OUTPUT_LIMIT_CONTINUATION_PROMPT)
+                        continuation.metadata["type"] = "output_limit_continuation"
+                        if self._session_storage:
+                            self._session_storage.append(
+                                self._cwd, self._session_id, continuation, git_branch=self._current_git_branch
+                            )
+                        step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "max_tokens")
+                        continue
+                    self._accepting_injected_user_messages = False
+                    step_span.set_attribute(GenAiAttr.REACT_FINISH_REASON, "max_tokens")
+                    yield _output_limit_error_event()
+                    break
+                output_limit_continuations = 0
 
                 # No tool calls -> end turn
                 if not completed_tools:

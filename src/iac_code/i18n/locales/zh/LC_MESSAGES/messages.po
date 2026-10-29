@@ -13675,3 +13675,7 @@ msgstr "requested_candidate_count 必须为正整数或 null"
 #: src/iac_code/pipeline/selling/hooks/architecture_planning.py
 msgid "The user requested {expected} candidate plans; {actual} were submitted. Correct the candidates or ask for clarification; do not silently change the requested count."
 msgstr "用户要求 {expected} 个候选方案，但提交了 {actual} 个。请修正候选方案或向用户澄清；不要擅自更改要求的数量。"
+
+#: src/iac_code/agent/agent_loop.py
+msgid "The model reached its output token limit. Increase the max output tokens setting and try again."
+msgstr "模型已达到输出 Token 上限。请提高最大输出 Token 数设置后重试。"
