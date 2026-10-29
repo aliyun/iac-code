@@ -36,9 +36,11 @@ def _failing_fsync_append_process(
     fsync_entered,
     success_done,
     result_queue,
+    ready,
 ) -> None:
     from iac_code.a2a import pipeline_journal as pipeline_journal_module
 
+    ready.wait(timeout=5)
     real_fsync = os.fsync
     raised = False
 
@@ -65,7 +67,9 @@ def _successful_append_process(
     fsync_entered,
     success_done,
     result_queue,
+    ready,
 ) -> None:
+    ready.wait(timeout=5)
     if not fsync_entered.wait(timeout=2):
         result_queue.put(("success", "timeout", "failing writer did not enter fsync"))
         return
@@ -229,26 +233,28 @@ def test_failed_cross_process_append_rollback_keeps_successful_append(tmp_path) 
     fsync_entered = ctx.Event()
     success_done = ctx.Event()
     result_queue = ctx.Queue()
+    ready = ctx.Barrier(3)
     failing = ctx.Process(
         target=_failing_fsync_append_process,
-        args=(str(journal.pipeline_dir), fsync_entered, success_done, result_queue),
+        args=(str(journal.pipeline_dir), fsync_entered, success_done, result_queue, ready),
     )
     succeeding = ctx.Process(
         target=_successful_append_process,
-        args=(str(journal.pipeline_dir), fsync_entered, success_done, result_queue),
+        args=(str(journal.pipeline_dir), fsync_entered, success_done, result_queue, ready),
     )
 
     failing.start()
     succeeding.start()
-    failing.join(timeout=5)
-    succeeding.join(timeout=5)
-
     try:
+        # Start the contention window only after both spawned workers have imported.
+        ready.wait(timeout=5)
+        failing.join(timeout=5)
+        succeeding.join(timeout=5)
         assert not failing.is_alive()
         assert not succeeding.is_alive()
         results = [result_queue.get(timeout=1), result_queue.get(timeout=1)]
         result_by_name = {name: status for name, status, _message in results}
-        assert result_by_name == {"failing": "OSError", "success": "ok"}
+        assert result_by_name == {"failing": "OSError", "success": "ok"}, results
         assert [event["eventId"] for event in journal.read_all_strict()] == ["evt-existing", "evt-success"]
     finally:
         if failing.is_alive():
