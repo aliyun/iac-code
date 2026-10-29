@@ -18,8 +18,8 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Literal, Mapping
 
 from iac_code.agent.message import (
+    HIDDEN_CONTEXT_METADATA_TYPES,
     RECALLED_MEMORY_MARKER,
-    RECALLED_MEMORY_METADATA_TYPE,
     ImageBlock,
     Message,
     TextBlock,
@@ -77,7 +77,7 @@ WebMode = Literal["normal", "pipeline"]
 SESSION_ID_PATTERN_TEXT = r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"
 SESSION_ID_PATTERN = re.compile(SESSION_ID_PATTERN_TEXT)
 HIDDEN_REPLAY_METADATA_TYPES = {
-    RECALLED_MEMORY_METADATA_TYPE,
+    *HIDDEN_CONTEXT_METADATA_TYPES,
     CLEANUP_PROMPT_METADATA_TYPE,
     "internal-skill-context",
 }

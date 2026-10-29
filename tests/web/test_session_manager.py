@@ -1673,6 +1673,38 @@ def test_persist_pipeline_handoff_context_feeds_resume_but_hidden_in_transcript(
     assert "[Pipeline Handoff Context]" not in dumped
 
 
+@pytest.mark.asyncio
+async def test_output_limit_continuation_stays_in_model_history_but_not_visible_transcript(tmp_path, monkeypatch):
+    from iac_code.agent.agent_loop import AgentLoop
+    from iac_code.tools.base import ToolRegistry
+    from tests.agent.test_agent_loop_output_limit import ScriptedProvider, reply
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    cwd = tmp_path / "project"
+    manager = WebSessionManager(projects_dir=tmp_path / "projects", cwd=cwd)
+    session = manager.create_session(cwd=str(cwd), mode="normal")
+    provider = ScriptedProvider([reply("first", text="A", reason="max_tokens"), reply("final", text="B")])
+    loop = AgentLoop(
+        provider_manager=provider,
+        system_prompt="offline test",
+        tool_registry=ToolRegistry(),
+        session_storage=manager.storage,
+        session_id=session.session_id,
+        cwd=str(cwd),
+    )
+    _events = [event async for event in loop.run_streaming("real request")]
+
+    assert provider.messages[1][-1].content == "Continue from where you stopped. Do not repeat completed work."
+    assert any(
+        message.metadata.get("type") == "output_limit_continuation"
+        for message in manager.load_resume_messages(session.session_id, cwd=cwd)
+    )
+    rows = manager.load_visible_transcript(session.session_id, cwd=cwd)["messages"]
+    assert [(row["role"], row["content"]) for row in rows] == [
+        ("user", "real request"), ("assistant", "A"), ("assistant", "B")
+    ]
+
+
 def test_set_session_model_accepts_deepseek_v41_documented_effort(tmp_path) -> None:
     manager = WebSessionManager(projects_dir=tmp_path / "projects")
     session = manager.create_session(cwd=str(tmp_path / "project"), mode="normal", session_id="numeric-effort-1")

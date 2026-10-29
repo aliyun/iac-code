@@ -1748,7 +1748,7 @@ class InlineREPL:
 
     def _history_search_messages(self) -> list[dict[str, str]]:
         """Build searchable user-history rows from prompt history and conversation context."""
-        from iac_code.agent.message import RECALLED_MEMORY_MARKER, is_recalled_memory_message
+        from iac_code.agent.message import RECALLED_MEMORY_MARKER, is_hidden_context_message
         from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         entries: list[str] = []
@@ -1779,7 +1779,7 @@ class InlineREPL:
             if getattr(msg, "role", None) != "user":
                 continue
             if (
-                is_recalled_memory_message(msg)
+                is_hidden_context_message(msg)
                 or is_cleanup_prompt_message(msg)
                 or Renderer.is_internal_skill_context_message(msg)
             ):
@@ -6520,14 +6520,14 @@ class InlineREPL:
 
     @staticmethod
     def _count_user_turns(messages: list) -> int:
-        from iac_code.agent.message import ToolResultBlock, is_recalled_memory_message
+        from iac_code.agent.message import ToolResultBlock, is_hidden_context_message
         from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         turns = 0
         for message in messages:
             if getattr(message, "role", None) != "user":
                 continue
-            if is_recalled_memory_message(message) or is_cleanup_prompt_message(message):
+            if is_hidden_context_message(message) or is_cleanup_prompt_message(message):
                 continue
             content = getattr(message, "content", "")
             if isinstance(content, list) and any(isinstance(block, ToolResultBlock) for block in content):
@@ -6810,13 +6810,13 @@ class InlineREPL:
     @staticmethod
     def _extract_last_user_text(messages: list) -> str:
         """Walk messages from newest to oldest, return first plain user text."""
-        from iac_code.agent.message import RECALLED_MEMORY_MARKER, TextBlock, is_recalled_memory_message
+        from iac_code.agent.message import RECALLED_MEMORY_MARKER, TextBlock, is_hidden_context_message
         from iac_code.pipeline.engine.cleanup import is_cleanup_prompt_message
 
         for msg in reversed(messages):
             if msg.role != "user":
                 continue
-            if is_recalled_memory_message(msg) or is_cleanup_prompt_message(msg):
+            if is_hidden_context_message(msg) or is_cleanup_prompt_message(msg):
                 continue
             content = msg.content
             if isinstance(content, str):

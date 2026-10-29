@@ -970,6 +970,11 @@ def test_history_search_with_session_includes_visible_user_turns_only(tmp_path, 
         session.session_id,
         Message(role="user", content="hidden deploy skill", metadata={"type": "internal-skill-context"}),
     )
+    manager.storage.append(
+        session.cwd,
+        session.session_id,
+        Message(role="user", content="hidden deploy continuation", metadata={"type": "output_limit_continuation"}),
+    )
     app = create_app(session_manager=manager)
 
     with TestClient(app) as client:
@@ -995,6 +1000,7 @@ def test_history_search_with_session_includes_visible_user_turns_only(tmp_path, 
     assert "hidden deploy memory" not in json.dumps(payload)
     assert "hidden deploy cleanup" not in json.dumps(payload)
     assert "hidden deploy skill" not in json.dumps(payload)
+    assert "hidden deploy continuation" not in json.dumps(payload)
 
 
 def test_history_search_uses_web_session_id_to_scope_duplicate_bare_session_ids(tmp_path) -> None:
