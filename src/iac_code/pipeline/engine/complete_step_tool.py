@@ -232,7 +232,7 @@ class CompleteStepTool(Tool):
     def _build_conclusion_property(self) -> dict[str, Any]:
         if self._empty_conclusion_baseline() is not None:
             original = self._project_model_input_schema(self._step_config.completion_input_schema)
-            return {"anyOf": [original, {"type": "object", "maxProperties": 0}]}
+            return {"type": "object", "anyOf": [original, {"type": "object", "maxProperties": 0}]}
         if self._step_config.completion_input_schema:
             return self._project_model_input_schema(self._step_config.completion_input_schema)
         if self._step_config.conclusion_schema:

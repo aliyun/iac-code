@@ -4308,15 +4308,27 @@ def _repl_wait_confirmation(pty: Any, runtime: ScenarioRuntime, *, require_input
     # the durable display journal, so they use a short human-sized handoff delay
     # instead of waiting forever for text that cannot be replayed.
     if require_input_ready:
+        ready_offset = getattr(pty, "_repl_confirmation_ready_offset", 0)
+
+        def current_selector_ready() -> str | None:
+            # Polling may already have captured this frame; previous rounds'
+            # hints must not authorize input to a selector that is still starting.
+            rendered = _legacy_repl_module()._normalize_transcript(getattr(pty, "transcript", "")[ready_offset:])
+            return next((pattern for pattern in REPL_CONFIRMATION_INPUT_READY_PATTERNS
+                         if re.search(pattern, rendered)), None)
+
         pty.expect_any(
             REPL_CONFIRMATION_INPUT_READY_PATTERNS,
             description=f"deployment confirmation selector ready #{occurrence}",
             timeout=runtime.args.stream_timeout,
+            state_check=current_selector_ready,
+            require_state_match=True,
         )
         time.sleep(0.25)
     else:
         time.sleep(0.5)
     pty.drain_output()
+    pty._repl_confirmation_ready_offset = len(getattr(pty, "transcript", ""))
     _record_repl_confirmation_options(runtime, event)
     runtime.repl_confirmation_wait_count = occurrence
     pty.events.append(
@@ -5111,7 +5123,7 @@ def _repl_wait_multimodal_confirmation(
         )
         if _is_repl_deployment_confirmation(event):
             runtime.repl_confirmation_wait_count = confirmation_occurrence - 1
-            _repl_wait_confirmation(pty, runtime, require_input_ready=False)
+            _repl_wait_confirmation(pty, runtime, require_input_ready=True)
             return
         pending = event, question_path
         if event["payload"].get("allow_free_text", True) is False:
