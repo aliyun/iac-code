@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import jsonschema
 import pytest
 
 from iac_code.pipeline.engine.complete_step_tool import (
@@ -1813,6 +1814,30 @@ def test_old_a2a_artifact_spec_positional_contract_is_unchanged():
 
 
 class TestUnchangedFollowup:
+    @pytest.mark.parametrize(
+        "step_id,field,status",
+        [
+            ("solution_planning_and_selection", "solution_selection", "awaiting_selection"),
+            ("materialize_selected_candidate", "selected_plan", "awaiting_confirmation"),
+        ],
+    )
+    def test_resumed_conclusion_keeps_explicit_object_type_on_qwen_wire(self, loaded, step_id, field, status):
+        from iac_code.providers.qwen_provider import QwenProvider
+
+        tool = _tool(
+            _step(loaded, step_id), context_snapshot={field: {"status": status}}, user_message="Adjust the plan"
+        )
+        wire = QwenProvider(model="qwen3.8-omni-flash", api_key="fake")._prepare_tool_schema_for_wire(tool.input_schema)
+        conclusion = wire["properties"]["conclusion"]
+        assert conclusion["type"] == "object"
+        assert len(conclusion["anyOf"]) == 2
+        nonempty = {"status": status} if field == "solution_selection" else _waiting_delta()["conclusion"]
+        for value in ({}, nonempty):
+            jsonschema.validate(value, conclusion)
+        for value in ("{}", json.dumps(nonempty), None, [], 1):
+            with pytest.raises(jsonschema.ValidationError):
+                jsonschema.validate(value, conclusion)
+
     @pytest.mark.parametrize("payload", [{"conclusion": {}}, {"conclusion": {"conclusion": {}}}])
     def test_step1_empty_keeps_authoritative_candidates(self, loaded, payload):
         step = _step(loaded, "solution_planning_and_selection")

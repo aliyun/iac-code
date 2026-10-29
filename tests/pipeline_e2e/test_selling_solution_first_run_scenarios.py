@@ -265,6 +265,13 @@ def test_multimodal_confirmation_ignores_confirmation_before_latest_selection(ru
                 output.write(json.dumps(confirmation) + '\n')
     pty = SimpleNamespace(transcript='', events=[], drain_output=drain,
                           paste_image_fixture=lambda *a: pytest.fail('not a parameter question'))
+    def selector_ready(patterns, *, state_check, require_state_match, **kwargs):
+        assert runtime.repl_confirmation_wait_count == 1
+        assert require_state_match is True
+        assert state_check() is None
+        pty.transcript += "Use Up/Down to select. Type directly on the last row, then press Enter."
+        return state_check()
+    pty.expect_any = selector_ready
     monkeypatch.setattr(runner, '_observe_repl_wait', lambda *a, **kw: False)
     runner._repl_wait_multimodal_confirmation(runtime, pty, primary_image_key='rollback-ask-answer', phase='rollback')
     assert len(drains) >= 2
@@ -3520,10 +3527,12 @@ def test_repl_confirmation_records_action_count_from_display(
         def __init__(self) -> None:
             self.events: list[dict[str, object]] = []
 
-        def expect_any(self, patterns, *, description, timeout):
+        def expect_any(self, patterns, *, description, timeout, state_check, require_state_match):
             assert patterns == runner.REPL_CONFIRMATION_INPUT_READY_PATTERNS
             assert description == "deployment confirmation selector ready #2"
             assert timeout == 9.0
+            assert require_state_match is True
+            assert state_check() is None
             calls.append("expect")
             return patterns[0]
 
@@ -3545,6 +3554,61 @@ def test_repl_confirmation_records_action_count_from_display(
     assert runtime.repl_confirmation_wait_count == 2
     assert runtime.repl_confirmation_action_count == 3
     assert pty.events[0]["occurrence"] == 2
+
+
+@pytest.mark.parametrize("already_captured", [False, True])
+def test_repl_confirmation_requires_fresh_selector_frame(runner, monkeypatch, already_captured):
+    hint = "Use Up/Down to select. Type directly on the last row, then press Enter."
+    event = {"type": "user_input_required", "payload": {
+        "kind": "deployment_confirmation", "options": [{"action": "confirm"}, {"action": "cancel"}],
+    }}
+    monkeypatch.setattr(runner, "_wait_repl_display_event", lambda *a, **kw: (event, Path("display")))
+    monkeypatch.setattr(runner.time, "sleep", lambda _seconds: None)
+
+    class Pty:
+        def __init__(self):
+            self.events = []
+            self.transcript = hint
+            self._repl_confirmation_ready_offset = len(self.transcript)
+            if already_captured:
+                self.transcript += "\n" + hint
+
+        def expect_any(self, patterns, *, state_check, require_state_match, **kwargs):
+            assert require_state_match is True
+            if not already_captured:
+                # The backend event and an old selector frame cannot authorize input.
+                assert state_check() is None
+                self.transcript += "\n" + hint
+            assert state_check() == patterns[1]
+            return state_check()
+
+        def drain_output(self):
+            pass
+
+    pty = Pty()
+    runtime = SimpleNamespace(args=SimpleNamespace(stream_timeout=9), repl_confirmation_wait_count=1)
+    runner._repl_wait_confirmation(pty, runtime)
+    assert runtime.repl_confirmation_wait_count == 2
+    assert pty._repl_confirmation_ready_offset == len(pty.transcript)
+
+
+def test_repl_confirmation_without_fresh_frame_does_not_advance(runner, monkeypatch):
+    hint = "Use Up/Down to select. Type directly on the last row, then press Enter."
+    event = {"type": "user_input_required", "payload": {"kind": "deployment_confirmation"}}
+    monkeypatch.setattr(runner, "_wait_repl_display_event", lambda *a, **kw: (event, Path("display")))
+    pty = SimpleNamespace(transcript=hint, _repl_confirmation_ready_offset=len(hint), events=[])
+
+    def timeout(patterns, *, state_check, require_state_match, **kwargs):
+        assert require_state_match is True
+        assert state_check() is None
+        raise TimeoutError("current selector not ready")
+
+    pty.expect_any = timeout
+    runtime = SimpleNamespace(args=SimpleNamespace(stream_timeout=9), repl_confirmation_wait_count=1)
+    with pytest.raises(TimeoutError, match="current selector not ready"):
+        runner._repl_wait_confirmation(pty, runtime)
+    assert runtime.repl_confirmation_wait_count == 1
+    assert pty.events == []
 
 
 @pytest.mark.parametrize('free_text', [True, False])
@@ -4201,7 +4265,7 @@ def test_repl_multimodal_confirmation_answers_repeated_asks_before_confirmation(
     assert ("send", "\r", "initial-image-ask-enter-2") in calls
     assert calls[calls.index(("send", "\r", "initial-image-ask-enter-2")) - 1] == "drain"
     assert calls[-2] == ('native_wait', 1)
-    assert calls[-1] == ("confirmation", False)
+    assert calls[-1] == ("confirmation", True)
 
 
 def test_repl_multimodal_confirmation_uses_phase_specific_generated_answer(
@@ -4255,7 +4319,7 @@ def test_repl_multimodal_confirmation_uses_phase_specific_generated_answer(
         "选择第一个已有 VPC，继续创建安全组，不创建 VSwitch。",
         "rollback-image-ask-enter-1",
     ) in calls
-    assert calls[-1] == ("confirmation", False)
+    assert calls[-1] == ("confirmation", True)
 
 
 def test_repl_multimodal_selection_answers_step1_ask_before_candidates(
