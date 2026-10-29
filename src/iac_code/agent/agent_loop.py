@@ -22,6 +22,7 @@ from iac_code.a2a.execution_control import (
     execution_non_advancing_wait,
 )
 from iac_code.agent.message import (
+    OUTPUT_LIMIT_CONTINUATION_METADATA_TYPE,
     ContentBlock,
     Message,
     RedactedThinkingBlock,
@@ -2328,7 +2329,7 @@ class AgentLoop:
                     if output_limit_continuations < _MAX_OUTPUT_LIMIT_CONTINUATIONS and _turn < self._max_turns - 1:
                         output_limit_continuations += 1
                         continuation = self.context_manager.add_user_message(_OUTPUT_LIMIT_CONTINUATION_PROMPT)
-                        continuation.metadata["type"] = "output_limit_continuation"
+                        continuation.metadata["type"] = OUTPUT_LIMIT_CONTINUATION_METADATA_TYPE
                         if self._session_storage:
                             self._session_storage.append(
                                 self._cwd, self._session_id, continuation, git_branch=self._current_git_branch

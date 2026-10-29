@@ -8,7 +8,7 @@ from collections import deque
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from iac_code.agent.message import Message
+from iac_code.agent.message import HIDDEN_CONTEXT_METADATA_TYPES, Message
 from iac_code.config import get_history_path
 from iac_code.i18n import _
 from iac_code.pipeline.constants import CLEANUP_PROMPT_METADATA_TYPE
@@ -23,7 +23,7 @@ MAX_SEARCH_LINE_CHARS = 2000
 HIDDEN_TRANSCRIPT_METADATA_TYPES = {
     CLEANUP_PROMPT_METADATA_TYPE,
     "internal-skill-context",
-    "recalled_memory",
+    *HIDDEN_CONTEXT_METADATA_TYPES,
 }
 _EXCLUDED_DIRS = {
     ".git",

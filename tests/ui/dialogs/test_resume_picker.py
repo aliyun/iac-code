@@ -118,6 +118,7 @@ class TestResumePickerLoad:
                 Message(role="user", content="visible question"),
                 create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"]),
                 create_cleanup_prompt_message("cleanup hidden prompt"),
+                Message(role="user", content="hidden continuation", metadata={"type": "output_limit_continuation"}),
                 Message(role="assistant", content="visible answer"),
             ],
         )
@@ -128,6 +129,7 @@ class TestResumePickerLoad:
         assert "Prefer ROS YAML" not in output
         assert "Relevant persistent memories" not in output
         assert "cleanup hidden prompt" not in output
+        assert "hidden continuation" not in output
 
     def test_supplied_entries_are_not_reloaded_when_toggling_all_projects(self):
         index = MagicMock()

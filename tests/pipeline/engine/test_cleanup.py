@@ -21,7 +21,15 @@ from iac_code.pipeline.engine.cleanup import (
     mark_cleanup_prompt_message_completed,
 )
 from iac_code.services.session_mutation_guard import session_mutation_guard
-from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
+from iac_code.types.stream_events import (
+    MessageEndEvent,
+    MessageStartEvent,
+    StackProgressEvent,
+    TombstoneEvent,
+    ToolResultEvent,
+    ToolUseEndEvent,
+    Usage,
+)
 
 
 def _observed_stack() -> ObservedResource:
@@ -37,6 +45,39 @@ def _observed_stack() -> ObservedResource:
         observed_at=1.0,
         metadata={"tool_name": "ros_stack"},
     )
+
+
+@pytest.mark.parametrize("stop_reason", ["tool_use", "max_tokens", "stream_error", "tombstone"])
+def test_cleanup_waits_for_accepted_tool_turn_before_persisting(tmp_path, stop_reason):
+    ledger = CleanupLedger(tmp_path / "cleanup.yaml")
+    ledger.mark_cleanup_required(
+        [CleanupResource.from_observed(_observed_stack(), reason="rollback")],
+        source_step_id="deploying",
+        reason="rollback",
+    )
+    observer = CleanupObserver(ledger)
+    observer.observe(MessageStartEvent(message_id="message-1"))
+    observer.observe(
+        ToolUseEndEvent(
+            tool_use_id="delete-1",
+            name="ros_stack",
+            input={"action": "DeleteStack", "region_id": "cn-hangzhou", "params": {"StackId": "stack-123"}},
+        )
+    )
+    assert ledger.cleanup_resources()[0].cleanup_status == "pending"
+    assert ledger.tool_use_mapping("delete-1") is None
+
+    observer.observe(
+        TombstoneEvent(message_id="message-1")
+        if stop_reason == "tombstone"
+        else MessageEndEvent(stop_reason=stop_reason, usage=Usage())
+    )
+
+    saved = CleanupLedger(ledger.path)
+    accepted = stop_reason == "tool_use"
+    assert saved.cleanup_resources()[0].cleanup_status == ("started" if accepted else "pending")
+    assert bool(saved.tool_use_mapping("delete-1")) is accepted
+    assert any(entry["type"] == "cleanup_started" for entry in saved.history_entries()) is accepted
 
 
 @pytest.mark.parametrize("nested", [False, True])

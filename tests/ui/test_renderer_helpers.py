@@ -212,6 +212,7 @@ class TestRendererHelpers:
             [
                 Message(role="user", content="visible question"),
                 create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"]),
+                Message(role="user", content="hidden continuation", metadata={"type": "output_limit_continuation"}),
                 Message(role="assistant", content="visible answer"),
             ]
         )
@@ -221,6 +222,7 @@ class TestRendererHelpers:
         assert "visible answer" in output
         assert "Prefer ROS YAML" not in output
         assert "Relevant persistent memories" not in output
+        assert "hidden continuation" not in output
 
     def test_replay_history_hides_pipeline_cleanup_prompt(self):
         renderer = make_renderer()

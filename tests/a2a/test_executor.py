@@ -1590,6 +1590,70 @@ async def test_executor_joins_output_limit_continuations_in_authoritative_final(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("blocked", [False, True])
+async def test_fatal_error_waits_for_backup_before_sdk_terminal_publication(monkeypatch, tmp_path, blocked):
+    from a2a.server.events.event_consumer import EventConsumer
+    from a2a.server.events.event_queue import EventQueueLegacy
+    from a2a.server.tasks.task_manager import TaskManager
+
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def backup(*_args, reason, critical, **_kwargs):
+        assert reason is BackupReason.TERMINAL and critical
+        started.set()
+        await release.wait()
+        if blocked:
+            raise SessionBackupBlocked("backup destination unavailable", retry_count=0)
+
+    runtime = FakeRuntime(
+        agent_loop=FakeAgentLoop([ErrorEvent(error="original", is_retryable=False, i18n_message_id="original")])
+    )
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
+    monkeypatch.setattr("iac_code.a2a.executor.backup_session_async", backup)
+    monkeypatch.setattr("iac_code.a2a.events.translate_message", lambda _msgid, *, language: language)
+    store = A2ATaskStore(metrics=NoOpA2AMetrics())
+    queue = EventQueueLegacy()
+    consumer = EventConsumer(queue)
+    manager = TaskManager(store, ServerCallContext(), "task-1", "ctx-1", None)
+    seen = []
+
+    async def consume():
+        async for event in consumer.consume_all():
+            await manager.process(event)
+            if isinstance(event, TaskStatusUpdateEvent):
+                seen.append(dump(event))
+
+    consuming = asyncio.create_task(consume())
+    producer = asyncio.create_task(
+        IacCodeA2AExecutor(task_store=store, model="qwen3.6-plus").execute(
+            FakeRequestContext(metadata={"iac_code": {"cwd": str(tmp_path), "preferredLanguage": "zh"}}), queue
+        )
+    )
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        assert not queue.is_closed()
+        assert not any(update["status"]["state"] == "TASK_STATE_FAILED" for update in seen)
+        release.set()
+        await asyncio.wait_for(producer, timeout=2)
+        await asyncio.wait_for(consuming, timeout=2)
+
+        expected = "TASK_STATE_INPUT_REQUIRED" if blocked else "TASK_STATE_FAILED"
+        assert seen[-1]["status"]["state"] == expected
+        assert TaskState.Name((await store.get("task-1")).status.state) == expected
+        assert (await store.get_task_record("task-1")).state == ("input-required" if blocked else "failed")
+        assert bool(seen[-1].get("metadata", {}).get("iac_code", {}).get("backupBlocked")) is blocked
+        if not blocked:
+            assert seen[-1]["status"]["message"]["parts"][0]["text"] == "zh"
+    finally:
+        release.set()
+        for task in (producer, consuming):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(producer, consuming, return_exceptions=True)
+        await store.stop_cleanup_loop()
+
+
+@pytest.mark.asyncio
 async def test_fatal_stream_error_survives_cancellation_during_stream_close(monkeypatch, tmp_path):
     closing = asyncio.Event()
     release = asyncio.Event()

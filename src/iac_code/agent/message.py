@@ -194,6 +194,15 @@ def is_recalled_memory_message(message: Message) -> bool:
     return message.metadata.get("type") == RECALLED_MEMORY_METADATA_TYPE
 
 
+OUTPUT_LIMIT_CONTINUATION_METADATA_TYPE = "output_limit_continuation"
+HIDDEN_CONTEXT_METADATA_TYPES = frozenset({RECALLED_MEMORY_METADATA_TYPE, OUTPUT_LIMIT_CONTINUATION_METADATA_TYPE})
+
+
+def is_hidden_context_message(message: Message) -> bool:
+    """Memory context and automatic continuation prompts are not user-authored turns."""
+    return message.metadata.get("type") in HIDDEN_CONTEXT_METADATA_TYPES
+
+
 COMPACTION_SUMMARY_METADATA_TYPE = "compaction_summary"
 
 # 压缩标记在存储/LLM 上下文里排在其保留尾部（recent）之前（有效切片须从标记起始才带得上最近

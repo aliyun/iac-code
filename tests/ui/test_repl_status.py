@@ -28,6 +28,7 @@ def test_count_user_turns_ignores_recalled_memory_messages() -> None:
         Message(role="user", content="first"),
         create_recalled_memory_message("# Recalled Memory\nPrefer ROS YAML.", ["ros-yaml.md"]),
         create_cleanup_prompt_message("cleanup hidden prompt"),
+        Message(role="user", content="hidden continuation", metadata={"type": "output_limit_continuation"}),
         Message(role="assistant", content="answer"),
         Message(role="user", content="second"),
     ]

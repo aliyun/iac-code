@@ -22,7 +22,14 @@ from iac_code.pipeline.constants import (
     PIPELINE_EVENT_CLEANUP_STARTED,
 )
 from iac_code.services.session_mutation_guard import session_mutation_guard
-from iac_code.types.stream_events import StackProgressEvent, ToolResultEvent, ToolUseEndEvent
+from iac_code.types.stream_events import (
+    MessageEndEvent,
+    MessageStartEvent,
+    StackProgressEvent,
+    TombstoneEvent,
+    ToolResultEvent,
+    ToolUseEndEvent,
+)
 from iac_code.utils.path_locks import PathLockRegistry
 from iac_code.utils.public_errors import sanitize_strict_text
 from iac_code.utils.state_io import atomic_write_text
@@ -592,10 +599,27 @@ class CleanupObserver:
     def __init__(self, ledger: CleanupLedger) -> None:
         self._ledger = ledger
         self._tool_inputs: dict[str, dict[str, Any]] = {}
+        self._message_id: str | None = None
+        self._pending_tool_uses: list[ToolUseEndEvent] = []
 
     def observe(self, event: Any) -> None:
-        if isinstance(event, ToolUseEndEvent):
-            self._observe_tool_use(event)
+        if isinstance(event, MessageStartEvent):
+            self._message_id = event.message_id
+            self._pending_tool_uses.clear()
+        elif isinstance(event, MessageEndEvent):
+            if event.stop_reason not in {"max_tokens", "stream_error", "refusal"}:
+                for pending in self._pending_tool_uses:
+                    self._observe_tool_use(pending)
+            self._message_id = None
+            self._pending_tool_uses.clear()
+        elif isinstance(event, TombstoneEvent) and event.message_id == self._message_id:
+            self._message_id = None
+            self._pending_tool_uses.clear()
+        elif isinstance(event, ToolUseEndEvent):
+            if self._message_id is not None:
+                self._pending_tool_uses.append(event)
+            else:
+                self._observe_tool_use(event)
         elif isinstance(event, ToolResultEvent):
             self._observe_tool_result(event)
         elif isinstance(event, StackProgressEvent):

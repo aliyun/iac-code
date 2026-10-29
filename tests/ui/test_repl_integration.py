@@ -1751,6 +1751,7 @@ def test_extract_last_user_text_skips_recalled_memory_message():
             Message(role="assistant", content="answer"),
             create_recalled_memory_message("# Recalled Memory\nhidden prompt", ["topic.md"]),
             create_cleanup_prompt_message("cleanup hidden prompt"),
+            Message(role="user", content="hidden continuation", metadata={"type": "output_limit_continuation"}),
         ]
     )
 
@@ -1777,6 +1778,7 @@ def test_history_search_messages_skips_recalled_memory_messages_and_leaked_entri
                 return_value=[
                     create_recalled_memory_message("# Recalled Memory\nhidden context", ["topic.md"]),
                     create_cleanup_prompt_message("cleanup hidden prompt"),
+                    Message(role="user", content="hidden continuation", metadata={"type": "output_limit_continuation"}),
                     Message(role="user", content="context prompt"),
                 ]
             )
