@@ -41,6 +41,7 @@ from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.transports.dispatcher import IacCodeRequestHandler
 from iac_code.types.stream_events import (
     MessageEndEvent,
+    MessageStartEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,
     ToolInputDeltaEvent,
@@ -606,3 +607,72 @@ def test_rest_sse_uses_profile_without_changing_text_or_turn_completion(monkeypa
         for part in entry.get("status", {}).get("message", {}).get("parts", [])
     )
     assert runtime.agent_loop.prompts == ["hello"]
+
+
+@pytest.mark.parametrize("filter_set", [NONE, USAGE, SKILL])
+@pytest.mark.parametrize("scenario", ["text", "tool", "exhausted", "backup_blocked"])
+def test_filter_sets_preserve_output_limit_recovery(monkeypatch, tmp_path, filter_set, scenario):
+    from iac_code.agent.agent_loop import AgentLoop
+    from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
+    from iac_code.tools.base import ToolRegistry
+    from tests.agent.test_agent_loop_output_limit import RecordingTool, ScriptedProvider, reply
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    tool = RecordingTool()
+    registry = ToolRegistry()
+    registry.register(tool)
+    if scenario == "tool":
+        first = [
+            MessageStartEvent(message_id="discarded-message"),
+            ToolUseStartEvent(tool_use_id="discarded-call", name="record"),
+            ToolUseEndEvent(tool_use_id="discarded-call", name="record", input={"value": "discarded"}),
+            MessageEndEvent(stop_reason="max_tokens", usage=Usage()),
+        ]
+        replies = [first, reply("final", text="second fragment")]
+    elif scenario in {"exhausted", "backup_blocked"}:
+        replies = [reply(str(index), text="fragment", reason="max_tokens") for index in range(4)]
+    else:
+        replies = [reply("first", text="first fragment", reason="max_tokens"), reply("final", text="second fragment")]
+
+    async def backup(*_args, reason, critical, **_kwargs):
+        if scenario == "backup_blocked" and reason is BackupReason.TERMINAL and critical:
+            raise SessionBackupBlocked("offline backup unavailable", retry_count=0)
+
+    provider = ScriptedProvider(replies)
+    loop = AgentLoop(provider_manager=provider, system_prompt="offline", tool_registry=registry)
+    runtime = FakeRuntime(session_id="session-1", agent_loop=loop, tool_registry=registry)
+    monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
+    monkeypatch.setattr("iac_code.a2a.executor.backup_session_async", backup)
+    app = create_app(host="127.0.0.1", port=41242, token=None, model="test-model", thinking_exposure="all")
+    with TestClient(app) as client:
+        response = client.post(
+            "/message:stream",
+            headers={"A2A-Version": "1.0"},
+            json={
+                "message": {
+                    "messageId": "request-1",
+                    "role": "ROLE_USER",
+                    "parts": [{"text": "go"}],
+                    "metadata": {"iac_code": {"cwd": str(tmp_path), "eventFilterSet": filter_set}},
+                }
+            },
+        )
+    assert response.status_code == 200
+    frames = [json.loads(line[5:].strip()) for line in response.text.splitlines() if line.startswith("data:")]
+    updates = [frame["statusUpdate"] for frame in frames if "statusUpdate" in frame]
+    metadata = [entry.get("metadata", {}).get("iac_code", {}) for entry in updates]
+    finals = [entry for entry in updates if entry.get("metadata", {}).get("iac_code", {}).get("assistantFinal")]
+    expected_state = "TASK_STATE_FAILED" if scenario == "exhausted" else "TASK_STATE_INPUT_REQUIRED"
+    assert updates[-1]["status"]["state"] == expected_state
+    assert len(provider.messages) == (4 if scenario in {"exhausted", "backup_blocked"} else 2)
+    assert tool.calls == []
+    if scenario in {"exhausted", "backup_blocked"}:
+        assert not finals
+        assert any("backupBlocked" in item for item in metadata) is (scenario == "backup_blocked")
+        assert any("error" in item for item in metadata) is (scenario == "exhausted")
+    else:
+        expected = "first fragmentsecond fragment" if scenario == "text" else "second fragment"
+        assert len(finals) == 1
+        assert finals[0]["status"]["message"]["parts"][0]["text"] == expected
+        if scenario == "tool":
+            assert any(item.get("tool", {}).get("status") == "discarded" for item in metadata)
