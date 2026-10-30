@@ -115,6 +115,19 @@ _SENSITIVE_KEY_PATTERN = re.compile(
 )
 
 
+def _skill_manifest_version():
+    if SKILL_DISTRIBUTION != "agenthub":
+        return SKILL_VERSION
+    try:
+        manifest = json.loads((SKILL_ROOT / "references" / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
+        raise RuntimeError("Skill manifest is missing or invalid; refusing outbound requests") from error
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    if not isinstance(version, str) or not version.strip() or version != SKILL_VERSION:
+        raise RuntimeError("Skill manifest version must match the packaged version; refusing outbound requests")
+    return version
+
+
 def _skill_user_agent():
     if SKILL_DISTRIBUTION != "agenthub":
         return USER_AGENT_TEMPLATE
@@ -122,7 +135,7 @@ def _skill_user_agent():
     if re.fullmatch(r"[0-9a-f]{32}", value) is None:
         value = uuid.uuid4().hex
         os.environ["SKILL_SESSION_ID"] = value
-    return USER_AGENT_TEMPLATE.replace("{session-id}", value).replace("{skill-version}", SKILL_VERSION)
+    return USER_AGENT_TEMPLATE.replace("{session-id}", value).replace("{skill-version}", _skill_manifest_version())
 
 
 _SKILL_USER_AGENT = _skill_user_agent()

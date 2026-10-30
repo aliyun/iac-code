@@ -131,7 +131,10 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
     assert "pip install" not in source
 
 
-def test_agenthub_user_agent_includes_packaged_skill_version(monkeypatch) -> None:
+def test_agenthub_user_agent_includes_packaged_skill_version(monkeypatch, tmp_path) -> None:
+    (tmp_path / "references").mkdir()
+    (tmp_path / "references/manifest.json").write_text('{"version":"0.5.0"}', encoding="utf-8")
+    monkeypatch.setattr(bridge, "SKILL_ROOT", tmp_path)
     monkeypatch.setattr(bridge, "SKILL_DISTRIBUTION", "agenthub")
     monkeypatch.setattr(
         bridge,
@@ -145,6 +148,19 @@ def test_agenthub_user_agent_includes_packaged_skill_version(monkeypatch) -> Non
         bridge._skill_user_agent()
         == "AlibabaCloud-Agent-Skills/alibabacloud-iac-code/{} skill-version/0.5.0".format("a" * 32)
     )
+
+
+@pytest.mark.parametrize("contents", [None, "{", "[]", "{}", '{"version":null}', '{"version":1}',
+                                      '{"version":" "}', '{"version":"0.4.0"}'])
+def test_agenthub_manifest_version_fails_closed_before_http(monkeypatch, tmp_path, contents) -> None:
+    monkeypatch.setattr(bridge, "SKILL_ROOT", tmp_path)
+    monkeypatch.setattr(bridge, "SKILL_DISTRIBUTION", "agenthub")
+    monkeypatch.setattr(bridge, "SKILL_VERSION", "0.5.0")
+    if contents is not None:
+        (tmp_path / "references").mkdir()
+        (tmp_path / "references/manifest.json").write_text(contents, encoding="utf-8")
+    with pytest.raises(RuntimeError, match="Skill manifest"):
+        bridge._skill_user_agent()
 
 
 def test_manifest_selects_exact_cp312_target_and_checks_numeric_compatibility() -> None:
