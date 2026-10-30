@@ -77,6 +77,7 @@ MAX_REMOTE_CLI_ENV_VALUE_BYTES = 16 * 1024
 MAX_REMOTE_CLI_ENV_BYTES = 64 * 1024
 SKILL_DISTRIBUTION = "public"
 SKILL_NAME = "alicloud-ros-agent"
+SKILL_VERSION = "0.5.0"
 USER_AGENT_TEMPLATE = "AlibabaCloud-Agent-Skills/alicloud-ros-agent"
 REQUIREMENTS_FILE = "requirements-code.txt"
 MIN_ROS_PLUGIN_VERSION = (0, 9, 1)
@@ -89,14 +90,28 @@ REMOTE_PROJECTION_BATCH_SECONDS = 5.0
 REMOTE_PROJECTION_BATCH_BYTES = 1024 * 1024
 
 
+def _skill_manifest_version() -> str:
+    manifest_path = pathlib.Path(__file__).resolve().parent.parent / "references" / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError) as error:
+        raise RuntimeError("Skill manifest is missing or invalid; refusing outbound requests") from error
+    version = manifest.get("version") if isinstance(manifest, dict) else None
+    pattern = r"(?:(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)|candidate-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12})"
+    if not isinstance(version, str) or re.fullmatch(pattern, version) is None or version != SKILL_VERSION:
+        raise RuntimeError("Skill manifest version must match the packaged version; refusing outbound requests")
+    return version
+
+
 def _skill_user_agent() -> str:
     if SKILL_DISTRIBUTION != "agenthub":
         return USER_AGENT_TEMPLATE
+    version = _skill_manifest_version()
     value = os.environ.get("SKILL_SESSION_ID", "").strip().lower()
     if re.fullmatch(r"[0-9a-f]{32}", value) is None:
         value = uuid.uuid4().hex
         os.environ["SKILL_SESSION_ID"] = value
-    return USER_AGENT_TEMPLATE.replace("{session-id}", value)
+    return USER_AGENT_TEMPLATE.replace("{session-id}", value).replace("{skill-version}", version)
 
 
 USER_AGENT = _skill_user_agent()

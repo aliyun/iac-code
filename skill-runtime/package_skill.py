@@ -119,12 +119,23 @@ def _replace_constant(source: str, name: str, value: str) -> str:
 def _stage(args: argparse.Namespace, root: Path) -> Path:
     profile = skill_profile(args.profile)
     skill_root = render_profile(profile.name, root / profile.archive_root)
+    skill_identity = args.skill_version or args.skill_candidate_id
+    if profile.agenthub:
+        (skill_root / "references/manifest.json").write_text(
+            json.dumps({"version": skill_identity}, indent=2) + "\n", encoding="utf-8", newline="\n"
+        )
+    if profile.name == "alibabacloud-ros-agent":
+        bridge_path = skill_root / profile.bridge_path
+        bridge_path.write_text(
+            _replace_constant(bridge_path.read_text(encoding="utf-8"), "SKILL_VERSION", str(skill_identity)),
+            encoding="utf-8",
+            newline="\n",
+        )
     if not profile.requires_runtime:
         return skill_root
     bridge_path = skill_root / profile.bridge_path
     bridge = bridge_path.read_text(encoding="utf-8")
     runtime_identity = args.runtime_tag or args.runtime_candidate_id
-    skill_identity = args.skill_version or args.skill_candidate_id
     replacements = {
         "SKILL_VERSION": str(skill_identity),
         "RUNTIME_TAG": str(runtime_identity),
@@ -137,10 +148,6 @@ def _stage(args: argparse.Namespace, root: Path) -> Path:
         bridge = _replace_constant(bridge, name, value)
     ast.parse(bridge, filename=str(bridge_path), feature_version=(3, 8))
     bridge_path.write_text(bridge, encoding="utf-8", newline="\n")
-    if profile.name == "alibabacloud-iac-code":
-        (skill_root / "references/manifest.json").write_text(
-            json.dumps({"version": skill_identity}, indent=2) + "\n", encoding="utf-8", newline="\n"
-        )
     return skill_root
 
 

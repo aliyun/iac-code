@@ -225,10 +225,12 @@ the selected credential has only the exact ROS actions required for the requeste
 All outbound HTTP requests made by this AgentHub Skill carry this `User-Agent` template:
 
 ```text
-AlibabaCloud-Agent-Skills/{{SKILL_NAME}}/{session-id}
+AlibabaCloud-Agent-Skills/{{SKILL_NAME}}/{session-id} skill-version/{skill-version}
 ```
 
 - `{{SKILL_NAME}}` is the fixed AgentHub Skill identifier and matches the frontmatter `name`.
+- The bridge loads `{skill-version}` from `version` in [references/manifest.json](references/manifest.json) before any cloud call.
+  Missing, invalid, empty, or mismatched packaged versions fail closed. Every request uses this version.
 - The session ID must be a 32-character lowercase hexadecimal string generated exactly once per session.
   It must be reused unchanged for every outbound HTTP request in that session. The bridge reads `SKILL_SESSION_ID`
   after validation; if it is absent or invalid, the bridge generates the session ID with `uuid.uuid4().hex` and stores

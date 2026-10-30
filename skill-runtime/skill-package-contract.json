@@ -26,6 +26,7 @@
       "archiveRoot": "alibabacloud-ros-agent",
       "files": [
         "SKILL.md",
+        "references/manifest.json",
         "references/ram-policies.md",
         "references/runtime-policy.md",
         "scripts/_ros_agent_core.py",
