@@ -6874,6 +6874,7 @@ def test_agenthub_packaged_first_cursor_recovery_across_independent_foregrounds(
     assert sum("--query" in call["args"] for call in calls) == 2
     headers = [call["args"][call["args"].index("--user-agent") + 1] for call in calls]
     assert all(header.startswith("AlibabaCloud-Agent-Skills/alibabacloud-ros-agent/") for header in headers)
+    assert all(header.endswith(" skill-version/0.5.0") for header in headers)
     assert headers[0] != headers[3]
     assert all(call["hil"] == "fake-context-two" for call in calls[3:])
 

@@ -28,12 +28,13 @@ def _valid_foreground_command(command: Any, job: Dict[str, Any]) -> bool:
             # Accept only this distribution's exact header shape, not arbitrary
             # headers; all authorization/routing arguments remain exact matches.
             index = expected.index("--user-agent") + 1
-            pattern = re.escape(USER_AGENT_TEMPLATE).replace(re.escape("{session-id}"), "[0-9a-f]{32}")
+            template = USER_AGENT_TEMPLATE.replace("{skill-version}", _skill_manifest_version())
+            pattern = re.escape(template).replace(re.escape("{session-id}"), "[0-9a-f]{32}")
             if len(command) <= index or re.fullmatch(pattern, command[index]) is None:
                 return False
             expected[index] = command[index]
         return command == expected
-    except (ValueError, IndexError, AttributeError, KeyError, BridgeError):
+    except (ValueError, IndexError, AttributeError, KeyError, BridgeError, RuntimeError):
         return False
 
 
