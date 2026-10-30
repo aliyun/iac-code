@@ -59,6 +59,7 @@ PROFILES = {
         agenthub=True,
         files=(
             ("SKILL.md.template", "SKILL.md"),
+            ("references/manifest.json.template", "references/manifest.json"),
             ("references/ram-policies.md", "references/ram-policies.md"),
             ("scripts/iac_code.py", "scripts/iac_code.py"),
         ),
@@ -152,6 +153,16 @@ def render_profile(profile_name: str, destination: Path) -> Path:
         if source_name == "SKILL.md.template":
             target.write_text(
                 render_markdown(source.read_text(encoding="utf-8"), profile),
+                encoding="utf-8",
+                newline="\n",
+            )
+        elif source_name == "references/manifest.json.template":
+            bridge_source = (source_root / profile.bridge_path).read_text(encoding="utf-8")
+            version = re.search(r'^SKILL_VERSION = "([^"]+)"$', bridge_source, re.MULTILINE)
+            if version is None:
+                raise SystemExit("Skill bridge must declare its default version")
+            target.write_text(
+                source.read_text(encoding="utf-8").replace("{{SKILL_VERSION}}", version.group(1)),
                 encoding="utf-8",
                 newline="\n",
             )
