@@ -244,6 +244,7 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
         ],
         "alibabacloud-ros-agent": [
             "SKILL.md",
+            "references/manifest.json",
             "references/ram-policies.md",
             "references/runtime-policy.md",
             "scripts/_ros_agent_core.py",
@@ -272,9 +273,8 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
             assert "32-character lowercase hexadecimal string" in skill
             assert 'SKILL_DISTRIBUTION = "agenthub"' in bridge
             expected_user_agent = "AlibabaCloud-Agent-Skills/{}/{{session-id}}".format(name)
-            if name == "alibabacloud-iac-code":
-                expected_user_agent += " skill-version/{skill-version}"
-                assert "skill-version/{skill-version}" in skill
+            expected_user_agent += " skill-version/{skill-version}"
+            assert "skill-version/{skill-version}" in skill
             assert expected_user_agent in bridge
             if name == "alibabacloud-ros-agent":
                 assert (output / "SKILL.md").stat().st_size <= 32_000
@@ -358,6 +358,7 @@ def test_agenthub_profiles_package_as_independent_products(tmp_path: Path) -> No
     with zipfile.ZipFile(ros_archive) as archive:
         assert archive.namelist() == [
             "alibabacloud-ros-agent/SKILL.md",
+            "alibabacloud-ros-agent/references/manifest.json",
             "alibabacloud-ros-agent/references/ram-policies.md",
             "alibabacloud-ros-agent/references/runtime-policy.md",
             "alibabacloud-ros-agent/scripts/_ros_agent_core.py",
@@ -367,7 +368,61 @@ def test_agenthub_profiles_package_as_independent_products(tmp_path: Path) -> No
             "alibabacloud-ros-agent/scripts/ros_agent.py",
         ]
         assert archive.getinfo("alibabacloud-ros-agent/SKILL.md").file_size <= 32_000
+        assert json.loads(archive.read("alibabacloud-ros-agent/references/manifest.json")) == {"version": "0.1.0"}
+        assert b'SKILL_VERSION = "0.1.0"' in archive.read("alibabacloud-ros-agent/scripts/ros_agent.py")
     assert json.loads(ros_manifest.read_text(encoding="utf-8"))["skillName"] == "alibabacloud-ros-agent"
+
+
+def test_ros_agenthub_uses_manifest_version_and_reuses_session(tmp_path: Path, monkeypatch) -> None:
+    output = tmp_path / "ros"
+    subprocess.run(
+        [sys.executable, str(PROFILE_SCRIPT), "--profile", "alibabacloud-ros-agent", "--output", str(output)],
+        cwd=ROOT,
+        check=True,
+    )
+    monkeypatch.delenv("SKILL_SESSION_ID", raising=False)
+    first = _load_module("ros_version_first", output / "scripts/ros_agent.py")
+    second = _load_module("ros_version_second", output / "scripts/ros_agent.py")
+    assert re.fullmatch(
+        r"AlibabaCloud-Agent-Skills/alibabacloud-ros-agent/[0-9a-f]{32} skill-version/0\.5\.0", first.USER_AGENT
+    )
+    assert first.USER_AGENT == second.USER_AGENT
+    monkeypatch.setattr(first, "resolve_aliyun", lambda path: path)
+    args = argparse.Namespace(
+        aliyun_path="fake-aliyun", endpoint="ros.example.test", mode="pipeline",
+        connect_timeout=10, read_timeout=30, region_id="cn-hangzhou",
+    )
+    job = {
+        "aliyunPath": args.aliyun_path, "endpoint": args.endpoint, "mode": args.mode,
+        "regionId": args.region_id, "connectTimeout": 10, "readTimeout": 30,
+    }
+    command = first.build_session_list_command(args)
+    index = command.index("--user-agent") + 1
+    command[index] = "AlibabaCloud-Agent-Skills/alibabacloud-ros-agent/{} skill-version/0.5.0".format("b" * 32)
+    assert first._valid_foreground_command(command, job)
+    command[index] = command[index].replace("skill-version/0.5.0", "skill-version/0.4.0")
+    assert not first._valid_foreground_command(command, job)
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    [None, "{", "[]", "{}", '{"version":""}', '{"version":5}', '{"version":"0.4.0"}'],
+)
+def test_ros_agenthub_rejects_invalid_manifest_before_cloud_calls(tmp_path: Path, monkeypatch, manifest) -> None:
+    output = tmp_path / "ros"
+    subprocess.run(
+        [sys.executable, str(PROFILE_SCRIPT), "--profile", "alibabacloud-ros-agent", "--output", str(output)],
+        cwd=ROOT,
+        check=True,
+    )
+    path = output / "references/manifest.json"
+    if manifest is None:
+        path.unlink()
+    else:
+        path.write_text(manifest, encoding="utf-8")
+    monkeypatch.setattr("socket.create_connection", lambda *args, **kwargs: pytest.fail("cloud call before validation"))
+    with pytest.raises(RuntimeError, match="Skill manifest.*refusing outbound requests"):
+        _load_module("ros_invalid_manifest", output / "scripts/ros_agent.py")
 
 
 def test_ros_skill_entrypoint_size_limit_counts_utf8_bytes() -> None:
@@ -411,6 +466,7 @@ def test_publisher_contracts_are_explicit() -> None:
     ]
     assert skill_contract["profiles"]["alibabacloud-ros-agent"]["files"] == [
         "SKILL.md",
+        "references/manifest.json",
         "references/ram-policies.md",
         "references/runtime-policy.md",
         "scripts/_ros_agent_core.py",
