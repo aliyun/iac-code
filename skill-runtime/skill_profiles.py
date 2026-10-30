@@ -77,6 +77,7 @@ PROFILES = {
         agenthub=True,
         files=(
             ("SKILL.md.template", "SKILL.md"),
+            ("references/manifest.json.template", "references/manifest.json"),
             ("references/ram-policies.md", "references/ram-policies.md"),
             ("references/runtime-policy.md", "references/runtime-policy.md"),
             ("scripts/_ros_agent_core.py", "scripts/_ros_agent_core.py"),
@@ -86,7 +87,9 @@ PROFILES = {
             ("scripts/ros_agent.py", "scripts/ros_agent.py"),
         ),
         bridge_path="scripts/ros_agent.py",
-        user_agent_template="AlibabaCloud-Agent-Skills/alibabacloud-ros-agent/{session-id}",
+        user_agent_template=(
+            "AlibabaCloud-Agent-Skills/alibabacloud-ros-agent/{session-id} skill-version/{skill-version}"
+        ),
         requirements_file="scripts/requirements.txt",
     ),
 }
