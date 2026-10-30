@@ -59,7 +59,7 @@ from iac_code.pipeline.engine.user_input import (
     PipelineUserInput,
     normalize_pipeline_user_input,
 )
-from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
+from iac_code.services.permission_wait import PermissionWaitCheckpointStore, RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
 from iac_code.services.session_storage import PIPELINE_USER_HISTORY_KEY
@@ -67,6 +67,7 @@ from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CloudResourceSelectionEvent,
     PermissionRequestEvent,
+    PermissionWaitSuspended,
     ResourceObservedEvent,
     StreamEvent,
     SubPipelineStreamEvent,
@@ -2096,7 +2097,30 @@ class PipelineRunner:
         self,
         checkpoint: dict[str, Any],
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
-        """Resume the current top-level step from its unrepaired transcript."""
+        """Resume the original parent or candidate permission from its exact transcript."""
+
+        coordinates = checkpoint.get("pipelineCoordinates")
+        if isinstance(coordinates, dict) and isinstance(coordinates.get("candidate"), dict):
+            self._permission_candidate_state(checkpoint)
+            store = PermissionWaitCheckpointStore(self._cwd, self._session_id)
+            checkpoints: dict[int, dict[str, Any]] = {}
+            for index, state in self._persisted_parallel_candidate_states().items():
+                if state.get("status") != "suspended":
+                    continue
+                record = store.load(state.get("permission_boundary_id", ""))
+                if record is None:
+                    raise ValueError("permission_resume_invalid: candidate checkpoint is unavailable")
+                self._permission_candidate_state(record)
+                checkpoints[index] = record
+            previous = getattr(self, "_restored_candidate_permissions", None)
+            self._restored_candidate_permissions = checkpoints
+            try:
+                async with aclosing(self._continue_from_current(resume_running_step=True)) as pipeline_events:
+                    async for event in pipeline_events:
+                        yield event
+            finally:
+                self._restored_candidate_permissions = previous
+            return
 
         transcript_id = self._execution.get("transcript_id") if isinstance(self._execution, dict) else None
         transcript_id = transcript_id if isinstance(transcript_id, str) else None
@@ -2112,6 +2136,48 @@ class PipelineRunner:
         ) as pipeline_events:
             async for event in pipeline_events:
                 yield event
+
+    def _permission_candidate_state(self, checkpoint: Mapping[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Correlate a durable permission with the original sidecar attempt."""
+        coordinates = checkpoint.get("pipelineCoordinates")
+        if not isinstance(coordinates, Mapping):
+            raise ValueError("permission_resume_invalid: candidate coordinates are unavailable")
+        candidate = coordinates.get("candidate")
+        candidate_step = coordinates.get("candidateStep")
+        parent_step = coordinates.get("step")
+        index = candidate.get("index") if isinstance(candidate, Mapping) else None
+        if type(index) is not int:
+            raise ValueError("permission_resume_invalid: candidate index changed")
+        step_id = self.state_machine.current_step.step_id
+        state = self._candidate_execution_state_for_resume(index)
+        if (
+            not self._execution_matches_current_parallel_step()
+            or not isinstance(state, dict)
+            or state.get("status") != "suspended"
+            or checkpoint.get("sessionId") != self._session_id
+            or state.get("permission_boundary_id") != checkpoint.get("boundaryId")
+            or not isinstance(candidate, Mapping)
+            or candidate.get("id") != state.get("sub_pipeline_id")
+            or not isinstance(candidate_step, Mapping)
+            or candidate_step.get("id") != state.get("current_sub_step")
+            or not isinstance(parent_step, Mapping)
+            or parent_step.get("id") != step_id
+            or parent_step.get("attempt") != self._current_step_attempt(step_id)
+        ):
+            raise ValueError("permission_resume_invalid: candidate execution changed")
+        attempt = self._attempts.get("items", {}).get(state.get("active_attempt_id"))
+        if (
+            not isinstance(attempt, dict)
+            or attempt.get("scope") != "sub_step"
+            or attempt.get("status") != "running"
+            or attempt.get("parent_step_id") != step_id
+            or attempt.get("candidate_index") != index
+            or attempt.get("sub_pipeline_id") != state.get("sub_pipeline_id")
+            or attempt.get("sub_step_id") != state.get("current_sub_step")
+            or attempt.get("transcript_id") != state.get("transcript_id")
+        ):
+            raise ValueError("permission_resume_invalid: candidate attempt changed")
+        return index, state
 
     async def resume_resource_selection_boundary(
         self,
@@ -2163,7 +2229,29 @@ class PipelineRunner:
         checkpoint: Mapping[str, Any],
         recovered: RecoveredPermissionAuditBoundary,
     ) -> PermissionRequestEvent:
-        """Rebuild restart audit data from the exact active parent step runtime."""
+        """Rebuild restart audit data from the exact original step runtime."""
+
+        coordinates = checkpoint.get("pipelineCoordinates")
+        if isinstance(coordinates, Mapping) and "candidate" in coordinates:
+            _, state = self._permission_candidate_state(checkpoint)
+            transcript_id = state.get("transcript_id")
+            if recovered.audit_context.get("transcript_id") != transcript_id:
+                raise ValueError("permission_resume_invalid: candidate transcript changed")
+            messages = self._load_unrepaired_resume_messages(transcript_id)
+            if not messages:
+                raise ValueError("permission_resume_invalid: candidate transcript is unavailable")
+            sub_pipeline_name = self.state_machine.current_step.sub_pipeline_name
+            if sub_pipeline_name is None:
+                raise ValueError("permission_resume_invalid: candidate pipeline changed")
+            sub_spec = self._loaded.sub_pipelines[sub_pipeline_name]
+            return await self._make_sub_pipeline_executor().rebuild_permission_audit_event(
+                sub_spec=sub_spec,
+                parent_context=self.context,
+                session_id=self._session_id,
+                resume_state=state,
+                resume_messages=messages,
+                recovered=recovered,
+            )
 
         execution = self._execution if isinstance(self._execution, dict) else {}
         current_step = self.state_machine.current_step
@@ -4678,7 +4766,14 @@ class PipelineRunner:
                     self._cwd, attempt["transcript_id"], model_resume_seed.transcript.messages()
                 )
             resume_current_step = (
-                resume_waiting_step or (resume_running_step and self._attempt_has_resume_transcript(existing_attempt))
+                resume_waiting_step
+                or (
+                    resume_running_step
+                    and (
+                        self._attempt_has_resume_transcript(existing_attempt)
+                        or self._execution_matches_current_parallel_step()
+                    )
+                )
             ) and is_first_step
 
             if resume_current_step:
@@ -4747,6 +4842,8 @@ class PipelineRunner:
                                 return
                             if self._is_backup_blocked_event(event):
                                 return
+                except PermissionWaitSuspended:
+                    raise
                 except SessionBackupBlocked as exc:
                     yield await self._backup_blocked_event_from_exception(
                         step.step_id,
@@ -5481,6 +5578,27 @@ class PipelineRunner:
                     error_id=failure.error_id,
                 )
 
+    def _make_sub_pipeline_executor(self) -> SubPipelineExecutor:
+        executor = SubPipelineExecutor(
+            provider_manager=self._step_executor._provider_manager,
+            base_tool_registry=self._step_executor._base_tool_registry,
+            pipeline=self._loaded,
+            pipeline_dir=self._step_executor._pipeline_dir,
+            session_storage=self._transcript_storage or self._session_storage,
+            root_session_storage=self._session_storage,
+            cwd=self._cwd,
+            pause_event=self._agent_pause_event,
+            permission_context_getter=self._permission_context_getter,
+            memory_content_getter=self._memory_content_getter,
+            auto_trigger_skills=self._auto_trigger_skills,
+            surface=self._surface,
+            backup_service=self._backup_service,
+            tool_context_env_overrides=self._tool_context_env_overrides,
+            aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
+        )
+        self._apply_telemetry_correlation(executor)
+        return executor
+
     async def _execute_parallel_sub_pipeline(
         self,
         step: StepSpec,
@@ -5492,28 +5610,7 @@ class PipelineRunner:
         sub_spec = self._loaded.sub_pipelines[step.sub_pipeline_name]
         candidates = self._resolve_iterate_field(sub_spec.iterate_over)
 
-        sub_executors = [
-            SubPipelineExecutor(
-                provider_manager=self._step_executor._provider_manager,
-                base_tool_registry=self._step_executor._base_tool_registry,
-                pipeline=self._loaded,
-                pipeline_dir=self._step_executor._pipeline_dir,
-                session_storage=self._transcript_storage or self._session_storage,
-                root_session_storage=self._session_storage,
-                cwd=self._cwd,
-                pause_event=self._agent_pause_event,
-                permission_context_getter=self._permission_context_getter,
-                memory_content_getter=self._memory_content_getter,
-                auto_trigger_skills=self._auto_trigger_skills,
-                surface=self._surface,
-                backup_service=self._backup_service,
-                tool_context_env_overrides=self._tool_context_env_overrides,
-                aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
-            )
-            for _ in candidates
-        ]
-        for sub_executor in sub_executors:
-            self._apply_telemetry_correlation(sub_executor)
+        sub_executors = [self._make_sub_pipeline_executor() for _ in candidates]
 
         self._active_candidates.clear()
 
@@ -5523,6 +5620,7 @@ class PipelineRunner:
         event_sequence = 0
         conclusions_by_index: dict[int, dict] = {}
         failed_by_index: dict[int, dict[str, Any]] = {}
+        suspended_boundaries: dict[int, str | None] = {}
         restored_execution = (
             self._execution
             if self._execution.get("kind") == "parallel_sub_pipeline" and self._execution.get("step_id") == step.step_id
@@ -5572,6 +5670,8 @@ class PipelineRunner:
             step_conclusions = payload.get("step_conclusions")
             if step_conclusions is not None:
                 entry["step_conclusions"] = step_conclusions
+            if payload.get("permission_boundary_id") is not None:
+                entry["permission_boundary_id"] = payload["permission_boundary_id"]
             active_state = self._active_candidates.get(i)
             pending_ask_resume = (
                 active_state.get(_PENDING_ASK_USER_QUESTION_RESUME_KEY) if isinstance(active_state, dict) else None
@@ -5681,6 +5781,7 @@ class PipelineRunner:
             if pending_ask_resume is not None:
                 state[_PENDING_ASK_USER_QUESTION_RESUME_KEY] = pending_ask_resume
             self._active_candidates[i] = state
+            candidate_permission_checkpoint = (getattr(self, "_restored_candidate_permissions", None) or {}).get(i)
 
             def allocate_sub_step_attempt(request: dict[str, Any]) -> dict[str, Any]:
                 request_resume_state = request.get("resume_state")
@@ -5697,7 +5798,11 @@ class PipelineRunner:
                     and request_resume_state.get("active_attempt_id") == attempt.get("attempt_id")
                     and request_resume_state.get("current_sub_step") == request["sub_step_id"]
                 ):
-                    resume_messages = self._load_repaired_resume_messages(attempt.get("transcript_id"))
+                    resume_messages = (
+                        self._load_unrepaired_resume_messages(attempt.get("transcript_id"))
+                        if candidate_permission_checkpoint is not None
+                        else self._load_repaired_resume_messages(attempt.get("transcript_id"))
+                    )
                 return {**attempt, "resume_messages": resume_messages}
 
             async def record_sub_step_state(payload: dict[str, Any]) -> None:
@@ -5721,6 +5826,12 @@ class PipelineRunner:
                 )
 
             try:
+                if (
+                    resume_state
+                    and resume_state.get("status") == "suspended"
+                    and candidate_permission_checkpoint is None
+                ):
+                    raise ValueError("permission_resume_invalid: suspended candidate requires its checkpoint")
                 execute_streaming = sub_executors[i].execute_streaming
                 start_from_step = restart_info.start_from_step if restart_info else None
                 preserved_conclusions = restart_info.preserved_conclusions if restart_info else None
@@ -5768,6 +5879,8 @@ class PipelineRunner:
                         recovery_kwargs["resume_messages"] = candidate_resume_messages
                     if "resource_selection_checkpoint" in parameters or has_var_keyword:
                         recovery_kwargs["resource_selection_checkpoint"] = candidate_resource_selection_checkpoint
+                    if "permission_checkpoint" in parameters or has_var_keyword:
+                        recovery_kwargs["permission_checkpoint"] = candidate_permission_checkpoint
                     event_stream = execute_streaming(**stream_kwargs, **recovery_kwargs)
                 else:
                     event_stream = execute_streaming(**stream_kwargs)
@@ -5800,6 +5913,8 @@ class PipelineRunner:
                         state["error_details"] = event.data.get("error_details")
                         await save_candidate_failed(i, state)
                     await put_candidate_event(i, event)
+            except PermissionWaitSuspended as exc:
+                suspended_boundaries[i] = exc.boundary_id
             except asyncio.CancelledError:
                 logger.debug("Candidate %d cancelled", i)
             except PipelineStatePersistenceError as exc:
@@ -5902,7 +6017,7 @@ class PipelineRunner:
                 self._execution.setdefault("candidates", {})[str(i)] = dict(restored)
                 tasks.append(None)
                 initial_done_count += 1
-            elif restored.get("status") == "running":
+            elif restored.get("status") in {"running", "suspended"}:
                 tasks.append(asyncio.create_task(run_candidate(i, candidate, resume_state=restored)))
             else:
                 tasks.append(asyncio.create_task(run_candidate(i, candidate)))
@@ -5978,6 +6093,8 @@ class PipelineRunner:
         # during that await. Preserve the rollback's context and execution record.
         if parent_attempt_id and self._execution.get("active_attempt_id") != parent_attempt_id:
             return
+        if suspended_boundaries:
+            raise PermissionWaitSuspended(next(iter(suspended_boundaries.values())))
         aggregated: Any = []
         for i, candidate in enumerate(candidates):
             if i in conclusions_by_index:

@@ -18,6 +18,7 @@ from iac_code.agent.agent_loop import AgentLoop
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
 from iac_code.pipeline.engine.pipeline_runner import PipelineRunner
 from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor
+from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.providers.base import ToolDefinition
 from iac_code.services.permission_wait import (
@@ -26,6 +27,7 @@ from iac_code.services.permission_wait import (
     PermissionWaitPolicy,
 )
 from iac_code.services.session_backup import BackupReason, BackupResult, SessionBackupService
+from iac_code.services.session_layout import SessionPaths
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.session_usage import SessionUsageStore
 from iac_code.tools.base import Tool, ToolContext, ToolRegistry, ToolResult
@@ -34,6 +36,7 @@ from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
     PermissionRequestEvent,
+    SubPipelineStreamEvent,
     TextDeltaEvent,
     ToolResultEvent,
     ToolUseEndEvent,
@@ -137,7 +140,7 @@ class _RecordingBackupService:
                 "toolUseId": permission.get("toolUseId") if isinstance(permission, dict) else None,
             }
         )
-        return BackupResult(enabled=True, shared_committed=True)
+        return self._initializer.backup_session(cwd, session_id, reason=reason, critical=critical, **_kwargs)
 
 
 class _CandidateStepExecutor:
@@ -183,23 +186,28 @@ class _CandidateStepExecutor:
         tool_registry = ToolRegistry()
         candidate_tool = self._protected_tool if asks_permission else _AskWriteTool()
         tool_registry.register(candidate_tool)
-        candidate_session_id = "{}-candidate-{}".format(session_id, index)
-        candidate_session_dir = self._storage.ensure_v2_session_dir_for_new_session(
-            str(self._cwd),
-            candidate_session_id,
-        )
+        transcript_id = str(_kwargs["transcript_id"])
+        root_session_dir = self._storage.v2_session_dir(str(self._cwd), session_id)
+        if root_session_dir is None:
+            raise AssertionError("candidate transcript lost its parent session")
+        paths = SessionPaths.require_supported(root_session_dir)
+        transcript_storage = PipelineTranscriptStorage(root_session_dir / "pipeline")
         loop = AgentLoop(
             provider_manager=_CandidateProvider(asks_permission=asks_permission),
             system_prompt="controlled candidate fixture",
             tool_registry=tool_registry,
             max_turns=3,
-            session_storage=self._storage,
-            session_usage_store=SessionUsageStore(projects_dir=self._projects_dir),
-            session_id=candidate_session_id,
+            session_storage=transcript_storage,
+            session_usage_store=SessionUsageStore(
+                path_provider=lambda _cwd, _sid: paths.transcript_usage_path(transcript_id)
+            ),
+            session_id=transcript_id,
+            root_session_id=session_id,
+            transcript_id=transcript_id,
             cwd=str(self._cwd),
             pipeline_mode=True,
             result_storage_dir=self._run_dir / "tool-results" / str(index),
-            audit_log_path=candidate_session_dir / "permission-audit.jsonl",
+            audit_log_path=paths.transcript_permission_audit_path(transcript_id),
         )
         self.current_agent_loop = loop
         text_parts: list[str] = []
@@ -310,7 +318,10 @@ async def run_scenario(*, run_dir: Path, timeout_seconds: float) -> dict[str, An
     _write_pipeline_fixture(pipeline_dir)
 
     previous_config_dir = os.environ.get("IAC_CODE_CONFIG_DIR")
+    previous_backup_dir = os.environ.get("IAC_CODE_CONFIG_BACKUP_DIR")
+    previous_staging_dir = os.environ.pop("IAC_CODE_CONFIG_BACKUP_TMP_DIR", None)
     os.environ["IAC_CODE_CONFIG_DIR"] = str(config_dir)
+    os.environ["IAC_CODE_CONFIG_BACKUP_DIR"] = str(run_dir / "shared-backup")
     original_step_factory = SubPipelineExecutor._make_step_executor
     try:
         storage = SessionStorage(projects_dir=projects_dir)
@@ -409,8 +420,16 @@ async def run_scenario(*, run_dir: Path, timeout_seconds: float) -> dict[str, An
         publisher.before_enqueue = record_publication_before_enqueue
 
         task_while_candidates_finished = None
+        published_checkpoint = None
         async for event in runner.run("evaluate both candidates and select one"):
             await publisher.publish(event)
+            inner = event
+            while isinstance(inner, SubPipelineStreamEvent):
+                inner = inner.inner
+            if isinstance(inner, PermissionRequestEvent) and inner.boundary_id is not None:
+                published_checkpoint = PermissionWaitCheckpointStore(str(cwd), session_id, storage=storage).load(
+                    inner.boundary_id
+                )
             if (
                 isinstance(event, PipelineEvent)
                 and event.type == PipelineEventType.STEP_COMPLETED
@@ -435,6 +454,9 @@ async def run_scenario(*, run_dir: Path, timeout_seconds: float) -> dict[str, An
             if event.get("eventType") == "permission_resolved" and event.get("permission", {}).get("timedOut") is True
         )
         checkpoint_store = PermissionWaitCheckpointStore(str(cwd), session_id, storage=storage)
+        resolved_checkpoint = (
+            checkpoint_store.load(published_checkpoint["boundaryId"]) if published_checkpoint is not None else None
+        )
         permission_backup_calls = [
             call
             for call in backup_service.calls
@@ -461,14 +483,31 @@ async def run_scenario(*, run_dir: Path, timeout_seconds: float) -> dict[str, An
             and "pipeline_completed" in event_types
             and isinstance(selection, dict)
             and selection.get("selected_candidate_index") == 1,
-            "no grace state or durable checkpoint": checkpoint_store.list_active() == []
-            and not list(run_dir.rglob("permission-waits/pwb_*.json")),
-            "production backup hook excluded Sub permission checkpoint": permission_backup_calls == []
+            "root session checkpoint resolved after automatic denial": checkpoint_store.list_active() == []
+            and published_checkpoint is not None
+            and published_checkpoint.get("sessionId") == session_id
+            and published_checkpoint.get("phase") == "WAITING"
+            and resolved_checkpoint is not None
+            and resolved_checkpoint.get("phase") == "RESOLVED"
+            and resolved_checkpoint.get("decision", {}).get("source") == "timeout"
+            and resolved_checkpoint.get("decision", {}).get("value") == "deny",
+            "production backup hook persisted Sub permission checkpoint": bool(permission_backup_calls)
+            and all(
+                call["critical"] and call["reason"] == BackupReason.INPUT_REQUIRED for call in permission_backup_calls
+            )
             and any(call["eventType"] == "input_required" for call in backup_service.calls),
         }
         result = {
             "schemaVersion": 1,
             "timeoutSeconds": timeout_seconds,
+            "permissionWaitLifecycle": {
+                "rootSessionId": session_id,
+                "publishedSessionId": (published_checkpoint or {}).get("sessionId"),
+                "publishedPhase": (published_checkpoint or {}).get("phase"),
+                "resolvedPhase": (resolved_checkpoint or {}).get("phase"),
+                "transcriptRef": (published_checkpoint or {}).get("continuationFrame", {}).get("assistantMessageRef"),
+                "decisionSource": (resolved_checkpoint or {}).get("decision", {}).get("source"),
+            },
             "backupCalls": [
                 {
                     **call,
@@ -487,6 +526,12 @@ async def run_scenario(*, run_dir: Path, timeout_seconds: float) -> dict[str, An
             os.environ.pop("IAC_CODE_CONFIG_DIR", None)
         else:
             os.environ["IAC_CODE_CONFIG_DIR"] = previous_config_dir
+        if previous_backup_dir is None:
+            os.environ.pop("IAC_CODE_CONFIG_BACKUP_DIR", None)
+        else:
+            os.environ["IAC_CODE_CONFIG_BACKUP_DIR"] = previous_backup_dir
+        if previous_staging_dir is not None:
+            os.environ["IAC_CODE_CONFIG_BACKUP_TMP_DIR"] = previous_staging_dir
 
 
 def _parse_args() -> argparse.Namespace:

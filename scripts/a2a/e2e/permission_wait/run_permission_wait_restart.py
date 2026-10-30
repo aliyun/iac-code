@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import socket
 import subprocess
 import sys
@@ -340,6 +339,8 @@ class _FixtureServer:
         defer_staging_publisher: bool = False,
         staging_dir: Path | None = None,
         backup_dir: Path | None = None,
+        config_dir: Path | None = None,
+        suspend_trigger: Path | None = None,
     ) -> None:
         self.run_dir = run_dir
         self.port = port
@@ -350,8 +351,10 @@ class _FixtureServer:
         self.handoff_first = handoff_first
         self.sequential_permissions = sequential_permissions
         self.defer_staging_publisher = defer_staging_publisher
-        self.staging_dir = staging_dir
-        self.backup_dir = backup_dir
+        self.staging_dir = staging_dir or run_dir / "staging"
+        self.backup_dir = backup_dir or run_dir / "shared-backup"
+        self.config_dir = config_dir or run_dir / "config"
+        self.suspend_trigger = suspend_trigger
         self.process: subprocess.Popen[str] | None = None
         self._stdout = None
         self._stderr = None
@@ -376,7 +379,7 @@ class _FixtureServer:
             "--port",
             str(self.port),
             "--config-dir",
-            str(self.run_dir / "config"),
+            str(self.config_dir),
             "--persistence-dir",
             str(self.run_dir / "a2a-state"),
             "--artifact-dir",
@@ -387,6 +390,10 @@ class _FixtureServer:
             str(self.run_dir / "tool-executions.log"),
             "--mode",
             self.mode,
+            "--resident-timeout-seconds",
+            "3600" if self.suspend_trigger is not None else "0.1",
+            "--timeout-grace-seconds",
+            "0",
         ]
         if self.candidate_first:
             command.append("--candidate-first")
@@ -398,6 +405,8 @@ class _FixtureServer:
             command.append("--sequential-permissions")
         if self.defer_staging_publisher:
             command.append("--defer-staging-publisher")
+        if self.suspend_trigger is not None:
+            command.extend(("--suspend-trigger", str(self.suspend_trigger)))
         if self.staging_dir is not None and self.backup_dir is not None:
             command.extend(("--staging-dir", str(self.staging_dir), "--backup-dir", str(self.backup_dir)))
         self.process = subprocess.Popen(
@@ -409,6 +418,68 @@ class _FixtureServer:
             text=True,
         )
         self._wait_healthy()
+
+    def replacement(self, *, config_dir: Path, staging_dir: Path) -> _FixtureServer:
+        return _FixtureServer(
+            run_dir=self.run_dir,
+            port=_free_port(),
+            repo_root=self.repo_root,
+            mode=self.mode,
+            candidate_first=self.candidate_first,
+            pipeline_step_id=self.pipeline_step_id,
+            handoff_first=self.handoff_first,
+            sequential_permissions=self.sequential_permissions,
+            defer_staging_publisher=self.defer_staging_publisher,
+            staging_dir=staging_dir,
+            backup_dir=self.backup_dir,
+            config_dir=config_dir,
+            suspend_trigger=self.suspend_trigger,
+        )
+
+    def wait_for_handoff(self, permission: dict[str, Any], *, timeout: float) -> dict[str, Any]:
+        """Use the production read-only probe before physically stopping this owner."""
+        from iac_code.a2a.input_handoff import RecoverableInputHandoffProof
+
+        if self.suspend_trigger is not None:
+            self.suspend_trigger.touch()
+        deadline = time.monotonic() + timeout
+        control_path = self.run_dir / "a2a-state/execution-control" / (permission["contextId"] + ".json")
+        while time.monotonic() < deadline:
+            try:
+                control = _read_checkpoint(control_path)
+                if RecoverableInputHandoffProof.validates_committed(
+                    control, permission["contextId"], permission["requestTaskId"]
+                ):
+                    break
+            except (OSError, ValueError):
+                pass
+            time.sleep(0.02)
+        else:
+            raise TimeoutError("permission owner did not commit its durable handoff before controlled shutdown")
+        env = os.environ.copy()
+        env["IAC_CODE_CONFIG_DIR"] = str(self.config_dir)
+        env["PYTHONPATH"] = os.pathsep.join(
+            part for part in (str(self.repo_root / "src"), env.get("PYTHONPATH", "")) if part
+        )
+        inspected = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "iac_code.a2a.permission_pause",
+                "--persistence-root",
+                str(self.run_dir / "a2a-state"),
+            ],
+            cwd=self.repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            timeout=timeout,
+        )
+        result = json.loads(inspected.stdout)
+        if inspected.returncode != 0 or result.get("status") != "ready" or result.get("checked", 0) < 1:
+            raise AssertionError("production permission-pause probe refused controlled shutdown: {}".format(result))
+        return control
 
     def _wait_healthy(self) -> None:
         deadline = time.monotonic() + 20
@@ -479,7 +550,7 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
     run_dir.mkdir(parents=True, exist_ok=False)
     workspace = run_dir / "workspace"
     workspace.mkdir()
-    config_dir = run_dir / "config"
+    config_dir = run_dir / "replacement-config"
     persistence_dir = run_dir / "a2a-state"
     staging_dir = run_dir / "staging"
     backup_dir = run_dir / "shared-backup"
@@ -497,7 +568,9 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
         defer_staging_publisher=True,
         staging_dir=staging_dir,
         backup_dir=backup_dir,
+        suspend_trigger=run_dir / "release-permission-suspension",
     )
+    original = server
     try:
         server.start(1)
         first_events = _stream_request(
@@ -571,12 +644,6 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
         if p2_staged_checkpoint.get("phase") != "WAITING":
             raise AssertionError("P2 staged checkpoint is not waiting")
 
-        server.stop()
-        primary_sessions = [path for path in config_dir.rglob(session_id) if path.is_dir()]
-        if len(primary_sessions) != 1:
-            raise AssertionError("expected exactly one primary session before sandbox replacement")
-        shutil.rmtree(primary_sessions[0])
-
         # Reproduce a replacement Sandbox after its normal startup restore:
         # the local session is the old shared P1 generation while the newer P2
         # generation is still only staged.  Use the production restore service
@@ -603,8 +670,7 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
         # A replacement Sandbox has its own empty local staging area.  Keep
         # the original worker attached to the first Sandbox's staged snapshots
         # so only the shared publication can make generation N available.
-        replacement_staging_dir = run_dir / "replacement-staging"
-        server.staging_dir = replacement_staging_dir
+        server = original.replacement(config_dir=config_dir, staging_dir=run_dir / "replacement-staging")
         server.start(2)
         p2_query = _permission_response_query(permission_2)
         not_ready_events = _stream_request(
@@ -645,6 +711,8 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
             or unchanged_decision.get("value") is not None
         ):
             raise AssertionError("not-ready P2 Resume claimed or consumed the staged checkpoint")
+        if original.process is None or original.process.poll() is not None:
+            raise AssertionError("old permission owner exited before the restore-floor rejection")
 
         published = worker.run_once()
         if published < 1:
@@ -652,6 +720,8 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
         shared_state = json.loads(shared_marker.read_text(encoding="utf-8"))
         if int(shared_state["generation"]) < expected_generation:
             raise AssertionError("shared backup did not reach the P2 generation")
+        original.wait_for_handoff(permission_2, timeout=timeout)
+        original.stop()
 
         recovered_events = _stream_request(
             server.url,
@@ -719,9 +789,12 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
             "p2ResolvedOnce": True,
             "toolExecutions": 2,
             "publicGenerationAbsent": True,
+            "controlledHandoffCommitted": True,
+            "oldOwnerAliveAtNotReady": True,
         }
     finally:
         server.stop()
+        original.stop()
 
 
 def run_scenario(
@@ -849,8 +922,10 @@ def run_scenario(
             _validate_structured_permission(permission, scenario=scenario)
         checkpoint_path = _checkpoint_path(run_dir / "config")
         checkpoint_before = _read_checkpoint(checkpoint_path)
-        if checkpoint_before.get("phase") != "WAITING":
-            raise AssertionError("initial checkpoint phase is not WAITING")
+        if checkpoint_before.get("phase") not in {"WAITING", "SUSPENDING", "SUSPENDED"} or (
+            checkpoint_before.get("decision", {}).get("status") != "none"
+        ):
+            raise AssertionError("initial checkpoint did not retain the unanswered permission")
         if checkpoint_before.get("taskId") != permission.get("requestTaskId"):
             raise AssertionError("permission task correlation differs from checkpoint")
         expected_class = "pipeline" if mode == "pipeline" and not handoff_first else "normal"
@@ -863,6 +938,7 @@ def run_scenario(
             if pipeline_step_id and coordinates["step"].get("id") != pipeline_step_id:
                 raise AssertionError("Pipeline permission checkpoint points at the wrong selling stage")
 
+        server.wait_for_handoff(permission, timeout=timeout)
         server.stop()
         if background is not None:
             background.join(10)
@@ -872,8 +948,8 @@ def run_scenario(
 
         server.start(2)
         checkpoint_after_restart = _read_checkpoint(checkpoint_path)
-        if checkpoint_after_restart.get("phase") != "WAITING":
-            raise AssertionError("restarted server did not retain the waiting permission checkpoint")
+        if checkpoint_after_restart.get("phase") != "SUSPENDED":
+            raise AssertionError("restarted server did not retain the committed suspended permission checkpoint")
         projection_preserved = expected_class == "pipeline"
         if projection_preserved:
             restored_permission = _pipeline_snapshot_permission(
@@ -1067,6 +1143,7 @@ def run_scenario(
             "nextOrdinaryPromptCompletedBeforeReplay": True,
             "restoredPermissionProjectionPreserved": projection_preserved,
             "durableWaitingPermissionRestored": True,
+            "controlledHandoffCommitted": True,
             "candidateSelectionBeforePermission": candidate_first,
             "pipelineStepId": pipeline_step_id,
             "handoffFirst": handoff_first,

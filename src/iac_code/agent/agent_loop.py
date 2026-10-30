@@ -1226,10 +1226,20 @@ class AgentLoop:
         decision = checkpoint.get("decision")
         if not isinstance(frame, dict) or not isinstance(decision, dict):
             raise ValueError("permission_resume_invalid: continuation frame is missing")
-        if decision.get("status") not in {"claimed", "applied"} or decision.get("value") not in {
+        coordinates = checkpoint.get("pipelineCoordinates")
+        rebuild_wait = (
+            checkpoint.get("phase") == "SUSPENDED"
+            and checkpoint.get("permissionClass") == "pipeline"
+            and isinstance(coordinates, dict)
+            and isinstance(coordinates.get("candidate"), dict)
+            and isinstance(checkpoint.get("boundaryId"), str)
+            and decision.get("status") == "none"
+            and decision.get("value") is None
+        )
+        if not rebuild_wait and (decision.get("status") not in {"claimed", "applied"} or decision.get("value") not in {
             "allow_once",
             "deny",
-        }:
+        }):
             raise ValueError("permission_resume_invalid: permission decision is missing")
 
         messages = self.context_manager.get_messages()
@@ -1330,8 +1340,39 @@ class AgentLoop:
             if request_index == current_index:
                 if permission is None:
                     raise ValueError("permission_resume_invalid: current tool is unavailable")
-                state = "allow" if decision["value"] == "allow_once" else "deny"
-                source = "user"
+                automatic_deny = False
+                if rebuild_wait:
+                    principal_ref, region = permission_execution_identity(
+                        tool_name=request.name,
+                        tool_input=request.input,
+                        permission_audit=getattr(permission, "audit", None),
+                    )
+                    if principal_ref != checkpoint.get("principalRef") or region != checkpoint.get("region"):
+                        raise ValueError("permission_resume_invalid: cloud execution identity changed")
+                    response_future: asyncio.Future[bool | PermissionWaitOutcome] = (
+                        asyncio.get_running_loop().create_future()
+                    )
+                    permission_event = PermissionRequestEvent(
+                        tool_name=request.name,
+                        tool_input=request.input,
+                        tool_use_id=request.id,
+                        response_future=response_future,
+                        permission_result=permission,
+                        audit_context=audit_context,
+                        continuation_frame=frame,
+                        boundary_id=checkpoint["boundaryId"],
+                    )
+                    yield permission_event
+                    async with execution_non_advancing_wait():
+                        outcome = await asyncio.shield(response_future)
+                    if outcome is PermissionWaitOutcome.SUSPEND:
+                        raise PermissionWaitSuspended(permission_event.boundary_id)
+                    await execution_checkpoint()
+                    automatic_deny = outcome is PermissionWaitOutcome.AUTOMATIC_DENY
+                    state = "allow" if not automatic_deny and bool(outcome) else "deny"
+                else:
+                    state = "allow" if decision["value"] == "allow_once" else "deny"
+                source = "automatic" if automatic_deny else "user"
                 principal_ref = None
                 region = None
                 if state == "allow":
@@ -1343,7 +1384,7 @@ class AgentLoop:
                     if principal_ref != checkpoint.get("principalRef") or region != checkpoint.get("region"):
                         raise ValueError("permission_resume_invalid: cloud execution identity changed")
                 if state == "deny":
-                    recorded["deniedResult"] = _user_denied_tool_result()
+                    recorded["deniedResult"] = _("Permission denied.") if automatic_deny else _user_denied_tool_result()
                 if permission.behavior != "deny":
                     additional_decision: Literal["allow", "deny"] = "allow" if state == "allow" else "deny"
                     additional_audit_ok = _emit_permission_audit_items(

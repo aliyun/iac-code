@@ -70,6 +70,8 @@ def test_agui_staged_backup_generation_fence_retries_after_shared_publication(tm
     assert result["p2ResolvedOnce"] is True
     assert result["toolExecutions"] == 2
     assert result["publicGenerationAbsent"] is True
+    assert result["controlledHandoffCommitted"] is True
+    assert result["oldOwnerAliveAtNotReady"] is True
 
 
 @pytest.mark.integration
@@ -109,6 +111,8 @@ def test_staged_backup_generation_fence_retries_after_shared_publication(tmp_pat
     assert result["p2ResolvedOnce"] is True
     assert result["toolExecutions"] == 2
     assert result["publicGenerationAbsent"] is True
+    assert result["controlledHandoffCommitted"] is True
+    assert result["oldOwnerAliveAtNotReady"] is True
 
 
 @pytest.mark.integration
@@ -157,6 +161,7 @@ def test_permission_wait_response_recovers_after_real_a2a_process_restart(
     assert result["mode"] == mode
     assert result["decision"] == decision
     assert result["checkpointPhase"] == "RESOLVED"
+    assert result["controlledHandoffCommitted"] is True
     assert result["toolExecutions"] == expected_executions
     assert result["duplicateAcknowledged"] is True
     assert result["conflictRejected"] is True

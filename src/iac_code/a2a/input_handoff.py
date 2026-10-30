@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
 
@@ -56,6 +56,18 @@ class RecoverableInputHandoffProof(BaseModel):
     backup_commit_id: str = Field(alias="backupCommitId", min_length=1)
     phase: Literal["PREPARING", "COMMITTED"]
     backup_receipt: HandoffBackupReceipt | None = Field(default=None, alias="backupReceipt")
+    boundaries: dict[str, int] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_boundaries(self) -> "RecoverableInputHandoffProof":
+        if self.boundaries.get(self.boundary_id) != self.boundary_generation or any(
+            not key or type(generation) is not int or generation < 1 for key, generation in self.boundaries.items()
+        ):
+            raise ValueError("invalid permission handoff boundary group")
+        return self
+
+    def matches_boundary(self, boundary_id: str, generation: int) -> bool:
+        return self.boundaries.get(boundary_id) == generation
 
     @field_validator("backup_commit_id")
     @classmethod
@@ -68,6 +80,20 @@ class RecoverableInputHandoffProof(BaseModel):
     @classmethod
     def from_document(cls, document: Any) -> "RecoverableInputHandoffProof":
         return cls.model_validate(document)
+
+    @classmethod
+    def from_checkpoint(cls, record: dict[str, Any]) -> "RecoverableInputHandoffProof":
+        proof = cls.from_document(record.get("executionHandoff"))
+        if (
+            any(record.get(key) != proof.as_document()[key] for key in ("contextId", "taskId", "sessionId"))
+            or type(record.get("generation")) is not int
+            or not any(
+                boundary_id == record.get("boundaryId") and generation <= record["generation"]
+                for boundary_id, generation in proof.boundaries.items()
+            )
+        ):
+            raise ValueError("permission recovery checkpoint does not match its handoff")
+        return proof
 
     @classmethod
     def validates_committed(cls, document: dict[str, Any], context_id: str, task_id: str | None = None) -> bool:

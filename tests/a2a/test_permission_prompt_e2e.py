@@ -8,6 +8,7 @@ import socket
 import time
 from contextlib import ExitStack
 from dataclasses import asdict
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -41,6 +42,8 @@ def _serve(
     pipeline_dir: str | None = None,
     artifact_mode: bool = False,
     max_turns: int = 3,
+    parallel_candidates: int = 0,
+    strict_permission_pause: bool = False,
 ) -> None:
     """Only the model and tool are fake; restart kills the actual server process."""
     import uvicorn
@@ -61,6 +64,9 @@ def _serve(
     root_path = Path(root)
     os.environ["IAC_CODE_CONFIG_DIR"] = config_dir or str(root_path / "config")
     os.environ["IAC_CODE_CONFIG_BACKUP_DIR"] = backup_dir or str(root_path / "backup")
+    os.environ["A2A_PERSISTENCE_DIR"] = persistence_dir or str(root_path / "a2a")
+    if strict_permission_pause:
+        os.environ["IAC_CODE_A2A_PERMISSION_PAUSE_ENABLED"] = "1"
     os.environ["IAC_CODE_MODE"] = "pipeline" if pipeline_dir else "normal"
     if pipeline_dir:
         os.environ["IAC_CODE_PIPELINE_NAME"] = "permission-engine-fixture"
@@ -105,6 +111,33 @@ def _serve(
                 if isinstance(message.content, list)
                 for block in message.content
             )
+            if parallel_candidates and "BUILD_CANDIDATES" in system:
+                yield ToolUseStartEvent(tool_use_id="complete-step", name="complete_step")
+                yield ToolUseEndEvent(
+                    tool_use_id="complete-step",
+                    name="complete_step",
+                    input={
+                        "conclusion": {
+                            "candidates": [{"name": f"candidate-{index}"} for index in range(parallel_candidates)]
+                        }
+                    },
+                )
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
+            if parallel_candidates and "PROTECTED_CANDIDATE" in system and not has_results:
+                candidate = next(
+                    (f"candidate-{index}" for index in range(parallel_candidates) if f"candidate-{index}" in system),
+                    "unknown",
+                )
+                tool_id = "tool-" + candidate
+                if fault == "late-second-candidate" and candidate == "candidate-1":
+                    (observation_path / "second-candidate-waiting").touch()
+                    while not (observation_path / "release-second-candidate").exists():
+                        await asyncio.sleep(0.02)
+                yield ToolUseStartEvent(tool_use_id=tool_id, name="write_test")
+                yield ToolUseEndEvent(tool_use_id=tool_id, name="write_test", input={"value": tool_id})
+                yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+                return
             if (
                 artifact_mode
                 and isinstance(messages[-1].content, str)
@@ -181,6 +214,47 @@ def _serve(
 
     with ExitStack() as patches:
         patches.enter_context(patch("iac_code.a2a.executor.create_agent_runtime", runtime))
+        if fault == "late-second-candidate":
+            from iac_code.a2a.input_required import PermissionInputRegistry
+            from iac_code.services.permission_wait import format_utc, utc_now
+
+            open_boundary = PermissionInputRegistry.open_durable_boundary
+
+            async def open_late_boundary(self, pending, **kwargs):
+                record = await open_boundary(self, pending, **kwargs)
+                if pending.request.tool_use_id == "tool-candidate-1":
+                    record = pending.checkpoint_store.transaction(
+                        pending.boundary_id,
+                        lambda value: {**value, "residentDeadlineAt": format_utc(utc_now() + timedelta(minutes=10))},
+                    )
+                return record
+
+            patches.enter_context(patch.object(PermissionInputRegistry, "open_durable_boundary", open_late_boundary))
+        if fault == "tool-result-append-failure":
+            from iac_code.a2a.execution_control import ExecutionControlService
+            from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
+
+            append = PipelineTranscriptStorage.append
+            commit_handoff = ExecutionControlService._commit_suspended_permission_handoff
+
+            def append_result_failure(self, cwd, session_id, message, **kwargs):
+                result = isinstance(message.content, list) and any(
+                    block.type == "tool_result" for block in message.content
+                )
+                if result and not (observation_path / "tool-result-append-failed").exists():
+                    (observation_path / "tool-result-append-failed").touch()
+                    raise OSError("injected canonical ToolResult append failure")
+                return append(self, cwd, session_id, message, **kwargs)
+
+            async def observed_handoff(self, control):
+                await commit_handoff(self, control)
+                if (observation_path / "tool-result-append-failed").exists() and not control.has_managed_work():
+                    (observation_path / "post-failure-handoff-checked").touch()
+
+            patches.enter_context(patch.object(PipelineTranscriptStorage, "append", append_result_failure))
+            patches.enter_context(
+                patch.object(ExecutionControlService, "_commit_suspended_permission_handoff", observed_handoff)
+            )
         if fault == "permission-claim-race":
             from iac_code.a2a.executor import IacCodeA2AExecutor
 
@@ -310,6 +384,34 @@ class Server:
             assert not self.process.is_alive()
             self.process.close()
             self.process = None
+
+    def wait_for_permission_handoff(self, permission, *, timeout=15):
+        from iac_code.a2a.input_handoff import RecoverableInputHandoffProof
+
+        persistence = Path(self.options.get("persistence_dir") or self.root / "a2a")
+        config = Path(self.options.get("config_dir") or self.root / "config")
+        path = persistence / "execution-control" / (permission["contextId"] + ".json")
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            try:
+                document = json.loads(path.read_text(encoding="utf-8"))
+                if RecoverableInputHandoffProof.validates_committed(
+                    document, permission["contextId"], permission["requestTaskId"]
+                ):
+                    proof = RecoverableInputHandoffProof.from_document(document["inputHandoff"])
+                    for boundary_id in proof.boundaries:
+                        for checkpoint_path in config.rglob(boundary_id + ".json"):
+                            record = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+                            if (
+                                record.get("inputId") == permission["inputId"]
+                                and record.get("phase") == "SUSPENDED"
+                                and proof.matches_boundary(boundary_id, record["generation"])
+                            ):
+                                return document
+            except (OSError, ValueError, KeyError):
+                pass
+            time.sleep(0.02)
+        raise AssertionError("Original permission did not reach its committed shared handoff")
 
     def stream(self, text, *, task_id=None):
         message = {
@@ -448,6 +550,38 @@ def test_new_prompt_cancels_unexecuted_permission_batch(tmp_path, monkeypatch, r
 
 
 @pytest.mark.integration
+def test_cold_normal_successor_suspends_its_own_boundary_before_next_reply(tmp_path, monkeypatch):
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "workspace").mkdir()
+    server = Server(tmp_path, resident_timeout=0.1, strict_permission_pause=True)
+    try:
+        server.start()
+        permission = _permission(server.send("original"))
+        task_id = permission["requestTaskId"]
+        input_ids = []
+        for tool_id in ("tool-1", "tool-2", "tool-3"):
+            assert permission["toolUseId"] == tool_id
+            assert permission["requestTaskId"] == task_id
+            input_ids.append(permission["inputId"])
+            server.wait_for_permission_handoff(permission)
+            events = server.send(_reply(permission), task_id=task_id)
+            assert not any("error" in event for event in events), events
+            if tool_id != "tool-3":
+                permission = _permission(events)
+        assert len(set(input_ids)) == 3
+        assert "completed approved batch" in json.dumps(events)
+        executions = [
+            json.loads(line)
+            for line in (tmp_path / "executions.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        assert sorted(item["value"] for item in executions) == ["tool-1", "tool-2", "tool-3"]
+        assert "handled new prompt" in json.dumps(server.send("new prompt"))
+    finally:
+        server.stop()
+        server.client.close()
+
+
+@pytest.mark.integration
 @pytest.mark.parametrize(
     ("restart", "middle_decision"),
     [(False, "allow_once"), (True, "allow_once"), (False, "deny"), (True, "deny")],
@@ -458,15 +592,18 @@ def test_permission_confirmation_continues_batch_and_accepts_next_prompt(
 ):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "workspace").mkdir()
-    server = Server(tmp_path)
+    server = Server(tmp_path, resident_timeout=0.1 if restart else 300, strict_permission_pause=True)
     try:
         server.start()
         first = _permission(server.send("original"))
+        if restart:
+            server.wait_for_permission_handoff(first)
         second = _permission(server.send(_reply(first), task_id=first["requestTaskId"]))
         assert first["toolUseId"] == "tool-1"
         assert second["toolUseId"] == "tool-2"
         assert not (tmp_path / "executions.jsonl").exists()
         if restart:
+            server.wait_for_permission_handoff(second)
             server.stop()
             server.start()
 
@@ -483,8 +620,10 @@ def test_permission_confirmation_continues_batch_and_accepts_next_prompt(
             assert not (tmp_path / "executions.jsonl").exists()
             assert len((tmp_path / "model-inputs.jsonl").read_text(encoding="utf-8").splitlines()) == 1
 
-            # Cold recovery keeps this SSE stream open while the third
-            # permission is answered through a separate HTTP request.
+            # Exercise another cold successor deterministically instead of
+            # racing the short resident deadline against the client's reply.
+            if restart:
+                server.wait_for_permission_handoff(third)
             events = server.send(_reply(third), task_id=third["requestTaskId"])
             events.extend(stream)
         assert not any("error" in event for event in events), events
@@ -521,9 +660,15 @@ def test_permission_confirmation_continues_batch_and_accepts_next_prompt(
         checkpoints = PermissionWaitCheckpointStore(ctx.cwd, ctx.session_id)
         for permission in (first, second):
             assert checkpoints.find_by_input_id(permission["inputId"])["phase"] == "RESOLVED"
-        # Main currently leaves a cold recovery's successor in WAITING after
-        # applying its decision. Check approval and replay safety separately.
-        assert checkpoints.find_by_input_id(third["inputId"])["decision"]["status"] == "applied"
+        receipt = checkpoints.find_by_input_id(third["inputId"])
+        assert receipt["phase"] == "RESOLVED"
+        assert receipt["decision"]["value"] == "allow_once"
+        assert receipt["decision"]["auditStatus"] == "recorded"
+        assert receipt["decision"]["backupStatus"] == "committed"
+        assert receipt["ack"] == {"decision": "allow_once", "accepted": True}
+        assert receipt["resultDigest"]
+        if not restart:
+            assert receipt["decision"]["status"] == "applied"
 
         # Check the next ordinary message before replaying any old permission
         # reply, so a stale click cannot explain a failure to release execution.
