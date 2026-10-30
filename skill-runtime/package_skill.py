@@ -137,6 +137,10 @@ def _stage(args: argparse.Namespace, root: Path) -> Path:
         bridge = _replace_constant(bridge, name, value)
     ast.parse(bridge, filename=str(bridge_path), feature_version=(3, 8))
     bridge_path.write_text(bridge, encoding="utf-8", newline="\n")
+    if profile.name == "alibabacloud-iac-code":
+        (skill_root / "references/manifest.json").write_text(
+            json.dumps({"version": skill_identity}, indent=2) + "\n", encoding="utf-8", newline="\n"
+        )
     return skill_root
 
 

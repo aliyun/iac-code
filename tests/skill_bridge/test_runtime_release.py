@@ -238,6 +238,7 @@ def test_skill_profiles_render_three_strict_product_shapes(tmp_path: Path) -> No
         "iac-code": ["SKILL.md", "agents/openai.yaml", "scripts/iac_code.py"],
         "alibabacloud-iac-code": [
             "SKILL.md",
+            "references/manifest.json",
             "references/ram-policies.md",
             "scripts/iac_code.py",
         ],
@@ -315,13 +316,19 @@ def test_agenthub_profiles_package_as_independent_products(tmp_path: Path) -> No
     iac_manifest = tmp_path / "iac-manifest.json"
     iac_command = _package_command(iac_archive, iac_manifest)
     iac_command[2:2] = ["--profile", "alibabacloud-iac-code"]
+    iac_command[iac_command.index("--skill-version") + 1] = "0.6.0"
     subprocess.run(iac_command, cwd=ROOT, check=True)
     with zipfile.ZipFile(iac_archive) as archive:
         assert archive.namelist() == [
             "alibabacloud-iac-code/SKILL.md",
+            "alibabacloud-iac-code/references/manifest.json",
             "alibabacloud-iac-code/references/ram-policies.md",
             "alibabacloud-iac-code/scripts/iac_code.py",
         ]
+        assert json.loads(archive.read("alibabacloud-iac-code/references/manifest.json")) == {"version": "0.6.0"}
+        unpacked = tmp_path / "unpacked"
+        archive.extractall(unpacked)
+    subprocess.run([sys.executable, str(unpacked / "alibabacloud-iac-code/scripts/iac_code.py"), "--help"], check=True)
     assert json.loads(iac_manifest.read_text(encoding="utf-8"))["skillName"] == "alibabacloud-iac-code"
 
     ros_archive = tmp_path / "alibabacloud-ros-agent-skill-0.1.0.zip"
@@ -398,6 +405,7 @@ def test_publisher_contracts_are_explicit() -> None:
     ]
     assert skill_contract["profiles"]["alibabacloud-iac-code"]["files"] == [
         "SKILL.md",
+        "references/manifest.json",
         "references/ram-policies.md",
         "scripts/iac_code.py",
     ]

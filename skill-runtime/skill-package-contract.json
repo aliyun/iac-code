@@ -15,6 +15,7 @@
       "archiveRoot": "alibabacloud-iac-code",
       "files": [
         "SKILL.md",
+        "references/manifest.json",
         "references/ram-policies.md",
         "scripts/iac_code.py"
       ],
