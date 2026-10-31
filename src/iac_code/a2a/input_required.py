@@ -1093,7 +1093,9 @@ class PermissionInputRegistry:
             pipeline_coordinates=pipeline_coordinates,
         )
         previous_boundary_id = frame.get("previousBoundaryId")
-        if isinstance(previous_boundary_id, str) and previous_boundary_id:
+        if pending.request.boundary_id is not None:
+            record = store.reactivate(pending.request.boundary_id, record)
+        elif isinstance(previous_boundary_id, str) and previous_boundary_id:
             store.create_successor(record, previous_boundary_id=previous_boundary_id)
             await self._release_replaced_durable_boundary(previous_boundary_id)
         else:
@@ -1269,8 +1271,10 @@ class PermissionInputRegistry:
                     await result
 
         control = current_execution_control()
-        if control is not None and (current.get("permissionClass") == "normal" or control.permission_pause_enabled):
-            control.bind_recoverable_permission_boundary(store, str(current["boundaryId"]))
+        if control is not None:
+            control.bind_recoverable_permission_boundary(
+                store, str(current["boundaryId"]), concurrent=pending.resolution_owner is not None
+            )
         coordinator.register_live(
             record=current,
             store=store,
@@ -1293,6 +1297,7 @@ class PermissionInputRegistry:
         resolution_owner: PermissionResolutionOwner | None = None,
         scope: str = "pipeline",
         coordinates: dict[str, Any] | None = None,
+        input_id: str | None = None,
     ) -> PendingPermission:
         if request.response_future is None or request.response_future.done():
             raise InvalidParamsError("Permission wait point is no longer active.")
@@ -1316,9 +1321,12 @@ class PermissionInputRegistry:
                 for pending in self._pending.values()
             ):
                 await self._condition.wait()
-            input_id = _permission_input_id()
-            while (task_id, input_id) in self._pending:
+            if input_id is None:
                 input_id = _permission_input_id()
+                while (task_id, input_id) in self._pending:
+                    input_id = _permission_input_id()
+            elif not input_id or (task_id, input_id) in self._pending:
+                raise InvalidParamsError("permission_resume_invalid: restored permission is already registered.")
             pending = PendingPermission(
                 task_id=task_id,
                 context_id=context_id,
@@ -1358,35 +1366,7 @@ class PermissionInputRegistry:
 
         coordinator = self._permission_wait_coordinator
         if coordinator is not None and pending.boundary_id is not None:
-            if response.decision == "allow_once":
-                await self._validate_live_execution_identity(pending)
-
-            def audit_new_claim(value: str) -> bool:
-                return emit_permission_boundary_audit(
-                    pending.request,
-                    decision="allow" if value == "allow_once" else "deny",
-                    scope="a2a_input_required",
-                    source="a2a_user_permission",
-                    reason_type="user_decision",
-                    reason_detail=value,
-                )
-
-            try:
-                record, _created = await coordinator.claim_live(
-                    boundary_id=pending.boundary_id,
-                    value="allow_once" if response.decision == "allow_once" else "deny",
-                    source="user",
-                    on_new_claim=audit_new_claim,
-                    before_delivery=lambda record: self._backup_claim_before_delivery(pending, record),
-                    before_release=prepare_delivery,
-                )
-            except (LookupError, ValueError) as exc:
-                raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
-            decision = record.get("decision")
-            approved = isinstance(decision, dict) and decision.get("value") == "allow_once"
-            if record.get("phase") in {"SUSPENDING", "SUSPENDED", "RESTORING"}:
-                pending.state = "suspended_decision_claimed"
-            return approved
+            return await self.resolve_durable_permission(pending, response, before_release=prepare_delivery)
 
         async with self._condition:
             self._validate_response(pending, response)
@@ -1407,6 +1387,46 @@ class PermissionInputRegistry:
             await prepare_delivery()
             future.set_result(approved)
             return approved
+
+    async def resolve_durable_permission(
+        self,
+        pending: PendingPermission,
+        response: PermissionResponse,
+        *,
+        before_release: Callable[[], Awaitable[None]] | None = None,
+        source: str = "user",
+    ) -> bool:
+        coordinator = self._permission_wait_coordinator
+        if coordinator is None or pending.boundary_id is None:
+            raise InvalidParamsError("permission_resume_invalid: durable permission is unavailable.")
+        if response.decision == "allow_once":
+            await self._validate_live_execution_identity(pending)
+
+        def audit_new_claim(value: str) -> bool:
+            return emit_permission_boundary_audit(
+                pending.request,
+                decision="allow" if value == "allow_once" else "deny",
+                scope="a2a_sub_pipeline_permission" if pending.resolution_owner is not None else "a2a_input_required",
+                source="timeout" if source == "timeout" else "a2a_user_permission",
+                reason_type="permission_wait_timeout" if source == "timeout" else "user_decision",
+                reason_detail=value,
+            )
+
+        try:
+            record, _created = await coordinator.claim_live(
+                boundary_id=pending.boundary_id,
+                value="allow_once" if response.decision == "allow_once" else "deny",
+                source=source,
+                on_new_claim=audit_new_claim,
+                before_delivery=lambda record: self._backup_claim_before_delivery(pending, record),
+                before_release=before_release,
+            )
+        except (LookupError, ValueError) as exc:
+            raise InvalidParamsError(f"permission_resume_invalid: {exc}") from exc
+        decision = record.get("decision")
+        if record.get("phase") in {"SUSPENDING", "SUSPENDED", "RESTORING"}:
+            pending.state = "suspended_decision_claimed"
+        return isinstance(decision, dict) and decision.get("value") == "allow_once"
 
     @staticmethod
     async def _validate_live_execution_identity(pending: PendingPermission) -> None:
@@ -1487,6 +1507,19 @@ class PermissionInputRegistry:
             for pending in claimed:
                 pending.state = "canceling"
             return claimed
+
+    async def release_failed_claim_for_retry(self, pending: PendingPermission) -> None:
+        """Keep a resident card usable when its decision delivery failed before release."""
+
+        async with self._condition:
+            if (
+                self._pending.get((pending.task_id, pending.input_id)) is pending
+                and pending.state == "resolving"
+                and pending.task_id not in self._closing_tasks
+                and pending.request.response_future is not None
+                and not pending.request.response_future.done()
+            ):
+                pending.state = "pending"
 
     async def pending_envelopes(
         self,
@@ -1587,16 +1620,7 @@ class PermissionInputRegistry:
         # used for answers and cancellation.  It prevents a failed critical
         # backup/publication from leaving a recoverable checkpoint for an
         # INPUT_REQUIRED boundary that was never externally visible.
-        coordinator = self._permission_wait_coordinator
-        if pending.boundary_id is not None and pending.checkpoint_store is not None:
-            canceled = bool(coordinator is not None and await coordinator.cancel_live(pending.boundary_id))
-            if not canceled:
-                try:
-                    pending.checkpoint_store.cancel(pending.boundary_id)
-                except ValueError:
-                    # A concurrently claimed decision remains authoritative;
-                    # recovery will finish applying that decision.
-                    pass
+        await self.cancel_durable_boundary(pending)
         future = pending.request.response_future
         if future is not None and not future.done():
             emit_permission_boundary_audit(
@@ -1608,6 +1632,20 @@ class PermissionInputRegistry:
                 reason_detail="permission input could not be published or resumed",
             )
             future.set_result(False)
+
+    async def cancel_durable_boundary(self, pending: PendingPermission, *, cancel_future: bool = True) -> None:
+        coordinator = self._permission_wait_coordinator
+        if pending.boundary_id is None or pending.checkpoint_store is None:
+            return
+        canceled = bool(
+            coordinator is not None and await coordinator.cancel_live(pending.boundary_id, cancel_future=cancel_future)
+        )
+        if not canceled:
+            try:
+                pending.checkpoint_store.cancel(pending.boundary_id)
+            except ValueError:
+                # An authoritative decision cannot be undone by cleanup.
+                pass
 
     async def complete(self, pending: PendingPermission) -> None:
         async with self._condition:

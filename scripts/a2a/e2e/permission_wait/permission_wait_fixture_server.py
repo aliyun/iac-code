@@ -35,6 +35,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--defer-staging-publisher", action="store_true")
     parser.add_argument("--staging-dir", type=Path)
     parser.add_argument("--backup-dir", type=Path)
+    parser.add_argument("--suspend-trigger", type=Path)
     return parser.parse_args()
 
 
@@ -186,7 +187,7 @@ def _create_fixture_pipeline(
     import time
     from types import SimpleNamespace
 
-    from iac_code.agent.message import Message, ToolUseBlock
+    from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
     from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
     from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
     from iac_code.services.permission_wait import canonical_digest
@@ -358,6 +359,7 @@ def _create_fixture_pipeline(
             allowed = bool(outcome)
             if allowed:
                 self._record_execution()
+            self._persist_permission_result(allowed)
             async for event in self._finish_stream():
                 yield event
 
@@ -378,9 +380,27 @@ def _create_fixture_pipeline(
                 self._record_execution()
             elif decision.get("value") != "deny":
                 raise ValueError("permission_resume_invalid: fixture decision is invalid")
+            self._persist_permission_result(decision["value"] == "allow_once")
             yield TextDeltaEvent(text="fixture pipeline recovery completed")
             async for event in self._finish_stream():
                 yield event
+
+        @staticmethod
+        def _persist_permission_result(allowed: bool) -> None:
+            transcript_storage.append(
+                cwd,
+                transcript_id,
+                Message(
+                    role="user",
+                    content=[
+                        ToolResultBlock(
+                            tool_use_id="fixture-pipeline-tool-1",
+                            content="executed" if allowed else "Permission denied.",
+                            is_error=not allowed,
+                        )
+                    ],
+                ),
+            )
 
         async def rebuild_permission_audit_event(self, checkpoint: dict[str, Any], recovered: Any):
             if recovered.audit_context.get("transcript_id") != transcript_id:
@@ -510,6 +530,8 @@ def main() -> int:
     os.environ["IAC_CODE_CONFIG_DIR"] = str(config_dir)
     os.environ["IAC_CODE_MODE"] = args.mode
     os.environ["IACCODE_A2A_ALLOWED_CWDS"] = str(workspace)
+    os.environ["A2A_PERSISTENCE_DIR"] = str(persistence_dir)
+    os.environ["IAC_CODE_A2A_PERMISSION_PAUSE_ENABLED"] = "1"
     # Cloud-shaped permission fixtures must exercise the durable identity
     # contract without making a real STS request.  Keep one stable caller
     # across both fixture-server generations while using explicitly fake
@@ -529,7 +551,22 @@ def main() -> int:
     from iac_code.a2a import pipeline_executor as pipeline_executor_module
     from iac_code.a2a.app import create_app
     from iac_code.services import session_backup_staging as backup_staging_module
+    from iac_code.services.permission_wait import PermissionWaitCoordinator
     from iac_code.services.providers.aliyun_identity import AliyunCallerIdentity, AliyunCallerIdentityResolver
+
+    original_log_exception = executor_module.IacCodeA2AExecutor._log_executor_exception
+
+    def log_fixture_executor_exception(self: Any, stage: str, *, task_id: str, context_id: str) -> None:
+        import logging
+
+        original_log_exception(self, stage, task_id=task_id, context_id=context_id)
+        service = self._execution_control_service
+        control = service.get_for_context(context_id) if service is not None else None
+        logging.getLogger(__name__).error(
+            "Fixture executor failure control=%s", control.snapshot() if control is not None else None, exc_info=True
+        )
+
+    executor_module.IacCodeA2AExecutor._log_executor_exception = log_fixture_executor_exception
 
     async def resolve_fixture_identity(
         self: AliyunCallerIdentityResolver,
@@ -540,6 +577,24 @@ def main() -> int:
         return AliyunCallerIdentity(kind="ram_role", account_id="1000000000000001", subject_id="fixture-role-id")
 
     AliyunCallerIdentityResolver.resolve = resolve_fixture_identity
+
+    if args.suspend_trigger is not None:
+        import asyncio
+
+        original_timer = PermissionWaitCoordinator._run_resident_timer
+
+        async def controlled_timer(self: PermissionWaitCoordinator, owner: Any) -> None:
+            while not args.suspend_trigger.exists():
+                await asyncio.sleep(0.02)
+            from iac_code.services.permission_wait import format_utc, utc_now
+
+            owner.store.transaction(
+                owner.boundary_id,
+                lambda record: {**record, "residentDeadlineAt": format_utc(utc_now())},
+            )
+            await original_timer(self, owner)
+
+        PermissionWaitCoordinator._run_resident_timer = controlled_timer
 
     if args.defer_staging_publisher:
         backup_staging_module.SessionBackupStagingProcess.start = lambda self: None

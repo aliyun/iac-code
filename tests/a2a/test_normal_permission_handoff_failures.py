@@ -18,9 +18,11 @@ from iac_code.a2a.executor import IacCodeA2AExecutor, InputResponseExecutionCont
 from iac_code.a2a.input_handoff import HandoffCommitResult, InputHandoffStore
 from iac_code.a2a.persistence import A2APersistenceStore
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.agent.message import Message, ToolResultBlock
 from iac_code.services.permission_wait import format_utc, utc_now
 from iac_code.services.session_backup import BackupResult
 from iac_code.services.session_backup_staging import StagedSessionBackupService
+from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionRequestEvent, TextDeltaEvent
 
 from .fakes import FakeEventQueue, FakeRuntime
@@ -181,6 +183,17 @@ class _RecoveryLoop:
         assert control is not None
         assert control.execution_id != self.fixture.control.execution_id
         self.resumed.append(checkpoint["decision"]["value"])
+        SessionStorage().append(
+            str(self.fixture.root),
+            checkpoint["sessionId"],
+            Message(
+                role="user",
+                content=[
+                    ToolResultBlock(tool_use_id=tool_use_id, content="recovered result")
+                    for tool_use_id in checkpoint["continuationFrame"]["orderedToolUseIds"]
+                ],
+            ),
+        )
         yield TextDeltaEvent(text="recovered result")
 
 
@@ -218,6 +231,53 @@ class _RevisionAdvanceBeforeActivation:
         path = self.fixture.root / "a2a/execution-control/ctx-1.json"
         path.write_text(json.dumps(document), encoding="utf-8")
         return await self.original(**kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lost_authority", ["missing_control", "generic_ready", "dead_pid", "wrong_boundary"])
+async def test_cold_permission_reply_requires_its_authoritative_handoff(tmp_path, monkeypatch, lost_authority):
+    fixture = _FailureHandoff(tmp_path, monkeypatch)
+    cold_store = None
+    try:
+        await fixture.start()
+        await fixture.suspend()
+        fixture.record_decision_audit()
+        recovery = _RecoveryLoop(fixture)
+        monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", recovery.runtime)
+        path = tmp_path / "a2a/execution-control/ctx-1.json"
+        document = fixture.document()
+        if lost_authority == "missing_control":
+            path.unlink()
+        else:
+            if lost_authority == "wrong_boundary":
+                document["inputHandoff"]["boundaryId"] = "pwb_unrelated_boundary"
+            else:
+                document["inputHandoff"] = None
+            if lost_authority == "dead_pid":
+                document["inputHandoffReady"] = False
+                document["ownerIdentity"] = None
+                document["ownerPid"] = 100000000
+                monkeypatch.setattr("iac_code.a2a.execution_control._pid_alive", lambda _pid: False)
+            path.write_text(json.dumps(document), encoding="utf-8")
+        cold_store = A2ATaskStore(persistence=A2APersistenceStore(tmp_path / "a2a"), backup_service=fixture.backup)
+        cold_store.set_execution_control_provider(
+            fixture.recovering.snapshot_for_context, fixture.recovering.has_active_work
+        )
+        executor = IacCodeA2AExecutor(
+            task_store=cold_store,
+            model="test",
+            backup_service=fixture.backup,
+            execution_control_service=fixture.recovering,
+        )
+
+        with pytest.raises(InputResponseExecutionControlConflictError):
+            await executor.execute(permission_reply(tmp_path, input_id=fixture.pending.input_id), FakeEventQueue())
+
+        assert recovery.resumed == []
+    finally:
+        if cold_store is not None:
+            await cold_store.stop_cleanup_loop()
+        await fixture.close()
 
 
 @pytest.mark.asyncio
@@ -481,7 +541,9 @@ async def test_real_failed_mirror_then_decision_generation_advance_can_retry_han
         assert claimed["generation"] > previous["boundaryGeneration"]
         fault.fail = False
 
-        result = await fixture.local_reserve()
+        result = await fixture.service.reserve_recoverable_input_continuation_result(
+            context_id="ctx-1", task_id="task-1", owner="", permission_checkpoint=claimed
+        )
 
         assert result.admitted, "A failed backup attempt must not permanently fence the newer decision generation"
         document = fixture.document()

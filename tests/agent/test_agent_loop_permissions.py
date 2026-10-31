@@ -38,6 +38,71 @@ USER_DENIED_TOOL_RESULT = (
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", [PermissionWaitOutcome.SUSPEND, PermissionWaitOutcome.AUTOMATIC_DENY])
+async def test_resume_unanswered_candidate_recreates_original_wait_without_executing(outcome) -> None:
+    class WaitingTool(WriteTool):
+        async def execute(self, *, tool_input, context):
+            raise AssertionError("An unanswered candidate must not execute its tool")
+
+    class UnusedProvider:
+        def get_model_name(self):
+            return "fake"
+
+        async def stream(self, messages, system, tools=None):
+            raise AssertionError("An unanswered candidate must not ask the model to regenerate its card")
+            yield  # pragma: no cover
+
+    assistant = Message(role="assistant", content=[ToolUseBlock(id="tool-original", name="write_test", input={})])
+    registry = ToolRegistry()
+    registry.register(WaitingTool())
+    loop = AgentLoop(
+        provider_manager=UnusedProvider(),
+        system_prompt="system",
+        tool_registry=registry,
+        resume_messages=[assistant],
+    )
+    checkpoint = build_permission_checkpoint(
+        session_id="session-original",
+        task_id="task-original",
+        context_id="context-original",
+        input_id="input-original",
+        tool_use_id="tool-original",
+        tool_name="write_test",
+        tool_input={},
+        permission_class="pipeline",
+        pipeline_coordinates={"candidate": {"id": "candidate-original", "index": 1}},
+        continuation_frame={
+            "assistantMessageRef": "session.jsonl:0",
+            "assistantMessageDigest": canonical_digest([block.model_dump(mode="json") for block in assistant.content]),
+            "orderedToolUseIds": ["tool-original"],
+            "currentIndex": 0,
+            "decisions": [{"toolUseId": "tool-original", "state": "pending", "source": None}],
+        },
+        policy=PermissionWaitPolicy(),
+    )
+    checkpoint["phase"] = "SUSPENDED"
+    stream = loop.resume_permission_boundary(checkpoint)
+    try:
+        permission = await anext(stream)
+        assert isinstance(permission, PermissionRequestEvent)
+        assert permission.boundary_id == checkpoint["boundaryId"]
+        assert permission.tool_use_id == "tool-original"
+        assert permission.continuation_frame == checkpoint["continuationFrame"]
+        assert checkpoint["decision"]["status"] == "none"
+        permission.response_future.set_result(outcome)
+        if outcome is PermissionWaitOutcome.SUSPEND:
+            with pytest.raises(PermissionWaitSuspended):
+                await anext(stream)
+        else:
+            denied = await anext(stream)
+            assert isinstance(denied, ToolResultEvent)
+            assert denied.is_error
+            assert "The user explicitly denied" not in denied.result
+    finally:
+        await stream.aclose()
+
+
+@pytest.mark.asyncio
 async def test_closing_resource_selection_stream_cancels_pending_tool() -> None:
     stopped = asyncio.Event()
 

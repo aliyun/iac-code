@@ -1655,6 +1655,8 @@ class IacCodeA2AExecutor(AgentExecutor):
             TASK_STATE_CANCELED,
         }:
             return False
+        if control.has_unsettled_permission_boundary():
+            return False
         if await self._permission_input_registry.has_pending_task(control.task_id):
             return False
         if execution_status != TASK_STATE_INPUT_REQUIRED or control.execution_mode == "normal":
@@ -4070,7 +4072,13 @@ class IacCodeA2AExecutor(AgentExecutor):
             audit_already_final = persisted_decision.get("auditStatus") in {"recorded", "failed"}
         pipeline_executor: IacCodeA2APipelineExecutor | None = None
         audit_event: PermissionRequestEvent | None = None
-        if not audit_already_final:
+        cloud_identity_required = expected_value == "allow_once" and (
+            record.get("principalRef") is not None
+            or record.get("principalKind") is not None
+            or record.get("toolName") == "aliyun_api"
+            or str(record.get("toolName", "")).startswith("ros_")
+        )
+        if not audit_already_final or cloud_identity_required:
             recovered = recover_permission_audit_boundary(
                 record,
                 cwd=context_record.cwd,
@@ -4237,7 +4245,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                 reserved_admission = None
                 if admission is None:
                     reservation = await self._execution_control_service.reserve_recoverable_input_continuation_result(
-                        context_id=response.context_id, task_id=response.task_id, owner=owner
+                        context_id=response.context_id,
+                        task_id=response.task_id,
+                        owner=owner,
+                        permission_checkpoint=record,
                     )
                     if not reservation.admitted:
                         raise InputResponseExecutionControlConflictError(
@@ -4246,6 +4257,14 @@ class IacCodeA2AExecutor(AgentExecutor):
                             decision_recorded=True,
                         )
                     reserved_admission = reservation.token
+                elif not await self._execution_control_service.require_recoverable_permission_admission(
+                    admission, record
+                ):
+                    raise InputResponseExecutionControlConflictError(
+                        "Permission recovery execution ownership unavailable: RECOVERY_PROOF_MISSING",
+                        reason="RECOVERY_PROOF_MISSING",
+                        decision_recorded=True,
+                    )
                 try:
                     # Hold the cross-process admission before publishing the
                     # decision. A losing cold worker must not advance shared
@@ -4300,13 +4319,32 @@ class IacCodeA2AExecutor(AgentExecutor):
         assistant_final = _AssistantFinalText()
 
         def resolve_restored_boundary() -> None:
-            persisted_messages = SessionStorage().load(context_record.cwd, context_record.session_id)
-            result_digest = canonical_digest(persisted_messages[-1].to_dict()) if persisted_messages else ""
-            store.resolve(
-                boundary_id,
-                result_digest=result_digest,
-                ack={"decision": expected_value, "accepted": True},
+            candidates = (
+                [
+                    current
+                    for current in store.list_active()
+                    if current.get("permissionClass") == "normal"
+                    and current.get("taskId") == response.task_id
+                    and current.get("contextId") == response.context_id
+                ]
+                if normal_recovery
+                else [store.load(boundary_id)]
             )
+            for current in candidates:
+                if current is None or current.get("phase") == "RESOLVED":
+                    continue
+                result_digest = store.persisted_result_digest(current)
+                if result_digest is None:
+                    continue
+                decision = current.get("decision")
+                store.resolve(
+                    str(current["boundaryId"]),
+                    result_digest=result_digest,
+                    ack={
+                        "decision": decision.get("value") if isinstance(decision, dict) else None,
+                        "accepted": True,
+                    },
+                )
 
         try:
             if normal_recovery:
@@ -4421,7 +4459,12 @@ class IacCodeA2AExecutor(AgentExecutor):
                             normal_turn_finished = True
                 finally:
                     if runtime is not None:
-                        await await_fenced(_close_runtime(runtime))
+                        control = current_execution_control()
+                        if control is not None and control.permission_handoff_requires_admission():
+                            control.set_permission_runtime_close_confirmation(partial(_close_runtime, runtime))
+                            await control.confirm_permission_runtime_closed()
+                        else:
+                            await await_fenced(_close_runtime(runtime))
             resolve_restored_boundary()
             task = await self._task_store.get_or_create_task(
                 task_id=response.task_id,
@@ -4470,8 +4513,10 @@ class IacCodeA2AExecutor(AgentExecutor):
                     state=task.state,
                 )
                 self._metrics.record_turn_completed()
-        except PermissionWaitSuspended:
-            store.mark_suspended(boundary_id)
+        except PermissionWaitSuspended as suspended:
+            if suspended.boundary_id is None:
+                raise ValueError("suspended permission boundary is unavailable") from suspended
+            store.mark_suspended(suspended.boundary_id)
             await self._publish_status(
                 event_queue,
                 task_id=response.task_id,

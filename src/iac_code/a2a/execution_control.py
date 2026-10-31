@@ -287,6 +287,7 @@ class _RecoverableInputAdmission:
     expected_revision: int | None = None
     boundary_generation: int | None = None
     local_server_instance_id: str | None = None
+    permission_handoff: dict[str, Any] | None = None
 
     def as_document(self) -> dict[str, Any]:
         return {
@@ -299,6 +300,7 @@ class _RecoverableInputAdmission:
             "expectedRevision": self.expected_revision,
             "boundaryGeneration": self.boundary_generation,
             "localServerInstanceId": self.local_server_instance_id,
+            "permissionHandoff": self.permission_handoff,
         }
 
 
@@ -306,6 +308,7 @@ class _RecoverableInputAdmission:
 class _PersistedControlActivation:
     previous_control: dict[str, Any] | None
     execution_id: str
+    permission_references: dict[str, dict[str, Any] | None] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -348,6 +351,8 @@ class _RecoverableInputAdmissionStore:
 
     def reserve_result(self, admission: _RecoverableInputAdmission) -> RecoverableInputAdmissionResult:
         if self._root is None:
+            if admission.permission_handoff is not None:
+                return RecoverableInputAdmissionResult(reason="RECOVERY_PROOF_MISSING")
             if admission.context_id in self._token_by_context:
                 return RecoverableInputAdmissionResult(reason="ADMISSION_BUSY")
             self._remember(admission)
@@ -381,10 +386,30 @@ class _RecoverableInputAdmissionStore:
         self._remember(admission)
         return RecoverableInputAdmissionResult(token=admission.token, reason="ADMITTED")
 
+    def require_permission_handoff(self, token: str, proof: RecoverableInputHandoffProof) -> bool:
+        admission = self.get(token)
+        if admission is None or self._root is None:
+            return False
+        required = replace(admission, permission_handoff=proof.as_document())
+        path = self._admission_path(admission.context_id)
+        with cross_process_file_lock(self._lock_path(admission.context_id)):
+            document = self._load_document(path)
+            if (
+                document is None
+                or self._expired(document)
+                or not self._matches(document, admission)
+                or not self._persisted_control_allows_recovery(required)
+            ):
+                return False
+            atomic_write_json(path, required.as_document())
+        self._remember(required)
+        return True
+
     def activate(
         self,
         admission: _RecoverableInputAdmission,
         control_snapshot: dict[str, Any],
+        permission_cwd: str | None = None,
     ) -> _PersistedControlActivation | None:
         """Fence one admission while publishing its running control."""
         if self._root is None:
@@ -412,9 +437,22 @@ class _RecoverableInputAdmissionStore:
             if self._permission_pause_references is not None:
                 self._permission_pause_references.retire_released(previous_control)
             atomic_write_json(control_path, persisted_snapshot)
+            permission_references = {}
+            if admission.permission_handoff is not None and self._permission_pause_references is not None:
+                assert previous_control is not None
+                try:
+                    if permission_cwd is None:
+                        raise ValueError("permission recovery workspace is unavailable")
+                    permission_references = self._permission_pause_references.rebind_recovered(
+                        previous_control, persisted_snapshot, cwd=permission_cwd
+                    )
+                except BaseException:
+                    atomic_write_json(control_path, previous_control)
+                    raise
         return _PersistedControlActivation(
             previous_control=previous_control,
             execution_id=str(control_snapshot["executionId"]),
+            permission_references=permission_references,
         )
 
     def finish_activation(self, admission: _RecoverableInputAdmission) -> bool:
@@ -456,6 +494,8 @@ class _RecoverableInputAdmissionStore:
                 control_path.unlink(missing_ok=True)
             else:
                 atomic_write_json(control_path, activation.previous_control)
+            if activation.permission_references and self._permission_pause_references is not None:
+                self._permission_pause_references.rollback_recovered(activation.permission_references)
         return True
 
     def claim_begin_without_admission(
@@ -750,7 +790,7 @@ class _RecoverableInputAdmissionStore:
         assert self._root is not None
         path = self._root / f"{admission.context_id}.json"
         if not path.exists():
-            return True
+            return admission.permission_handoff is None
         document = self._load_document(path)
         if document is None or document.get("taskId") != admission.task_id:
             return False
@@ -759,6 +799,18 @@ class _RecoverableInputAdmissionStore:
             or document.get("revision") != admission.expected_revision
         ):
             return False
+        if admission.permission_handoff is not None:
+            proof = admission.permission_handoff
+            handoff = document.get("inputHandoff")
+            return bool(
+                document.get("owner") == admission.owner
+                and document.get("commitError") is None
+                and RecoverableInputHandoffProof.validates_committed(document, admission.context_id, admission.task_id)
+                and isinstance(handoff, dict)
+                and all(
+                    handoff.get(key) == value for key, value in proof.items() if key not in {"phase", "backupReceipt"}
+                )
+            )
         if admission.local_server_instance_id is not None:
             return bool(
                 document.get("serverInstanceId") == admission.local_server_instance_id
@@ -849,6 +901,7 @@ class _RecoverableInputAdmissionStore:
             and document.get("expectedRevision") == admission.expected_revision
             and document.get("boundaryGeneration") == admission.boundary_generation
             and document.get("localServerInstanceId") == admission.local_server_instance_id
+            and document.get("permissionHandoff") == admission.permission_handoff
         )
 
 
@@ -1132,7 +1185,7 @@ class ExecutionController:
         self._suspended_input_handoff_commit = suspended_input_handoff_commit
         self._permission_handoff: SuspendedPermissionHandoff | None = None
         self._input_handoff_proof: RecoverableInputHandoffProof | None = None
-        self._permission_suspension_inflight = False
+        self._permission_suspension_inflight = 0
         self._durable_input_handoff_enabled = False
         self._termination_cleanup_complete = termination_cleanup is None
         self._termination_cleanup_inflight = False
@@ -1171,19 +1224,62 @@ class ExecutionController:
     def disable_durable_input_handoff(self) -> None:
         self._durable_input_handoff_enabled = False
 
-    def bind_recoverable_permission_boundary(self, store: PermissionWaitCheckpointStore, boundary_id: str) -> None:
-        if self.execution_mode == "normal" or self.permission_pause_enabled:
-            # A recovered turn may reach a second permission card. Its new
-            # resident continuation must not inherit the previous handoff.
-            self.disable_durable_input_handoff()
-            self._input_handoff_proof = None
-            self._permission_handoff = SuspendedPermissionHandoff(store, boundary_id)
+    def bind_recoverable_permission_boundary(
+        self, store: PermissionWaitCheckpointStore, boundary_id: str, *, concurrent: bool = False
+    ) -> None:
+        # Each resident card must retire the previous card's recovery authority.
+        previous = self._permission_handoff
+        boundary_ids = [boundary_id]
+        if concurrent and previous is not None:
+            if previous.store.paths.session_dir != store.paths.session_dir:
+                raise ValueError("concurrent permission session changed")
+            boundary_ids = [
+                key
+                for key in previous.boundary_ids
+                if (record := store.load(key)) is None or record.get("phase") != "RESOLVED"
+            ]
+            if boundary_id not in boundary_ids:
+                boundary_ids.append(boundary_id)
+        self.disable_durable_input_handoff()
+        self._input_handoff_proof = None
+        self._permission_handoff = SuspendedPermissionHandoff(store, boundary_ids[0], boundary_ids=tuple(boundary_ids))
+        self._permission_handoff.suspension_started = any(
+            (record := store.load(key)) is not None and record.get("phase") in {"SUSPENDING", "SUSPENDED"}
+            for key in boundary_ids
+        )
 
     def permission_handoff_requires_admission(self) -> bool:
         return self.phase == "running" and bool(
             self._permission_suspension_inflight
             or self._input_handoff_proof is not None
-            or (self._permission_handoff is not None and self._permission_handoff.suspension_started)
+            or (
+                self._permission_handoff is not None
+                and self._permission_handoff.suspension_started
+                and self.has_unsettled_permission_boundary()
+            )
+        )
+
+    def has_unsettled_permission_boundary(self) -> bool:
+        boundary = self._permission_handoff
+        return boundary is not None and any(
+            (record := boundary.store.load(boundary_id)) is None or record.get("phase") not in {"RESOLVED", "CANCELED"}
+            for boundary_id in boundary.boundary_ids
+        )
+
+    def _permission_handoff_blocks_current_work(self) -> bool:
+        if not self.permission_handoff_requires_admission():
+            return False
+        boundary = self._permission_handoff
+        task = asyncio.current_task()
+        registered = self._participant_ids_by_task.get(task) if task is not None else None
+        inherited = _CURRENT_PARTICIPANT_IDS.get()
+        return not (
+            self.stream_available
+            and self._input_handoff_proof is None
+            and boundary is not None
+            and not boundary.runtime_drained
+            and boundary.runtime_close_confirmation is None
+            and (registered in self._participants or any(key in self._participants for key in inherited))
         )
 
     def set_permission_runtime_close_confirmation(self, confirmation: Callable[[], Awaitable[None]]) -> None:
@@ -1233,7 +1329,9 @@ class ExecutionController:
         self.persisted_revision = self.revision
         boundary = self._permission_handoff
         if boundary is not None:
-            replacement = SuspendedPermissionHandoff(boundary.store, boundary.boundary_id)
+            replacement = SuspendedPermissionHandoff(
+                boundary.store, boundary.boundary_id, boundary_ids=boundary.boundary_ids
+            )
             replacement.suspension_started = boundary.suspension_started
             replacement.runtime_drained = boundary.runtime_drained
             replacement.runtime_close_confirmation = boundary.runtime_close_confirmation
@@ -1259,6 +1357,7 @@ class ExecutionController:
             or self._permission_suspension_inflight
             or boundary is None
             or not boundary.suspension_started
+            or not self.has_unsettled_permission_boundary()
             or self._suspended_input_handoff_commit is None
             or not self._input_work_drained()
             or self.input_handoff_ready()
@@ -1316,7 +1415,7 @@ class ExecutionController:
                 ancestor_activity_ids=(),
                 handoff_participant_ids=(),
             )
-            self._permission_suspension_inflight = True
+            self._permission_suspension_inflight += 1
             if self._permission_handoff is not None:
                 self._permission_handoff.suspension_started = True
             self._invalidate_pause_commit_locked()
@@ -1334,12 +1433,17 @@ class ExecutionController:
         await self.end_activity(activity_id)
         try:
             if suspended is False and self._permission_handoff is not None:
-                self._permission_handoff.suspension_started = False
+                boundary = self._permission_handoff
+                boundary.suspension_started = any(
+                    (record := boundary.store.load(boundary_id)) is not None
+                    and record.get("phase") in {"SUSPENDING", "SUSPENDED"}
+                    for boundary_id in boundary.boundary_ids
+                )
             if self._permission_handoff is not None and self._suspended_input_handoff_commit is not None:
                 await self._suspended_input_handoff_commit(self)
         finally:
             async with self._condition:
-                self._permission_suspension_inflight = False
+                self._permission_suspension_inflight -= 1
                 self._condition.notify_all()
 
     async def attach_task(
@@ -1373,7 +1477,7 @@ class ExecutionController:
     def register_spawned_task(self, task: asyncio.Task[Any], *, kind: str) -> None:
         """Synchronously reserve a newly-created Task before it can be scheduled."""
 
-        if self.phase in {"terminating", "terminated"} or self.permission_handoff_requires_admission():
+        if self.phase in {"terminating", "terminated"} or self._permission_handoff_blocks_current_work():
             task.cancel()
             raise ExecutionTerminatedError()
         self._ensure_participant_locked(task, kind)
@@ -1472,7 +1576,8 @@ class ExecutionController:
         if handoff_snapshot is not None and handoff_commit is not None:
             await handoff_commit(self, handoff_snapshot)
         elif self._permission_handoff is not None and self._suspended_input_handoff_commit is not None:
-            await self._suspended_input_handoff_commit(self)
+            async with self._condition:
+                self._schedule_suspended_input_handoff_locked()
         return natural_completion_generation
 
     async def observe_state(self) -> dict[str, Any]:
@@ -1835,7 +1940,7 @@ class ExecutionController:
 
     async def checkpoint(self) -> None:
         async with self._condition:
-            if self.permission_handoff_requires_admission():
+            if self._permission_handoff_blocks_current_work():
                 raise ExecutionTerminatedError()
             task = asyncio.current_task()
             participant_ids = _CURRENT_PARTICIPANT_IDS.get()
@@ -1872,7 +1977,7 @@ class ExecutionController:
         if check_gate:
             await self.checkpoint()
         async with self._condition:
-            if self.permission_handoff_requires_admission():
+            if self._permission_handoff_blocks_current_work():
                 raise ExecutionControlConflictError("Permission continuation requires recovery admission")
             if self.phase in {"terminating", "terminated"}:
                 raise ExecutionTerminatedError()
@@ -3357,6 +3462,13 @@ class ExecutionControlService:
         """Publish only after permission_cleanup exits, without counting this commit as business work."""
 
         async with self._context_start_locks.setdefault(control.context_id, asyncio.Lock()):
+            async with control._condition:
+                if (
+                    self._controls.get(control.context_id) is not control
+                    or not control._input_work_drained()
+                    or not control.has_unsettled_permission_boundary()
+                ):
+                    return
             try:
                 await control.confirm_permission_runtime_closed()
             except Exception as exc:
@@ -3377,6 +3489,7 @@ class ExecutionControlService:
                     or control._persistence_path is None
                     or self._backup_service is None
                     or not control._input_work_drained()
+                    or not control.has_unsettled_permission_boundary()
                     or control.input_handoff_ready()
                 ):
                     return
@@ -3527,6 +3640,10 @@ class ExecutionControlService:
                 )
             assert control is not None
             if admission is not None and not reuse:
+                if admission.permission_handoff is not None:
+                    control.bind_session(
+                        RecoverableInputHandoffProof.from_document(admission.permission_handoff).session_id
+                    )
                 control.enable_durable_input_handoff()
                 control.revision += 1
                 activation: _PersistedControlActivation | None = None
@@ -3546,12 +3663,18 @@ class ExecutionControlService:
                     await control.close()
 
                 await control.attach_task(task, mark_working=False)
+                if admission.permission_handoff is not None:
+                    proof = RecoverableInputHandoffProof.from_document(admission.permission_handoff)
+                    checkpoints = PermissionWaitCheckpointStore(control.cwd, proof.session_id)
+                    for boundary_id in proof.boundaries:
+                        control.bind_recoverable_permission_boundary(checkpoints, boundary_id, concurrent=True)
                 try:
                     activation = await run_sync_fenced_with_cancel_completion(
                         self._recoverable_input_admissions.activate,
                         cleanup_cancelled_activation,
                         admission,
                         control.snapshot(),
+                        control.cwd,
                     )
                     if activation is None:
                         raise ExecutionControlConflictError("Recoverable input continuation admission is stale")
@@ -3693,7 +3816,7 @@ class ExecutionControlService:
         return result.token
 
     async def reserve_recoverable_input_continuation_result(
-        self, *, context_id: str, task_id: str, owner: str
+        self, *, context_id: str, task_id: str, owner: str, permission_checkpoint: dict[str, Any] | None = None
     ) -> RecoverableInputAdmissionResult:
         """Reserve one request-scoped continuation after the caller proves the sidecar wait."""
         local = self._controls.get(context_id)
@@ -3721,6 +3844,16 @@ class ExecutionControlService:
                 # handoff write failed. Re-publish the same revision before a
                 # request can reserve and replace this controller.
                 await control._persist_snapshot(control.snapshot())
+            permission_handoff = None
+            if permission_checkpoint is not None and not local_only:
+                try:
+                    permission_checkpoint = self._refresh_local_permission_checkpoint(permission_checkpoint)
+                    proof = RecoverableInputHandoffProof.from_checkpoint(permission_checkpoint)
+                except (ValidationError, ValueError, TypeError):
+                    return RecoverableInputAdmissionResult(reason="RECOVERY_PROOF_MISSING")
+                if proof.context_id != context_id or proof.task_id != task_id:
+                    return RecoverableInputAdmissionResult(reason="RECOVERY_PROOF_MISSING")
+                permission_handoff = proof.as_document()
             token = "recovery-" + uuid.uuid4().hex
             admission = _RecoverableInputAdmission(
                 token=token,
@@ -3729,11 +3862,27 @@ class ExecutionControlService:
                 owner=owner,
                 expires_at=time.time() + _RECOVERABLE_INPUT_ADMISSION_TTL_SECONDS,
                 local_server_instance_id=self.server_instance_id if local_only else None,
+                permission_handoff=permission_handoff,
             )
             return await run_sync_fenced(
                 self._recoverable_input_admissions.reserve_result,
                 admission,
             )
+
+    async def require_recoverable_permission_admission(self, token: str, checkpoint: dict[str, Any]) -> bool:
+        try:
+            checkpoint = self._refresh_local_permission_checkpoint(checkpoint)
+            proof = RecoverableInputHandoffProof.from_checkpoint(checkpoint)
+        except (ValidationError, ValueError, TypeError):
+            return False
+        return await run_sync_fenced(self._recoverable_input_admissions.require_permission_handoff, token, proof)
+
+    def _refresh_local_permission_checkpoint(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
+        local = self._controls.get(str(checkpoint.get("contextId")))
+        boundary = local._permission_handoff if local is not None else None
+        if boundary is not None and checkpoint.get("boundaryId") in boundary.boundary_ids:
+            return boundary.store.refresh_handoff_checkpoint(checkpoint)
+        return checkpoint
 
     async def wait_until_recoverable_input_continuation(
         self,

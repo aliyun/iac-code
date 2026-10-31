@@ -38,11 +38,14 @@ from iac_code.a2a.pipeline_transport_delivery import (
     pipeline_transport_delivery_tracking,
 )
 from iac_code.a2a.task_store import A2ATaskStore
+from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
     PermissionWaitPolicy,
+    canonical_digest,
 )
 from iac_code.services.permissions.audit import fingerprint_text
 from iac_code.services.session_storage import SessionStorage
@@ -51,6 +54,7 @@ from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CandidateDetailEvent,
     MCPProgressEvent,
+    MessageStartEvent,
     PermissionRequestEvent,
     PermissionWaitOutcome,
     SubPipelineStreamEvent,
@@ -63,6 +67,7 @@ from iac_code.utils.public_errors import suppress_all_redaction
 from iac_code.web.pipeline_transcript import PipelineTranscriptTranslator, build_pipeline_transcript_rows
 
 from .fakes import FakeEventQueue
+from .test_permission_execution_control import continuation_frame
 
 
 def dump(event: Any) -> dict[str, Any]:
@@ -816,7 +821,10 @@ async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_o
     task_record.state = "working"
     task_store.mirror_task(task_record)
     session_id = "session-1"
-    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    session_dir = SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    transcript = PipelineTranscriptStorage(session_dir / "pipeline")
+    tool = ToolUseBlock(id="tool-candidate-a", name="bash", input={"cmd": "pwd"})
+    transcript.append(str(tmp_path), "candidate-a", Message(role="assistant", content=[tool]))
     pipeline_dir = tmp_path / "pipeline"
     publisher = PipelineA2AEventPublisher(
         event_queue=queue,
@@ -849,13 +857,24 @@ async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_o
             sub_pipeline_id="candidate-a",
             candidate_index=0,
             inner=PermissionRequestEvent(
-                tool_name="aliyun_api",
-                tool_input={"product": "ros", "action": "CreateStack"},
+                tool_name="bash",
+                tool_input={"cmd": "pwd"},
                 tool_use_id="tool-candidate-a",
                 response_future=permission_result,
+                continuation_frame={
+                    **continuation_frame(),
+                    "assistantMessageRef": "pipeline/transcripts/candidate-a/session.jsonl:0",
+                    "assistantMessageDigest": canonical_digest([tool.model_dump(mode="json")]),
+                    "orderedToolUseIds": ["tool-candidate-a"],
+                    "decisions": [
+                        {"toolUseId": "tool-candidate-a", "state": "pending", "source": None, "deniedResult": None}
+                    ],
+                },
+                audit_context={"transcript_id": "candidate-a"},
             ),
         )
     )
+    registry.activate_durable_boundary(next(iter(registry._pending.values())))
     await publisher.publish(
         PipelineEvent(
             type=PipelineEventType.SUB_PIPELINE_STARTED,
@@ -905,7 +924,18 @@ async def test_two_sub_pipeline_candidates_continue_while_one_permission_times_o
     assert timeout["permission"]["automatic"] is True
     task = await task_store.get_task_record("task-1")
     assert task.state == "working"
-    assert PermissionWaitCheckpointStore(str(tmp_path), session_id).list_active() == []
+    checkpoints = PermissionWaitCheckpointStore(str(tmp_path), session_id)
+    assert len(checkpoints.list_active()) == 1
+    transcript.append(
+        str(tmp_path),
+        "candidate-a",
+        Message(
+            role="user",
+            content=[ToolResultBlock(tool_use_id="tool-candidate-a", content="Permission denied.", is_error=True)],
+        ),
+    )
+    await publisher.publish(SubPipelineStreamEvent("candidate-a", 0, MessageStartEvent("denied-tool-persisted")))
+    assert checkpoints.list_active() == []
 
 
 @pytest.mark.asyncio

@@ -14,7 +14,49 @@ from iac_code.pipeline.engine.sub_pipeline_executor import SubPipelineExecutor, 
 from iac_code.pipeline.engine.types import StepResult, StepStatus
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked
 from iac_code.tools.base import ToolRegistry
-from iac_code.types.stream_events import ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
+from iac_code.types.stream_events import PermissionWaitSuspended, ToolResultEvent, ToolUseEndEvent, ToolUseStartEvent
+
+
+@pytest.mark.asyncio
+async def test_permission_suspension_preserves_candidate_attempt_without_failure(tmp_path, monkeypatch):
+    class WaitingStepExecutor:
+        current_agent_loop = None
+
+        async def execute(self, step, context, session_id, **kwargs):
+            raise PermissionWaitSuspended("pwb_candidate")
+            yield  # pragma: no cover
+
+    executor = SubPipelineExecutor(
+        provider_manager=MagicMock(),
+        base_tool_registry=ToolRegistry(),
+        pipeline=LoadedPipeline(name="test", steps=[], context_dependencies={}, max_rollbacks=3, skills={}),
+        pipeline_dir=tmp_path,
+        cwd=str(tmp_path),
+    )
+    monkeypatch.setattr(executor, "_make_step_executor", lambda: WaitingStepExecutor())
+    states = []
+    events = []
+    with pytest.raises(PermissionWaitSuspended, match="permission wait suspended"):
+        async for event in executor.execute_streaming(
+            sub_spec=_make_single_step_sub_spec(),
+            candidate={"name": "Plan A"},
+            candidate_index=0,
+            parent_context=PipelineContext({"intent": []}),
+            session_id="test_session",
+            resume_state={"sub_pipeline_id": "original-candidate"},
+            sub_step_attempt_allocator=lambda request: {"attempt_id": "attempt-7", "transcript_id": "transcript-7"},
+            sub_step_state_callback=states.append,
+        ):
+            events.append(event)
+    assert states[-1]["status"] == "suspended"
+    assert states[-1]["attempt_status"] == "running"
+    assert states[-1]["active_attempt_id"] == "attempt-7"
+    assert states[-1]["transcript_id"] == "transcript-7"
+    assert states[-1]["sub_pipeline_id"] == "original-candidate"
+    assert states[-1]["permission_boundary_id"] == "pwb_candidate"
+    assert not any(
+        event.type in {PipelineEventType.SUB_STEP_FAILED, PipelineEventType.SUB_PIPELINE_COMPLETED} for event in events
+    )
 
 
 def _make_sub_spec() -> SubPipelineSpec:
