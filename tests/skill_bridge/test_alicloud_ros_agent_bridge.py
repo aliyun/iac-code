@@ -7101,3 +7101,80 @@ def test_unknown_input_fails_explicitly_but_cannot_reopen_terminal_state(termina
         with pytest.raises(bridge.BridgeError) as error:
             summary.apply(payload)
         assert error.value.code == "unsupported_input"
+
+
+@pytest.mark.parametrize("location", ["input", "pipeline", "pipelineBatch"])
+def test_deployment_confirmation_is_a_safe_display_boundary(location):
+    envelope = {
+        "kind": "deployment_confirmation",
+        "inputId": "deployment-input",
+        "solution_summary": "Network plan",
+        "template_url": "https://example.invalid/template.yaml?Signature=fake-signed-value#fake-fragment",
+        "architecture_diagram": "flowchart LR\n VPC --> Switch",
+        "preview_ready_for_create": True,
+        "cost": {"totalMonthlyCost": "0", "AccessKeySecret": "fake-cost-secret"},
+        "effective_deployment_parameters": {"Password": "fake-parameter-secret"},
+        "options": [{"action": action, "name": action} for action in ("confirm", "adjust", "cancel", "deploy")],
+    }
+    event = {"eventType": "input_required", "data": envelope}
+    metadata = {
+        "input": {"input": envelope},
+        "pipeline": {"pipeline": event},
+        "pipelineBatch": {"pipelineBatch": {"events": [event]}},
+    }[location]
+    payload = _status_event(state="TASK_STATE_INPUT_REQUIRED", metadata=metadata)
+    summary = bridge.StreamSummary("session-1", mode="pipeline")
+    summary.apply(payload)
+    result = summary.to_result(0, "")
+    projected = bridge._project_stream_event(payload, "pipeline", 1)
+    for pending in (result["inputRequired"], projected["inputRequired"]):
+        assert pending["kind"] == "deployment_confirmation"
+        assert pending["solutionSummary"] == "Network plan"
+        assert pending["templateUrl"] == "https://example.invalid/template.yaml"
+        assert pending["architectureDiagram"] == "flowchart LR\n VPC --> Switch"
+        assert pending["cost"] == {"totalMonthlyCost": "0"}
+        assert [item["action"] for item in pending["options"]] == ["confirm", "adjust", "cancel"]
+        assert "permissionClass" not in pending
+    assert result["state"] == "input-required"
+    assert result["presentationRequired"] is True
+    for secret in ("fake-cost-secret", "fake-parameter-secret", "fake-signed-value", "fake-fragment"):
+        assert secret not in json.dumps(result)
+
+
+def test_deployment_confirmation_rejects_natural_language_continue_without_mutating_job(monkeypatch, tmp_path):
+    monkeypatch.setenv(bridge.STATE_DIR_ENV, str(tmp_path / "state"))
+    job_id = "d" * 32
+    root, job_path, spool = bridge._job_paths(job_id)
+    bridge._secure_directory(root)
+    spool.touch()
+    job = {
+        "schemaVersion": 1, "jobId": job_id, "workspace": str(tmp_path),
+        "state": "input-required", "mode": "pipeline", "sessionId": "session-1",
+        "inputRequired": {"kind": "deployment_confirmation", "inputId": "deployment-input"},
+    }
+    bridge._atomic_json(job_path, job)
+    monkeypatch.setattr(bridge, "_spawn_worker", lambda *args: pytest.fail("must not send deployment Query"))
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._continue_job_local({"jobId": job_id, "prompt": "confirm"})
+    assert error.value.code == "unsupported_input_response"
+    assert bridge._load_state_json(job_path) == job
+
+
+def test_large_deployment_confirmation_is_bounded_without_mutating_source():
+    pending = bridge._safe_input({
+        "kind": "deployment_confirmation", "inputId": "deployment-input",
+        "solutionSummary": "s" * 1200, "architectureDiagram": "d" * 2400,
+        "cost": {"resources": [{"name": "n" * 200, "spec": "s" * 300, "monthlyCost": "c" * 300}] * 12},
+        "options": [{"action": action, "summary": "s" * 800, "architectureDiagram": "d" * 2400}
+                    for action in ("confirm", "adjust", "reselect", "cancel")],
+    })
+    projection = {"type": "input-required", "inputRequired": pending}
+    original = json.dumps(projection)
+    bounded = bridge._bound_projection(projection)
+    assert bounded["trimmed"] is True
+    assert len(bridge._json_bytes(bounded)) <= bridge.MAX_INPUT_PROJECTION_BYTES
+    assert bounded["inputRequired"]["inputId"] == "deployment-input"
+    assert [option["action"] for option in bounded["inputRequired"]["options"]] == [
+        "confirm", "adjust", "reselect", "cancel",
+    ]
+    assert json.dumps(projection) == original
