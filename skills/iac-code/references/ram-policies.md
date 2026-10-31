@@ -12,19 +12,53 @@ Do not attach a product-wide `FullAccess` policy or use an action wildcard. Read
 plan and cleanup scope have been approved. Where an API supports resource-level authorization, scope `Resource` to
 the target account, region, stack, or resource ARN rather than all resources.
 
-## Common workflow actions
+## Required permissions by workflow
 
-These are workflow-specific examples, not one policy to grant in full.
+The following `required_permissions` declaration defines the exact RAM actions for these supported operations in
+Normal and Pipeline modes. Select only the operation and action needed by the approved task; do not grant the
+union of this declaration. Mode selection itself grants no permission. Write actions require the corresponding
+explicit user approval and resource scope; read actions remain subject to Runtime permission decisions.
 
-| Workflow | Read actions | Write actions when explicitly approved |
-|---|---|---|
-| Caller preflight | `sts:GetCallerIdentity` | None |
-| ROS template and stack operations | `ros:ValidateTemplate`, `ros:GetTemplateParameterConstraints`, `ros:PreviewStack`, `ros:GetStack`, `ros:ListStackResources` | `ros:CreateStack`, `ros:UpdateStack`, `ros:DeleteStack` |
-| VPC and vSwitch operations | `vpc:DescribeVpcs`, `vpc:DescribeVSwitches`, `vpc:DescribeVpcAttribute`, `vpc:DescribeVSwitchAttributes` | `vpc:CreateVpc`, `vpc:CreateVSwitch`, `vpc:DeleteVSwitch`, `vpc:DeleteVpc` |
-| Security-group operations | `ecs:DescribeZones`, `ecs:DescribeSecurityGroups`, `ecs:DescribeSecurityGroupAttribute` | `ecs:CreateSecurityGroup`, `ecs:AuthorizeSecurityGroup`, `ecs:AuthorizeSecurityGroupEgress`, `ecs:DeleteSecurityGroup` |
+```yaml
+required_permissions:
+  offline_template_and_runtime_cache: []
+  caller_preflight:
+    read: ["sts:GetCallerIdentity"]
+    write_after_approval: []
+  ros_template_and_stack:
+    read:
+      - "ros:ValidateTemplate"
+      - "ros:GetTemplateParameterConstraints"
+      - "ros:PreviewStack"
+      - "ros:GetStack"
+      - "ros:ListStackResources"
+    write_after_approval: ["ros:CreateStack", "ros:UpdateStack", "ros:DeleteStack"]
+  vpc_and_vswitch:
+    read:
+      - "vpc:DescribeVpcs"
+      - "vpc:DescribeVSwitches"
+      - "vpc:DescribeVpcAttribute"
+      - "vpc:DescribeVSwitchAttributes"
+    write_after_approval: ["vpc:CreateVpc", "vpc:CreateVSwitch", "vpc:DeleteVSwitch", "vpc:DeleteVpc"]
+  security_group:
+    read: ["ecs:DescribeZones", "ecs:DescribeSecurityGroups", "ecs:DescribeSecurityGroupAttribute"]
+    write_after_approval:
+      - "ecs:CreateSecurityGroup"
+      - "ecs:AuthorizeSecurityGroup"
+      - "ecs:AuthorizeSecurityGroupEgress"
+      - "ecs:DeleteSecurityGroup"
+```
 
 Other resource types require their own exact product/action pairs. Never infer that the actions above authorize ECS
 instances, databases, public IP addresses, gateways, load balancers, disks, or any other unrelated resource.
+
+## Idempotent writes
+
+For APIs supporting `ClientToken`, preserve the same token and identical parameters for retries of one approved
+operation. After a timeout or uncertain result, query the original stack/resource/request state before another
+write; do not create a duplicate resource to recover a missing response. Keep the original job and cursor, honor
+permission boundaries, and stop if the outcome cannot be established. A changed plan or expanded cleanup scope
+requires a new explicit confirmation. This guidance does not authorize direct cloud calls outside the Runtime.
 
 ## Failure handling
 

@@ -13,6 +13,27 @@ For every infrastructure request covered by this Skill, the first operational co
 
 Treat a bridge error returned before job creation as the authoritative outcome for that invocation. In particular, when the bridge returns `incompatible_host`, report its error code, message, retryability, and any available host/runtime-baseline facts, then stop. Do not install Terraform, pip packages, another Runtime, or other substitute tools; do not bypass the bridge with direct cloud calls; do not ask for deployment inputs; and do not continue the infrastructure workflow or claim success. A later attempt is allowed only after the host compatibility problem has actually been corrected.
 
+## Runtime installation and environment
+
+The bridge downloads the pinned Runtime manifest and executable archive over HTTPS from
+`ros-public-tools.oss-cn-beijing.aliyuncs.com`, under the exact
+`/github-releases/aliyun/iac-code/skill-runtime/releases/<runtime-tag>/` prefix (or the pinned Candidate prefix).
+This OSS distribution endpoint is an explicit installation exception to the cloud OpenAPI endpoint restriction;
+it is not a cloud resource API. Every initial download and redirect must stay within that allow-list. The bridge
+also verifies the pinned manifest SHA-256, archive SHA-256 and exact size, archive paths, and Runtime identity before
+execution. Never override these checks or use another download source after a rejection.
+
+The bridge reads `IAC_CODE_CONFIG_DIR` to select its local configuration root; it defaults to `~/.iac-code` and
+supports `~` and environment-variable expansion. Its `skill-runtime` subtree stores downloaded Runtime binaries,
+job state, and private local A2A server records including bearer tokens. This is an installation-side path setting,
+not a credential or task input. Never derive or change it from a user prompt, reveal its contents, or move private
+state into a shared/workspace directory. `SKILL_SESSION_ID` supplies the validated per-session observability ID.
+
+Skill packaging uses an explicit file allow-list. Agent-framework configuration directories such as `.claude`,
+`.qwen`, and `.agents` are excluded from published Skill packages. The Skill does not enable harness plugins,
+install third-party session observers, or modify global Agent-framework settings; scan-environment harness files
+are not Skill runtime dependencies and must not be copied into an installation.
+
 ## Workflow
 
 1. Put the complete user request in a UTF-8 prompt file inside the workspace.
@@ -67,6 +88,20 @@ Use `poll` only for diagnosis or recovery when follow cannot be used:
 ```text
 python3 scripts/iac_code.py poll --job-id <job-id> --cursor <cursor> --wait-seconds 5
 ```
+
+## Cloud-write idempotency and uncertain outcomes
+
+For a cloud API that supports `ClientToken`, the Runtime must reuse one token for the same approved logical write
+and identical parameters across retries; never create a new token merely because a response timed out. After an
+ambiguous create/update/delete result, first query the original stack, resource ID, or request state through the
+same Runtime and honor any returned permission boundary. Record the actual created IDs for dependency-ordered
+cleanup. A check-then-act query is not a replacement for an API-supported idempotency token.
+
+Keep following the original job and cursor while its outcome is unresolved. Once a task ID is recorded, the bridge
+recovers streams through `GetTask` / `SubscribeToTask`. If the initial request fails before a task ID is recorded,
+the bridge reports `a2a_request_outcome_unknown` and does not replay the message. Stop and report the uncertainty;
+do not start a replacement job, repeat an approval, issue another cloud write, or bypass the bridge. Resume only
+after the original outcome is established and any required user confirmation has been obtained.
 
 ## User input
 
