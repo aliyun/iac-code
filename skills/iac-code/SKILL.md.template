@@ -86,6 +86,35 @@ The packaging command also reopens the generated ZIP and verifies its exact prof
 Offline packaging tests deliberately inject fake observer settings into staging and require their exclusion;
 scanner-injected harness plugins must be preserved in the scanner environment and must never be installed by this Skill.
 
+### Pinned Runtime provenance — release-review record
+
+This record applies only to Runtime `v0.17.0` / iac-code `0.17.0`, with bundled CPython `cp312`.
+The published manifest is 2,121 bytes with SHA-256
+`48bb4e3384121dc34b3d929b1ba5221318b20df74b229032133591c523d34b83`.
+Its `sourceCommit` is `9e58a795f2480e755299e063d792c33969376891`, matching the published
+[`v0.17.0` source tag](https://github.com/aliyun/iac-code/tree/9e58a795f2480e755299e063d792c33969376891),
+and its controlled-publisher revision is `020ea2138464b01b48fb4ad3b3850833a5eadf3b`.
+The manifest records publication at `2026-10-30T07:10:56Z`; the corresponding GitHub release is published,
+not a draft or prerelease. These links are human release-audit references, not additional Runtime download endpoints.
+
+The pinned source's `skill-runtime/build_runtime.py`, `iac-code-runtime.spec`, `entry.py`, and
+`assemble_manifest.py` identify the native build, bundled dependencies, A2A entry point, version record,
+smoke checks, and exact three-target assembly contract. The manifest's archive inventory is:
+
+| Target | Archive bytes | Archive SHA-256 |
+| --- | ---: | --- |
+| darwin-arm64-macos-cp312 | 65732043 | `378ef9e1960e4e0ce81a3ede42b46a62deda24bd3eff476924b67340bc2547fb` |
+| linux-x86_64-gnu-cp312 | 80947194 | `6d3e143a252c4e2b2b4757859c963d03791a62a02919546236ab30b45fed64c6` |
+| windows-x86_64-msvc-cp312 | 66082119 | `011380ee544430b71fb8f3415325d30f07e1a25bd890ad954943e7a98e79de6b` |
+
+The Linux manifest requires glibc 2.39; this record does not lower that baseline. Archive identities above
+were read from the verified manifest, not established by rebuilding or executing these binaries during review.
+Hash and identity checks establish consistency with that pinned release; they are not a signature,
+reproducible-build proof, independent binary security audit, or download approval. Release operators must retain
+the manifest, exact source/publisher revisions, native build/verification receipts, and their own review decision.
+Missing native receipts must be reported as unavailable, never invented or inferred from a passing hash check.
+No reusable approval receipt is distributed with this record. A different Runtime tag/digest requires a new review.
+
 ## Workflow
 
 1. Put the complete user request in a UTF-8 prompt file inside the workspace.
@@ -151,11 +180,23 @@ python3 scripts/iac_code.py poll --job-id <job-id> --cursor <cursor> --wait-seco
 
 ## Cloud-write idempotency and uncertain outcomes
 
+**Implementation ownership:** the bridge protects A2A message delivery, not the cloud API transaction.
+Cloud `ClientToken` selection, persistence, and check-then-act recovery belong to the Runtime workflow and the
+particular provider API. The bridge does not generate or certify those tokens and cannot promise exactly-once
+resource creation. In the pinned `v0.17.0` source, `src/iac_code/tools/cloud/aliyun/retry_policy.py`
+allows automatic transport retries only for metadata-declared reads using bodyless GET/HEAD/OPTIONS;
+writes are not retry-eligible. `tests/tools/cloud/aliyun/test_acs3_transport.py` exercises write transport failures
+with one attempted request, while `test_retry_policy.py` covers write exclusion and uncertain outcomes.
+Those offline contracts do not prove that every model-generated write supplies a correct `ClientToken`.
+
 For a cloud API that supports `ClientToken`, the Runtime must reuse one token for the same approved logical write
 and identical parameters across retries; never create a new token merely because a response timed out. After an
 ambiguous create/update/delete result, first query the original stack, resource ID, or request state through the
 same Runtime and honor any returned permission boundary. Record the actual created IDs for dependency-ordered
 cleanup. A check-then-act query is not a replacement for an API-supported idempotency token.
+If the Runtime cannot preserve the original approved token/parameters or establish an ambiguous operation's
+outcome, stop at that unresolved boundary. Do not turn this requirement into a claim that the binary's
+application-level idempotency has been independently verified.
 
 Keep following the original job and cursor while its outcome is unresolved. Once a task ID is recorded, the bridge
 recovers streams through `GetTask` / `SubscribeToTask`. If the initial request fails before a task ID is recorded,
