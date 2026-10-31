@@ -4,8 +4,10 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 import re
 import runpy
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -31,6 +33,7 @@ def _load_module(name: str, path: Path):
     spec = importlib.util.spec_from_file_location(name, path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -308,6 +311,49 @@ def test_ros_skill_loads_with_crlf_checkout_within_source_limits(tmp_path: Path)
         text=True,
         encoding="utf-8",
         timeout=30,
+    )
+
+
+def test_ros_dependency_lock_and_bootstrap_ignore_host_pip_sources(monkeypatch) -> None:
+    root = ROOT / "skills/alicloud-ros-agent"
+    requirements = (root / "requirements-code.txt").read_text(encoding="utf-8")
+    entries = [line.strip() for line in requirements.replace("\\\n", "").splitlines()
+               if line.strip() and not line.lstrip().startswith("#")]
+    assert len(entries) > 3
+    for entry in entries:
+        assert re.match(r"[a-zA-Z0-9_.-]+==[a-zA-Z0-9_.+!-]+(?:\s|$)", entry)
+        assert re.search(r"--hash=sha256:[0-9a-f]{64}(?:\s|$)", entry)
+        assert "http://" not in entry and "https://" not in entry
+    policy = (root / "references/runtime-policy.md").read_text(encoding="utf-8")
+    installer = re.search(r"```python\n(.*?)\n```", policy, re.DOTALL)
+    assert installer is not None
+    captured = {}
+    monkeypatch.setattr(os, "environ", {"PATH": "/fake/bin", "PIP_INDEX_URL": "https://untrusted.invalid",
+                                       "PIP_EXTRA_INDEX_URL": "https://extra.invalid", "PIP_CONFIG_FILE": "/fake/pip"})
+    monkeypatch.setattr(sys, "argv", ["bootstrap", "/fake/requirements.txt"])
+    monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: captured.update(command=command, **kwargs))
+    exec(compile(installer.group(1), "locked-wheel-bootstrap", "exec"), {})
+    assert captured["env"] == {"PATH": "/fake/bin", "PIP_CONFIG_FILE": os.devnull}
+    assert captured["check"] is True
+    command = captured["command"]
+    assert command[:3] == [sys.executable, "-m", "pip"]
+    assert "--require-hashes" in command and "--only-binary=:all:" in command
+    assert command[command.index("--index-url") + 1] == "https://mirrors.aliyun.com/pypi/simple/"
+    assert command[-2:] == ["-r", "/fake/requirements.txt"]
+
+
+def test_ros_profile_excludes_injected_agent_plugin_configuration(monkeypatch, tmp_path: Path) -> None:
+    module = _load_module("ros_profile_plugin_exclusion", PROFILE_SCRIPT)
+    source = tmp_path / "source/skills/alicloud-ros-agent"
+    shutil.copytree(ROOT / "skills/alicloud-ros-agent", source)
+    (source / ".claude").mkdir()
+    (source / ".claude/settings.json").write_text('{"enabledPlugins":{"unrelated-test-plugin":true}}')
+    monkeypatch.setattr(module, "ROOT", tmp_path / "source")
+    output = tmp_path / "package"
+    module.render_profile("alibabacloud-ros-agent", output)
+    assert not (output / ".claude").exists()
+    assert sorted(path.relative_to(output).as_posix() for path in output.rglob("*") if path.is_file()) == sorted(
+        module.skill_profile("alibabacloud-ros-agent").output_files
     )
 
 

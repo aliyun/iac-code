@@ -1,5 +1,50 @@
 # Runtime policy and remote CLI diagnostics
 
+## Trusted dependency installation
+
+The bundled requirements lock pins direct and transitive dependencies and their SHA-256 hashes. Its source is
+`requirements-code.in`; maintainers regenerate the lock with `uv pip compile --python-version 3.10 --universal
+--generate-hashes --only-binary :all: --no-header --no-annotate --index-url https://mirrors.aliyun.com/pypi/simple/`.
+Review dependency changes before publishing. Code transport requires Python 3.10+ so the lock does not select
+obsolete Python 3.8/3.9 dependency branches; the dependency-free CLI bridge remains Python 3.8 compatible.
+Hashes do not attest that a package is free of vulnerabilities.
+
+Dependency downloads are limited to HTTPS `mirrors.aliyun.com` (the Aliyun PyPI index and wheel files), in addition
+to the configured ROS OpenAPI endpoint. This does not authorize arbitrary external network access. The host must
+already permit this source; otherwise stop and request administrator provisioning. No mirror fallback, extra index,
+direct package URL, source build, `--trusted-host`, TLS bypass, or unpinned upgrade is allowed.
+
+Outside AgentHub, the installation administrator provisions dependencies before an infrastructure task. The only
+task-time exception is the `sdk_not_installed` repair in an AgentHub-managed disposable runtime described in SKILL.md.
+Use the same Python interpreter and pass the absolute bundled requirements path as the sole script argument:
+
+```python
+import os
+import subprocess
+import sys
+
+environment = {key: value for key, value in os.environ.items() if not key.upper().startswith("PIP_")}
+environment["PIP_CONFIG_FILE"] = os.devnull
+subprocess.run([
+    sys.executable, "-m", "pip", "--disable-pip-version-check", "--no-cache-dir", "install",
+    "--require-hashes", "--only-binary=:all:", "--force-reinstall",
+    "--index-url", "https://mirrors.aliyun.com/pypi/simple/", "-r", sys.argv[1],
+], env=environment, check=True)
+```
+
+This disables inherited pip files and index environment overrides without inspecting or displaying their values.
+It installs only reviewed locked wheels; failure stops readiness repair. CLI plugins are never installed or upgraded
+by this Skill during an infrastructure task. An administrator must preinstall the reviewed ROS plugin from the
+organization's approved source; remote CLI executors remain externally managed. Never grant broader credentials or
+change transports to make installation succeed.
+
+Returned artifact URLs are locations for display, not download authorization. The bridge strips URL query strings,
+fragments, and user information from artifacts and sanitized text before output or durable projection. A changed
+artifact URI is marked `uriRedacted`; do not reconstruct or fetch it. Read only the authorized local artifact
+`sourcePath` when available. Logs and state remain private even after redaction.
+
+## Configuration
+
 The bridge reads an optional `config.json` in the Skill root beside `SKILL.md`. If it is absent, the transport defaults to `code`, the endpoint defaults to `ros.aliyuncs.com`, both Agent modes are allowed, Thinking is enabled, the Credentials SDK default chain selects the effective identity, and the temporary loopback manager exits 60 seconds after the last SSE worker and manager request become idle. The file accepts these settings:
 
 ```json

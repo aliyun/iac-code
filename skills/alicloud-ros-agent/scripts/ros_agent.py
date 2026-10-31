@@ -164,8 +164,9 @@ STEP_BOUNDARY_EVENT_TYPES = {
 }
 SECRET_PATTERN = re.compile(
     r"(?i)((?:[\"']?)(?:access[-_ ]?key(?:[-_ ]?id|[-_ ]?secret)?|security[-_ ]?token|signature|"
-    r"authorization)(?:[\"']?)\s*[:=]\s*(?:[\"']?)(?:bearer\s+)?)([^\"'\s,;&}]+)"
+    r"token|credential|password|authorization)(?:[\"']?)\s*[:=]\s*(?:[\"']?)(?:bearer\s+)?)([^\"'\s,;&}]+)"
 )
+OUTPUT_URL_PATTERN = re.compile(r"(?i)(?:https?|file)://[^\s<>\"']+")
 SENSITIVE_CLIENT_CONTEXT_KEY_PARTS = (
     "accesskey",
     "authorization",

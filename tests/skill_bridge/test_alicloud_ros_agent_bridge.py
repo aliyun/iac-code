@@ -1300,6 +1300,51 @@ def test_stream_summary_projects_completed_turn_identity_and_artifacts() -> None
     assert result["artifacts"][0]["name"] == "template.yaml"
 
 
+@pytest.mark.parametrize("url", [
+    "https://example.invalid/template?token=FAKE_DOWNLOAD_TOKEN",
+    "https://example.invalid/template?%53ignature=FAKE_SIGNATURE",
+    "https://example.invalid/template?x-oss-credential=FAKE_ACCESS_ID%2Fscope&x-oss-signature=FAKE_SIGNATURE",
+    "https://FAKE_USER:FAKE_PASSWORD@example.invalid/template#FAKE_FRAGMENT_TOKEN",
+])
+def test_artifact_and_text_outputs_omit_url_bearer_values(url: str) -> None:
+    summary = bridge.StreamSummary()
+    event = {"artifactUpdate": {"artifact": {
+        "artifactId": "template-1", "name": "template.yaml", "parts": [{"url": url}],
+        "metadata": {"sourcePath": "/workspace/template.yaml", "mediaType": "application/yaml"},
+    }}}
+    summary.apply({"result": event})
+    result = summary.to_result(0, "")
+    artifact = result["artifacts"][0]
+    assert artifact["uri"] == "https://example.invalid/template"
+    assert artifact["uriRedacted"] is True
+    assert artifact["sourcePath"] == "/workspace/template.yaml"
+    assert "FAKE_" not in json.dumps(result)
+    assert "FAKE_" not in bridge.sanitize_text("Returned artifact: " + url)
+    logger = object.__new__(bridge._RemoteCLIDebugLog)
+    logger.secret_values = []
+    assert "FAKE_" not in logger._text(url)
+
+
+def test_plain_artifact_location_and_nonsecret_metadata_remain_available() -> None:
+    artifact = bridge._safe_artifact({"artifact": {
+        "artifactId": "template-1", "name": "template.yaml",
+        "parts": [{"url": "file:///workspace/template.yaml"}],
+        "metadata": {"sourcePath": "/workspace/template.yaml", "byteSize": 42, "sha256": "a" * 64},
+    }})
+    assert artifact["uri"] == "file:///workspace/template.yaml"
+    assert "uriRedacted" not in artifact
+    assert artifact["byteSize"] == 42
+    assert artifact["sha256"] == "a" * 64
+
+
+def test_code_transport_rejects_unsupported_python_before_loading_credentials(monkeypatch) -> None:
+    monkeypatch.setattr(bridge.sys, "version_info", (3, 9, 0))
+    monkeypatch.setattr(bridge.importlib, "import_module", lambda name: pytest.fail("must not import SDKs"))
+    with pytest.raises(bridge.BridgeError) as error:
+        bridge._load_code_sdk()
+    assert error.value.code == "unsupported_python_version"
+
+
 def test_stream_summary_final_snapshot_replaces_streamed_deltas() -> None:
     summary = bridge.StreamSummary()
     summary.apply(_status_event(state="TASK_STATE_WORKING", text="template "))

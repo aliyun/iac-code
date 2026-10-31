@@ -633,6 +633,8 @@ def _safe_artifact(result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "name": sanitize_text(artifact.get("name") or first.get("filename"), 240),
         "uri": sanitize_text(uri, 1200, True),
     }
+    if projected["uri"] != uri:
+        projected["uriRedacted"] = True
     for key in ("mediaType", "sha256", "sourcePath"):
         if isinstance(metadata.get(key), str):
             projected[key] = sanitize_text(metadata[key], 1000, True)
