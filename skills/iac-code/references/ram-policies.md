@@ -65,11 +65,19 @@ instances, databases, public IP addresses, gateways, load balancers, disks, or a
 
 ## Idempotent writes
 
+The Runtime workflow and provider API own cloud-operation idempotency. The standard-library bridge only prevents
+unsafe A2A message replay; it neither generates/persists cloud `ClientToken` values nor certifies exactly-once
+resource creation. The pinned Runtime's transport excludes writes from automatic retries. This transport-level
+boundary is narrower than proving that every generated cloud write uses a correct durable token.
+
 For APIs supporting `ClientToken`, preserve the same token and identical parameters for retries of one approved
 operation. After a timeout or uncertain result, query the original stack/resource/request state before another
 write; do not create a duplicate resource to recover a missing response. Keep the original job and cursor, honor
 permission boundaries, and stop if the outcome cannot be established. A changed plan or expanded cleanup scope
 requires a new explicit confirmation. This guidance does not authorize direct cloud calls outside the Runtime.
+If token continuity or the original outcome cannot be established, stop rather than issue another write.
+See the Skill's pinned Runtime provenance record for the exact audited source revision and offline contract paths;
+neither that record nor these permissions are a native binary audit, download exception, or approval receipt.
 
 ## Failure handling
 
