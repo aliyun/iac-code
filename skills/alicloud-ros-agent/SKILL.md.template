@@ -1,15 +1,15 @@
 ---
 name: {{SKILL_NAME}}
-description: Use Alibaba Cloud ROS Agent through its StartChat API for remote infrastructure conversations. Trigger when the user explicitly asks for the ROS Agent, its StartChat API, or a remote iac-code conversation through Alibaba Cloud. Supports normal and selling Pipeline conversations, questions, candidate selection, correlated permission approval or denial, and explicit StopChat cancellation. Do not trigger for ordinary Alibaba Cloud infrastructure work that can use the local iac-code Skill, or for unrelated ROS API operations.
+description: Use Alibaba Cloud ROS Agent through its StartChat API for remote infrastructure conversations. Trigger when the user explicitly asks for the ROS Agent, its StartChat API, or a remote iac-code conversation through Alibaba Cloud. Supports normal and selling Pipeline conversations, questions, candidate selection, correlated permission approval or denial, and explicit StopChat cancellation. Also trigger for cancelling a previous ROS Agent job in a later conversation, even without a job ID. Do not trigger for ordinary Alibaba Cloud infrastructure work that can use the local iac-code Skill, or for unrelated ROS API operations.
 ---
 
 # {{SKILL_TITLE}}
 
-Use the bridge at `scripts/ros_agent.py`. Its default code transport uses the Alibaba Cloud Credentials SDK default credential chain and Tea OpenAPI V3 signing to send ROS RPCs directly and consume StartChat SSE incrementally. The bridge never reads credential environment variables or credential values from Profile files itself. A Profile explicitly pinned by local policy is delegated to the Credentials SDK Profile provider and is exclusive: it never falls back to the default chain or another Profile. Credentials exist only inside the SDK-backed request path and are never accepted as bridge arguments, persisted in job state, or returned. An optional dependency-free transport invokes the ROS CLI plugin's `start-chat` and `stop-chat` commands. Run the bridge with `python3` on macOS/Linux or `py -3` on Windows.
+Use `scripts/ros_agent.py` with `python3` on macOS/Linux or `py -3` on Windows. Code transport delegates credentials and RPC signing to the Credentials SDK and Tea OpenAPI V3, then consumes StartChat SSE incrementally. A pinned Profile is exclusive, with no fallback. Never read, pass, persist, or expose credential values. Optional dependency-free CLI transport uses the ROS plugin's `start-chat` and `stop-chat` commands.
 
 ## Required interaction contract
 
-Visible narration is part of completing this workflow, not optional styling. Internal reasoning/thinking, a tool description, raw tool output, and the wording of a user question are not substitutes for a user-visible assistant text block. Keep each update concise—normally one to three sentences in the user's language. An update and the following tool call may be in the same assistant response, so do not pause merely to narrate.
+Narrate each stage visibly in the user's language before its tool call; reasoning, tool descriptions and raw output do not count. Keep updates to one to three sentences. Narration and its tool call may share one response.
 
 Use these stage gates:
 
@@ -129,6 +129,7 @@ Stdout is one bounded JSON object; diagnostics belong to stderr.
 - `state: turn-completed`: present `finalText` and `artifacts` as the authoritative normal-turn result.
 - `state: input-required`: present the prompt, safe action details, and every option from `inputRequired`. Treat correlation fields as bridge-owned opaque data; do not copy or rewrite them. For `ask_user_question` or `candidate_selection`, send the user's answer with `continue` on the same `jobId`.
 - For `candidate_selection`, show every option's label, summary, `totalMonthlyCost`, and `costItems`. Render each non-empty `architectureDiagram` as its own fenced `mermaid` block before asking the user to choose; never leave the diagram as escaped JSON or only inside tool output.
+- `deployment_confirmation` is a supported display-only boundary. Present its actual `solutionSummary`, sanitized `templateUrl`, `cost` and available diagram, then follow the summary → Mermaid → confirmation-question order and stop. Missing data stays missing. Do not use `continue` or `respond` to confirm: this bridge does not support submitting deployment decisions.
 - A permission in `inputRequired` includes `permissionClass`: `normal` for a Normal conversation or `pipeline` for a top-level Pipeline permission. A permission in `pendingPermissions` uses `sub_pipeline`.
 - `pendingPermissions` contains every currently visible Sub Pipeline step permission. Present them separately; multiple candidate steps may wait for permission at the same time.
 - For a terminal Pipeline, present `pipelineResult` and `artifacts` as the authoritative deployment conclusion. `normalHandoffReady: true` or `conversationMode: normal` means later operations must continue this job as Normal chat. Do not claim success from milestones alone.

@@ -281,9 +281,24 @@ def _safe_input(value: Any) -> Optional[Dict[str, Any]]:
         )
     elif kind == "ask_user_question":
         allowed.update({"allowFreeText", "freeTextPrompt"})
+    elif kind == "deployment_confirmation":
+        allowed.update({"solutionSummary", "templateUrl", "cost", "architectureDiagram", "previewReadyForCreate"})
     elif kind != "candidate_selection":
         return None
     result = {key: value[key] for key in allowed if key in value}
+    if kind == "deployment_confirmation":
+        for camel, snake in (
+            ("solutionSummary", "solution_summary"),
+            ("templateUrl", "template_url"),
+            ("architectureDiagram", "architecture_diagram"),
+            ("previewReadyForCreate", "preview_ready_for_create"),
+        ):
+            if camel not in result and snake in value:
+                result[camel] = value[snake]
+        if "cost" in result:
+            result["cost"] = _safe_deployment_summary(result["cost"])
+        if "previewReadyForCreate" in result:
+            result["previewReadyForCreate"] = result["previewReadyForCreate"] is True
     text_fields = (
         ("prompt", 1000),
         ("freeTextPrompt", 600),
@@ -296,10 +311,13 @@ def _safe_input(value: Any) -> Optional[Dict[str, Any]]:
         ("language", 12),
         ("scope", 120),
         ("subPipelineId", 200),
+        ("solutionSummary", 1200),
+        ("templateUrl", 400),
+        ("architectureDiagram", 2400),
     )
     for key, maximum in text_fields:
         if key in result:
-            result[key] = sanitize_text(result[key], maximum)
+            result[key] = sanitize_text(result[key], maximum, key == "architectureDiagram")
     if "isReadOnly" in result:
         result["isReadOnly"] = result["isReadOnly"] is True
     if "allowFreeText" in result:
@@ -324,6 +342,13 @@ def _safe_input(value: Any) -> Optional[Dict[str, Any]]:
                 ("architectureDiagram", 2400),
                 ("totalMonthlyCost", 300),
             )
+            if kind == "deployment_confirmation":
+                action = item.get("action")
+                if action not in {"confirm", "adjust", "reselect", "cancel"}:
+                    continue
+                safe_item["action"] = action
+                if "name" in item:
+                    safe_item["name"] = sanitize_text(item["name"], 240)
             for key, maximum in option_fields:
                 if key in item:
                     safe_item[key] = sanitize_text(item.get(key), maximum, key == "architectureDiagram")
@@ -725,7 +750,9 @@ class StreamSummary:
         terminal_state_seen = self.state in TERMINAL_STATES
         raw_input = metadata.get("input")
         if (not terminal_state_seen and isinstance(raw_input, dict)
-                and raw_input.get("kind") not in {"permission", "ask_user_question", "candidate_selection"}):
+                and raw_input.get("kind") not in {
+                    "permission", "ask_user_question", "candidate_selection", "deployment_confirmation"
+                }):
             raise BridgeError("unsupported_input", "StartChat returned an unsupported user-input envelope.")
         if terminal_state_seen:
             # Terminal ownership also closes every waiting boundary. A stale
@@ -957,6 +984,11 @@ def _bound_projection(projection: Dict[str, Any]) -> Dict[str, Any]:
     if isinstance(input_value, dict):
         envelope = dict(input_value)
         bounded["inputRequired"] = envelope
+        cost = envelope.get("cost")
+        if isinstance(cost, dict):
+            envelope["cost"] = dict(cost)
+            if isinstance(cost.get("resources"), list):
+                envelope["cost"]["resources"] = list(cost["resources"])
         options = envelope.get("options")
         if isinstance(options, list):
             envelope["options"] = [dict(item) for item in options if isinstance(item, dict)]
@@ -968,6 +1000,8 @@ def _bound_projection(projection: Dict[str, Any]) -> Dict[str, Any]:
                 ("target", 80),
                 ("prompt", 120),
                 ("freeTextPrompt", 80),
+                ("solutionSummary", 160),
+                ("architectureDiagram", 240),
             ):
                 value = envelope.get(key)
                 if isinstance(value, str) and len(value) > minimum:
@@ -985,6 +1019,10 @@ def _bound_projection(projection: Dict[str, Any]) -> Dict[str, Any]:
                 if isinstance(costs, list) and len(costs) > 6:
                     del costs[6:]
                     changed = True
+            cost = envelope.get("cost")
+            if isinstance(cost, dict) and isinstance(cost.get("resources"), list) and len(cost["resources"]) > 3:
+                cost["resources"] = cost["resources"][:max(3, len(cost["resources"]) // 2)]
+                changed = True
             if not changed:
                 break
         if len(_json_bytes(bounded)) > maximum:
