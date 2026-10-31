@@ -25,6 +25,8 @@ def bridge(monkeypatch, tmp_path):
     installed.mkdir()
     monkeypatch.setattr(module, "SKILL_ROOT", installed)
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "private"))
+    monkeypatch.delenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", raising=False)
+    monkeypatch.delenv("IAC_CODE_SKILL_CHANNEL", raising=False)
     return module
 
 
@@ -40,6 +42,69 @@ def _approval(bridge):
 
 def _write_approval(bridge, value):
     (bridge.SKILL_ROOT / "config.json").write_text(json.dumps({"runtimeDownloadApproval": value}), encoding="utf-8")
+
+
+def test_installer_environment_works_before_the_skill_directory_is_created(bridge, monkeypatch) -> None:
+    bridge.SKILL_ROOT.rmdir()
+    monkeypatch.setenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", json.dumps(_approval(bridge)))
+    monkeypatch.setenv("IAC_CODE_SKILL_CHANNEL", "agenthub-e2e")
+    config = bridge._skill_config()
+    assert config["runtimeDownloadApproval"] == _approval(bridge)
+    assert config["channel"] == "skill/agenthub-e2e"
+    assert config["pipelineName"] == bridge.DEFAULT_PIPELINE_NAME
+    bridge._require_runtime_download_approval()
+    assert not bridge.SKILL_ROOT.exists()
+
+
+@pytest.mark.parametrize(
+    "record",
+    ["not-json", "{}", "true", '"external-record"', "null", "x" * (16 * 1024 + 1), "\udcff"],
+    ids=["invalid-json", "missing-fields", "boolean", "string", "null", "too-large", "invalid-utf8"],
+)
+def test_invalid_installer_environment_denies_network(bridge, monkeypatch, tmp_path, record) -> None:
+    monkeypatch.setenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", record)
+    monkeypatch.setattr(
+        bridge.urllib.request, "build_opener", lambda *_: pytest.fail("invalid approval reached network")
+    )
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge._download(_download_root(bridge) + "runtime.zip", tmp_path / "runtime.part", 100)
+    assert caught.value.code == "skill_configuration_invalid"
+    assert record not in caught.value.message
+
+
+def test_installer_environment_cannot_override_invalid_local_approval(bridge, monkeypatch) -> None:
+    local = _approval(bridge)
+    local["runtimeTag"] = "v999.0.0"
+    _write_approval(bridge, local)
+    monkeypatch.setenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", json.dumps(_approval(bridge)))
+    with pytest.raises(bridge.BridgeError, match="does not match this package"):
+        bridge._skill_config()
+
+
+def test_explicit_local_installation_policy_keeps_precedence(bridge, monkeypatch) -> None:
+    local = _approval(bridge)
+    local["approvalReference"] = "original-installation-approval"
+    _write_approval(bridge, local)
+    path = bridge.SKILL_ROOT / "config.json"
+    config = json.loads(path.read_text())
+    config["channel"] = "operator-channel"
+    path.write_text(json.dumps(config))
+    monkeypatch.setenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", "invalid-environment-value")
+    monkeypatch.setenv("IAC_CODE_SKILL_CHANNEL", "agenthub-e2e")
+    actual = bridge._skill_config()
+    assert actual["runtimeDownloadApproval"] == local
+    assert actual["channel"] == "skill/operator-channel"
+
+
+def test_explicit_null_local_policy_is_not_overridden_by_environment(bridge, monkeypatch) -> None:
+    path = bridge.SKILL_ROOT / "config.json"
+    path.write_text(json.dumps({"runtimeDownloadApproval": None, "channel": None}))
+    monkeypatch.setenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", json.dumps(_approval(bridge)))
+    monkeypatch.setenv("IAC_CODE_SKILL_CHANNEL", "agenthub-e2e")
+    assert bridge._skill_config()["channel"] is None
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge._require_runtime_download_approval()
+    assert caught.value.code == "runtime_download_approval_required"
 
 
 def test_runtime_installation_denies_network_without_approval(bridge, monkeypatch, capsys) -> None:

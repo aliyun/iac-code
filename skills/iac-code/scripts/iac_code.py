@@ -3110,12 +3110,7 @@ def _skill_config():
     try:
         encoded = config_path.read_bytes()
     except FileNotFoundError:
-        return {
-            "channel": None,
-            "pipelineName": DEFAULT_PIPELINE_NAME,
-            "permissionWaitPolicy": None,
-            "runtimeDownloadApproval": None,
-        }
+        encoded = b"{}"
     except OSError as exc:
         raise BridgeError("skill_configuration_invalid", "The installed Skill config could not be read.") from exc
     if len(encoded) > MAX_SKILL_CONFIG_BYTES:
@@ -3139,11 +3134,36 @@ def _skill_config():
             "skill_configuration_invalid",
             "pipelineName must be selling_solution_first or selling.",
         )
+    channel = config.get("channel")
+    if "channel" not in config:
+        channel = os.environ.get("IAC_CODE_SKILL_CHANNEL")
+    approval = config.get("runtimeDownloadApproval")
+    if "runtimeDownloadApproval" not in config:
+        external_record = os.environ.get("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL")
+        if external_record is not None:
+            try:
+                external_bytes = external_record.encode("utf-8")
+            except UnicodeError as exc:
+                raise BridgeError(
+                    "skill_configuration_invalid", "The Runtime approval environment value is not valid UTF-8."
+                ) from exc
+            if len(external_bytes) > MAX_SKILL_CONFIG_BYTES:
+                raise BridgeError("skill_configuration_invalid", "The Runtime approval environment value is too large.")
+            try:
+                approval = json.loads(external_record)
+            except ValueError as exc:
+                raise BridgeError(
+                    "skill_configuration_invalid", "The Runtime approval environment value is not valid JSON."
+                ) from exc
+            if approval is None:
+                raise BridgeError(
+                    "skill_configuration_invalid", "The Runtime approval environment value must be a JSON object."
+                )
     return {
-        "channel": _normalize_telemetry_channel(config.get("channel")) if config.get("channel") is not None else None,
+        "channel": _normalize_telemetry_channel(channel),
         "pipelineName": pipeline_name,
         "permissionWaitPolicy": _normalize_permission_wait_policy(config.get("permissionWaitPolicy")),
-        "runtimeDownloadApproval": _normalize_runtime_download_approval(config.get("runtimeDownloadApproval")),
+        "runtimeDownloadApproval": _normalize_runtime_download_approval(approval),
     }
 
 
