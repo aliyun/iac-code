@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import json
 import runpy
 import urllib.request
 import zipfile
@@ -15,12 +16,67 @@ BRIDGE_PATH = ROOT / "skills/iac-code/scripts/iac_code.py"
 
 
 @pytest.fixture
-def bridge():
+def bridge(monkeypatch, tmp_path):
     spec = importlib.util.spec_from_file_location("iac_code_security_bridge", BRIDGE_PATH)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    installed = tmp_path / "installed-skill"
+    installed.mkdir()
+    monkeypatch.setattr(module, "SKILL_ROOT", installed)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "private"))
     return module
+
+
+def _approval(bridge):
+    return {
+        "host": bridge.RUNTIME_DOWNLOAD_HOST,
+        "runtimeTag": bridge.RUNTIME_TAG,
+        "manifestSha256": bridge.MANIFEST_SHA256,
+        "approvedBy": "offline-test-operator",
+        "approvalReference": "offline-test-approval-record",
+    }
+
+
+def _write_approval(bridge, value):
+    (bridge.SKILL_ROOT / "config.json").write_text(json.dumps({"runtimeDownloadApproval": value}), encoding="utf-8")
+
+
+def test_runtime_installation_denies_network_without_approval(bridge, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(bridge, "detect_host", lambda: {"os": "darwin", "arch": "arm64", "nativeAbi": "macos"})
+    monkeypatch.setattr(bridge.urllib.request, "build_opener", lambda *_: pytest.fail("unapproved network access"))
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge.ensure_runtime()
+    assert caught.value.code == "runtime_download_approval_required"
+    assert caught.value.retryable is False
+    assert caught.value.payload()["error"]["details"]["requiredApproval"]["host"] == bridge.RUNTIME_DOWNLOAD_HOST
+    assert not bridge._bridge_root().exists()
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("field,value", [
+    ("host", "other.example"), ("runtimeTag", "v999.0.0"), ("manifestSha256", "f" * 64),
+    ("approvedBy", ""), ("approvalReference", "  "), ("approvalReference", "record\nforged"),
+])
+def test_runtime_approval_rejects_wrong_scope_or_missing_audit_record(
+    bridge, monkeypatch, tmp_path, field, value
+) -> None:
+    approval = _approval(bridge)
+    approval[field] = value
+    _write_approval(bridge, approval)
+    monkeypatch.setattr(
+        bridge.urllib.request, "build_opener", lambda *_: pytest.fail("invalid approval reached network")
+    )
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge._download(_download_root(bridge) + "runtime.zip", tmp_path / "runtime.part", 100)
+    assert caught.value.code == "skill_configuration_invalid"
+
+
+@pytest.mark.parametrize("approval", [True, {}, {"approvedBy": "operator"}])
+def test_runtime_approval_requires_a_complete_scoped_object(bridge, approval) -> None:
+    _write_approval(bridge, approval)
+    with pytest.raises(bridge.BridgeError, match="exactly the pinned scope"):
+        bridge._skill_config()
 
 
 def _download_root(bridge) -> str:
@@ -73,6 +129,7 @@ def test_download_requires_the_pinned_runtime_directory(bridge) -> None:
 @pytest.mark.parametrize("runtime_tag", ["v0.12.0", "candidate-20261031T010000Z-aaaaaaaaaaaa"])
 def test_download_accepts_only_the_pinned_release_or_candidate(bridge, monkeypatch, tmp_path, runtime_tag) -> None:
     monkeypatch.setattr(bridge, "RUNTIME_TAG", runtime_tag)
+    _write_approval(bridge, _approval(bridge))
     url = _download_root(bridge) + "runtime.zip"
     calls = []
 
