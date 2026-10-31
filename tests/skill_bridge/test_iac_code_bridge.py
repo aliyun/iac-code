@@ -103,6 +103,7 @@ def test_bridge_parses_as_python_38_and_uses_only_standard_library_imports() -> 
         "copy",
         "contextlib",
         "ctypes",
+        "datetime",
         "errno",
         "fcntl",
         "hashlib",
@@ -227,6 +228,17 @@ def test_projection_normalizes_a2a_task_states(
 
 
 def test_ensure_runtime_downloads_verifies_atomically_and_hits_cache(monkeypatch, tmp_path: Path) -> None:
+    installed_skill = tmp_path / "installed-skill"
+    installed_skill.mkdir()
+    monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
+    (installed_skill / "config.json").write_text(json.dumps({"runtimeDownloadApproval": {
+        "host": bridge.RUNTIME_DOWNLOAD_HOST,
+        "runtimeTag": bridge.RUNTIME_TAG,
+        "manifestSha256": bridge.MANIFEST_SHA256,
+        "approvedBy": "offline-installer",
+        "approvalReference": "offline-install-test",
+        "expiresAt": "2099-01-01T00:00:00Z",
+    }}))
     archive = tmp_path / "runtime.zip"
     script = "#!/bin/sh\necho iac-code {}\n".format(bridge.IAC_CODE_VERSION)
     with zipfile.ZipFile(archive, "w") as bundle:
@@ -2001,6 +2013,7 @@ def test_start_persists_installed_skill_channel_and_injects_it_into_a2a_metadata
         "manifestSha256": bridge.MANIFEST_SHA256,
         "approvedBy": "offline-installer",
         "approvalReference": "offline-installation-approval-should-stay-local",
+        "expiresAt": "2099-01-01T00:00:00Z",
     }
     if installation_source == "file":
         (installed_skill / "config.json").write_text(
@@ -3171,7 +3184,9 @@ def test_job_rejects_context_change_without_spooling_it(monkeypatch, tmp_path: P
 
 def test_continue_rejects_pipeline_and_incomplete_normal_turn(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
-    prompt = tmp_path / "prompt.txt"
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    prompt = workspace / "prompt.txt"
     prompt.write_text("next", encoding="utf-8")
     job_id = "5" * 32
     root, job_path, spool = bridge._job_paths(job_id)
@@ -3180,13 +3195,13 @@ def test_continue_rejects_pipeline_and_incomplete_normal_turn(monkeypatch, tmp_p
     monkeypatch.setattr(bridge, "_runtime_record_for_job", lambda _job: {})
     bridge._atomic_json(
         job_path,
-        {"mode": "pipeline", "conversationMode": "pipeline", "state": "completed", "workspace": str(tmp_path)},
+        {"mode": "pipeline", "conversationMode": "pipeline", "state": "completed", "workspace": str(workspace)},
     )
     with pytest.raises(bridge.BridgeError, match="completed Pipeline handoff"):
         bridge.continue_job(SimpleNamespace(job_id=job_id, prompt_file=str(prompt), follow=False))
     bridge._atomic_json(
         job_path,
-        {"mode": "normal", "conversationMode": "normal", "state": "working", "workspace": str(tmp_path)},
+        {"mode": "normal", "conversationMode": "normal", "state": "working", "workspace": str(workspace)},
     )
     with pytest.raises(bridge.BridgeError, match="has not completed"):
         bridge.continue_job(SimpleNamespace(job_id=job_id, prompt_file=str(prompt), follow=False))

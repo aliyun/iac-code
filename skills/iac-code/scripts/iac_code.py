@@ -9,6 +9,7 @@ import argparse
 import contextlib
 import copy
 import ctypes
+import datetime
 import errno
 import hashlib
 import json
@@ -222,7 +223,30 @@ def _localized_progress_text(message):
 
 def _config_root():
     raw = os.environ.get("IAC_CODE_CONFIG_DIR") or os.path.join("~", ".iac-code")
-    return pathlib.Path(os.path.expandvars(os.path.expanduser(raw))).resolve()
+    path = pathlib.Path(os.path.expandvars(os.path.expanduser(raw)))
+    if not path.is_absolute():
+        raise BridgeError("skill_configuration_invalid", "The private configuration root must be absolute.")
+    if any(part.is_symlink() for part in (path,) + tuple(path.parents)):
+        raise BridgeError("skill_configuration_invalid", "The private configuration root must not use symbolic links.")
+    root = path.resolve()
+    if root.exists() and os.name != "nt" and root.stat().st_mode & stat.S_IWOTH:
+        raise BridgeError("skill_configuration_invalid", "The private configuration root must not be shared writable.")
+    for boundary in (pathlib.Path.cwd().resolve(), SKILL_ROOT.resolve()):
+        if root == boundary or boundary in root.parents:
+            raise BridgeError(
+                "skill_configuration_invalid", "Private Runtime state must be outside the working directory and Skill."
+            )
+    return root
+
+
+def _validate_private_state_location(workspace):
+    root = _config_root()
+    workspace = pathlib.Path(workspace).resolve()
+    if root == workspace or workspace in root.parents:
+        raise BridgeError("skill_configuration_invalid", "Private Runtime state must be outside the workspace.")
+    installed = SKILL_ROOT.resolve()
+    if root == installed or installed in root.parents:
+        raise BridgeError("skill_configuration_invalid", "Private Runtime state must be outside the installed Skill.")
 
 
 def _bridge_root():
@@ -531,6 +555,7 @@ def _validate_runtime_download_url(url):
 class _RuntimeDownloadRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         _validate_runtime_download_url(newurl)
+        _require_runtime_download_approval()
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
@@ -547,6 +572,7 @@ def _require_runtime_download_approval():
                     "runtimeTag": RUNTIME_TAG,
                     "manifestSha256": MANIFEST_SHA256,
                     "purpose": "Download and execute the verified official iac-code Runtime.",
+                    "expiresAt": "A future UTC timestamp from the external approval, YYYY-MM-DDTHH:MM:SSZ.",
                 }
             },
         )
@@ -728,6 +754,7 @@ def ensure_runtime():
                     raise BridgeError("artifact_verification_failed", "The extracted runtime identity is invalid.")
                 if os.name != "nt":
                     os.chmod(str(staged_executable), os.stat(str(staged_executable)).st_mode | stat.S_IXUSR)
+                _require_runtime_download_approval()
                 check = subprocess.run(
                     [str(staged_executable), "--version"],
                     stdout=subprocess.PIPE,
@@ -1044,6 +1071,10 @@ def _runtime_matches(record, mode, pipeline_name, target, permission_wait_policy
     }
     if any(record.get(key) != value for key, value in expected.items()) or not _pid_alive(record.get("pid")):
         return False
+    cwd_policy = _runtime_cwd_policy()
+    explicit_cwd_policy = "IACCODE_A2A_ALLOWED_CWDS" in os.environ or "IAC_CODE_A2A_TRUST_REQUEST_CWD" in os.environ
+    if (explicit_cwd_policy or "cwdPolicy" in record) and record.get("cwdPolicy") != cwd_policy:
+        return False
     base = "http://127.0.0.1:{}/".format(record.get("port"))
     try:
         health = _http_json(base + "health", record.get("token"), timeout=2)
@@ -1055,6 +1086,25 @@ def _runtime_matches(record, mode, pipeline_name, target, permission_wait_policy
     if health.get("mode") != mode:
         return False
     return card.get("version") == IAC_CODE_VERSION
+
+
+def _runtime_cwd_policy():
+    allowed = os.environ.get("IACCODE_A2A_ALLOWED_CWDS")
+    trust = os.environ.get("IAC_CODE_A2A_TRUST_REQUEST_CWD", "1")
+    # An explicit allow-list always wins over broad workspace trust.
+    if allowed is not None:
+        trust = "0"
+    return {"allowedCwds": allowed, "trustRequestCwd": trust}
+
+
+def _validate_runtime_workspace(workspace):
+    policy = _runtime_cwd_policy()
+    allowed = policy["allowedCwds"]
+    if allowed is None:
+        return
+    roots = [pathlib.Path(item).expanduser().resolve() for item in allowed.split(os.pathsep) if item]
+    if not any(workspace == root or root in workspace.parents for root in roots):
+        raise BridgeError("runtime_workspace_denied", "The workspace is outside the installer-provided allow-list.")
 
 
 def _valid_job_pipeline_identity(mode, pipeline_name):
@@ -1208,8 +1258,8 @@ def ensure_server(executable, artifact, mode, pipeline_name, permission_wait_pol
         log_path = root / "runtime.log"
         environment = dict(os.environ)
         environment["IAC_CODE_MODE"] = mode
-        environment.pop("IACCODE_A2A_ALLOWED_CWDS", None)
-        environment["IAC_CODE_A2A_TRUST_REQUEST_CWD"] = "1"
+        cwd_policy = _runtime_cwd_policy()
+        environment["IAC_CODE_A2A_TRUST_REQUEST_CWD"] = cwd_policy["trustRequestCwd"]
         environment["IAC_CODE_SKILL_RUNTIME_GENERATION"] = generation
         environment["IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION"] = "1"
         if pipeline_name:
@@ -1252,6 +1302,7 @@ def ensure_server(executable, artifact, mode, pipeline_name, permission_wait_pol
                 "pipelineName": pipeline_name or "",
                 "handoffToolConfirmation": True,
                 "permissionWaitPolicy": permission_wait_policy,
+                "cwdPolicy": cwd_policy,
                 "pid": process.pid,
                 "port": port,
                 "token": token,
@@ -3078,7 +3129,7 @@ def _normalize_permission_wait_policy(value):
 def _normalize_runtime_download_approval(value):
     if value is None:
         return None
-    required = {"host", "runtimeTag", "manifestSha256", "approvedBy", "approvalReference"}
+    required = {"host", "runtimeTag", "manifestSha256", "approvedBy", "approvalReference", "expiresAt"}
     if not isinstance(value, dict) or set(value) != required:
         raise BridgeError(
             "skill_configuration_invalid",
@@ -3102,6 +3153,16 @@ def _normalize_runtime_download_approval(value):
         ):
             raise BridgeError("skill_configuration_invalid", "The Runtime download approval record is incomplete.")
         normalized[name] = text.strip()
+    expiry = value.get("expiresAt")
+    if not isinstance(expiry, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", expiry):
+        raise BridgeError("skill_configuration_invalid", "The Runtime approval requires a UTC expiresAt timestamp.")
+    try:
+        deadline = datetime.datetime.strptime(expiry, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+    except ValueError as exc:
+        raise BridgeError("skill_configuration_invalid", "The Runtime approval expiration is invalid.") from exc
+    if deadline.timestamp() <= time.time():
+        raise BridgeError("runtime_download_approval_required", "The Runtime installation approval has expired.")
+    normalized["expiresAt"] = expiry
     return normalized
 
 
@@ -3224,6 +3285,8 @@ def start_job(args):
     if not workspace.is_absolute() or not workspace.exists() or not workspace.is_dir():
         raise BridgeError("runtime_identity_mismatch", "The Skill workspace must be an existing absolute directory.")
     workspace = workspace.resolve()
+    _validate_private_state_location(workspace)
+    _validate_runtime_workspace(workspace)
     prompt = _read_workspace_prompt(workspace, args.prompt_file)
     preferred_language = _preferred_language(prompt, args.language)
     _set_output_language(preferred_language)
@@ -3308,6 +3371,10 @@ def _ensure_job_runtime(job_id):
     root, job_path, _spool = _job_paths(job_id)
     job = _load_json(job_path)
     _set_output_language(job.get("preferredLanguage"))
+    if isinstance(job.get("workspace"), str):
+        workspace_path = pathlib.Path(job["workspace"]).resolve()
+        _validate_private_state_location(workspace_path)
+        _validate_runtime_workspace(workspace_path)
     if job.get("runtimeIdentityVersion") != 2 or job.get("runtimeTag") != RUNTIME_TAG:
         return job, _runtime_record_for_job(job)
     try:

@@ -155,6 +155,18 @@ def deterministic_zip(skill_root: Path, profile: SkillProfile, output: Path) -> 
             info.external_attr = (0o100000 | mode) << 16
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, source.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+    verify_skill_archive(skill_root, profile, output)
+
+
+def verify_skill_archive(skill_root: Path, profile: SkillProfile, output: Path) -> None:
+    """Check the actual output, including exclusion of scanner-injected harness files."""
+    expected = [profile.archive_root + "/" + relative for relative in profile.output_files]
+    with zipfile.ZipFile(output) as archive:
+        if archive.namelist() != expected:
+            raise ValueError("Skill ZIP entries differ from the explicit publication profile")
+        for relative, name in zip(profile.output_files, expected):
+            if archive.read(name) != (skill_root / relative).read_bytes():
+                raise ValueError("Skill ZIP bytes differ from the staged publication file: " + relative)
 
 
 def release_manifest(args: argparse.Namespace, profile: SkillProfile, archive: Path) -> dict[str, object]:
