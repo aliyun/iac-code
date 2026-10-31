@@ -21,7 +21,9 @@ The bridge downloads the pinned Runtime manifest and executable archive over HTT
 This OSS distribution endpoint is not a cloud resource API. **Network downloads are denied by default**: the
 installer must first obtain the user's or organization's explicit permission to download and execute this exact
 official Runtime, and record the approver and external approval reference in install-local `config.json` as
-`runtimeDownloadApproval`. Its `host`, `runtimeTag`, and `manifestSha256` must exactly match the packaged endpoint,
+`runtimeDownloadApproval`, or provision the same JSON object through the installer's
+`IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL` environment variable before the Agent session starts.
+Its `host`, `runtimeTag`, and `manifestSha256` must exactly match the packaged endpoint,
 Runtime tag, and manifest digest; `approvedBy` and `approvalReference` must identify the real approval. A changed
 Runtime tag or manifest needs a new approval. This document, installation instructions, a cloud deployment request,
 or the Agent's own decision is not approval. Do not invent an approval record, copy a record from another package,
@@ -37,6 +39,13 @@ supports `~` and environment-variable expansion. Its `skill-runtime` subtree sto
 job state, and private local A2A server records including bearer tokens. This is an installation-side path setting,
 not a credential or task input. Never derive or change it from a user prompt, reveal its contents, or move private
 state into a shared/workspace directory. `SKILL_SESSION_ID` supplies the validated per-session observability ID.
+The bridge also reads two installer-provisioned environment variables when the corresponding install-local field
+is absent: `IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL` supplies the externally approved, exactly scoped JSON record above;
+`IAC_CODE_SKILL_CHANNEL` supplies a non-credential observability channel. Explicit install-local fields take precedence,
+including validation failures; environment values cannot replace or repair an invalid local policy. These variables
+support managed installers that create the Skill directory after task preparation. The infrastructure Agent must
+not create, edit, derive, or print either value during a task. The approval record is validated locally and is not sent
+as Runtime/A2A metadata; only the normalized channel is sent for observability. Missing approval still denies downloads.
 For `--language auto`, the bridge also reads `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, and `LANG`, in that order, only
 to choose one supported UI language. These locale values are read-only, non-credential inputs; their raw values
 are not sent to the network. An explicit supported `--language` takes precedence.

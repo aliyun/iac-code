@@ -1988,11 +1988,28 @@ def test_start_checks_pipeline_readiness_before_creating_a_job(monkeypatch, tmp_
     assert observed == {"requireCloud": True}
 
 
-def test_start_persists_installed_skill_channel_and_injects_it_into_a2a_metadata(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("installation_source", ["file", "environment"])
+def test_start_persists_installed_skill_channel_and_injects_it_into_a2a_metadata(
+    monkeypatch, tmp_path: Path, installation_source: str
+) -> None:
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     installed_skill = tmp_path / "installed-skill"
     installed_skill.mkdir()
-    (installed_skill / "config.json").write_text('{"channel":" host ","pipelineName":"selling"}', encoding="utf-8")
+    approval = {
+        "host": bridge.RUNTIME_DOWNLOAD_HOST,
+        "runtimeTag": bridge.RUNTIME_TAG,
+        "manifestSha256": bridge.MANIFEST_SHA256,
+        "approvedBy": "offline-installer",
+        "approvalReference": "offline-installation-approval-should-stay-local",
+    }
+    if installation_source == "file":
+        (installed_skill / "config.json").write_text(
+            json.dumps({"channel": " host ", "pipelineName": "selling", "runtimeDownloadApproval": approval}),
+            encoding="utf-8",
+        )
+    else:
+        monkeypatch.setenv("IAC_CODE_SKILL_CHANNEL", " host ")
+        monkeypatch.setenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", json.dumps(approval))
     monkeypatch.setattr(bridge, "SKILL_ROOT", installed_skill)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -2056,6 +2073,8 @@ def test_start_persists_installed_skill_channel_and_injects_it_into_a2a_metadata
     assert job["pipelineName"] == ""
     assert metadata["channel"] == "skill/host"
     assert result["contextId"] == "context-1"
+    assert approval["approvalReference"] not in json.dumps(captured["payload"])
+    assert "runtimeDownloadApproval" not in job
 
 
 def test_follow_surfaces_every_parent_and_candidate_step_boundary() -> None:
