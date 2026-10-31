@@ -137,6 +137,10 @@ def _stage(args: argparse.Namespace, root: Path) -> Path:
         bridge = _replace_constant(bridge, name, value)
     ast.parse(bridge, filename=str(bridge_path), feature_version=(3, 8))
     bridge_path.write_text(bridge, encoding="utf-8", newline="\n")
+    if profile.name == "alibabacloud-iac-code":
+        (skill_root / "references/manifest.json").write_text(
+            json.dumps({"version": skill_identity}, indent=2) + "\n", encoding="utf-8", newline="\n"
+        )
     return skill_root
 
 
@@ -151,6 +155,18 @@ def deterministic_zip(skill_root: Path, profile: SkillProfile, output: Path) -> 
             info.external_attr = (0o100000 | mode) << 16
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, source.read_bytes(), compress_type=zipfile.ZIP_DEFLATED, compresslevel=9)
+    verify_skill_archive(skill_root, profile, output)
+
+
+def verify_skill_archive(skill_root: Path, profile: SkillProfile, output: Path) -> None:
+    """Check the actual output, including exclusion of scanner-injected harness files."""
+    expected = [profile.archive_root + "/" + relative for relative in profile.output_files]
+    with zipfile.ZipFile(output) as archive:
+        if archive.namelist() != expected:
+            raise ValueError("Skill ZIP entries differ from the explicit publication profile")
+        for relative, name in zip(profile.output_files, expected):
+            if archive.read(name) != (skill_root / relative).read_bytes():
+                raise ValueError("Skill ZIP bytes differ from the staged publication file: " + relative)
 
 
 def release_manifest(args: argparse.Namespace, profile: SkillProfile, archive: Path) -> dict[str, object]:

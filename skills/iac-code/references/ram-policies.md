@@ -12,19 +12,72 @@ Do not attach a product-wide `FullAccess` policy or use an action wildcard. Read
 plan and cleanup scope have been approved. Where an API supports resource-level authorization, scope `Resource` to
 the target account, region, stack, or resource ARN rather than all resources.
 
-## Common workflow actions
+## Required permissions by workflow
 
-These are workflow-specific examples, not one policy to grant in full.
+The following `required_permissions` declaration defines the exact RAM actions for these supported operations in
+Normal and Pipeline modes. Select only the operation and action needed by the approved task; do not grant the
+union of this declaration. Mode selection itself grants no permission. Write actions require the corresponding
+explicit user approval and resource scope; read actions remain subject to Runtime permission decisions.
 
-| Workflow | Read actions | Write actions when explicitly approved |
-|---|---|---|
-| Caller preflight | `sts:GetCallerIdentity` | None |
-| ROS template and stack operations | `ros:ValidateTemplate`, `ros:GetTemplateParameterConstraints`, `ros:PreviewStack`, `ros:GetStack`, `ros:ListStackResources` | `ros:CreateStack`, `ros:UpdateStack`, `ros:DeleteStack` |
-| VPC and vSwitch operations | `vpc:DescribeVpcs`, `vpc:DescribeVSwitches`, `vpc:DescribeVpcAttribute`, `vpc:DescribeVSwitchAttributes` | `vpc:CreateVpc`, `vpc:CreateVSwitch`, `vpc:DeleteVSwitch`, `vpc:DeleteVpc` |
-| Security-group operations | `ecs:DescribeZones`, `ecs:DescribeSecurityGroups`, `ecs:DescribeSecurityGroupAttribute` | `ecs:CreateSecurityGroup`, `ecs:AuthorizeSecurityGroup`, `ecs:AuthorizeSecurityGroupEgress`, `ecs:DeleteSecurityGroup` |
+```yaml
+required_permissions:
+  offline_template_and_runtime_cache: []
+  caller_preflight:
+    read:
+      - "sts:GetCallerIdentity" # Identify the caller and target account.
+    write_after_approval: []
+  ros_template_and_stack:
+    read:
+      - "ros:ValidateTemplate" # Validate a template without creating a stack.
+      - "ros:GetTemplateParameterConstraints" # Discover valid template parameter values.
+      - "ros:PreviewStack" # Preview the approved plan before any deployment.
+      - "ros:GetStack" # Inspect the original stack and its operation state.
+      - "ros:ListStackResources" # Verify the exact resources belonging to the stack.
+    write_after_approval:
+      - "ros:CreateStack" # Create the explicitly confirmed stack.
+      - "ros:UpdateStack" # Apply an explicitly confirmed change to the selected stack.
+      - "ros:DeleteStack" # Remove only the explicitly approved stack and cleanup scope.
+  vpc_and_vswitch:
+    read:
+      - "vpc:DescribeVpcs" # Discover candidate VPCs in the selected account and region.
+      - "vpc:DescribeVSwitches" # Discover candidate vSwitches and verify cleanup.
+      - "vpc:DescribeVpcAttribute" # Inspect the selected VPC's attributes.
+      - "vpc:DescribeVSwitchAttributes" # Inspect a selected vSwitch and its parent VPC.
+    write_after_approval:
+      - "vpc:CreateVpc" # Create only the VPC from the confirmed deployment plan.
+      - "vpc:CreateVSwitch" # Create only the confirmed subnet in the selected VPC.
+      - "vpc:DeleteVSwitch" # Delete the exact approved vSwitch after dependency checks.
+      - "vpc:DeleteVpc" # Delete the exact approved VPC after its dependencies are removed.
+  security_group:
+    read:
+      - "ecs:DescribeZones" # Discover available zones for the selected region.
+      - "ecs:DescribeSecurityGroups" # Discover security groups and verify cleanup.
+      - "ecs:DescribeSecurityGroupAttribute" # Inspect the selected group's effective rules.
+    write_after_approval:
+      - "ecs:CreateSecurityGroup" # Create only the confirmed group in the selected VPC.
+      - "ecs:AuthorizeSecurityGroup" # Add only explicitly approved ingress rules.
+      - "ecs:AuthorizeSecurityGroupEgress" # Add only explicitly approved egress rules.
+      - "ecs:DeleteSecurityGroup" # Delete only the approved group after dependency checks.
+```
 
 Other resource types require their own exact product/action pairs. Never infer that the actions above authorize ECS
 instances, databases, public IP addresses, gateways, load balancers, disks, or any other unrelated resource.
+
+## Idempotent writes
+
+The Runtime workflow and provider API own cloud-operation idempotency. The standard-library bridge only prevents
+unsafe A2A message replay; it neither generates/persists cloud `ClientToken` values nor certifies exactly-once
+resource creation. The pinned Runtime's transport excludes writes from automatic retries. This transport-level
+boundary is narrower than proving that every generated cloud write uses a correct durable token.
+
+For APIs supporting `ClientToken`, preserve the same token and identical parameters for retries of one approved
+operation. After a timeout or uncertain result, query the original stack/resource/request state before another
+write; do not create a duplicate resource to recover a missing response. Keep the original job and cursor, honor
+permission boundaries, and stop if the outcome cannot be established. A changed plan or expanded cleanup scope
+requires a new explicit confirmation. This guidance does not authorize direct cloud calls outside the Runtime.
+If token continuity or the original outcome cannot be established, stop rather than issue another write.
+See the Skill's pinned Runtime provenance record for the exact audited source revision and offline contract paths;
+neither that record nor these permissions are a native binary audit, download exception, or approval receipt.
 
 ## Failure handling
 

@@ -13,6 +13,108 @@ For every infrastructure request covered by this Skill, the first operational co
 
 Treat a bridge error returned before job creation as the authoritative outcome for that invocation. In particular, when the bridge returns `incompatible_host`, report its error code, message, retryability, and any available host/runtime-baseline facts, then stop. Do not install Terraform, pip packages, another Runtime, or other substitute tools; do not bypass the bridge with direct cloud calls; do not ask for deployment inputs; and do not continue the infrastructure workflow or claim success. A later attempt is allowed only after the host compatibility problem has actually been corrected.
 
+## Runtime installation and environment
+
+The bridge downloads the pinned Runtime manifest and executable archive over HTTPS from
+`ros-public-tools.oss-cn-beijing.aliyuncs.com`, under the exact
+`/github-releases/aliyun/iac-code/skill-runtime/releases/<runtime-tag>/` prefix (or the pinned Candidate prefix).
+This OSS distribution endpoint is not a cloud resource API. **Network downloads are denied by default**: the
+installer must first obtain the user's or organization's explicit permission to download and execute this exact
+official Runtime, and record the approver and external approval reference in install-local `config.json` as
+`runtimeDownloadApproval`, or provision the same JSON object through the installer's
+`IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL` environment variable before the Agent session starts.
+Its `host`, `runtimeTag`, and `manifestSha256` must exactly match the packaged endpoint,
+Runtime tag, and manifest digest; `approvedBy` and `approvalReference` must identify the real approval, and
+`expiresAt` must be its future UTC deadline in `YYYY-MM-DDTHH:MM:SSZ` format. The bridge checks expiration before
+each download and redirect. A changed
+Runtime tag or manifest needs a new approval. This document, installation instructions, a cloud deployment request,
+or the Agent's own decision is not approval. Do not invent an approval record, copy a record from another package,
+or create/edit this policy during an infrastructure task. If the bridge returns `runtime_download_approval_required`,
+present `error.details.requiredApproval`, stop before any network or job creation, and ask the installer/operator to
+obtain and record that specific permission. Never automatically approve or retry it. Every initial download and redirect must
+stay within the pinned allow-list after approval. The bridge
+also verifies the pinned manifest SHA-256, archive SHA-256 and exact size, archive paths, and Runtime identity before
+execution. Never override these checks or use another download source after a rejection.
+
+No publication-wide download exception or reusable approval is shipped in this repository, eval scripts, or ZIP.
+The release operator must explicitly approve this binary installation path for each installation's scope; retain
+that real receipt in the operator's protected installation environment. The record is an installer policy input,
+not a cryptographically signed authorization token: its provenance must be established by that trusted installer.
+An Agent with arbitrary write access to its own interpreter, environment, or installed code is not isolated by this
+record. Do not describe it as a sandbox or use it to grant cloud permissions; protect the installation with OS access controls.
+
+The bridge reads `IAC_CODE_CONFIG_DIR` to select its local configuration root; it defaults to `~/.iac-code` and
+supports `~` and environment-variable expansion. Its `skill-runtime` subtree stores downloaded Runtime binaries,
+job state, and private local A2A server records including bearer tokens. This is an installation-side path setting,
+not a credential or task input. Never derive or change it from a user prompt, reveal its contents, or move private
+state into a shared/workspace directory. `SKILL_SESSION_ID` supplies the validated per-session observability ID.
+The bridge rejects a relative root, symbolic links in its path, a world-writable root, and state inside the selected
+workspace or installed Skill. Use a private directory outside both; do not change a rejected path from a task prompt.
+The bridge also reads two installer-provisioned environment variables when the corresponding install-local field
+is absent: `IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL` supplies the externally approved, exactly scoped JSON record above;
+`IAC_CODE_SKILL_CHANNEL` supplies a non-credential observability channel. Explicit install-local fields take precedence,
+including validation failures; environment values cannot replace or repair an invalid local policy. These variables
+support managed installers that create the Skill directory after task preparation. The infrastructure Agent must
+not create, edit, derive, or print either value during a task. The approval record is validated locally and is not sent
+as Runtime/A2A metadata; only the normalized channel is sent for observability. Missing approval still denies downloads.
+For `--language auto`, the bridge also reads `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, and `LANG`, in that order, only
+to choose one supported UI language. These locale values are read-only, non-credential inputs; their raw values
+are not sent to the network. An explicit supported `--language` takes precedence.
+
+The bridge starts only its own authenticated, loopback A2A child process. In that child's environment,
+`IAC_CODE_MODE` selects normal/pipeline, `IAC_CODE_SKILL_RUNTIME_GENERATION` binds its process generation,
+`IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION=1` preserves tool confirmations, and `IAC_CODE_PIPELINE_NAME` selects
+the installed Pipeline (removed for normal mode). It does not edit the parent shell or a global Agent configuration.
+For this single-user child only, absent an installer restriction, `IAC_CODE_A2A_TRUST_REQUEST_CWD=1` lets the
+authenticated bridge select an existing absolute user workspace instead of the Runtime's default CWD roots.
+This is an explicit local sandbox-policy choice, not cloud permission. An installer-provided
+`IACCODE_A2A_ALLOWED_CWDS` is preserved and enforced before job creation, with broad workspace trust disabled;
+an explicit `IAC_CODE_A2A_TRUST_REQUEST_CWD` value is otherwise preserved. A process with a different explicit
+CWD policy is not reused. Never remove or broaden an installer's restriction to get a task to proceed.
+
+For a normal turn whose final text exceeds 10 KiB, the bridge creates `.iac-code-skill-results/` inside the
+selected workspace and writes `<jobId>-turn-<n>.txt` there as a private result artifact (up to the bounded turn
+result size). It returns that file's URI instead of silently truncating the answer. This is a local workspace
+write, in addition to the caller's prompt/response files; no cloud write occurs. Present the returned artifact
+and leave its retention or deletion to the user.
+
+Skill packaging uses an explicit file allow-list. Agent-framework configuration directories such as `.claude`,
+`.qwen`, and `.agents` are excluded from published Skill packages. The Skill does not enable harness plugins,
+install third-party session observers, or modify global Agent-framework settings; scan-environment harness files
+are not Skill runtime dependencies and must not be copied into an installation.
+The packaging command also reopens the generated ZIP and verifies its exact profile entry list and bytes.
+Offline packaging tests deliberately inject fake observer settings into staging and require their exclusion;
+scanner-injected harness plugins must be preserved in the scanner environment and must never be installed by this Skill.
+
+### Pinned Runtime provenance — release-review record
+
+This record applies only to Runtime `v0.17.0` / iac-code `0.17.0`, with bundled CPython `cp312`.
+The published manifest is 2,121 bytes with SHA-256
+`48bb4e3384121dc34b3d929b1ba5221318b20df74b229032133591c523d34b83`.
+Its `sourceCommit` is `9e58a795f2480e755299e063d792c33969376891`, matching the published
+[`v0.17.0` source tag](https://github.com/aliyun/iac-code/tree/9e58a795f2480e755299e063d792c33969376891),
+and its controlled-publisher revision is `020ea2138464b01b48fb4ad3b3850833a5eadf3b`.
+The manifest records publication at `2026-10-30T07:10:56Z`; the corresponding GitHub release is published,
+not a draft or prerelease. These links are human release-audit references, not additional Runtime download endpoints.
+
+The pinned source's `skill-runtime/build_runtime.py`, `iac-code-runtime.spec`, `entry.py`, and
+`assemble_manifest.py` identify the native build, bundled dependencies, A2A entry point, version record,
+smoke checks, and exact three-target assembly contract. The manifest's archive inventory is:
+
+| Target | Archive bytes | Archive SHA-256 |
+| --- | ---: | --- |
+| darwin-arm64-macos-cp312 | 65732043 | `378ef9e1960e4e0ce81a3ede42b46a62deda24bd3eff476924b67340bc2547fb` |
+| linux-x86_64-gnu-cp312 | 80947194 | `6d3e143a252c4e2b2b4757859c963d03791a62a02919546236ab30b45fed64c6` |
+| windows-x86_64-msvc-cp312 | 66082119 | `011380ee544430b71fb8f3415325d30f07e1a25bd890ad954943e7a98e79de6b` |
+
+The Linux manifest requires glibc 2.39; this record does not lower that baseline. Archive identities above
+were read from the verified manifest, not established by rebuilding or executing these binaries during review.
+Hash and identity checks establish consistency with that pinned release; they are not a signature,
+reproducible-build proof, independent binary security audit, or download approval. Release operators must retain
+the manifest, exact source/publisher revisions, native build/verification receipts, and their own review decision.
+Missing native receipts must be reported as unavailable, never invented or inferred from a passing hash check.
+No reusable approval receipt is distributed with this record. A different Runtime tag/digest requires a new review.
+
 ## Workflow
 
 1. Put the complete user request in a UTF-8 prompt file inside the workspace.
@@ -24,6 +126,8 @@ Treat a bridge error returned before job creation as the authoritative outcome f
 
    Set `<language>` to the user's language code (`en`, `zh`, `es`, `fr`, `de`, `ja`, or `pt`). If it is unknown, use `auto`. Every job result repeats `preferredLanguage`; treat it as durable control state across all turns. Present progress, questions, permissions, candidate plans, and final results in that language; protocol field names, enums, IDs, and commands remain unchanged. When authoritative text already uses `preferredLanguage`, present it directly or summarize it in the same language—never translate Chinese user-visible content into English.
 
+   `runtimeDownloadApproval` is absent by default. Only the installer may add it after obtaining the externally
+   recorded Runtime-installation approval described above; the infrastructure Agent must not supply it itself.
    The installer or Skill distributor may place an optional `config.json` beside this `SKILL.md`:
 
    ```json
@@ -37,6 +141,12 @@ Treat a bridge error returned before job creation as the authoritative outcome f
      }
    }
    ```
+
+   After obtaining real approval, the installer adds `runtimeDownloadApproval` to this object with exactly these
+   fields: `host` (the distribution host above), `runtimeTag` (this package's pinned tag), `manifestSha256` (this
+   package's pinned manifest digest), `approvedBy` (the actual approver), `approvalReference` (the external
+   approval record), and `expiresAt` (its UTC expiration). Read the pinned tag and digest from the packaged bridge; placeholders, example records, and
+   an Agent-generated reference are not approvals. Keep this install-local record out of distributed Skill ZIPs.
 
    `channel` stores only the channel identifier; the bridge adds the `skill/` prefix before sending it to iac-code. `pipelineName` selects the implementation used only after Pipeline mode is chosen: `selling_solution_first` is the default, while the legacy `selling` flow is used only when this install-local file explicitly selects it. `permissionWaitPolicy` applies only to the temporary A2A server owned by this Skill: `null` timeouts mean unlimited waits, positive finite values set resident/Sub Pipeline limits, and grace is a non-negative finite value. Finite values cannot exceed 10 years; use `null` instead of an arbitrarily large number for an unlimited resident or Sub Pipeline wait. The bridge validates and converts this object into server configuration; it never sends the policy through A2A message metadata. The bridge rejects unknown configuration fields and invalid Pipeline names. If `config.json` or `pipelineName` is absent, Pipeline mode uses `selling_solution_first`; other absent fields keep their existing defaults. Never derive these values from the user's request, ask the user for them, or create, edit, or reveal this install-local configuration during an infrastructure task.
 
@@ -67,6 +177,32 @@ Use `poll` only for diagnosis or recovery when follow cannot be used:
 ```text
 python3 scripts/iac_code.py poll --job-id <job-id> --cursor <cursor> --wait-seconds 5
 ```
+
+## Cloud-write idempotency and uncertain outcomes
+
+**Implementation ownership:** the bridge protects A2A message delivery, not the cloud API transaction.
+Cloud `ClientToken` selection, persistence, and check-then-act recovery belong to the Runtime workflow and the
+particular provider API. The bridge does not generate or certify those tokens and cannot promise exactly-once
+resource creation. In the pinned `v0.17.0` source, `src/iac_code/tools/cloud/aliyun/retry_policy.py`
+allows automatic transport retries only for metadata-declared reads using bodyless GET/HEAD/OPTIONS;
+writes are not retry-eligible. `tests/tools/cloud/aliyun/test_acs3_transport.py` exercises write transport failures
+with one attempted request, while `test_retry_policy.py` covers write exclusion and uncertain outcomes.
+Those offline contracts do not prove that every model-generated write supplies a correct `ClientToken`.
+
+For a cloud API that supports `ClientToken`, the Runtime must reuse one token for the same approved logical write
+and identical parameters across retries; never create a new token merely because a response timed out. After an
+ambiguous create/update/delete result, first query the original stack, resource ID, or request state through the
+same Runtime and honor any returned permission boundary. Record the actual created IDs for dependency-ordered
+cleanup. A check-then-act query is not a replacement for an API-supported idempotency token.
+If the Runtime cannot preserve the original approved token/parameters or establish an ambiguous operation's
+outcome, stop at that unresolved boundary. Do not turn this requirement into a claim that the binary's
+application-level idempotency has been independently verified.
+
+Keep following the original job and cursor while its outcome is unresolved. Once a task ID is recorded, the bridge
+recovers streams through `GetTask` / `SubscribeToTask`. If the initial request fails before a task ID is recorded,
+the bridge reports `a2a_request_outcome_unknown` and does not replay the message. Stop and report the uncertainty;
+do not start a replacement job, repeat an approval, issue another cloud write, or bypass the bridge. Resume only
+after the original outcome is established and any required user confirmation has been obtained.
 
 ## User input
 
@@ -151,7 +287,9 @@ AlibabaCloud-Agent-Skills/{{SKILL_NAME}}/{session-id} skill-version/{skill-versi
 ```
 
 - `{{SKILL_NAME}}` is the fixed AgentHub Skill identifier and matches the frontmatter `name`.
-- The skill version is the packaged `SKILL_VERSION` injected by the Skill release process.
+- The skill version comes from the non-empty string `version` in [references/manifest.json](references/manifest.json),
+  generated by the Skill release process. The bridge loads it before its first outbound request and fails closed if
+  the manifest is missing, invalid, or inconsistent with the packaged `SKILL_VERSION`.
 - The session ID must be a 32-character lowercase hexadecimal string generated exactly once per session.
   It must be reused unchanged for every outbound HTTP request in that session. The bridge reads `SKILL_SESSION_ID`
   after validation; if it is absent or invalid, the bridge generates the session ID with `uuid.uuid4().hex` and stores
