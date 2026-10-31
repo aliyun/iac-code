@@ -534,8 +534,27 @@ class _RuntimeDownloadRedirectHandler(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def _require_runtime_download_approval():
+    if _skill_config().get("runtimeDownloadApproval") is None:
+        raise BridgeError(
+            "runtime_download_approval_required",
+            "The installer must record explicit approval for this pinned Runtime download before network access.",
+            details={
+                "requiredApproval": {
+                    "kind": "runtime_installation",
+                    "scheme": "https",
+                    "host": RUNTIME_DOWNLOAD_HOST,
+                    "runtimeTag": RUNTIME_TAG,
+                    "manifestSha256": MANIFEST_SHA256,
+                    "purpose": "Download and execute the verified official iac-code Runtime.",
+                }
+            },
+        )
+
+
 def _download(url, destination, maximum, expected_size=None):
     _validate_runtime_download_url(url)
+    _require_runtime_download_approval()
     request = urllib.request.Request(url, headers={"User-Agent": _SKILL_USER_AGENT})
     opener = urllib.request.build_opener(_RuntimeDownloadRedirectHandler())
     downloaded = 0
@@ -616,6 +635,7 @@ def safe_extract(archive_path, archive_type, destination):
 
 
 def _fetch_manifest():
+    _require_runtime_download_approval()
     temporary = pathlib.Path(tempfile.mkstemp(prefix="iac-code-manifest-", suffix=".json")[1])
     try:
         _progress("manifest", "Downloading the pinned runtime manifest")
@@ -3055,6 +3075,36 @@ def _normalize_permission_wait_policy(value):
     }
 
 
+def _normalize_runtime_download_approval(value):
+    if value is None:
+        return None
+    required = {"host", "runtimeTag", "manifestSha256", "approvedBy", "approvalReference"}
+    if not isinstance(value, dict) or set(value) != required:
+        raise BridgeError(
+            "skill_configuration_invalid",
+            "runtimeDownloadApproval must contain exactly the pinned scope and an external approval record.",
+        )
+    expected = {
+        "host": RUNTIME_DOWNLOAD_HOST,
+        "runtimeTag": RUNTIME_TAG,
+        "manifestSha256": MANIFEST_SHA256,
+    }
+    if any(value.get(key) != item for key, item in expected.items()):
+        raise BridgeError("skill_configuration_invalid", "The Runtime download approval does not match this package.")
+    normalized = dict(expected)
+    for name in ("approvedBy", "approvalReference"):
+        text = value.get(name)
+        if (
+            not isinstance(text, str)
+            or not text.strip()
+            or len(text) > 512
+            or any(ord(char) < 32 or ord(char) == 127 for char in text)
+        ):
+            raise BridgeError("skill_configuration_invalid", "The Runtime download approval record is incomplete.")
+        normalized[name] = text.strip()
+    return normalized
+
+
 def _skill_config():
     config_path = SKILL_ROOT / "config.json"
     try:
@@ -3064,6 +3114,7 @@ def _skill_config():
             "channel": None,
             "pipelineName": DEFAULT_PIPELINE_NAME,
             "permissionWaitPolicy": None,
+            "runtimeDownloadApproval": None,
         }
     except OSError as exc:
         raise BridgeError("skill_configuration_invalid", "The installed Skill config could not be read.") from exc
@@ -3075,7 +3126,8 @@ def _skill_config():
         raise BridgeError("skill_configuration_invalid", "The installed Skill config is not valid UTF-8 JSON.") from exc
     if not isinstance(config, dict):
         raise BridgeError("skill_configuration_invalid", "The installed Skill config must be a JSON object.")
-    unknown = sorted(str(key) for key in config if key not in {"channel", "pipelineName", "permissionWaitPolicy"})
+    allowed = {"channel", "pipelineName", "permissionWaitPolicy", "runtimeDownloadApproval"}
+    unknown = sorted(str(key) for key in config if key not in allowed)
     if unknown:
         raise BridgeError(
             "skill_configuration_invalid",
@@ -3091,6 +3143,7 @@ def _skill_config():
         "channel": _normalize_telemetry_channel(config.get("channel")) if config.get("channel") is not None else None,
         "pipelineName": pipeline_name,
         "permissionWaitPolicy": _normalize_permission_wait_policy(config.get("permissionWaitPolicy")),
+        "runtimeDownloadApproval": _normalize_runtime_download_approval(config.get("runtimeDownloadApproval")),
     }
 
 

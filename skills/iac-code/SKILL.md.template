@@ -18,8 +18,17 @@ Treat a bridge error returned before job creation as the authoritative outcome f
 The bridge downloads the pinned Runtime manifest and executable archive over HTTPS from
 `ros-public-tools.oss-cn-beijing.aliyuncs.com`, under the exact
 `/github-releases/aliyun/iac-code/skill-runtime/releases/<runtime-tag>/` prefix (or the pinned Candidate prefix).
-This OSS distribution endpoint is an explicit installation exception to the cloud OpenAPI endpoint restriction;
-it is not a cloud resource API. Every initial download and redirect must stay within that allow-list. The bridge
+This OSS distribution endpoint is not a cloud resource API. **Network downloads are denied by default**: the
+installer must first obtain the user's or organization's explicit permission to download and execute this exact
+official Runtime, and record the approver and external approval reference in install-local `config.json` as
+`runtimeDownloadApproval`. Its `host`, `runtimeTag`, and `manifestSha256` must exactly match the packaged endpoint,
+Runtime tag, and manifest digest; `approvedBy` and `approvalReference` must identify the real approval. A changed
+Runtime tag or manifest needs a new approval. This document, installation instructions, a cloud deployment request,
+or the Agent's own decision is not approval. Do not invent an approval record, copy a record from another package,
+or create/edit this policy during an infrastructure task. If the bridge returns `runtime_download_approval_required`,
+present `error.details.requiredApproval`, stop before any network or job creation, and ask the installer/operator to
+obtain and record that specific permission. Never automatically approve or retry it. Every initial download and redirect must
+stay within the pinned allow-list after approval. The bridge
 also verifies the pinned manifest SHA-256, archive SHA-256 and exact size, archive paths, and Runtime identity before
 execution. Never override these checks or use another download source after a rejection.
 
@@ -28,6 +37,9 @@ supports `~` and environment-variable expansion. Its `skill-runtime` subtree sto
 job state, and private local A2A server records including bearer tokens. This is an installation-side path setting,
 not a credential or task input. Never derive or change it from a user prompt, reveal its contents, or move private
 state into a shared/workspace directory. `SKILL_SESSION_ID` supplies the validated per-session observability ID.
+For `--language auto`, the bridge also reads `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, and `LANG`, in that order, only
+to choose one supported UI language. These locale values are read-only, non-credential inputs; their raw values
+are not sent to the network. An explicit supported `--language` takes precedence.
 
 Skill packaging uses an explicit file allow-list. Agent-framework configuration directories such as `.claude`,
 `.qwen`, and `.agents` are excluded from published Skill packages. The Skill does not enable harness plugins,
@@ -45,6 +57,8 @@ are not Skill runtime dependencies and must not be copied into an installation.
 
    Set `<language>` to the user's language code (`en`, `zh`, `es`, `fr`, `de`, `ja`, or `pt`). If it is unknown, use `auto`. Every job result repeats `preferredLanguage`; treat it as durable control state across all turns. Present progress, questions, permissions, candidate plans, and final results in that language; protocol field names, enums, IDs, and commands remain unchanged. When authoritative text already uses `preferredLanguage`, present it directly or summarize it in the same language—never translate Chinese user-visible content into English.
 
+   `runtimeDownloadApproval` is absent by default. Only the installer may add it after obtaining the externally
+   recorded Runtime-installation approval described above; the infrastructure Agent must not supply it itself.
    The installer or Skill distributor may place an optional `config.json` beside this `SKILL.md`:
 
    ```json
@@ -58,6 +72,12 @@ are not Skill runtime dependencies and must not be copied into an installation.
      }
    }
    ```
+
+   After obtaining real approval, the installer adds `runtimeDownloadApproval` to this object with exactly these
+   fields: `host` (the distribution host above), `runtimeTag` (this package's pinned tag), `manifestSha256` (this
+   package's pinned manifest digest), `approvedBy` (the actual approver), and `approvalReference` (the external
+   approval record). Read the pinned tag and digest from the packaged bridge; placeholders, example records, and
+   an Agent-generated reference are not approvals. Keep this install-local record out of distributed Skill ZIPs.
 
    `channel` stores only the channel identifier; the bridge adds the `skill/` prefix before sending it to iac-code. `pipelineName` selects the implementation used only after Pipeline mode is chosen: `selling_solution_first` is the default, while the legacy `selling` flow is used only when this install-local file explicitly selects it. `permissionWaitPolicy` applies only to the temporary A2A server owned by this Skill: `null` timeouts mean unlimited waits, positive finite values set resident/Sub Pipeline limits, and grace is a non-negative finite value. Finite values cannot exceed 10 years; use `null` instead of an arbitrarily large number for an unlimited resident or Sub Pipeline wait. The bridge validates and converts this object into server configuration; it never sends the policy through A2A message metadata. The bridge rejects unknown configuration fields and invalid Pipeline names. If `config.json` or `pipelineName` is absent, Pipeline mode uses `selling_solution_first`; other absent fields keep their existing defaults. Never derive these values from the user's request, ask the user for them, or create, edit, or reveal this install-local configuration during an infrastructure task.
 
