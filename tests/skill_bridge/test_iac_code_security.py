@@ -37,6 +37,7 @@ def _approval(bridge):
         "manifestSha256": bridge.MANIFEST_SHA256,
         "approvedBy": "offline-test-operator",
         "approvalReference": "offline-test-approval-record",
+        "expiresAt": "2099-01-01T00:00:00Z",
     }
 
 
@@ -144,6 +145,101 @@ def test_runtime_approval_requires_a_complete_scoped_object(bridge, approval) ->
         bridge._skill_config()
 
 
+@pytest.mark.parametrize("expiry", ["2000-01-01T00:00:00Z", "2099-02-31T00:00:00Z", "2099-01-01", None])
+def test_expired_or_invalid_approval_cannot_reach_network(bridge, monkeypatch, tmp_path, expiry) -> None:
+    approval = _approval(bridge)
+    approval["expiresAt"] = expiry
+    _write_approval(bridge, approval)
+    monkeypatch.setattr(bridge.urllib.request, "build_opener", lambda *_: pytest.fail("approval reached network"))
+    with pytest.raises(bridge.BridgeError):
+        bridge._download(_download_root(bridge) + "runtime.zip", tmp_path / "runtime.part", 100)
+
+
+def test_approval_is_rechecked_at_redirect(bridge, monkeypatch) -> None:
+    approval = _approval(bridge)
+    _write_approval(bridge, approval)
+    bridge._require_runtime_download_approval()
+    approval["expiresAt"] = "2000-01-01T00:00:00Z"
+    _write_approval(bridge, approval)
+    request = urllib.request.Request(_download_root(bridge) + "first.zip")
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge._RuntimeDownloadRedirectHandler().redirect_request(
+            request, None, 302, "Found", {}, _download_root(bridge) + "next.zip"
+        )
+    assert caught.value.code == "runtime_download_approval_required"
+
+
+def test_private_state_rejects_workspace_and_installed_skill(bridge, monkeypatch, tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for root in (workspace, workspace / "private", bridge.SKILL_ROOT / "private"):
+        monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(root))
+        with pytest.raises(bridge.BridgeError, match="outside"):
+            bridge._validate_private_state_location(workspace)
+        assert not (root / "skill-runtime").exists()
+
+
+def test_private_state_rejects_symlink_ancestors(bridge, monkeypatch, tmp_path) -> None:
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    link = tmp_path / "alias"
+    try:
+        link.symlink_to(actual, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks unavailable")
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(link / "private"))
+    with pytest.raises(bridge.BridgeError, match="symbolic"):
+        bridge._config_root()
+
+
+def test_explicit_runtime_cwd_allowlist_is_enforced(bridge, monkeypatch, tmp_path) -> None:
+    allowed = tmp_path / "allowed"
+    allowed.mkdir()
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(allowed))
+    monkeypatch.setenv("IAC_CODE_A2A_TRUST_REQUEST_CWD", "1")
+    assert bridge._runtime_cwd_policy() == {"allowedCwds": str(allowed), "trustRequestCwd": "0"}
+    bridge._validate_runtime_workspace(allowed / "child")
+    with pytest.raises(bridge.BridgeError) as caught:
+        bridge._validate_runtime_workspace(tmp_path / "outside")
+    assert caught.value.code == "runtime_workspace_denied"
+
+
+def test_runtime_reuse_does_not_ignore_new_cwd_restriction(bridge, monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("IACCODE_A2A_ALLOWED_CWDS", raising=False)
+    monkeypatch.delenv("IAC_CODE_A2A_TRUST_REQUEST_CWD", raising=False)
+    record = {
+        "runtimeTag": bridge.RUNTIME_TAG,
+        "iacCodeVersion": bridge.IAC_CODE_VERSION,
+        "target": "test-target",
+        "mode": "normal",
+        "pipelineName": "",
+        "handoffToolConfirmation": True,
+        "permissionWaitPolicy": None,
+        "pid": 123,
+        "cwdPolicy": bridge._runtime_cwd_policy(),
+    }
+    monkeypatch.setattr(bridge, "_pid_alive", lambda *_: True)
+    monkeypatch.setattr(bridge, "_http_json", lambda *_args, **_kwargs: pytest.fail("restricted runtime was reused"))
+    monkeypatch.setenv("IACCODE_A2A_ALLOWED_CWDS", str(tmp_path))
+    assert bridge._runtime_matches(record, "normal", "", "test-target") is False
+
+
+def test_explicit_runtime_trust_deny_is_preserved(bridge, monkeypatch) -> None:
+    monkeypatch.delenv("IACCODE_A2A_ALLOWED_CWDS", raising=False)
+    monkeypatch.setenv("IAC_CODE_A2A_TRUST_REQUEST_CWD", "0")
+    assert bridge._runtime_cwd_policy()["trustRequestCwd"] == "0"
+
+
+def test_cache_private_state_cannot_be_inside_current_workspace(bridge, monkeypatch, tmp_path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(workspace / "private"))
+    with pytest.raises(bridge.BridgeError, match="outside"):
+        bridge._bridge_root()
+    assert not (workspace / "private").exists()
+
+
 def _download_root(bridge) -> str:
     channel = "candidates" if bridge.RUNTIME_TAG.startswith("candidate-") else "releases"
     return "https://{}/github-releases/aliyun/iac-code/skill-runtime/{}/{}/".format(
@@ -217,6 +313,7 @@ def test_download_accepts_only_the_pinned_release_or_candidate(bridge, monkeypat
 @pytest.mark.parametrize("target", ["https://evil.example/runtime.zip", "http://127.0.0.1/runtime.zip",
                                    "file:///tmp/runtime.zip"])
 def test_each_redirect_hop_is_checked_before_following(bridge, target) -> None:
+    _write_approval(bridge, _approval(bridge))
     handler = bridge._RuntimeDownloadRedirectHandler()
     original = urllib.request.Request(_download_root(bridge) + "first.zip")
     intermediate = handler.redirect_request(original, None, 302, "Found", {}, _download_root(bridge) + "second.zip")
@@ -298,3 +395,7 @@ def test_agenthub_package_excludes_harness_settings_even_if_present_in_staging(m
         assert archive.namelist() == [profile.archive_root + "/" + name for name in profile.output_files]
         assert len(archive.namelist()) == 4
         assert all(b"fake-observer" not in archive.read(name) for name in archive.namelist())
+    with zipfile.ZipFile(output, "a") as archive:
+        archive.writestr(profile.archive_root + "/.claude/settings.json", '{"enabledPlugins":{"fake-observer":true}}')
+    with pytest.raises(ValueError, match="explicit publication profile"):
+        package["verify_skill_archive"](staged, profile, output)

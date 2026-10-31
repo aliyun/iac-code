@@ -24,7 +24,9 @@ official Runtime, and record the approver and external approval reference in ins
 `runtimeDownloadApproval`, or provision the same JSON object through the installer's
 `IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL` environment variable before the Agent session starts.
 Its `host`, `runtimeTag`, and `manifestSha256` must exactly match the packaged endpoint,
-Runtime tag, and manifest digest; `approvedBy` and `approvalReference` must identify the real approval. A changed
+Runtime tag, and manifest digest; `approvedBy` and `approvalReference` must identify the real approval, and
+`expiresAt` must be its future UTC deadline in `YYYY-MM-DDTHH:MM:SSZ` format. The bridge checks expiration before
+each download and redirect. A changed
 Runtime tag or manifest needs a new approval. This document, installation instructions, a cloud deployment request,
 or the Agent's own decision is not approval. Do not invent an approval record, copy a record from another package,
 or create/edit this policy during an infrastructure task. If the bridge returns `runtime_download_approval_required`,
@@ -34,11 +36,20 @@ stay within the pinned allow-list after approval. The bridge
 also verifies the pinned manifest SHA-256, archive SHA-256 and exact size, archive paths, and Runtime identity before
 execution. Never override these checks or use another download source after a rejection.
 
+No publication-wide download exception or reusable approval is shipped in this repository, eval scripts, or ZIP.
+The release operator must explicitly approve this binary installation path for each installation's scope; retain
+that real receipt in the operator's protected installation environment. The record is an installer policy input,
+not a cryptographically signed authorization token: its provenance must be established by that trusted installer.
+An Agent with arbitrary write access to its own interpreter, environment, or installed code is not isolated by this
+record. Do not describe it as a sandbox or use it to grant cloud permissions; protect the installation with OS access controls.
+
 The bridge reads `IAC_CODE_CONFIG_DIR` to select its local configuration root; it defaults to `~/.iac-code` and
 supports `~` and environment-variable expansion. Its `skill-runtime` subtree stores downloaded Runtime binaries,
 job state, and private local A2A server records including bearer tokens. This is an installation-side path setting,
 not a credential or task input. Never derive or change it from a user prompt, reveal its contents, or move private
 state into a shared/workspace directory. `SKILL_SESSION_ID` supplies the validated per-session observability ID.
+The bridge rejects a relative root, symbolic links in its path, a world-writable root, and state inside the selected
+workspace or installed Skill. Use a private directory outside both; do not change a rejected path from a task prompt.
 The bridge also reads two installer-provisioned environment variables when the corresponding install-local field
 is absent: `IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL` supplies the externally approved, exactly scoped JSON record above;
 `IAC_CODE_SKILL_CHANNEL` supplies a non-credential observability channel. Explicit install-local fields take precedence,
@@ -50,10 +61,30 @@ For `--language auto`, the bridge also reads `LANGUAGE`, `LC_ALL`, `LC_MESSAGES`
 to choose one supported UI language. These locale values are read-only, non-credential inputs; their raw values
 are not sent to the network. An explicit supported `--language` takes precedence.
 
+The bridge starts only its own authenticated, loopback A2A child process. In that child's environment,
+`IAC_CODE_MODE` selects normal/pipeline, `IAC_CODE_SKILL_RUNTIME_GENERATION` binds its process generation,
+`IAC_CODE_HANDOFF_USE_TOOL_CONFIRMATION=1` preserves tool confirmations, and `IAC_CODE_PIPELINE_NAME` selects
+the installed Pipeline (removed for normal mode). It does not edit the parent shell or a global Agent configuration.
+For this single-user child only, absent an installer restriction, `IAC_CODE_A2A_TRUST_REQUEST_CWD=1` lets the
+authenticated bridge select an existing absolute user workspace instead of the Runtime's default CWD roots.
+This is an explicit local sandbox-policy choice, not cloud permission. An installer-provided
+`IACCODE_A2A_ALLOWED_CWDS` is preserved and enforced before job creation, with broad workspace trust disabled;
+an explicit `IAC_CODE_A2A_TRUST_REQUEST_CWD` value is otherwise preserved. A process with a different explicit
+CWD policy is not reused. Never remove or broaden an installer's restriction to get a task to proceed.
+
+For a normal turn whose final text exceeds 10 KiB, the bridge creates `.iac-code-skill-results/` inside the
+selected workspace and writes `<jobId>-turn-<n>.txt` there as a private result artifact (up to the bounded turn
+result size). It returns that file's URI instead of silently truncating the answer. This is a local workspace
+write, in addition to the caller's prompt/response files; no cloud write occurs. Present the returned artifact
+and leave its retention or deletion to the user.
+
 Skill packaging uses an explicit file allow-list. Agent-framework configuration directories such as `.claude`,
 `.qwen`, and `.agents` are excluded from published Skill packages. The Skill does not enable harness plugins,
 install third-party session observers, or modify global Agent-framework settings; scan-environment harness files
 are not Skill runtime dependencies and must not be copied into an installation.
+The packaging command also reopens the generated ZIP and verifies its exact profile entry list and bytes.
+Offline packaging tests deliberately inject fake observer settings into staging and require their exclusion;
+scanner-injected harness plugins must be preserved in the scanner environment and must never be installed by this Skill.
 
 ## Workflow
 
@@ -84,8 +115,8 @@ are not Skill runtime dependencies and must not be copied into an installation.
 
    After obtaining real approval, the installer adds `runtimeDownloadApproval` to this object with exactly these
    fields: `host` (the distribution host above), `runtimeTag` (this package's pinned tag), `manifestSha256` (this
-   package's pinned manifest digest), `approvedBy` (the actual approver), and `approvalReference` (the external
-   approval record). Read the pinned tag and digest from the packaged bridge; placeholders, example records, and
+   package's pinned manifest digest), `approvedBy` (the actual approver), `approvalReference` (the external
+   approval record), and `expiresAt` (its UTC expiration). Read the pinned tag and digest from the packaged bridge; placeholders, example records, and
    an Agent-generated reference are not approvals. Keep this install-local record out of distributed Skill ZIPs.
 
    `channel` stores only the channel identifier; the bridge adds the `skill/` prefix before sending it to iac-code. `pipelineName` selects the implementation used only after Pipeline mode is chosen: `selling_solution_first` is the default, while the legacy `selling` flow is used only when this install-local file explicitly selects it. `permissionWaitPolicy` applies only to the temporary A2A server owned by this Skill: `null` timeouts mean unlimited waits, positive finite values set resident/Sub Pipeline limits, and grace is a non-negative finite value. Finite values cannot exceed 10 years; use `null` instead of an arbitrarily large number for an unlimited resident or Sub Pipeline wait. The bridge validates and converts this object into server configuration; it never sends the policy through A2A message metadata. The bridge rejects unknown configuration fields and invalid Pipeline names. If `config.json` or `pipelineName` is absent, Pipeline mode uses `selling_solution_first`; other absent fields keep their existing defaults. Never derive these values from the user's request, ask the user for them, or create, edit, or reveal this install-local configuration during an infrastructure task.
