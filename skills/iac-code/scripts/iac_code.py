@@ -28,6 +28,7 @@ import tarfile
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 import zipfile
@@ -42,6 +43,7 @@ USER_AGENT_TEMPLATE = "iac-code-skill/1"
 MANIFEST_URL = "https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill-runtime/releases/v0.12.0/runtime-manifest.json"
 # Replaced in a temporary staging directory by skill-runtime/package_skill.py.
 MANIFEST_SHA256 = "0000000000000000000000000000000000000000000000000000000000000000"
+RUNTIME_DOWNLOAD_HOST = "ros-public-tools.oss-cn-beijing.aliyuncs.com"
 SCHEMA_VERSION = 1
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_ARCHIVE_BYTES = 2 * 1024 * 1024 * 1024
@@ -506,11 +508,39 @@ class InstallLock(object):
         self.handle.close()
 
 
+def _validate_runtime_download_url(url):
+    if not isinstance(url, str) or not url or any(ord(char) <= 32 or ord(char) == 127 for char in url):
+        raise BridgeError("runtime_download_url_rejected", "The Runtime download URL is not allowed.")
+    try:
+        parsed = urllib.parse.urlsplit(url)
+    except ValueError as exc:
+        raise BridgeError("runtime_download_url_rejected", "The Runtime download URL is not allowed.") from exc
+    channel = "candidates" if RUNTIME_TAG.startswith("candidate-") else "releases"
+    prefix = "/github-releases/aliyun/iac-code/skill-runtime/{}/{}/".format(channel, RUNTIME_TAG)
+    if (
+        parsed.scheme != "https"
+        or parsed.netloc != RUNTIME_DOWNLOAD_HOST
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith(prefix)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", parsed.path[len(prefix):])
+    ):
+        raise BridgeError("runtime_download_url_rejected", "The Runtime download URL is not allowed.")
+
+
+class _RuntimeDownloadRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_runtime_download_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def _download(url, destination, maximum, expected_size=None):
+    _validate_runtime_download_url(url)
     request = urllib.request.Request(url, headers={"User-Agent": _SKILL_USER_AGENT})
+    opener = urllib.request.build_opener(_RuntimeDownloadRedirectHandler())
     downloaded = 0
     try:
-        with urllib.request.urlopen(request, timeout=30) as response, destination.open("wb") as output:
+        with opener.open(request, timeout=30) as response, destination.open("wb") as output:
             while True:
                 chunk = response.read(1024 * 1024)
                 if not chunk:
@@ -2785,8 +2815,13 @@ def _subscription_after_stream(record, job_id):
     _root, job_path, _spool = _job_paths(job_id)
     job = _load_json(job_path)
     task_id = job.get("taskId")
-    if not isinstance(task_id, str):
-        return None
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise BridgeError(
+            "a2a_request_outcome_unknown",
+            "The A2A stream ended before a task ID was recorded. Its outcome is unknown; "
+            "do not replay the request or start a replacement job.",
+            False,
+        )
     status = _http_json(
         "http://127.0.0.1:{}/".format(record["port"]),
         record["token"],
@@ -2869,11 +2904,13 @@ def worker(job_id, request_path):
                 return 0
             job = _load_json(job_path)
             task_id = job.get("taskId")
-            if not isinstance(task_id, str):
-                if attempts >= 3:
-                    raise
-                time.sleep(0.2 * attempts)
-                continue
+            if not isinstance(task_id, str) or not task_id.strip():
+                raise BridgeError(
+                    "a2a_request_outcome_unknown",
+                    "The A2A request failed before a task ID was recorded. Its outcome is unknown; "
+                    "do not replay the request or start a replacement job.",
+                    False,
+                ) from exc
             payload = _subscription_after_stream(record, job_id)
             if payload is None:
                 return 0
