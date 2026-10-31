@@ -498,9 +498,24 @@ def _truncate_utf8(value: str, maximum: int) -> str:
     return encoded[:maximum].decode("utf-8", "ignore")
 
 
+def _redact_output_urls(value: str) -> str:
+    """Keep URL locations, never bearer query/fragment values or user information."""
+
+    def redact(match: Any) -> str:
+        try:
+            parsed = urllib.parse.urlsplit(match.group(0))
+            netloc = parsed.netloc.rsplit("@", 1)[-1]
+            return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+        except ValueError:
+            return "[REDACTED URL]"
+
+    return OUTPUT_URL_PATTERN.sub(redact, value)
+
+
 def sanitize_text(value: Any, maximum: int = 4000, preserve_lines: bool = False) -> str:
     if not isinstance(value, str):
         return ""
+    value = _redact_output_urls(value)
     value = SECRET_PATTERN.sub(lambda match: match.group(1) + "[REDACTED]", value)
     value = "".join(character for character in value if character in "\n\r\t" or ord(character) >= 32)
     if not preserve_lines:
@@ -891,6 +906,12 @@ def build_stop_command(job: Dict[str, Any], session_id: str) -> List[str]:
 
 
 def _load_code_sdk() -> Dict[str, Any]:
+    if sys.version_info < (3, 10):
+        raise BridgeError(
+            "unsupported_python_version",
+            "Code transport requires Python 3.10 or newer for the reviewed dependency lock. "
+            "Ask the installation administrator to provision it; do not switch transports.",
+        )
     try:
         return {
             "CredentialClient": getattr(importlib.import_module("alibabacloud_credentials.client"), "Client"),
@@ -906,7 +927,8 @@ def _load_code_sdk() -> Dict[str, Any]:
         raise BridgeError(
             "sdk_not_installed",
             "The configured code transport requires the packages listed in {} for the Python interpreter running "
-            "this bridge. Do not switch transports; install them and run check again.".format(REQUIREMENTS_FILE),
+            "this bridge. Use only the trusted locked-wheel installation procedure in references/runtime-policy.md, "
+            "then run check again; do not switch transports.".format(REQUIREMENTS_FILE),
         ) from exc
 
 
@@ -1339,7 +1361,7 @@ class _RemoteCLIDebugLog(object):
         value = SECRET_PATTERN.sub(lambda match: match.group(1) + "[REDACTED]", value)
         value = _DEBUG_TEXT_SECRET.sub(lambda match: match.group(1) + '"[REDACTED]"', value)
         value = re.sub(r"\bLTAI[A-Za-z0-9]{12,}\b", "[REDACTED]", value)
-        return value
+        return _redact_output_urls(value)
 
     def _value(self, value, depth=0):
         if depth > 16:

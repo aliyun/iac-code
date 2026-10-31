@@ -1,0 +1,4 @@
+# Direct dependencies; regenerate requirements-code.txt with uv pip compile and SHA-256 hashes.
+alibabacloud-credentials>=1.0.8,<2
+alibabacloud-tea-openapi>=0.4.4,<0.5
+requests>=2.31,<3
