@@ -1258,6 +1258,12 @@ def _continue_job_local(payload: Dict[str, Any]) -> Dict[str, Any]:
         pending = job.get("inputRequired")
         if isinstance(pending, dict) and pending.get("kind") == "permission":
             raise BridgeError("input_response_mismatch", "A permission must be answered with respond, not continue.")
+        if isinstance(pending, dict) and pending.get("kind") == "deployment_confirmation":
+            raise BridgeError(
+                "unsupported_input_response",
+                "Deployment confirmation is display-only in this bridge. Present the plan and stop; "
+                "do not send a natural-language confirmation or a permission response.",
+            )
         pipeline_handoff = (
             job.get("mode") == "pipeline"
             and job.get("state") == "completed"
