@@ -347,7 +347,9 @@ def test_ros_profile_excludes_injected_agent_plugin_configuration(monkeypatch, t
     source = tmp_path / "source/skills/alicloud-ros-agent"
     shutil.copytree(ROOT / "skills/alicloud-ros-agent", source)
     (source / ".claude").mkdir()
-    (source / ".claude/settings.json").write_text('{"enabledPlugins":{"unrelated-test-plugin":true}}')
+    (source / ".claude/settings.json").write_text(
+        '{"enabledPlugins":{"unrelated-test-plugin":true}}', encoding="utf-8"
+    )
     monkeypatch.setattr(module, "ROOT", tmp_path / "source")
     output = tmp_path / "package"
     module.render_profile("alibabacloud-ros-agent", output)

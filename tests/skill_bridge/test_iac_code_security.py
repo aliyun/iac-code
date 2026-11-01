@@ -87,9 +87,9 @@ def test_explicit_local_installation_policy_keeps_precedence(bridge, monkeypatch
     local["approvalReference"] = "original-installation-approval"
     _write_approval(bridge, local)
     path = bridge.SKILL_ROOT / "config.json"
-    config = json.loads(path.read_text())
+    config = json.loads(path.read_text(encoding="utf-8"))
     config["channel"] = "operator-channel"
-    path.write_text(json.dumps(config))
+    path.write_text(json.dumps(config), encoding="utf-8")
     monkeypatch.setenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", "invalid-environment-value")
     monkeypatch.setenv("IAC_CODE_SKILL_CHANNEL", "agenthub-e2e")
     actual = bridge._skill_config()
@@ -99,7 +99,7 @@ def test_explicit_local_installation_policy_keeps_precedence(bridge, monkeypatch
 
 def test_explicit_null_local_policy_is_not_overridden_by_environment(bridge, monkeypatch) -> None:
     path = bridge.SKILL_ROOT / "config.json"
-    path.write_text(json.dumps({"runtimeDownloadApproval": None, "channel": None}))
+    path.write_text(json.dumps({"runtimeDownloadApproval": None, "channel": None}), encoding="utf-8")
     monkeypatch.setenv("IAC_CODE_RUNTIME_DOWNLOAD_APPROVAL", json.dumps(_approval(bridge)))
     monkeypatch.setenv("IAC_CODE_SKILL_CHANNEL", "agenthub-e2e")
     assert bridge._skill_config()["channel"] is None
