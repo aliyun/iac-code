@@ -238,7 +238,7 @@ def test_ensure_runtime_downloads_verifies_atomically_and_hits_cache(monkeypatch
         "approvedBy": "offline-installer",
         "approvalReference": "offline-install-test",
         "expiresAt": "2099-01-01T00:00:00Z",
-    }}))
+    }}), encoding="utf-8")
     archive = tmp_path / "runtime.zip"
     script = "#!/bin/sh\necho iac-code {}\n".format(bridge.IAC_CODE_VERSION)
     with zipfile.ZipFile(archive, "w") as bundle:
