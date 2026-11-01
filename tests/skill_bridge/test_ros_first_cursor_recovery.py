@@ -303,23 +303,39 @@ def test_code_and_local_cli_do_not_send_client_reference(executor):
     assert "ClientReferenceId" not in bridge.build_start_chat_parameters(configured, "hello", None, [])
 
 
-def test_agenthub_lookup_allows_independent_telemetry_ids_but_not_other_arguments(executor, monkeypatch):
-    template = "AlibabaCloud-Agent-Skills/alibabacloud-ros-agent/{session-id}"
+def test_agenthub_lookup_allows_independent_telemetry_ids_but_not_other_arguments(executor, monkeypatch, tmp_path):
+    template = "AlibabaCloud-Agent-Skills/alibabacloud-ros-agent/{session-id} skill-version/{skill-version}"
+    # Model an installed AgentHub package, including its required version manifest.
+    references = tmp_path / "references"
+    references.mkdir()
+    manifest = references / "manifest.json"
+    manifest.write_text(json.dumps({"version": bridge.SKILL_VERSION}), encoding="utf-8")
+    monkeypatch.setattr(bridge, "__file__", str(tmp_path / "scripts/ros_agent.py"))
     monkeypatch.setattr(bridge, "SKILL_DISTRIBUTION", "agenthub")
     monkeypatch.setattr(bridge, "USER_AGENT_TEMPLATE", template)
-    monkeypatch.setattr(bridge, "USER_AGENT", template.replace("{session-id}", "a" * 32))
+    header = template.replace("{skill-version}", bridge.SKILL_VERSION)
+    monkeypatch.setattr(bridge, "USER_AGENT", header.replace("{session-id}", "a" * 32))
     command = bridge.build_session_list_command(args())
     index = command.index("--user-agent") + 1
-    command[index] = template.replace("{session-id}", "b" * 32)
+    command[index] = header.replace("{session-id}", "b" * 32)
     job = {"aliyunPath": "/fake/aliyun", "endpoint": "ros.aliyuncs.com", "mode": "normal", "regionId": "cn-hangzhou"}
     assert bridge._valid_foreground_command(command, job)
     modified = list(command)
     modified[modified.index("--biz-mode") + 1] = "IaCCodePipeline"
     assert not bridge._valid_foreground_command(modified, job)
-    for value in ("arbitrary-header", template, command[index] + "\nInjected: value", command[index][:-1]):
+    for value in (
+        "arbitrary-header", template, command[index] + "\nInjected: value", command[index][:-1],
+        command[index].replace("b" * 32, "b" * 31),
+        command[index].split(" skill-version/")[0],
+        command[index].replace(" skill-version/" + bridge.SKILL_VERSION, " skill-version/99.0.0"),
+    ):
         modified = list(command)
         modified[index] = value
         assert not bridge._valid_foreground_command(modified, job)
+    manifest.write_text(json.dumps({"version": "99.0.0"}), encoding="utf-8")
+    assert not bridge._valid_foreground_command(command, job)
+    manifest.unlink()
+    assert not bridge._valid_foreground_command(command, job)
     monkeypatch.setattr(bridge, "SKILL_DISTRIBUTION", "public")
     assert not bridge._valid_foreground_command(command, job)
 
