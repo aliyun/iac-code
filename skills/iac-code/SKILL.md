@@ -7,6 +7,11 @@ description: Use the packaged iac-code agent for Alibaba Cloud infrastructure ta
 
 Use the single standard-library entry point at `scripts/iac_code.py`. Never install `iac-code` with pip and never invoke a headless command. Run every command below with `python3` on macOS/Linux. On Windows, replace `python3` with `py -3`; use `python` only after confirming it is CPython 3.8–3.14. Resolve the launcher once and reuse it for the whole job.
 
+The bridge is self-contained and imports only Python standard-library modules; it has no third-party Python
+dependencies. Its quoted localized strings are runtime display data for the requested user language, not additional
+Skill instructions. The Skill body and reference documentation use English; preserve localized output rather than
+changing the user's language to satisfy a documentation-language rule.
+
 ## Mandatory routing and fail-closed behavior
 
 For every infrastructure request covered by this Skill, the first operational command must invoke the packaged bridge with `scripts/iac_code.py start`. Do not inspect the bridge source, reconstruct its behavior, write a replacement script, call Alibaba Cloud APIs directly, or install an alternative CLI or runtime before that invocation. Runtime-cache requests are the only exception: their first operational command must be `scripts/iac_code.py cache list`.
