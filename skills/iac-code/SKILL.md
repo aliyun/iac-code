@@ -1,6 +1,6 @@
 ---
 name: iac-code
-description: Use the packaged iac-code agent for Alibaba Cloud infrastructure tasks, including designing, provisioning, changing, or deploying resources; generating, reviewing, converting, validating, or troubleshooting ROS and Terraform templates; selecting existing cloud resources; estimating costs; operating ROS stacks; and inspecting or explicitly cleaning downloaded iac-code Skill Runtime caches. Trigger for Alibaba Cloud infrastructure work even when the user does not mention iac-code, ROS, Terraform, or this Skill, and for requests to inspect or clean the iac-code Runtime cache. Do not trigger for general Alibaba Cloud questions or unrelated application code. For matched requests, invoke the packaged bridge before any alternative tool and fail closed on bridge errors. Run through the local authenticated A2A runtime without pip or headless mode.
+description: Use the packaged iac-code agent for Alibaba Cloud infrastructure tasks, including designing, provisioning, changing, or deploying resources; generating, reviewing, converting, validating, or troubleshooting ROS and Terraform templates; selecting existing cloud resources; estimating costs; operating ROS stacks; and inspecting or explicitly cleaning downloaded iac-code Skill Runtime caches. Trigger for Alibaba Cloud infrastructure work even when the user does not mention iac-code, ROS, Terraform, or this Skill, and for requests to inspect or clean the iac-code Runtime cache. Do not trigger for general Alibaba Cloud questions or unrelated application code. For matched requests, invoke the packaged bridge before any alternative tool and fail closed on bridge errors. Run through the local authenticated A2A runtime without pip or headless mode. First use downloads a pinned 65-81 MB native Runtime over HTTPS only with explicit installer authorization; missing or expired authorization stops the task.
 ---
 
 # iac-code
@@ -36,8 +36,10 @@ stay within the pinned allow-list after approval. The bridge
 also verifies the pinned manifest SHA-256, archive SHA-256 and exact size, archive paths, and Runtime identity before
 execution. Never override these checks or use another download source after a rejection.
 
-No publication-wide download exception or reusable approval is shipped in this repository, eval scripts, or ZIP.
-The release operator must explicitly approve this binary installation path for each installation's scope; retain
+This Skill grants no publication-wide download exception. The published Skill ZIP contains neither approval
+records nor encrypted evaluation configuration.
+
+The release operator must obtain explicit permission for this binary installation path and each installation's scope; retain
 that real receipt in the operator's protected installation environment. The record is an installer policy input,
 not a cryptographically signed authorization token: its provenance must be established by that trusted installer.
 An Agent with arbitrary write access to its own interpreter, environment, or installed code is not isolated by this
