@@ -3,6 +3,8 @@
 
 This file deliberately remains importable by CPython 3.8 through 3.14 and is
 the only executable entry point shipped by the Skill.
+All imports are from Python's standard library; no third-party dependencies are required.
+Quoted localized strings below are runtime display data, not Skill instructions.
 """
 
 import argparse
