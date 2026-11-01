@@ -119,9 +119,11 @@ smoke checks, and exact three-target assembly contract. The manifest's archive i
 The Linux manifest requires glibc 2.39; this record does not lower that baseline. Archive identities above
 were read from the verified manifest, not established by rebuilding or executing these binaries during review.
 Hash and identity checks establish consistency with that pinned release; they are not a signature,
-reproducible-build proof, independent binary security audit, or download approval. Release operators must retain
-the manifest, exact source/publisher revisions, native build/verification receipts, and their own review decision.
-Missing native receipts must be reported as unavailable, never invented or inferred from a passing hash check.
+reproducible-build proof, independent binary security audit, or download approval. No independent binary audit
+or native build/verification receipts are provided or will be supplied for this Skill release. The provided
+evidence is limited to the pinned manifest, exact source/publisher revisions, archive identities, and documented
+source-level contracts; never present them as native build or binary audit evidence. Release operators must
+retain that provenance and their own installation review decision. Explicit scoped download approval is still required.
 No reusable approval receipt is distributed with this record. A different Runtime tag/digest requires a new review.
 
 ## Workflow
