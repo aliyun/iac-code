@@ -27,9 +27,12 @@ class SuspendedPermissionHandoff:
     contains PREPARING and cannot authorize recovery by itself.
     """
 
-    def __init__(self, store: PermissionWaitCheckpointStore, boundary_id: str) -> None:
+    def __init__(
+        self, store: PermissionWaitCheckpointStore, boundary_id: str, *, boundary_ids: tuple[str, ...] | None = None
+    ) -> None:
         self.store = store
         self.boundary_id = boundary_id
+        self.boundary_ids = boundary_ids or (boundary_id,)
         self.proof: RecoverableInputHandoffProof | None = None
         self.published_revision: int | None = None
         self.result = HandoffCommitResult.FENCED_OUT
@@ -41,9 +44,12 @@ class SuspendedPermissionHandoff:
         self.local_only = False
 
     def commit(self, snapshot: dict[str, Any], control_path: Path, backup_service: Any) -> HandoffCommitResult:
-        record = self.store.load(self.boundary_id)
-        if not self._matches_boundary(record, snapshot):
+        records = {boundary_id: self.store.load(boundary_id) for boundary_id in self.boundary_ids}
+        records = {key: value for key, value in records.items() if value is None or value.get("phase") != "RESOLVED"}
+        if not records or any(not self._matches_boundary(record, snapshot) for record in records.values()):
             return HandoffCommitResult.FENCED_OUT
+        self.boundary_id = next(iter(records))
+        record = records[self.boundary_id]
         assert record is not None
         if not backup_service._backup_enabled():
             # No shared backup can authorize migration. A local service may
@@ -51,7 +57,9 @@ class SuspendedPermissionHandoff:
             self.local_only = True
             return HandoffCommitResult.FENCED_OUT
         generation = int(record["generation"])
-        if self.proof is not None and self.proof.boundary_generation != generation:
+        generations = {key: int(value["generation"]) for key, value in records.items() if value is not None}
+        proof_changed = self.proof is not None and self.proof.boundaries != generations
+        if proof_changed:
             # A failed backup owns its operation id until its mirror settles.
             # Finish that attempt without granting its obsolete generation any
             # recovery authority, then capture the new checkpoint separately.
@@ -69,7 +77,7 @@ class SuspendedPermissionHandoff:
                 return HandoffCommitResult.FENCED_OUT
         # An answer may have advanced the safe checkpoint while a failed
         # preparation remained. Bind a fresh proof to that exact generation.
-        if self.proof is None or self.proof.boundary_generation != generation:
+        if self.proof is None or proof_changed:
             self._preparing_snapshot = None
             self._pending_committed_snapshot = None
             self.proof = RecoverableInputHandoffProof(
@@ -82,10 +90,16 @@ class SuspendedPermissionHandoff:
                 controlRevision=int(snapshot["revision"]),
                 backupCommitId=str(uuid.uuid4()),
                 phase="PREPARING",
+                boundaries=generations,
             )
         # This annotation grants no authority. The final generation fence
         # rejects an answer/cancel that wins before the ownership preparation.
-        self.store.transaction(self.boundary_id, self._save_preparing)
+        for boundary_id in generations:
+            self.store.transaction(boundary_id, self._save_preparing)
+        if len(generations) > 1:
+            return self.store.run_generations_fenced(
+                generations, partial(self._commit_fenced, snapshot, control_path, backup_service)
+            )
         return self.store.run_generation_fenced(
             self.boundary_id,
             expected_generation=generation,
@@ -161,7 +175,12 @@ class SuspendedPermissionHandoff:
 
     def _save_preparing(self, record: dict[str, Any]) -> dict[str, Any]:
         assert self.proof is not None
-        if record.get("generation") != self.proof.boundary_generation or record.get("phase") != "SUSPENDED":
+        generation = record.get("generation")
+        if (
+            type(generation) is not int
+            or not self.proof.matches_boundary(str(record.get("boundaryId")), generation)
+            or record.get("phase") not in {"SUSPENDED", "CANCELED"}
+        ):
             raise ValueError("permission generation changed before handoff")
         record["executionHandoff"] = self.proof.as_document()
         return record
@@ -169,11 +188,11 @@ class SuspendedPermissionHandoff:
     def _matches_boundary(self, record: dict[str, Any] | None, snapshot: dict[str, Any]) -> bool:
         return bool(
             record is not None
-            and record.get("boundaryId") == self.boundary_id
+            and record.get("boundaryId") in self.boundary_ids
             and record.get("contextId") == snapshot.get("contextId")
             and record.get("taskId") == snapshot.get("taskId")
             and record.get("sessionId") == snapshot.get("sessionId")
             and record.get("permissionClass") in {"normal", "pipeline"}
-            and record.get("phase") == "SUSPENDED"
+            and record.get("phase") in {"SUSPENDED", "CANCELED"}
             and isinstance(record.get("continuationFrame"), dict)
         )

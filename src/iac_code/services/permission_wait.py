@@ -424,6 +424,23 @@ def new_boundary_id() -> str:
 class PermissionWaitCheckpointStore:
     """Atomic JSON records scoped to one existing conversation session."""
 
+    _CONTINUATION_IDENTITY_FIELDS = (
+        "taskId",
+        "contextId",
+        "sessionId",
+        "inputId",
+        "toolUseId",
+        "toolName",
+        "payloadDigest",
+        "principalRef",
+        "principalKind",
+        "identitySchemaVersion",
+        "region",
+        "permissionClass",
+        "continuationFrame",
+        "pipelineCoordinates",
+    )
+
     def __init__(self, cwd: str, session_id: str, *, storage: SessionStorage | None = None) -> None:
         self.cwd = cwd
         self.session_id = session_id
@@ -558,6 +575,91 @@ class PermissionWaitCheckpointStore:
             ensure_private_file(path)
             return updated
 
+    def reactivate(self, boundary_id: str, replacement: Mapping[str, Any]) -> dict[str, Any]:
+        """Rebuild an unanswered card only after its execution owner was recovered."""
+
+        def mutate(current: dict[str, Any]) -> dict[str, Any]:
+            decision = current.get("decision")
+            if (
+                current.get("phase") != "SUSPENDED"
+                or not isinstance(decision, dict)
+                or decision.get("status") != "none"
+            ):
+                raise ValueError("permission boundary is not an unanswered suspended card")
+            if any(current.get(key) != replacement.get(key) for key in self._CONTINUATION_IDENTITY_FIELDS):
+                raise ValueError("restored permission identity changed")
+            return {
+                **replacement,
+                "boundaryId": boundary_id,
+                "createdAt": current["createdAt"],
+                "generation": int(current["generation"]) + 1,
+            }
+
+        return self.transaction(boundary_id, mutate)
+
+    def refresh_handoff_checkpoint(self, expected: Mapping[str, Any]) -> dict[str, Any]:
+        """Refresh a newly committed proof without changing the caller's continuation identity."""
+
+        current = self.load(str(expected.get("boundaryId")))
+        if current is None or any(current.get(key) != expected.get(key) for key in self._CONTINUATION_IDENTITY_FIELDS):
+            raise ValueError("permission recovery continuation changed")
+        before, after = expected.get("decision"), current.get("decision")
+        if isinstance(before, Mapping) and before.get("status") in {"claimed", "applied"}:
+            if not isinstance(after, Mapping) or any(
+                before.get(key) != after.get(key) for key in ("claimId", "value", "source")
+            ):
+                raise ValueError("permission recovery decision changed")
+        return current
+
+    def persisted_result_digest(self, record: Mapping[str, Any]) -> str | None:
+        """Verify the exact original assistant and its complete durable ToolResult batch."""
+
+        from iac_code.agent.message import ToolResultBlock
+        from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
+
+        frame = record.get("continuationFrame")
+        if not isinstance(frame, Mapping) or record.get("sessionId") != self.session_id:
+            return None
+        try:
+            transcript_id, index = _parse_permission_message_ref(frame.get("assistantMessageRef"))
+            with session_mutation_guard(self.paths.session_dir):
+                if transcript_id is None:
+                    messages = self._storage.load(self.cwd, self.session_id)
+                else:
+                    ensure_session_owned_dir(self.paths.session_dir, self.paths.transcript_dir(transcript_id))
+                    messages = PipelineTranscriptStorage(self.paths.session_dir / "pipeline").load(
+                        self.cwd, transcript_id
+                    )
+            if index + 1 >= len(messages):
+                return None
+            assistant, result = messages[index], messages[index + 1]
+            if assistant.role != "assistant" or not isinstance(assistant.content, list):
+                return None
+            if canonical_digest([block.model_dump(mode="json") for block in assistant.content]) != frame.get(
+                "assistantMessageDigest"
+            ):
+                return None
+            tools = assistant.get_tool_use_blocks()
+            ordered_ids = [tool.id for tool in tools]
+            current_index = frame.get("currentIndex")
+            if type(current_index) is not int or not 0 <= current_index < len(tools):
+                return None
+            tool = tools[current_index]
+            if (
+                ordered_ids != frame.get("orderedToolUseIds")
+                or tool.id != record.get("toolUseId")
+                or tool.name != record.get("toolName")
+                or canonical_digest({"name": tool.name, "input": tool.input}) != record.get("payloadDigest")
+                or result.role != "user"
+                or not isinstance(result.content, list)
+                or not all(isinstance(block, ToolResultBlock) for block in result.content)
+                or [block.tool_use_id for block in result.content if isinstance(block, ToolResultBlock)] != ordered_ids
+            ):
+                return None
+            return canonical_digest(result.to_dict())
+        except (OSError, RuntimeError, TypeError, ValueError):
+            return None
+
     def run_generation_fenced(
         self,
         boundary_id: str,
@@ -579,6 +681,32 @@ class PermissionWaitCheckpointStore:
             verified = self._read(path)
             if verified is None or int(verified.get("generation", 0)) != expected_generation:
                 raise ValueError("permission generation changed")
+            return result
+
+    def run_generations_fenced(self, generations: Mapping[str, int], operation: Callable[[], Any]) -> Any:
+        """Fence all permission cards captured by a single execution handoff."""
+
+        with (
+            session_mutation_guard(self.paths.session_dir),
+            cross_process_file_lock(self.paths.permission_waits_lock_path),
+        ):
+            for boundary_id, generation in generations.items():
+                current = self._read(self._record_path(boundary_id))
+                if (
+                    current is None
+                    or current.get("generation") != generation
+                    or current.get("phase") not in {"SUSPENDED", "CANCELED"}
+                ):
+                    raise ValueError("permission group generation changed")
+            result = operation()
+            for boundary_id, generation in generations.items():
+                current = self._read(self._record_path(boundary_id))
+                if (
+                    current is None
+                    or current.get("generation") != generation
+                    or current.get("phase") not in {"SUSPENDED", "CANCELED"}
+                ):
+                    raise ValueError("permission group generation changed")
             return result
 
     def reconcile_deadline(
@@ -820,7 +948,13 @@ class PermissionWaitCheckpointStore:
 
         return self.transaction(boundary_id, mutate)
 
-    def cancel(self, boundary_id: str, *, expected_generation: int | None = None) -> dict[str, Any]:
+    def cancel(
+        self,
+        boundary_id: str,
+        *,
+        expected_generation: int | None = None,
+        allow_unreleased_claim: bool = False,
+    ) -> dict[str, Any]:
         def mutate(record: dict[str, Any]) -> dict[str, Any] | None:
             if expected_generation is not None and int(record.get("generation", 0)) != expected_generation:
                 raise ValueError("permission generation changed")
@@ -829,7 +963,13 @@ class PermissionWaitCheckpointStore:
             if record.get("phase") == "RESOLVED":
                 raise ValueError("resolved permission cannot be canceled")
             decision = record.get("decision")
-            if isinstance(decision, dict) and decision.get("status") != "none":
+            unreleased_claim = bool(
+                allow_unreleased_claim
+                and record.get("phase") in {"WAITING", "TIMEOUT_GRACE"}
+                and isinstance(decision, dict)
+                and decision.get("status") == "claimed"
+            )
+            if isinstance(decision, dict) and decision.get("status") != "none" and not unreleased_claim:
                 raise ValueError("permission decision already claimed")
             record["phase"] = "CANCELED"
             record["generation"] = int(record["generation"]) + 1
@@ -1250,31 +1390,42 @@ class PermissionWaitCoordinator:
                         await result
                 record = owner.store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
                 owner.generation = int(record["generation"])
-            if created and before_release is not None:
+            if before_release is not None and (created or not owner.future.done()):
                 await before_release()
             phase = record.get("phase")
             if phase in {"SUSPENDING", "SUSPENDED", "RESTORING"}:
                 return record, created
             if not owner.future.done():
-                owner.future.set_result(delivered_value == "allow_once")
+                owner.future.set_result(
+                    PermissionWaitOutcome.AUTOMATIC_DENY if source == "timeout" else delivered_value == "allow_once"
+                )
             record = owner.store.mark_applied(boundary_id, claim_id=claim_id)
             owner.generation = int(record["generation"])
             if owner.timer is not None:
                 owner.timer.cancel()
             return record, created
 
-    async def cancel_live(self, boundary_id: str) -> bool:
+    async def cancel_live(self, boundary_id: str, *, cancel_future: bool = True) -> bool:
         owner = self._owners.get(boundary_id)
         if owner is None:
             return False
         async with owner.permission_resolution_lock:
             try:
-                record = owner.store.cancel(boundary_id, expected_generation=owner.generation)
+                # The resolution lock and this exact, still-pending Future
+                # prove a failed claim delivery has not reached tool execution.
+                record = owner.store.cancel(
+                    boundary_id,
+                    expected_generation=owner.generation,
+                    allow_unreleased_claim=not owner.future.done(),
+                )
                 owner.generation = int(record["generation"])
             except ValueError:
                 return False
             if not owner.future.done():
-                owner.future.cancel()
+                if cancel_future:
+                    owner.future.cancel()
+                else:
+                    owner.future.set_result(False)
             if owner.timer is not None:
                 owner.timer.cancel()
             return True

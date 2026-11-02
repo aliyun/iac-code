@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.a2a.test_permission_handoff_process_e2e import assert_success, count_lines
+from tests.a2a.test_permission_handoff_process_e2e import assert_success, count_lines, wait_for
 from tests.a2a.test_permission_prompt_e2e import Server, _permission, _reply
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(120)]
@@ -16,11 +16,22 @@ PIPELINE = Path(__file__).resolve().parents[2] / "scripts/a2a/e2e/permission_wai
 def test_pipeline_handoff_folds_original_request_without_losing_history(tmp_path, restart):
     (tmp_path / "workspace").mkdir()
     original = "请让我选择已有 VPC。\n只选择，不创建、修改或删除资源；收到选择后结束本轮。"
-    server = Server(tmp_path, pipeline_dir=str(PIPELINE), tool_count=1)
+    server = Server(tmp_path, pipeline_dir=str(PIPELINE), tool_count=1, resident_timeout=0.1)
     try:
         server.start()
         permission = _permission(server.send(original))
         if restart:
+            wait_for(
+                lambda: (
+                    (
+                        json.loads((tmp_path / "a2a/execution-control/context-1.json").read_text(encoding="utf-8")).get(
+                            "inputHandoff"
+                        )
+                        or {}
+                    ).get("phase")
+                    == "COMMITTED"
+                )
+            )
             server.stop()
             server.start()
         completed = server.send(_reply(permission), task_id=permission["requestTaskId"])
@@ -74,12 +85,23 @@ def test_pipeline_handoff_folds_original_request_without_losing_history(tmp_path
 @pytest.mark.parametrize("decision", ["allow_once", "deny"])
 def test_real_pipeline_permission_recovery_completes_step_and_accepts_next_prompt(tmp_path, decision):
     (tmp_path / "workspace").mkdir()
-    server = Server(tmp_path, pipeline_dir=str(PIPELINE), tool_count=1)
+    server = Server(tmp_path, pipeline_dir=str(PIPELINE), tool_count=1, resident_timeout=0.1)
     try:
         server.start()
         first = server.send("original")
         permission = _permission(first)
         assert count_lines(tmp_path / "executions.jsonl") == 0
+        wait_for(
+            lambda: (
+                (
+                    json.loads((tmp_path / "a2a/execution-control/context-1.json").read_text(encoding="utf-8")).get(
+                        "inputHandoff"
+                    )
+                    or {}
+                ).get("phase")
+                == "COMMITTED"
+            )
+        )
         server.stop()
         server.start()
         events = server.send(_reply(permission, decision), task_id=permission["requestTaskId"])

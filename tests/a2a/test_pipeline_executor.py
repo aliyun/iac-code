@@ -263,7 +263,7 @@ async def test_pipeline_permission_backup_records_staged_generation_before_publi
 
     await executor._backup_pipeline_publication(
         {"eventType": "input_required", "status": "input_required"},
-        publisher=SimpleNamespace(pending_durable_permission=pending),
+        publisher=SimpleNamespace(durable_permission_for_envelope=lambda _envelope: pending),
         pipeline=object(),
         cwd="/workspace",
         session_id="session-1",
@@ -274,6 +274,44 @@ async def test_pipeline_permission_backup_records_staged_generation_before_publi
 
     task_store.record_expected_permission_backup_generation.assert_awaited_once_with("task-1", 6)
     permission_registry.backup_durable_boundary.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_permission_publication_backs_up_its_own_card(tmp_path) -> None:
+    from .test_pipeline_stream import _publisher
+
+    publisher, _queue = _publisher(tmp_path)
+    first, second = object(), object()
+    publisher._durable_permissions = {"first": first, "second": second}
+    registry = MagicMock()
+    registry.backup_coordinator = None
+    registry.backup_durable_boundary = AsyncMock(return_value=None)
+    task_store = MagicMock()
+    executor = IacCodeA2APipelineExecutor(
+        task_store=task_store,
+        model="test",
+        permission_input_registry=registry,
+        backup_service=object(),
+        metrics=NoOpA2AMetrics(),
+        artifact_store=None,
+        push_notifier=None,
+        permission_resolver=None,
+        auto_approve_permissions=False,
+        thinking_exposure_types=None,
+    )
+
+    await executor._backup_pipeline_publication(
+        {"eventType": "permission_requested", "permission": {"inputId": "first"}},
+        publisher=publisher,
+        pipeline=object(),
+        cwd=str(tmp_path),
+        session_id="session-1",
+        task=SimpleNamespace(task_id="task-1"),
+        ctx=object(),
+        reason=BackupReason.INPUT_REQUIRED,
+    )
+
+    assert registry.backup_durable_boundary.await_args.args[0] is first
 
 
 @pytest.mark.asyncio
@@ -303,7 +341,7 @@ async def test_delegated_permission_backup_records_generation_only_after_staging
 
     await executor._backup_pipeline_publication(
         {"eventType": "input_required", "status": "input_required"},
-        publisher=SimpleNamespace(pending_durable_permission=object()),
+        publisher=SimpleNamespace(durable_permission_for_envelope=lambda _envelope: object()),
         pipeline=object(),
         cwd="/workspace",
         session_id="session-1",
@@ -356,7 +394,7 @@ async def test_pipeline_non_permission_input_does_not_record_permission_backup_g
 
     await executor._backup_pipeline_publication(
         {"eventType": "input_required", "status": "input_required"},
-        publisher=SimpleNamespace(pending_durable_permission=None),
+        publisher=SimpleNamespace(durable_permission_for_envelope=lambda _envelope: None),
         pipeline=object(),
         cwd="/workspace",
         session_id="session-1",
@@ -3929,8 +3967,11 @@ async def test_sub_pipeline_permission_stays_working_without_global_pause(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from .test_permission_execution_control import continuation_frame
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     monkeypatch.setattr("iac_code.a2a.pipeline_stream.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
     future = asyncio.get_running_loop().create_future()
     release_pipeline = asyncio.Event()
 
@@ -3950,6 +3991,8 @@ async def test_sub_pipeline_permission_stays_working_without_global_pause(
                     tool_input={"cmd": "pwd"},
                     tool_use_id="tool-1",
                     response_future=future,
+                    continuation_frame=continuation_frame(),
+                    audit_context={"transcript_id": "candidate-0"},
                 ),
             )
             yield SubPipelineStreamEvent(
@@ -4091,6 +4134,8 @@ async def test_pipeline_failure_drains_sub_pipeline_permission_before_terminal(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    from .test_permission_execution_control import continuation_frame
+
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     monkeypatch.setattr("iac_code.a2a.pipeline_stream.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
     future = asyncio.get_running_loop().create_future()
@@ -4105,6 +4150,8 @@ async def test_pipeline_failure_drains_sub_pipeline_permission_before_terminal(
                     tool_input={"cmd": "pwd"},
                     tool_use_id="tool-1",
                     response_future=future,
+                    continuation_frame=continuation_frame(),
+                    audit_context={"transcript_id": "candidate-0"},
                 ),
             ),
             ValueError("candidate-1 failed"),
@@ -4127,6 +4174,10 @@ async def test_pipeline_failure_drains_sub_pipeline_permission_before_terminal(
     assert resolution["permission"]["canceled"] is True
     assert "task-1" not in store._pending_permissions
     assert _status_events(queue)[-1]["status"]["state"] == "TASK_STATE_FAILED"
+    context = await store.get_context_record("ctx-1")
+    records = PermissionWaitCheckpointStore(str(tmp_path), context.session_id).list_active(include_canceled=True)
+    assert len(records) == 1
+    assert records[0]["phase"] == "CANCELED"
 
 
 @pytest.mark.asyncio

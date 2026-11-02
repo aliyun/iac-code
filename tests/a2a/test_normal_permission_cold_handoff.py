@@ -12,8 +12,8 @@ import pytest
 
 from iac_code.a2a.execution_control import ExecutionControlConflictError, ExecutionControlService
 from iac_code.a2a.executor import IacCodeA2AExecutor
-from iac_code.agent.message import Message
-from iac_code.services.permission_wait import PermissionWaitPolicy, format_utc, utc_now
+from iac_code.agent.message import Message, ToolUseBlock
+from iac_code.services.permission_wait import PermissionWaitPolicy, canonical_digest, format_utc, utc_now
 from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_storage import SessionStorage
 from iac_code.types.stream_events import PermissionRequestEvent
@@ -53,12 +53,21 @@ class _NormalPermissionHandoff:
         return FakeRuntime(session_id=options.session_id, agent_loop=self)
 
     async def run_streaming(self, _prompt):
+        context = await self.store.get_context_record("ctx-1")
+        storage = SessionStorage()
+        index = len(storage.load(str(self.root), context.session_id))
+        tool = ToolUseBlock(id="tool-1", name="bash", input={"cmd": "pwd"})
+        storage.append(str(self.root), context.session_id, Message(role="assistant", content=[tool]))
         yield PermissionRequestEvent(
             tool_name="bash",
             tool_input={"cmd": "pwd"},
             tool_use_id="tool-1",
             response_future=self.response,
-            continuation_frame=continuation_frame(),
+            continuation_frame={
+                **continuation_frame(),
+                "assistantMessageRef": f"session.jsonl:{index}",
+                "assistantMessageDigest": canonical_digest([tool.model_dump(mode="json")]),
+            },
         )
 
     async def start(self) -> None:

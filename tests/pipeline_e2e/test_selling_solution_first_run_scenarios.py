@@ -921,12 +921,20 @@ def test_backup_delay_uses_artifact_directory_for_multiple_windows(
     harness = argparse.Namespace(server_env={})
     a2a = argparse.Namespace(BACKUP_DELAY_FIXTURE_ROOT=tmp_path, BACKUP_DELAY_SECONDS=0.01)
 
-    first = runner._arm_a2a_backup_delay(runtime, harness, a2a, 1)
-    second = runner._arm_a2a_backup_delay(runtime, harness, a2a, 2)
+    first = runner._arm_a2a_backup_delay(
+        runtime, harness, a2a, 1, step_id=runner.NEW_STEPS[0], kinds=("ask_user_question",)
+    )
+    second = runner._arm_a2a_backup_delay(
+        runtime, harness, a2a, 2, step_id=runner.NEW_STEPS[0], kinds=("candidate_selection",)
+    )
 
     assert harness.server_env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] == str(runtime.paths.artifacts_dir)
     assert runner._backup_delay_marker(first, "arm").is_file()
     assert runner._backup_delay_marker(second, "arm").is_file()
+    first_arm = json.loads(runner._backup_delay_marker(first, "arm").read_text(encoding="utf-8"))
+    second_arm = json.loads(runner._backup_delay_marker(second, "arm").read_text(encoding="utf-8"))
+    assert (first_arm["stepId"], first_arm["kinds"]) == (runner.NEW_STEPS[0], ["ask_user_question"])
+    assert (second_arm["stepId"], second_arm["kinds"]) == (runner.NEW_STEPS[0], ["candidate_selection"])
 
 
 def test_backup_window_wait_reads_started_marker(
@@ -6155,8 +6163,10 @@ def test_backup_window_answers_actual_question_with_native_step_not_fixed_respon
             pytest.fail('native question driver was bypassed for a fixed response')
         def fetch_state(self, name):
             return {'snapshot': {'pendingInput': question}}
-    monkeypatch.setattr(runner, '_wait_a2a_backup_window_started', lambda *_: {'startedMonotonic': 1})
-    monkeypatch.setattr(runner, '_arm_a2a_backup_delay', lambda *_: tmp_path / 'next')
+    monkeypatch.setattr(runner, '_wait_a2a_backup_window_started', lambda *_: {
+        'startedMonotonic': 1, 'stepId': runner.NEW_STEPS[0], 'kind': 'ask_user_question',
+    })
+    monkeypatch.setattr(runner, '_arm_a2a_backup_delay', lambda *_, **_kwargs: tmp_path / 'next')
     def answer(_runtime, pending, **_kwargs):
         assert pending['question'] == question['question']
         assert pending['_step_id'] == runner.NEW_STEPS[0]

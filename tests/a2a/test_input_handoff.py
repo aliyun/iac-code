@@ -23,6 +23,7 @@ def proof():
         session_id="session",
         boundary_id="boundary",
         boundary_generation=3,
+        boundaries={"boundary": 3},
         execution_id="execution",
         control_revision=7,
         backup_commit_id="c62a3752-ec3c-4442-9be8-2f3f31397c25",
@@ -53,6 +54,17 @@ def committed_snapshot(proof):
         "inputHandoffReady": True,
         "inputHandoff": proof.as_document(),
     }
+
+
+@pytest.mark.parametrize("shape", ["missing", "empty"])
+def test_authorization_proof_requires_nonempty_canonical_boundary_map(proof, shape):
+    document = proof.as_document()
+    if shape == "missing":
+        document.pop("boundaries", None)
+    else:
+        document["boundaries"] = {}
+    with pytest.raises(ValidationError):
+        RecoverableInputHandoffProof.from_document(document)
 
 
 def test_committed_proof_roundtrips_and_is_immutable(proof):

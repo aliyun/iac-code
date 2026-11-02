@@ -87,6 +87,7 @@ class PauseFixture:
             executionId="execution",
             boundaryId="pwb_boundary",
             boundaryGeneration=3,
+            boundaries={"pwb_boundary": 3},
             controlRevision=3,
             backupCommitId=commit,
             phase="COMMITTED",
@@ -153,7 +154,7 @@ def test_stale_or_preparing_handoff_cannot_authorize_current_boundary(pause, fie
     assert pause.inspector.inspect()["status"] == "pending"
 
 
-def test_generic_pipeline_handoff_does_not_require_normal_proof(pause):
+def test_generic_pipeline_handoff_does_not_authorize_permission_pause(pause):
     pause.record["permissionClass"] = "pipeline"
     pause.references.root.joinpath("pwb_boundary.json").unlink()
     pause.register()
@@ -165,7 +166,7 @@ def test_generic_pipeline_handoff_does_not_require_normal_proof(pause):
         inputHandoffReady=True,
     )
     pause.write()
-    assert pause.inspector.inspect()["status"] == "ready"
+    assert pause.inspector.inspect()["status"] == "pending"
 
 
 def test_new_boundary_does_not_inherit_generic_handoff_revision(pause):
@@ -302,12 +303,14 @@ def test_only_matching_linux_sandbox_configuration_auto_enables(pause, monkeypat
     monkeypatch.delenv(PendingPermissionPauseReferences.ENABLED_ENV, raising=False)
     monkeypatch.setattr("iac_code.a2a.permission_pause.sys", SimpleNamespace(platform="linux"))
     monkeypatch.setenv("A2A_PERSISTENCE_DIR", str(pause.persistence))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", "/shared-backup")
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_TMP_DIR", "/local-staging")
     pause.identity = pause.identity.model_copy(update={"runtime_incarnation": "linux-boot:test"})
     assert PendingPermissionPauseReferences.enabled(pause.persistence) is not None
     assert PendingPermissionPauseReferences.enabled(pause.persistence / "other") is None
     monkeypatch.setenv(PendingPermissionPauseReferences.ENABLED_ENV, "0")
-    assert PendingPermissionPauseReferences.enabled(pause.persistence) is None
+    with pytest.raises(ValueError, match="cloud_protection_required"):
+        PendingPermissionPauseReferences.enabled(pause.persistence)
 
 
 def test_explicit_enable_requires_identity_and_persistence(tmp_path, monkeypatch):
@@ -438,7 +441,7 @@ def test_workers_publish_to_one_runtime_index_and_cli_only_reads(tmp_path, monke
         result = subprocess.run(command, capture_output=True, text=True, timeout=30)
         assert result.returncode == 0, result.stderr
         assert json.loads(result.stdout) == {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "status": "not_applicable",
             "reason": "verified",
             "checked": 2,
@@ -630,6 +633,10 @@ async def test_stop_keeps_original_acceptance_and_terminal_release(tmp_path, mon
         await fixture.drain()
         assert fixture.control.release_ready
         assert fixture.control.snapshot()["commitError"] is None
+        # The cleanup double releases the owner but does not cancel its card.
+        # A terminal control alone must not discard an unanswered permission.
+        assert inspector.inspect()["status"] == ("error" if corrupt_probe else "pending")
+        fixture.pending.checkpoint_store.cancel(fixture.pending.boundary_id)
         assert inspector.inspect()["status"] == ("error" if corrupt_probe else "ready")
     finally:
         gate.release.set()
@@ -812,6 +819,7 @@ def test_prewarmed_index_survives_csi_claim_symlink_rebinding(pause, monkeypatch
     monkeypatch.setattr("iac_code.a2a.permission_pause.sys", SimpleNamespace(platform="linux"))
     monkeypatch.delenv(PendingPermissionPauseReferences.ENABLED_ENV, raising=False)
     monkeypatch.setenv("A2A_PERSISTENCE_DIR", str(logical_persistence))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(pause.persistence.parent / "shared"))
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_TMP_DIR", str(pause.persistence.parent / "staging"))
     pause.identity = pause.identity.model_copy(update={"runtime_incarnation": "linux-boot:test"})
     pause.control["ownerIdentity"] = pause.identity.as_document()

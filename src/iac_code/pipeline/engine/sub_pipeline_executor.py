@@ -24,8 +24,9 @@ from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_executor import StepExecutor
 from iac_code.pipeline.engine.step_spec import LoadedPipeline, SubPipelineSpec
 from iac_code.pipeline.engine.types import StepResult, StepStatus
+from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import SessionBackupBlocked
-from iac_code.types.stream_events import SubPipelineStreamEvent
+from iac_code.types.stream_events import PermissionRequestEvent, PermissionWaitSuspended, SubPipelineStreamEvent
 from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
@@ -388,6 +389,7 @@ class SubPipelineExecutor:
         sub_step_state_callback: Callable[[dict[str, Any]], Any] | None = None,
         precompleted_tools: dict[str, dict[str, Any]] | None = None,
         resource_selection_checkpoint: dict[str, Any] | None = None,
+        permission_checkpoint: dict[str, Any] | None = None,
     ) -> AsyncGenerator[PipelineEvent | SubPipelineStreamEvent, None]:
         """Execute sub-pipeline yielding all events in real-time for UI rendering."""
         self._observability.session_id = session_id
@@ -396,14 +398,7 @@ class SubPipelineExecutor:
             if resume_state and resume_state.get("sub_pipeline_id")
             else f"{sub_spec.name}_{uuid.uuid4().hex[:8]}"
         )
-        sub_context = self._build_sub_context(sub_spec, candidate, parent_context)
-        if resume_state and isinstance(resume_state.get("context"), dict):
-            merged_context_snapshot = sub_context.to_snapshot()
-            merged_context_snapshot.update(resume_state["context"])
-            sub_context = PipelineContext.from_snapshot(
-                merged_context_snapshot,
-                self._sub_context_dependencies(sub_spec),
-            )
+        sub_context = self._build_sub_context(sub_spec, candidate, parent_context, resume_state=resume_state)
         replay_conclusions: dict[str, Any] = {}
         if preserved_step_conclusions:
             replay_conclusions.update(
@@ -461,12 +456,13 @@ class SubPipelineExecutor:
         def sub_step_event_data(step_id: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
             return sub_pipeline_event_data({"step_id": step_id, **(extra or {})})
 
-        yield PipelineEvent(
-            type=PipelineEventType.SUB_PIPELINE_STARTED,
-            step_id=None,
-            timestamp=time.time(),
-            data=sub_pipeline_event_data(),
-        )
+        if permission_checkpoint is None:
+            yield PipelineEvent(
+                type=PipelineEventType.SUB_PIPELINE_STARTED,
+                step_id=None,
+                timestamp=time.time(),
+                data=sub_pipeline_event_data(),
+            )
 
         if resume_state and isinstance(resume_state.get("step_conclusions"), dict):
             step_conclusions = dict(resume_state["step_conclusions"])
@@ -497,6 +493,7 @@ class SubPipelineExecutor:
             attempt_status: str,
             current_sub_step: str,
             attempt_info: dict[str, Any],
+            permission_boundary_id: str | None = None,
         ) -> None:
             if sub_step_state_callback is None:
                 return
@@ -518,6 +515,8 @@ class SubPipelineExecutor:
                 "conclusions": dict(conclusions),
                 "step_conclusions": dict(step_conclusions),
             }
+            if permission_boundary_id is not None:
+                payload["permission_boundary_id"] = permission_boundary_id
             result = sub_step_state_callback(payload)
             if asyncio.iscoroutine(result):
                 await result
@@ -625,25 +624,27 @@ class SubPipelineExecutor:
                             attempt_info=attempt_info,
                         )
 
-                        yield PipelineEvent(
-                            type=PipelineEventType.SUB_STEP_STARTED,
-                            step_id=step.step_id,
-                            timestamp=time.time(),
-                            data=sub_step_event_data(
-                                step.step_id,
-                                {
-                                    "step_index": state_machine.current_step_index,
-                                    "active_attempt_id": attempt_info.get("attempt_id"),
-                                    "transcript_id": attempt_info.get("transcript_id"),
-                                },
-                            ),
-                        )
+                        if permission_checkpoint is None or not is_first_step:
+                            yield PipelineEvent(
+                                type=PipelineEventType.SUB_STEP_STARTED,
+                                step_id=step.step_id,
+                                timestamp=time.time(),
+                                data=sub_step_event_data(
+                                    step.step_id,
+                                    {
+                                        "step_index": state_machine.current_step_index,
+                                        "active_attempt_id": attempt_info.get("attempt_id"),
+                                        "transcript_id": attempt_info.get("transcript_id"),
+                                    },
+                                ),
+                            )
 
                         step_msg = user_message if is_first_step else None
                         step_precompleted_tools = precompleted_tools if is_first_step else None
                         step_resource_selection_checkpoint = (
                             resource_selection_checkpoint if is_first_step else None
                         )
+                        step_permission_checkpoint = permission_checkpoint if is_first_step else None
                         attempt_resume_messages = attempt_info.get("resume_messages")
                         if not isinstance(attempt_resume_messages, list):
                             attempt_resume_messages = []
@@ -668,6 +669,7 @@ class SubPipelineExecutor:
                                 "resume_messages": step_resume_messages,
                                 "precompleted_tools": step_precompleted_tools,
                                 "resource_selection_checkpoint": step_resource_selection_checkpoint,
+                                "permission_checkpoint": step_permission_checkpoint,
                                 "rollback_targets": state_machine.completed_non_future_rollback_targets(),
                                 "rollback_count": state_machine.rollback_count,
                                 "max_rollbacks": state_machine.max_rollbacks,
@@ -885,6 +887,16 @@ class SubPipelineExecutor:
                             ),
                         )
 
+                except PermissionWaitSuspended as exc:
+                    if attempt_info is not None and current_sub_step_id is not None:
+                        await publish_sub_step_state(
+                            status="suspended",
+                            attempt_status="running",
+                            current_sub_step=current_sub_step_id,
+                            attempt_info=attempt_info,
+                            permission_boundary_id=exc.boundary_id,
+                        )
+                    raise
                 except SessionBackupBlocked:
                     raise
                 except Exception as e:
@@ -1002,6 +1014,8 @@ class SubPipelineExecutor:
         sub_spec: SubPipelineSpec,
         candidate: dict,
         parent_context: PipelineContext,
+        *,
+        resume_state: dict[str, Any] | None = None,
     ) -> PipelineContext:
         """Build an isolated context for the sub-pipeline.
 
@@ -1021,7 +1035,45 @@ class SubPipelineExecutor:
             if value is not None:
                 ctx.set_conclusion(parent_field, value)
 
+        if resume_state and isinstance(resume_state.get("context"), dict):
+            snapshot = ctx.to_snapshot()
+            snapshot.update(resume_state["context"])
+            return PipelineContext.from_snapshot(snapshot, self._sub_context_dependencies(sub_spec))
         return ctx
+
+    async def rebuild_permission_audit_event(
+        self,
+        *,
+        sub_spec: SubPipelineSpec,
+        parent_context: PipelineContext,
+        session_id: str,
+        resume_state: dict[str, Any],
+        resume_messages: list[Message],
+        recovered: RecoveredPermissionAuditBoundary,
+    ) -> PermissionRequestEvent:
+        """Rebuild the original candidate's tool policy without advancing its step."""
+        step = next((step for step in sub_spec.steps if step.step_id == resume_state.get("current_sub_step")), None)
+        if step is None:
+            raise ValueError("permission_resume_invalid: candidate step changed")
+        context = self._build_sub_context(
+            sub_spec, resume_state["candidate"], parent_context, resume_state=resume_state
+        )
+        agent_context = self._make_step_executor().build_agent_loop_context(
+            step,
+            context,
+            session_id,
+            attempt_id=resume_state["active_attempt_id"],
+            transcript_id=resume_state["transcript_id"],
+            resume_messages=resume_messages,
+        )
+        if agent_context.agent_loop is None:
+            raise ValueError("permission_resume_invalid: candidate step already completed")
+        return await agent_context.agent_loop.rebuild_permission_audit_event(
+            tool_name=recovered.tool_name,
+            tool_input=recovered.tool_input,
+            tool_use_id=recovered.tool_use_id,
+            audit_context=recovered.audit_context,
+        )
 
     def _sub_context_dependencies(self, sub_spec: SubPipelineSpec) -> dict[str, list[str]]:
         """Build the dependency map used by isolated sub-pipeline contexts."""

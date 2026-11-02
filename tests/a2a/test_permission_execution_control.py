@@ -20,12 +20,13 @@ from iac_code.a2a.execution_control import (
 from iac_code.a2a.executor import IacCodeA2AExecutor
 from iac_code.a2a.input_required import PERMISSION_QUERY_PREFIX
 from iac_code.a2a.request_scoped_active_task import PipelineLifecycleEventQueueCarrier
-from iac_code.agent.message import Message
+from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
     PermissionWaitPolicy,
     build_permission_checkpoint,
+    canonical_digest,
     format_utc,
     utc_now,
 )
@@ -117,7 +118,14 @@ async def test_cold_permission_recovery_releases_execution_for_next_turn(
     task.state = "input-required"
     store.mirror_task(task)
     checkpoints = PermissionWaitCheckpointStore(str(tmp_path), ctx.session_id)
-    record = checkpoints.create(checkpoint_record(ctx.session_id))
+    tool = ToolUseBlock(id="tool-1", name="bash", input={"cmd": "pwd"})
+    SessionStorage().append(str(tmp_path), ctx.session_id, Message(role="assistant", content=[tool]))
+    original = checkpoint_record(ctx.session_id)
+    original["continuationFrame"].update(
+        assistantMessageRef="session.jsonl:1",
+        assistantMessageDigest=canonical_digest([tool.model_dump(mode="json")]),
+    )
+    record = checkpoints.create(original)
     boundary_id = record["boundaryId"]
     checkpoints.mark_suspended(boundary_id)
     claimed, _ = checkpoints.claim_decision(boundary_id, value=decision, source="user")
@@ -128,20 +136,22 @@ async def test_cold_permission_recovery_releases_execution_for_next_turn(
     # Simulate an old sandbox's durable input handoff, but no local controller
     # in the fresh sandbox handling the answer.
     old_service = ExecutionControlService(persistence_root=tmp_path / "a2a", backup_service=backup)
-    old_control = await old_service.begin_execution(
-        context_id="ctx-1", task_id="task-1", owner="", cwd=str(tmp_path)
-    )
-    old_control.enable_durable_input_handoff()
+    old_control = await old_service.begin_execution(context_id="ctx-1", task_id="task-1", owner="", cwd=str(tmp_path))
     old_control.bind_session(ctx.session_id)
+    old_control.bind_recoverable_permission_boundary(checkpoints, boundary_id)
+    old_control._permission_handoff.suspension_started = True
+    old_control.set_permission_runtime_close_confirmation(
+        lambda: store.discard_context_runtime_for_input_handoff("ctx-1")
+    )
     await old_control.detach_task(asyncio.current_task(), execution_status="input-required")
+    await old_service._commit_suspended_permission_handoff(old_control)
     assert old_control.input_handoff_ready()
+    assert old_control.snapshot()["inputHandoff"]["phase"] == "COMMITTED"
     assert service.get_for_context("ctx-1") is None
     request = permission_reply(tmp_path)
     request.message.parts[0].text = request.message.parts[0].text.replace('"allow_once"', json.dumps(decision))
     if dispatcher_admission:
-        admission = await service.reserve_recoverable_input_continuation(
-            context_id="ctx-1", task_id="task-1", owner=""
-        )
+        admission = await service.reserve_recoverable_input_continuation(context_id="ctx-1", task_id="task-1", owner="")
         assert admission is not None
         RecoverableInputAdmissionCarrier.attach(request, admission)
     resumed = []
@@ -153,6 +163,11 @@ async def test_cold_permission_recovery_releases_execution_for_next_turn(
             assert control.execution_id != old_control.execution_id
             assert control.session_id == ctx.session_id
             resumed.append(checkpoint["decision"]["value"])
+            SessionStorage().append(
+                str(tmp_path),
+                ctx.session_id,
+                Message(role="user", content=[ToolResultBlock(tool_use_id="tool-1", content="recovered result")]),
+            )
             yield TextDeltaEvent(text="recovered result")
 
     monkeypatch.setattr(
@@ -182,9 +197,7 @@ async def test_cold_permission_recovery_releases_execution_for_next_turn(
         # Duplicate answers after finalization must not reopen ownership.
         await executor.execute(request, FakeEventQueue())
         assert resumed == [decision]
-        next_control = await service.begin_execution(
-            context_id="ctx-1", task_id="task-2", owner="", cwd=str(tmp_path)
-        )
+        next_control = await service.begin_execution(context_id="ctx-1", task_id="task-2", owner="", cwd=str(tmp_path))
         assert next_control.execution_id != recovered.execution_id
         await next_control.detach_task(asyncio.current_task(), execution_status="completed")
     finally:

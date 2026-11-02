@@ -37,7 +37,7 @@ from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore, reduce_pipe
 from iac_code.a2a.request_scoped_active_task import PipelineLifecycleEventQueueCarrier
 from iac_code.a2a.resource_selector import ResourceSelectionResponse
 from iac_code.a2a.task_store import A2ATaskStore
-from iac_code.agent.message import ImageBlock, Message, TextBlock
+from iac_code.agent.message import ImageBlock, Message, TextBlock, ToolResultBlock, ToolUseBlock
 from iac_code.commands.registry import CommandRegistry, PromptCommand
 from iac_code.mcp.errors import MCPConnectionError, MCPNeedsAuthError
 from iac_code.mcp.prompts import register_mcp_prompt_commands
@@ -50,7 +50,14 @@ from iac_code.mcp.types import (
 )
 from iac_code.pipeline.engine.cleanup import CleanupLedger, CleanupResource, create_cleanup_prompt_message
 from iac_code.pipeline.engine.user_input import PipelineUserInput
-from iac_code.services.permission_wait import PermissionExecutionIdentity, RecoveredPermissionAuditBoundary
+from iac_code.services.permission_wait import (
+    PermissionExecutionIdentity,
+    PermissionWaitCheckpointStore,
+    PermissionWaitPolicy,
+    RecoveredPermissionAuditBoundary,
+    build_permission_checkpoint,
+    canonical_digest,
+)
 from iac_code.services.session_backup import (
     BACKUP_STATE_FILENAME,
     BackupReason,
@@ -3162,6 +3169,9 @@ async def test_executor_binds_recovered_pipeline_lifecycle_before_delegation(
         session_id = "session-1"
         cwd = str(tmp_path)
 
+        def has_unsettled_permission_boundary(self) -> bool:
+            return False
+
         async def checkpoint(self) -> None:
             observed["checkpointed"] = True
 
@@ -3251,6 +3261,9 @@ async def test_executor_marks_terminal_response_as_natural_completion(
 
     class Control:
         task_id = "task-1"
+
+        def has_unsettled_permission_boundary(self) -> bool:
+            return False
 
         async def detach_task(
             self,
@@ -6420,6 +6433,11 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
 ) -> None:
     class RecoveryLoop:
         async def resume_permission_boundary(self, _checkpoint):
+            SessionStorage().append(
+                str(tmp_path),
+                context_record.session_id,
+                Message(role="user", content=[ToolResultBlock(tool_use_id="tool-1", content="Cleanup completed.")]),
+            )
             if continued:
                 yield MessageStartEvent(message_id="prefix")
                 yield TextDeltaEvent(text="The stack is gone. ")
@@ -6430,41 +6448,13 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
             if failed:
                 yield ErrorEvent(error="output limit exhausted", is_retryable=False)
 
-    checkpoint = {
-        "boundaryId": "pwb-boundary1",
-        "phase": "SUSPENDED",
-        "permissionClass": "normal",
-        "decision": {
-            "status": "claimed",
-            "value": "allow_once",
-            "claimId": "claim-1",
-            "auditStatus": "recorded",
-            "backupStatus": "committed",
-        },
-    }
     resolved: list[dict] = []
 
-    class CheckpointStore:
-        def find(self, **_kwargs):
-            return checkpoint
-
-        def reconcile_deadline(self, *_args, **_kwargs):
-            return checkpoint
-
-        def claim_decision(self, *_args, **_kwargs):
-            return checkpoint, False
-
-        def run_claim_audit_once(self, *_args, **_kwargs):
-            return checkpoint, False
-
-        def begin_restore(self, _boundary_id):
-            checkpoint["phase"] = "RESTORING"
-            return checkpoint
-
-        def resolve(self, _boundary_id, **kwargs):
-            checkpoint["phase"] = "RESOLVED"
+    class CheckpointStore(PermissionWaitCheckpointStore):
+        def resolve(self, boundary_id, **kwargs):
+            result = super().resolve(boundary_id, **kwargs)
             resolved.append(kwargs)
-            return checkpoint
+            return result
 
     backup_service = SnapshotReadingBackupService()
     task_store = A2ATaskStore(metrics=NoOpA2AMetrics())
@@ -6478,6 +6468,35 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         context_record.session_id,
         Message(role="user", content="delete the stack"),
     )
+    tool = ToolUseBlock(id="tool-1", name="bash", input={"cmd": "pwd"})
+    SessionStorage().append(str(tmp_path), context_record.session_id, Message(role="assistant", content=[tool]))
+    checkpoint_store = CheckpointStore(str(tmp_path), context_record.session_id)
+    checkpoint = checkpoint_store.create(
+        build_permission_checkpoint(
+            session_id=context_record.session_id,
+            task_id="task-1",
+            context_id="ctx-1",
+            input_id="input-1",
+            tool_use_id=tool.id,
+            tool_name=tool.name,
+            tool_input=tool.input,
+            permission_class="normal",
+            policy=PermissionWaitPolicy(resident_timeout_seconds=3600),
+            continuation_frame={
+                "assistantMessageRef": "session.jsonl:1",
+                "assistantMessageDigest": canonical_digest([tool.model_dump(mode="json")]),
+                "orderedToolUseIds": [tool.id],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": tool.id, "state": "pending", "source": None, "deniedResult": None}],
+            },
+        )
+    )
+    boundary_id = checkpoint["boundaryId"]
+    checkpoint_store.mark_suspended(boundary_id)
+    claimed, _ = checkpoint_store.claim_decision(boundary_id, value="allow_once", source="user")
+    claim_id = claimed["decision"]["claimId"]
+    checkpoint_store.run_claim_audit_once(boundary_id, claim_id=claim_id, audit=lambda _: True)
+    checkpoint_store.mark_claim_backed_up(boundary_id, claim_id=claim_id)
     task_record = await task_store.get_or_create_task(task_id="task-1", context_id="ctx-1")
     task_record.state = "input-required"
     task_store.mirror_task(task_record)
@@ -6501,7 +6520,7 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         seen_access_key_ids.append(client.config.access_key_id)
         assert client.config.security_token == "resume-sts-token"
 
-    monkeypatch.setattr("iac_code.a2a.executor.PermissionWaitCheckpointStore", lambda *_args: CheckpointStore())
+    monkeypatch.setattr("iac_code.a2a.executor.PermissionWaitCheckpointStore", lambda *_args: checkpoint_store)
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda _options: runtime)
     monkeypatch.setattr("iac_code.tools.cloud.registry.register_cloud_tools", register_cloud_tools)
     monkeypatch.setattr("iac_code.services.providers.aliyun.AliyunCredentials._load_from_iac_code_config", lambda: None)
@@ -6567,7 +6586,7 @@ async def test_normal_persisted_permission_recovery_publishes_final_and_terminal
         assert final_events[0]["status"]["message"]["parts"][0]["text"] == expected
     assert "".join(task_record.output_text) == expected
     assert task_record.state == ("failed" if failed else "input-required")
-    assert checkpoint["phase"] == "RESOLVED"
+    assert checkpoint_store.load(boundary_id)["phase"] == "RESOLVED"
     assert len(resolved) == 1
     assert seen_access_key_ids == ["resume-sts-id"]
     reason = BackupReason.TERMINAL if failed else BackupReason.NORMAL_TURN_END

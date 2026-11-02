@@ -1088,10 +1088,8 @@ class IacCodeA2APipelineExecutor:
 
                 async def release_detached_runtime() -> None:
                     control = current_execution_control()
-                    if control is not None and control.permission_pause_enabled:
-                        control.set_permission_runtime_close_confirmation(
-                            partial(self._task_store.discard_context_runtime_for_input_handoff, context_id)
-                        )
+                    if control is not None:
+                        self._prepare_suspended_permission_runtime_close(context_id)
                         await control.confirm_permission_runtime_closed()
                     else:
                         await self._task_store.discard_context_runtime(context_id)
@@ -1420,6 +1418,8 @@ class IacCodeA2APipelineExecutor:
                 await self._complete_backup_blocked_transition(task=task, ctx=ctx)
             except PermissionWaitSuspended:
                 task_persistence_started = True
+                if not self._prepare_suspended_permission_runtime_close(context_id):
+                    await self._task_store.discard_context_runtime(context_id)
                 task.state = TASK_STATE_INPUT_REQUIRED
                 ctx.active_task_id = None
                 task.touch()
@@ -2023,6 +2023,8 @@ class IacCodeA2APipelineExecutor:
         except _PipelineBackupBlockedTransitionError:
             await self._complete_backup_blocked_transition(task=task, ctx=ctx)
         except PermissionWaitSuspended:
+            if not self._prepare_suspended_permission_runtime_close(context_id):
+                await self._task_store.discard_context_runtime(context_id)
             task.state = TASK_STATE_INPUT_REQUIRED
             ctx.active_task_id = None
             task.touch()
@@ -3057,8 +3059,12 @@ class IacCodeA2APipelineExecutor:
             reason=reason,
         )
         if reason == BackupReason.INPUT_REQUIRED:
-            pending = publisher.pending_durable_permission
-            if pending is not None and self._permission_input_registry is not None:
+            pending = publisher.durable_permission_for_envelope(envelope)
+            if (
+                pending is not None
+                and envelope.get("eventType") == "permission_requested"
+                and self._permission_input_registry is not None
+            ):
                 self._permission_input_registry.activate_durable_boundary(pending)
         return True
 
@@ -3081,6 +3087,15 @@ class IacCodeA2APipelineExecutor:
         # before external visibility; repeating it here would create a second
         # generation after publication.
         return
+
+    def _prepare_suspended_permission_runtime_close(self, context_id: str) -> bool:
+        control = current_execution_control()
+        if control is None:
+            return False
+        control.set_permission_runtime_close_confirmation(
+            partial(self._task_store.discard_context_runtime_for_input_handoff, context_id)
+        )
+        return True
 
     @staticmethod
     async def _delegate_or_backup(awaitable: Awaitable[Any]) -> Any:
@@ -3109,7 +3124,9 @@ class IacCodeA2APipelineExecutor:
                 NORMAL_HANDOFF_PROOF_KEY: BackupPublicationProof.from_envelope(envelope),
             }
         try:
-            pending = publisher.pending_durable_permission if reason == BackupReason.INPUT_REQUIRED else None
+            pending = (
+                publisher.durable_permission_for_envelope(envelope) if reason == BackupReason.INPUT_REQUIRED else None
+            )
             coordinator = (
                 self._permission_input_registry.backup_coordinator
                 if self._permission_input_registry is not None
@@ -4547,6 +4564,8 @@ def _backup_reason_for_pipeline_envelope(envelope: dict[str, Any]) -> BackupReas
     status = envelope.get("status")
     if event_type == "backup_blocked":
         return None
+    if event_type in {"permission_requested", "permission_resolved"}:
+        return BackupReason.INPUT_REQUIRED
     if event_type == "pipeline_handoff_ready":
         return BackupReason.HANDOFF_READY
     if event_type in {"pipeline_completed", "pipeline_failed", "pipeline_canceled"}:

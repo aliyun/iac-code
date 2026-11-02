@@ -1543,6 +1543,9 @@ def test_selection_during_backup_configures_e2e_only_delay(tmp_path: Path) -> No
     )
     assert arm["scenario"] == runner.SELECTION_DURING_BACKUP_SCENARIO
     assert arm["delaySeconds"] == 10.0
+    assert arm["stepId"] == "confirm_and_select"
+    assert arm["kinds"] == ["candidate_selection"]
+    assert arm["awaitRequestDispatch"] is True
 
 
 def test_selection_during_backup_allows_real_step1_planning_time(
@@ -1576,20 +1579,34 @@ def test_selection_during_backup_allows_real_step1_planning_time(
 def test_backup_delay_sitecustomize_delays_armed_input_required_backup(tmp_path: Path) -> None:
     runner = _load_runner()
     control = tmp_path / "backup-delay"
-    runner._write_json(runner._backup_delay_marker_path(control, "arm"), {"armed": True})
+    runner._write_json(runner._backup_delay_marker_path(control, "arm"), {
+        "stepId": "confirm_and_select", "kinds": ["candidate_selection"],
+    })
     env = os.environ.copy()
     env["PYTHONPATH"] = os.pathsep.join(
         value for value in (str(runner.BACKUP_DELAY_FIXTURE_ROOT.resolve()), env.get("PYTHONPATH", "")) if value
     )
     env["IAC_CODE_E2E_BACKUP_DELAY_SECONDS"] = "0.05"
     env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] = str(control)
-    script = "\n".join(
-        [
-            "from iac_code.services.session_backup import BackupReason, SessionBackupService",
-            "service = SessionBackupService()",
-            "service.backup_session('', 'session-1', reason=BackupReason.INPUT_REQUIRED, critical=False)",
-        ]
-    )
+    env["IAC_CODE_CONFIG_DIR"] = str(tmp_path / "config")
+    env["IAC_CODE_CONFIG_BACKUP_DIR"] = ""
+    script = '''
+import asyncio
+from types import SimpleNamespace
+from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
+from iac_code.services.session_backup import BackupReason, SessionBackupService
+executor = object.__new__(IacCodeA2APipelineExecutor)
+executor._permission_input_registry = None
+executor._backup_service = SessionBackupService()
+executor._metrics = None
+asyncio.run(executor._backup_pipeline_publication(
+    {"eventType": "input_required", "step": {"id": "confirm_and_select"},
+     "data": {"kind": "candidate_selection"}},
+    publisher=SimpleNamespace(durable_permission_for_envelope=lambda _event: None),
+    pipeline=None, cwd="", session_id="session-1", task=None, ctx=None,
+    reason=BackupReason.INPUT_REQUIRED,
+))
+'''
 
     result = subprocess.run(
         [sys.executable, "-c", script],
@@ -1604,6 +1621,35 @@ def test_backup_delay_sitecustomize_delays_armed_input_required_backup(tmp_path:
     finished = runner._wait_for_backup_delay_marker(control, "finished", timeout=1)
     assert finished["elapsedSeconds"] >= 0.05
     assert finished["succeeded"] is True
+
+
+@pytest.mark.parametrize("wrong_marker", [False, True])
+def test_selection_during_backup_rejects_a_different_pending_window(tmp_path, monkeypatch, wrong_marker):
+    runner = _load_runner()
+
+    class Harness:
+        snapshots = {}
+
+        def start_stream(self, **kwargs):
+            assert kwargs["name"] == "01-initial", "selection was dispatched before verifying the window"
+            return object()
+
+        def fetch_state(self, _name):
+            return {"snapshot": {"pendingInput": {
+                "step": {"id": "confirm_and_select" if wrong_marker else "evaluate_candidates"},
+                "kind": "candidate_selection",
+            }}}
+
+    marker = {
+        "stepId": "confirm_and_select", "kind": "ask_user_question" if wrong_marker else "candidate_selection",
+    }
+    monkeypatch.setattr(runner, "_run_with_harness", lambda _args, _scenario, callback: callback(Harness()))
+    monkeypatch.setattr(runner, "_backup_delay_control_path", lambda _h: tmp_path)
+    monkeypatch.setattr(runner, "_wait_for_backup_start_with_intervening_asks", lambda *_args, **_kwargs: (marker, []))
+    args = SimpleNamespace(initial_prompt="test", event_timeout=240.0, stream_timeout=1800.0)
+
+    with pytest.raises(RuntimeError, match="did not match the pending candidate selection"):
+        runner.run_selection_during_backup(args, runner.SELECTION_DURING_BACKUP_SCENARIO)
 
 
 def test_backup_delay_wait_answers_step1_question_before_marker(tmp_path: Path, monkeypatch) -> None:
@@ -3712,14 +3758,18 @@ def test_backup_fixture_dispatch_handshake_is_bounded_and_keeps_window_open(tmp_
     runner = _load_runner()
     control = tmp_path / 'backup-delay-handshake'
     runner._write_json(runner._backup_delay_marker_path(control, 'arm'),
-                      {'awaitRequestDispatch': True, 'dispatchWaitSeconds': 2.0})
+                      {'stepId': 'confirm_and_select', 'kinds': ['candidate_selection'],
+                       'awaitRequestDispatch': True, 'dispatchWaitSeconds': 2.0})
     env = os.environ.copy()
     env.update(IAC_CODE_CONFIG_DIR=str(tmp_path / 'isolated-config'),
+               IAC_CODE_CONFIG_BACKUP_DIR='',
                IAC_CODE_E2E_BACKUP_DELAY_SECONDS='0.01', IAC_CODE_E2E_BACKUP_DELAY_CONTROL=str(control))
     env['PYTHONPATH'] = os.pathsep.join(
         v for v in (str(runner.BACKUP_DELAY_FIXTURE_ROOT.resolve()), env.get('PYTHONPATH', '')) if v)
     script = '''
-import json, pathlib, threading, time
+import asyncio, json, pathlib, threading, time
+from types import SimpleNamespace
+from iac_code.a2a.pipeline_executor import IacCodeA2APipelineExecutor
 from iac_code.services.session_backup import BackupReason, SessionBackupService
 control = pathlib.Path(__import__('os').environ['IAC_CODE_E2E_BACKUP_DELAY_CONTROL'])
 def dispatched():
@@ -3738,8 +3788,18 @@ def dispatched():
         script += 'threading.Thread(target=dispatched).start()\n'
     script += '''
 time.sleep(0.15)  # Slow pre-backup work must not consume the dispatch delay.
+executor = object.__new__(IacCodeA2APipelineExecutor)
+executor._permission_input_registry = None
+executor._backup_service = SessionBackupService()
+executor._metrics = None
 try:
-    SessionBackupService().backup_session('', 'session-1', reason=BackupReason.INPUT_REQUIRED, critical=False)
+    asyncio.run(executor._backup_pipeline_publication(
+        {"eventType": "input_required", "step": {"id": "confirm_and_select"},
+         "data": {"kind": "candidate_selection"}},
+        publisher=SimpleNamespace(durable_permission_for_envelope=lambda _event: None),
+        pipeline=None, cwd="", session_id="session-1", task=None, ctx=None,
+        reason=BackupReason.INPUT_REQUIRED,
+    ))
 except TimeoutError:
     print('bounded_dispatch_timeout')
 '''
@@ -3752,7 +3812,7 @@ except TimeoutError:
         assert finished['startedMonotonic'] < dispatched['requestStartedMonotonic'] <= finished['finishedMonotonic']
     else:
         assert 'bounded_dispatch_timeout' in result.stdout
-        assert not runner._backup_delay_marker_path(control, 'finished').exists()
+        assert runner._wait_for_backup_delay_marker(control, 'finished', timeout=1)['succeeded'] is False
 
 
 def test_golden_diagnostics_distinguish_source_read_from_tagged_completion():

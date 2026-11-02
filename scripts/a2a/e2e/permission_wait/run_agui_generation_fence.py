@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -222,7 +221,7 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
     run_dir.mkdir(parents=True, exist_ok=False)
     workspace = run_dir / "workspace"
     workspace.mkdir()
-    config_dir = run_dir / "config"
+    config_dir = run_dir / "replacement-config"
     persistence_dir = run_dir / "a2a-state"
     staging_dir = run_dir / "staging"
     backup_dir = run_dir / "shared-backup"
@@ -241,7 +240,9 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
         defer_staging_publisher=True,
         staging_dir=staging_dir,
         backup_dir=backup_dir,
+        suspend_trigger=run_dir / "release-permission-suspension",
     )
+    original_a2a = a2a
     agui = _AguiServer(
         run_dir=run_dir,
         repo_root=repo_root,
@@ -314,11 +315,6 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
             raise AssertionError("P2 staged snapshot is unavailable")
 
         agui.stop()
-        a2a.stop()
-        primary_sessions = [path for path in config_dir.rglob(session_id) if path.is_dir()]
-        if len(primary_sessions) != 1:
-            raise AssertionError("expected exactly one primary session before sandbox replacement")
-        shutil.rmtree(primary_sessions[0])
 
         previous_backup_dir = os.environ.get(BACKUP_ENV_VAR)
         os.environ[BACKUP_ENV_VAR] = str(backup_dir)
@@ -339,7 +335,7 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
         if int(restored_old_state["generation"]) != old_shared_generation:
             raise AssertionError("replacement Sandbox did not start from the expected old generation")
 
-        a2a.staging_dir = run_dir / "replacement-staging"
+        a2a = original_a2a.replacement(config_dir=config_dir, staging_dir=run_dir / "replacement-staging")
         a2a.start(2)
         agui.start(generation=2, a2a_url=a2a.url)
         not_ready_events = _agui_request(
@@ -368,12 +364,16 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
             or unchanged_decision.get("value") is not None
         ):
             raise AssertionError("not-ready AG-UI P2 Resume claimed or consumed the staged checkpoint")
+        if original_a2a.process is None or original_a2a.process.poll() is not None:
+            raise AssertionError("old permission owner exited before the AG-UI restore-floor rejection")
 
         if worker.run_once() < 1:
             raise AssertionError("P2 staged backup was not published to shared storage")
         shared_state = json.loads(shared_marker.read_text(encoding="utf-8"))
         if int(shared_state["generation"]) < expected_generation:
             raise AssertionError("shared backup did not reach the P2 generation")
+        original_a2a.wait_for_handoff(permission_2, timeout=timeout)
+        original_a2a.stop()
 
         recovered_events = _agui_request(
             agui.url,
@@ -410,10 +410,16 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
         followup_events = _agui_request(
             agui.url, _run_payload(workspace, run_id="run-5", prompt=followup_prompt), timeout=timeout
         )
+        (run_dir / "followup-events.json").write_text(
+            json.dumps(followup_events, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         if followup_events[-1].get("type") != "RUN_FINISHED" or followup_events[-1].get("outcome") != {
             "type": "success"
         }:
-            raise AssertionError("AG-UI next ordinary prompt did not finish successfully")
+            raise AssertionError(
+                "AG-UI next ordinary prompt did not finish successfully: "
+                + json.dumps(followup_events[-1], ensure_ascii=False)
+            )
         if "fixture recovery completed" not in json.dumps(followup_events):
             raise AssertionError("AG-UI next ordinary prompt lost its normal AgentLoop response")
         if _tool_execution_lines(execution_log) != ["executed", "executed-2"]:
@@ -476,10 +482,13 @@ def run_scenario(*, run_dir: Path, timeout: float) -> dict[str, Any]:
             "p2ResolvedOnce": True,
             "toolExecutions": 2,
             "publicGenerationAbsent": True,
+            "controlledHandoffCommitted": True,
+            "oldOwnerAliveAtNotReady": True,
         }
     finally:
         agui.stop()
         a2a.stop()
+        original_a2a.stop()
 
 
 def main() -> int:

@@ -638,20 +638,24 @@ async def test_agent_loop_rejects_snapshot_on_deny_or_prompt_rejection(behavior:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entrypoint", ["run_streaming", "continue_streaming"])
-async def test_agent_loop_cancels_snapshot_when_permission_prompt_is_cancelled(entrypoint: str) -> None:
+@pytest.mark.parametrize("startup_delay", [0, 1.1])
+async def test_agent_loop_cancels_snapshot_when_permission_prompt_is_cancelled(
+    entrypoint: str, startup_delay: float
+) -> None:
     assert PROCESS_RESOLVED_CONTRACT_STORE.size == 0
     tool = _SnapshotTool(behavior="ask")
     loop = _snapshot_loop(tool, {"value": "business"}, ToolPermissionContext(cwd="/tmp"))
     prompt_ready = asyncio.Event()
 
     async def consume() -> None:
+        await asyncio.sleep(startup_delay)
         stream = loop.run_streaming("run") if entrypoint == "run_streaming" else loop.continue_streaming()
         async for event in stream:
             if isinstance(event, PermissionRequestEvent):
                 prompt_ready.set()
 
     task = asyncio.create_task(consume())
-    await asyncio.wait_for(prompt_ready.wait(), timeout=1)
+    await prompt_ready.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -713,7 +717,8 @@ async def test_agent_loop_cancels_unconsumed_snapshot_on_batch_cancellation(star
 
 
 @pytest.mark.asyncio
-async def test_agent_loop_releases_consumed_snapshot_on_batch_cancellation(monkeypatch) -> None:
+@pytest.mark.parametrize("startup_delay", [0, 1.1])
+async def test_agent_loop_releases_consumed_snapshot_on_batch_cancellation(startup_delay: float, monkeypatch) -> None:
     cleanup_cancels = []
     original_cancel = PROCESS_RESOLVED_CONTRACT_STORE.cancel
 
@@ -726,11 +731,12 @@ async def test_agent_loop_releases_consumed_snapshot_on_batch_cancellation(monke
     loop = _snapshot_loop(tool, {"value": "business"}, ToolPermissionContext(cwd="/tmp"))
 
     async def consume() -> None:
+        await asyncio.sleep(startup_delay)
         async for _event in loop.run_streaming("run"):
             pass
 
     task = asyncio.create_task(consume())
-    await asyncio.wait_for(tool.execute_started.wait(), timeout=1)
+    await tool.execute_started.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
