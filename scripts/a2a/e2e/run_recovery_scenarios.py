@@ -640,7 +640,7 @@ class ScenarioHarness:
             self.server_env["IAC_CODE_E2E_BACKUP_DELAY_SECONDS"] = str(BACKUP_DELAY_SECONDS)
             control = (self.run_dir / "selection-backup-delay").resolve()
             self.server_env["IAC_CODE_E2E_BACKUP_DELAY_CONTROL"] = str(control)
-            for marker in ("arm", "started", "finished"):
+            for marker in ("arm", "claimed", "started", "dispatched", "finished"):
                 _backup_delay_marker_path(control, marker).unlink(missing_ok=True)
             _write_json(
                 _backup_delay_marker_path(control, "arm"),
@@ -648,6 +648,10 @@ class ScenarioHarness:
                     "armedAt": time.time(),
                     "scenario": scenario,
                     "delaySeconds": BACKUP_DELAY_SECONDS,
+                    "stepId": "confirm_and_select",
+                    "kinds": ["candidate_selection"],
+                    "awaitRequestDispatch": True,
+                    "dispatchWaitSeconds": 180.0,
                 },
             )
             self.notes.append(f"armed E2E-only input_required backup delay fixture for {BACKUP_DELAY_SECONDS:.0f}s")
@@ -1449,6 +1453,14 @@ def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
             timeout=max(args.event_timeout, min(args.stream_timeout, 600.0)),
         )
         h.snapshots["backup_delay_started"] = started
+        pending = h.fetch_state("selection-backup-pending")
+        if (
+            started.get("stepId") != "confirm_and_select"
+            or started.get("kind") != "candidate_selection"
+            or _pending_step_id(pending) != "confirm_and_select"
+            or _pending_kind(pending) not in {"candidate_select", "candidate_selection"}
+        ):
+            raise RuntimeError("backup window did not match the pending candidate selection")
         h.checks["input_required backup delay started"] = started.get("delaySeconds") == BACKUP_DELAY_SECONDS
         h.checks["active stream was open when backup delay started"] = not initial_streams[-1].done
 
@@ -1459,6 +1471,10 @@ def run_selection_during_backup(args: argparse.Namespace, scenario: str) -> int:
             prompt=args.selection_prompt,
             name="02-select-during-backup",
             wait_for_identity=False,
+        )
+        _write_json(
+            _backup_delay_marker_path(control, "dispatched"),
+            {"dispatchedMonotonic": selection_stream.request_started_monotonic},
         )
 
         continued_streams = _wait_for_with_intervening_ask_inputs(

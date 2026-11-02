@@ -16,8 +16,11 @@ import uvicorn
 
 from iac_code.a2a.app import create_app as create_a2a_app
 from iac_code.a2a.executor import IacCodeA2AExecutor
+from iac_code.agent.message import Message, ToolResultBlock, ToolUseBlock
 from iac_code.agui.app import create_app as create_agui_app
 from iac_code.pipeline.engine.events import PipelineEvent, PipelineEventType
+from iac_code.pipeline.engine.transcript_storage import PipelineTranscriptStorage
+from iac_code.services.permission_wait import canonical_digest
 from iac_code.types.stream_events import PermissionRequestEvent, SubPipelineStreamEvent, TextDeltaEvent
 
 
@@ -39,6 +42,28 @@ class _ParallelPermissionPipeline:
         self.other_candidate_continued = threading.Event()
         self.permission_resolved = threading.Event()
         self.permission_future: asyncio.Future[bool] | None = None
+        self.cwd = ""
+        self.session_id = ""
+
+    def _permission_event(self) -> PermissionRequestEvent:
+        tool = ToolUseBlock(id="tool-a", name="bash", input={"cmd": "pwd"})
+        PipelineTranscriptStorage(self.session.session_dir).append(
+            self.cwd, "candidate-a", Message(role="assistant", content=[tool])
+        )
+        return PermissionRequestEvent(
+            tool_name=tool.name,
+            tool_input=tool.input,
+            tool_use_id=tool.id,
+            response_future=self.permission_future,
+            continuation_frame={
+                "assistantMessageRef": "pipeline/transcripts/candidate-a/session.jsonl:0",
+                "assistantMessageDigest": canonical_digest([tool.model_dump(mode="json")]),
+                "orderedToolUseIds": [tool.id],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": tool.id, "state": "pending", "source": None, "deniedResult": None}],
+            },
+            audit_context={"transcript_id": "candidate-a", "root_session_id": self.session_id},
+        )
 
     async def run(self, prompt: str):
         del prompt
@@ -52,12 +77,7 @@ class _ParallelPermissionPipeline:
         yield SubPipelineStreamEvent(
             sub_pipeline_id="candidate-a",
             candidate_index=0,
-            inner=PermissionRequestEvent(
-                tool_name="bash",
-                tool_input={"cmd": "pwd"},
-                tool_use_id="tool-a",
-                response_future=self.permission_future,
-            ),
+            inner=self._permission_event(),
         )
         yield SubPipelineStreamEvent(
             sub_pipeline_id="candidate-b",
@@ -66,6 +86,11 @@ class _ParallelPermissionPipeline:
         )
         self.other_candidate_continued.set()
         approved = await self.permission_future
+        PipelineTranscriptStorage(self.session.session_dir).append(
+            self.cwd,
+            "candidate-a",
+            Message(role="user", content=[ToolResultBlock(tool_use_id="tool-a", content="fixture result")]),
+        )
         self.permission_resolved.set()
         yield SubPipelineStreamEvent(
             sub_pipeline_id="candidate-a",
@@ -174,6 +199,8 @@ def test_real_http_sse_sub_pipeline_interrupt_survives_agui_restart_and_snapshot
     monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", lambda _options: runtime)
 
     def create_test_pipeline(*_args, **kwargs):
+        pipeline.cwd = kwargs["cwd"]
+        pipeline.session_id = kwargs["session_id"]
         pipeline.session.session_dir = (
             kwargs["session_storage"].session_dir(
                 kwargs["cwd"],

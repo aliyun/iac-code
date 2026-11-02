@@ -1,6 +1,9 @@
 """Permission handoff failures and competing owners through real HTTP workers."""
 
 import json
+import os
+import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -40,7 +43,37 @@ def worker(root, name, fault=None, *, resident_timeout=300):
         tool_count=1,
         resident_timeout=resident_timeout,
         fault=fault,
+        strict_permission_pause=True,
     )
+
+
+class WorkerPermissionProbe:
+    def __init__(self, root, name):
+        self.root, self.name = root, name
+
+    def inspect(self):
+        environment = {
+            **os.environ,
+            "IAC_CODE_CONFIG_DIR": str(self.root / self.name / "config"),
+            "A2A_PERSISTENCE_DIR": str(self.root / "shared/a2a"),
+        }
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "iac_code.a2a.permission_pause",
+                "--persistence-root",
+                str(self.root / "shared/a2a"),
+            ],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        document = json.loads(result.stdout)
+        assert document["schemaVersion"] == 2
+        assert result.returncode == {"ready": 0, "not_applicable": 0, "pending": 1, "error": 2}[document["status"]]
+        return document
 
 
 def count_lines(path):
@@ -145,6 +178,7 @@ def test_two_http_workers_claim_once_and_old_owner_cannot_overwrite_replacement(
         wait_for(lambda: (document(tmp_path).get("inputHandoff") or {}).get("phase") == "COMMITTED")
         before = document(tmp_path)
         assert before["inputHandoff"]["backupReceipt"]["sharedCommitted"] is True
+        assert WorkerPermissionProbe(tmp_path, "original").inspect()["status"] == "ready"
         for server in contenders:
             server.start()
         with ThreadPoolExecutor(max_workers=2) as pool:
@@ -157,6 +191,7 @@ def test_two_http_workers_claim_once_and_old_owner_cannot_overwrite_replacement(
             assert replacement["executionId"] != before["executionId"]
             assert replacement["phase"] == "running"
             assert count_lines(tmp_path / "shared/executions.jsonl") == 1
+            assert WorkerPermissionProbe(tmp_path, "worker-b").inspect()["status"] == "pending"
 
             # Trigger real cleanup on the retired worker rather than calling
             # a private persistence method. Its original execution is fenced.

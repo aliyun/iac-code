@@ -2492,7 +2492,9 @@ def _backup_delay_marker(control: Path, marker: str) -> Path:
     return control.with_name(f"{control.name}.{marker}.json")
 
 
-def _arm_a2a_backup_delay(runtime: ScenarioRuntime, harness: Any, a2a: Any, checkpoint: int) -> Path:
+def _arm_a2a_backup_delay(
+    runtime: ScenarioRuntime, harness: Any, a2a: Any, checkpoint: int, *, step_id: str, kinds: tuple[str, ...]
+) -> Path:
     control = runtime.paths.artifacts_dir / f"backup-delay-{checkpoint:02d}"
     fixture_root = Path(a2a.BACKUP_DELAY_FIXTURE_ROOT).resolve()
     existing_pythonpath = harness.server_env.get("PYTHONPATH", "")
@@ -2509,6 +2511,7 @@ def _arm_a2a_backup_delay(runtime: ScenarioRuntime, harness: Any, a2a: Any, chec
     write_json(
         _backup_delay_marker(control, "arm"),
         {"checkpoint": checkpoint, "armedAt": time.time(), "delaySeconds": a2a.BACKUP_DELAY_SECONDS,
+         "stepId": step_id, "kinds": list(kinds),
          "awaitRequestDispatch": True, "dispatchWaitSeconds": 180.0},
     )
     return control
@@ -2752,6 +2755,8 @@ def _run_a2a_input_during_backup(
             observed_step, observed_kind, pending_data = _pending_from_pipeline_state(pending_state)
             if not observed_step or not observed_kind:
                 raise RuntimeError("backup-window snapshot did not expose the pending input")
+            if (started.get("stepId"), started.get("kind")) != (observed_step, observed_kind):
+                raise RuntimeError("backup-window marker did not match the pending input snapshot")
             matched_target = observed_step == expected_step and observed_kind == expected_kind
             supplemental_ask = (
                 expected_step == NEW_STEPS[1]
@@ -2761,14 +2766,19 @@ def _run_a2a_input_during_backup(
             )
             if not matched_target and not supplemental_ask:
                 raise RuntimeError(f"expected {expected_step}:{expected_kind}, got {observed_step}:{observed_kind}")
-            # The server can reach its next input_required backup as soon as it
-            # consumes this response. Arm that window before sending, so a
-            # fast turn cannot pass the fixture's bounded arm wait.
-            next_control = (
-                _arm_a2a_backup_delay(runtime, harness, a2a, control_index + 1)
-                if control_index < 12 and not (matched_target and index == len(expected))
-                else None
-            )
+            # Arm the next target before replying so a fast turn cannot
+            # reach its input backup before the test has selected it.
+            next_control = None
+            if control_index < 12 and not (matched_target and index == len(expected)):
+                next_step, next_kind = expected[index if matched_target else index - 1]
+                next_kinds = (
+                    (next_kind, "ask_user_question")
+                    if next_kind == "deployment_confirmation"
+                    else (next_kind,)
+                )
+                next_control = _arm_a2a_backup_delay(
+                    runtime, harness, a2a, control_index + 1, step_id=next_step, kinds=next_kinds
+                )
             unfinished_at_dispatch = not _backup_delay_marker(control, "finished").exists()
             # Publication is gated here, so use the native snapshot question
             # rather than the not-yet-published event journal. The step identity
@@ -3179,7 +3189,9 @@ def _run_a2a(runtime: ScenarioRuntime) -> None:
     harness.server_url = f"http://127.0.0.1:{runtime.port}"
     plan = _a2a_plan(runtime)
     first_backup_control = (
-        _arm_a2a_backup_delay(runtime, harness, a2a, 1) if runtime.spec.profile == "input_during_backup" else None
+        _arm_a2a_backup_delay(
+            runtime, harness, a2a, 1, step_id=NEW_STEPS[0], kinds=("ask_user_question",)
+        ) if runtime.spec.profile == "input_during_backup" else None
     )
     runtime.event("surface-started", surface="a2a", port=runtime.port)
     try:

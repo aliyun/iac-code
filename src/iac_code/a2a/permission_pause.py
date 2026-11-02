@@ -15,13 +15,14 @@ from typing import Any
 from iac_code.a2a.execution_owner import ExecutionOwnerIdentity
 from iac_code.a2a.input_handoff import RecoverableInputHandoffProof
 from iac_code.config import _resolve_config_dir
+from iac_code.services.permission_wait import PermissionWaitCheckpointStore
 from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
 
 logger = logging.getLogger(__name__)
 
 
 class PendingPermissionPauseReferences:
-    """An immutable index of boundaries published by this physical runtime."""
+    """Index immutable owner references, replacing them only under the recovery CAS."""
 
     ENABLED_ENV = "IAC_CODE_A2A_PERMISSION_PAUSE_ENABLED"
 
@@ -45,33 +46,25 @@ class PendingPermissionPauseReferences:
 
     @classmethod
     def enabled(cls, persistence_root: Path | None) -> PendingPermissionPauseReferences | None:
+        configured_root = os.environ.get("A2A_PERSISTENCE_DIR", "").strip()
+        cloud_runtime = bool(
+            sys.platform == "linux"
+            and persistence_root is not None
+            and os.environ.get("IAC_CODE_CONFIG_BACKUP_DIR", "").strip()
+            and configured_root
+            and os.path.abspath(configured_root) == os.path.abspath(persistence_root)
+        )
         setting = os.environ.get(cls.ENABLED_ENV)
         if setting is not None:
             setting = setting.strip().lower()
             if setting in {"0", "false", "no", "off"}:
+                if cloud_runtime:
+                    raise ValueError("permission_pause_cloud_protection_required")
                 return None
             if setting not in {"1", "true", "yes", "on"}:
                 raise ValueError("permission_pause_invalid_enabled_setting")
-        else:
-            # These are the existing Linux sandbox image's runtime settings;
-            # ordinary A2A/CLI/desktop sessions do not opt into physical drain.
-            configured_root = os.environ.get("A2A_PERSISTENCE_DIR", "").strip()
-            if (
-                sys.platform != "linux"
-                or persistence_root is None
-                or not os.environ.get("IAC_CODE_CONFIG_BACKUP_TMP_DIR", "").strip()
-                or not configured_root
-                or os.path.abspath(configured_root) != os.path.abspath(persistence_root)
-            ):
-                return None
-            identity = ExecutionOwnerIdentity.capture()
-            if not (
-                identity.runtime_incarnation
-                and identity.runtime_incarnation.startswith("linux-boot:")
-                and identity.pid_namespace
-                and identity.process_start_identity
-            ):
-                return None
+        elif not cloud_runtime:
+            return None
         if persistence_root is None:
             raise ValueError("permission_pause_persistence_unavailable")
         references = cls(persistence_root)
@@ -88,6 +81,29 @@ class PendingPermissionPauseReferences:
                 atomic_write_json(path, self.manifest, durable=True)
 
     def register(self, *, checkpoint_path: Path, cwd: str, record: dict[str, Any], control: dict[str, Any]) -> None:
+        reference = self._build_reference(checkpoint_path=checkpoint_path, cwd=cwd, record=record, control=control)
+        with cross_process_file_lock(self.root / ".lock"):
+            self.validate_manifest()
+            path = self.root / f"{reference['boundaryId']}.json"
+            if path.exists():
+                existing = self.read_document(path)
+                self.validate_reference(existing)
+                if (
+                    any(
+                        value != existing.get(key)
+                        for key, value in reference.items()
+                        if key not in {"initialGeneration", "controlRevision"}
+                    )
+                    or existing["initialGeneration"] > reference["initialGeneration"]
+                    or existing["controlRevision"] > reference["controlRevision"]
+                ):
+                    raise ValueError("permission_pause_reference_conflict")
+            else:
+                atomic_write_json(path, reference, durable=True)
+
+    def _build_reference(
+        self, *, checkpoint_path: Path, cwd: str, record: dict[str, Any], control: dict[str, Any]
+    ) -> dict[str, Any]:
         reference = {
             "schemaVersion": 1,
             "boundaryId": record["boundaryId"],
@@ -106,14 +122,76 @@ class PendingPermissionPauseReferences:
         self.validate_reference(reference)
         if any(control.get(key) != reference[key] for key in ("contextId", "taskId")):
             raise ValueError("permission_pause_control_mismatch")
+        return reference
+
+    def rebind_recovered(
+        self, previous: dict[str, Any], replacement: dict[str, Any], *, cwd: str
+    ) -> dict[str, dict[str, Any] | None]:
+        """Move every captured card to the new owner while its admission lock is held."""
+
+        if not RecoverableInputHandoffProof.validates_committed(previous, str(replacement["contextId"])):
+            raise ValueError("permission_pause_recovery_proof_missing")
+        if any(previous.get(key) != replacement.get(key) for key in ("contextId", "taskId", "owner", "sessionId")):
+            raise ValueError("permission_pause_recovery_identity_changed")
+        proof = RecoverableInputHandoffProof.from_document(previous["inputHandoff"])
+        store = PermissionWaitCheckpointStore(cwd, proof.session_id)
+        snapshots: dict[str, dict[str, Any] | None] = {}
         with cross_process_file_lock(self.root / ".lock"):
             self.validate_manifest()
-            path = self.root / f"{reference['boundaryId']}.json"
-            if path.exists():
-                if self.read_document(path) != reference:
-                    raise ValueError("permission_pause_reference_conflict")
+            references = []
+            for boundary_id in proof.boundaries:
+                record = store.load(boundary_id)
+                if record is None:
+                    raise ValueError("permission_pause_recovery_checkpoint_missing")
+                if record.get("phase") == "RESOLVED":
+                    continue
+                anchor = RecoverableInputHandoffProof.from_checkpoint(record)
+                if any(
+                    value != proof.as_document()[key]
+                    for key, value in anchor.as_document().items()
+                    if key not in {"phase", "backupReceipt"}
+                ):
+                    raise ValueError("permission_pause_recovery_checkpoint_changed")
+                reference = (
+                    None
+                    if record.get("phase") == "CANCELED"
+                    else self._build_reference(
+                        checkpoint_path=store.paths.permission_waits_dir / f"{boundary_id}.json",
+                        cwd=cwd,
+                        record=record,
+                        control=replacement,
+                    )
+                )
+                path = self.root / f"{boundary_id}.json"
+                old = self.read_document(path) if path.exists() else None
+                if old is not None and any(
+                    old.get(key) != previous.get(key) for key in ("contextId", "taskId", "executionId", "ownerIdentity")
+                ):
+                    raise ValueError("permission_pause_recovery_reference_changed")
+                snapshots[path.name] = old
+                references.append((path, reference))
+            try:
+                for path, reference in references:
+                    if reference is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        atomic_write_json(path, reference, durable=True)
+            except BaseException:
+                self._restore_references(snapshots)
+                raise
+        return snapshots
+
+    def rollback_recovered(self, snapshots: dict[str, dict[str, Any] | None]) -> None:
+        with cross_process_file_lock(self.root / ".lock"):
+            self._restore_references(snapshots)
+
+    def _restore_references(self, snapshots: dict[str, dict[str, Any] | None]) -> None:
+        for name, document in snapshots.items():
+            path = self.root / name
+            if document is None:
+                path.unlink(missing_ok=True)
             else:
-                atomic_write_json(path, reference, durable=True)
+                atomic_write_json(path, document, durable=True)
 
     def validate_manifest(self) -> None:
         document = self.read_document(self.root / "manifest.json")
@@ -206,7 +284,7 @@ class PendingPermissionPauseInspector:
 
     @staticmethod
     def result(status: str, reason: str, checked: int = 0) -> dict[str, Any]:
-        return {"schemaVersion": 1, "status": status, "reason": reason, "checked": checked}
+        return {"schemaVersion": 2, "status": status, "reason": reason, "checked": checked}
 
     def inspect(self) -> dict[str, Any]:
         checked = 0
@@ -278,7 +356,8 @@ class PendingPermissionPauseInspector:
             return "pending"
         from iac_code.a2a.execution_control import persisted_natural_handoff_admits_input_recovery
 
-        if persisted_natural_handoff_admits_input_recovery(control, reference["contextId"]):
+        canceled = record["phase"] == "CANCELED"
+        if canceled and persisted_natural_handoff_admits_input_recovery(control, reference["contextId"]):
             return "ready"
         drained = (
             control.get("blockers") == []
@@ -290,7 +369,7 @@ class PendingPermissionPauseInspector:
         )
         if not drained:
             return "pending"
-        if control.get("phase") == "terminated" and control.get("releaseReady") is True:
+        if canceled and control.get("phase") == "terminated" and control.get("releaseReady") is True:
             backup = control.get("backup")
             return (
                 "ready"
@@ -298,7 +377,7 @@ class PendingPermissionPauseInspector:
                 and backup.get("status") in {"disabled", "shared_committed", "staged_committed"}
                 else "pending"
             )
-        if record["phase"] == "CANCELED" or control.get("phase") != "running":
+        if control.get("phase") != "running":
             return "pending"
         if control.get("sessionId") != reference["sessionId"]:
             return "pending"
@@ -310,16 +389,13 @@ class PendingPermissionPauseInspector:
                     RecoverableInputHandoffProof.validates_committed(
                         control, reference["contextId"], reference["taskId"]
                     )
-                    and handoff.get("boundaryId") == reference["boundaryId"]
-                    and handoff.get("boundaryGeneration") == record["generation"]
+                    and RecoverableInputHandoffProof.from_document(handoff).matches_boundary(
+                        reference["boundaryId"], record["generation"]
+                    )
                 )
                 else "pending"
             )
-        return (
-            "ready"
-            if (control.get("inputHandoffReady") is True and control.get("executionStatus") == "input-required")
-            else "pending"
-        )
+        return "pending"
 
 
 class PermissionPauseCommand:

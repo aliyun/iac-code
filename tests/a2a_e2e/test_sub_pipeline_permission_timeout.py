@@ -26,3 +26,9 @@ async def test_real_agent_loop_candidates_continue_through_sub_pipeline_hard_tim
 
     assert result["passed"] is True
     assert all(result["checks"].values())
+    lifecycle = result["permissionWaitLifecycle"]
+    assert lifecycle["publishedSessionId"] == lifecycle["rootSessionId"]
+    assert lifecycle["publishedPhase"] == "WAITING"
+    assert lifecycle["resolvedPhase"] == "RESOLVED"
+    assert lifecycle["decisionSource"] == "timeout"
+    assert lifecycle["transcriptRef"].startswith("pipeline/transcripts/")
