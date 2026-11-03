@@ -57,6 +57,7 @@ from iac_code.services.session_backup import (
     BackupReason,
     SessionBackupBlocked,
     SessionBackupNotReadyError,
+    SessionBackupPublishing,
     SessionBackupService,
 )
 from iac_code.services.session_backup_state import NORMAL_HANDOFF_PROOF_KEY, BackupPublicationProof
@@ -2065,6 +2066,150 @@ def test_persisted_task_get_and_cancel_work_with_bearer_auth_after_restart(tmp_p
     assert cancel_result["error"]["message"] == "Task cannot be canceled"
 
 
+def test_stop_admission_route_reports_publication_window(monkeypatch, tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    class PublishingBackup:
+        def publication_in_progress(self, _cwd: str, _session_id: str) -> bool:
+            return True
+
+    app.state.a2a_components.backup_service = PublishingBackup()
+    with TestClient(app) as client:
+        response = client.post(
+            "/iac-code/execution/stop-admission",
+            json={"action": "prepare", "taskId": "task-1"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "Session backup is publishing."
+
+
+def test_stop_admission_route_prepare_accepts_free_publication(monkeypatch, tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    class FreeBackup:
+        def publication_in_progress(self, _cwd: str, _session_id: str) -> bool:
+            return False
+
+    app.state.a2a_components.backup_service = FreeBackup()
+    with TestClient(app) as client:
+        response = client.post(
+            "/iac-code/execution/stop-admission",
+            json={"action": "prepare", "taskId": "task-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "prepared"
+    assert response.json()["taskId"] == "task-1"
+
+
+def test_stop_admission_route_maps_publication_race(monkeypatch, tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    async def publish_after_admission(_request, _context):
+        raise SessionBackupPublishing("Session backup is publishing.")
+
+    monkeypatch.setattr(app.state.a2a_components.handler, "on_cancel_task", publish_after_admission)
+    with TestClient(app) as client:
+        response = client.post(
+            "/iac-code/execution/stop-admission",
+            json={"action": "commit", "taskId": "task-1"},
+        )
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "Session backup is publishing."
+
+
+def test_stop_admission_route_commit_cancels_pending_permission_task(monkeypatch, tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    permission_store = PermissionWaitCheckpointStore(str(tmp_path), session_id)
+    permission = permission_store.create(
+        build_permission_checkpoint(
+            session_id=session_id,
+            task_id="task-1",
+            context_id="ctx-1",
+            input_id="permission-1",
+            tool_use_id="tool-1",
+            tool_name="aliyun_api",
+            tool_input={"action": "CreateStack"},
+            permission_class="normal",
+            continuation_frame={
+                "assistantMessageRef": "session.jsonl:0",
+                "assistantMessageDigest": "a" * 64,
+                "orderedToolUseIds": ["tool-1"],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
+            },
+            policy=PermissionWaitPolicy(),
+        )
+    )
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=persistence_dir,
+    )
+
+    class FreeBackup:
+        def publication_in_progress(self, _cwd: str, _session_id: str) -> bool:
+            return False
+
+    app.state.a2a_components.backup_service = FreeBackup()
+    with TestClient(app) as client:
+        response = client.post(
+            "/iac-code/execution/stop-admission",
+            json={"action": "commit", "taskId": "task-1"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    assert response.json()["taskState"] == "TASK_STATE_CANCELED"
+    assert persistence.load_task("task-1").state == "canceled"
+    assert permission_store.load(permission["boundaryId"])["phase"] == "CANCELED"
+
+
 def test_send_message_routes_context_only_pending_pipeline_input_after_restart(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     persistence_dir = tmp_path / "a2a"
@@ -2431,6 +2576,54 @@ async def test_cancel_inactive_permission_wait_loses_to_claimed_decision(tmp_pat
         assert task.status.state == TaskState.TASK_STATE_INPUT_REQUIRED
         assert persistence.load_task("task-1").state == "input-required"
         assert permission_store.load(permission["boundaryId"])["decision"]["status"] == "claimed"
+    finally:
+        await components.aclose()
+
+
+@pytest.mark.asyncio
+async def test_cancel_normal_permission_after_checkpoint_canceled_marks_task_canceled(tmp_path: Path) -> None:
+    persistence_dir = tmp_path / "a2a"
+    session_id = "session-ctx-1"
+    persistence = A2APersistenceStore(persistence_dir)
+    persistence.save_context(A2AContextSnapshot(context_id="ctx-1", session_id=session_id, cwd=str(tmp_path)))
+    persistence.save_task(A2ATaskSnapshot(task_id="task-1", context_id="ctx-1", state="input-required"))
+    SessionStorage().ensure_v2_session_dir_for_new_session(str(tmp_path), session_id)
+    permission_store = PermissionWaitCheckpointStore(str(tmp_path), session_id)
+    permission = permission_store.create(
+        build_permission_checkpoint(
+            session_id=session_id,
+            task_id="task-1",
+            context_id="ctx-1",
+            input_id="permission-1",
+            tool_use_id="tool-1",
+            tool_name="aliyun_api",
+            tool_input={"action": "CreateStack"},
+            permission_class="normal",
+            continuation_frame={
+                "assistantMessageRef": "session.jsonl:0",
+                "assistantMessageDigest": "a" * 64,
+                "orderedToolUseIds": ["tool-1"],
+                "currentIndex": 0,
+                "decisions": [{"toolUseId": "tool-1", "state": "pending", "source": None, "deniedResult": None}],
+            },
+            policy=PermissionWaitPolicy(),
+        )
+    )
+    permission_store.cancel(permission["boundaryId"])
+    components = create_runtime_components(
+        model="qwen3.6-plus",
+        host="127.0.0.1",
+        port=41242,
+        persistence_dir=persistence_dir,
+    )
+
+    try:
+        task = await components.handler.on_cancel_task(CancelTaskRequest(id="task-1"), ServerCallContext())
+
+        assert isinstance(task, Task)
+        assert task.status.state == TaskState.TASK_STATE_CANCELED
+        assert persistence.load_task("task-1").state == "canceled"
+        assert permission_store.load(permission["boundaryId"])["phase"] == "CANCELED"
     finally:
         await components.aclose()
 

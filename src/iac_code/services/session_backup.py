@@ -213,6 +213,10 @@ class SessionBackupBlocked(SessionBackupError):  # noqa: N818 - public API name 
         self.result = result
 
 
+class SessionBackupPublishing(SessionBackupError):  # noqa: N818 - public API name
+    """Raised when a stop request races an active shared publication."""
+
+
 class SessionBackupService:
     def __init__(
         self,
@@ -1451,6 +1455,52 @@ class SessionBackupService:
         lock_path = self._shared_session_lock_path(backup_root, project=project, session_id=session_id)
         with cross_process_file_lock(lock_path):
             yield
+
+    def publication_in_progress(self, cwd: str, session_id: str) -> bool:
+        """Return True only while another process holds the shared publication lock."""
+
+        source = self._source_for_backup(cwd, session_id)
+        if source is None:
+            return False
+        backup_root = self._backup_root()
+        if backup_root is None:
+            return False
+        lock_path = self._shared_session_lock_path(
+            backup_root,
+            project=source.parent.name,
+            session_id=session_id,
+        )
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_file = self._open_backup_lock_file(lock_path)
+        busy = False
+        try:
+            if os.name == "nt":
+                import msvcrt
+
+                lock_file.seek(0)
+                try:
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    return True
+                try:
+                    lock_file.seek(0)
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                except OSError:
+                    busy = True
+                return busy
+            import fcntl
+
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return True
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                busy = True
+            return busy
+        finally:
+            lock_file.close()
 
     def _open_backup_lock_file(self, lock_path: Path):
         if lock_path.is_symlink() or self._is_reparse_point(lock_path):
