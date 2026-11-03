@@ -1,11 +1,14 @@
 # ROS 模板最佳实践
 
+ROS 模板支持 YAML 与 JSON 两种格式，结构规则一致。本文示例使用 YAML 短标签（`!Ref`、`!GetAtt`、`!Sub` 等）；JSON 模板没有 `!` 简写，函数必须写成对象形式的长格式，如 `{"Ref": "参数名或资源逻辑ID"}`、`{"Fn::GetAtt": ["资源逻辑ID", "属性名"]}`。
+
 ## 常用资源
 
 - ALIYUN::ECS::VPC: 创建专有网络
 - ALIYUN::ECS::VSwitch: 创建交换机
 - ALIYUN::ECS::SecurityGroup: 创建安全组（同时支持安全组规则）
 - ALIYUN::ECS::InstanceGroup: 创建N个ECS实例（通过 `MaxAmount` 指定数量）
+- ALIYUN::CEN::CenInstance: 创建云企业网（CEN）实例。全局资源，无可用区/库存相关属性，无需参数化；`Name`、`Description`、`ProtectionLevel`、`ResourceGroupId` 均可选，返回属性含 `CenId`
 
 ## 在实例中执行命令
 
@@ -72,6 +75,7 @@ Resources:
 ## 资源引用
 
 - 通过 `!Ref` 和 `!GetAtt` 引用参数和资源属性，避免硬编码
+- 用户明确指定的资源逻辑 ID（`Resources` 下的 key）必须逐字保留，`Ref` / `Fn::GetAtt` 必须使用这些 ID；不得自行改名、添加后缀或用文档示例名称替代
 - 使用 `DependsOn` 声明隐式依赖无法表达的顺序关系
 
 ## 常用函数
