@@ -18,6 +18,8 @@ from iac_code.a2a.execution_control import current_execution_control
 from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
 from iac_code.i18n import translate_message
 from iac_code.services.permission_wait import (
+    PermissionCancelOutcome,
+    PermissionCancelResult,
     PermissionWaitCheckpointStore,
     PermissionWaitCoordinator,
     PermissionWaitPolicy,
@@ -1572,12 +1574,38 @@ class PermissionInputRegistry:
             await owner.cancel_permissions(task_id)
         for pending in legacy:
             coordinator = self._permission_wait_coordinator
-            canceled = bool(
-                coordinator is not None
-                and pending.boundary_id is not None
-                and await coordinator.cancel_live(pending.boundary_id)
-            )
-            if not canceled:
+            cancel_result: PermissionCancelResult | None = None
+            if coordinator is not None and pending.boundary_id is not None:
+                boundary_id = pending.boundary_id
+                cancel_live_result = getattr(coordinator, "cancel_live_result", None)
+                if callable(cancel_live_result):
+                    cancel_result = await cancel_live_result(boundary_id)
+                else:
+                    canceled = await coordinator.cancel_live(boundary_id)
+                    cancel_result = PermissionCancelResult(
+                        boundary_id,
+                        PermissionCancelOutcome.CANCELED if canceled else PermissionCancelOutcome.FENCED,
+                    )
+                if cancel_result.outcome is PermissionCancelOutcome.NO_LOCAL_OWNER:
+                    store = pending.checkpoint_store
+                    boundary_id = pending.boundary_id
+                    if store is not None:
+                        try:
+                            record = store.cancel(boundary_id)
+                            cancel_result = PermissionCancelResult(
+                                boundary_id,
+                                PermissionCancelOutcome.CANCELED,
+                                generation=int(record["generation"]),
+                            )
+                        except ValueError:
+                            current = store.load(boundary_id)
+                            if isinstance(current, dict) and current.get("phase") == "CANCELED":
+                                cancel_result = PermissionCancelResult(
+                                    boundary_id,
+                                    PermissionCancelOutcome.ALREADY_CANCELED,
+                                    generation=int(current["generation"]),
+                                )
+            if cancel_result is not None and cancel_result.outcome is PermissionCancelOutcome.FENCED:
                 await self.fail(pending)
             callback = pending.suspend_callback
             if callable(callback):

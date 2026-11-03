@@ -14,6 +14,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any, Literal, cast
 
@@ -32,6 +33,27 @@ from iac_code.utils.state_io import atomic_write_json, cross_process_file_lock
 
 PermissionClass = Literal["normal", "pipeline"]
 PermissionPrincipalKind = CallerIdentityKind
+
+
+class PermissionCancelOutcome(str, Enum):
+    CANCELED = "canceled"
+    ALREADY_CANCELED = "already_canceled"
+    DECISION_CLAIMED = "decision_claimed"
+    NO_LOCAL_OWNER = "no_local_owner"
+    FENCED = "fenced"
+
+
+@dataclass(frozen=True)
+class PermissionCancelResult:
+    boundary_id: str
+    outcome: PermissionCancelOutcome
+    generation: int | None = None
+    reason: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.outcome in {PermissionCancelOutcome.CANCELED, PermissionCancelOutcome.ALREADY_CANCELED}
+
+
 PermissionPhase = Literal[
     "WAITING",
     "TIMEOUT_GRACE",
@@ -1405,11 +1427,23 @@ class PermissionWaitCoordinator:
                 owner.timer.cancel()
             return record, created
 
-    async def cancel_live(self, boundary_id: str, *, cancel_future: bool = True) -> bool:
+    async def cancel_live_result(
+        self,
+        boundary_id: str,
+        *,
+        cancel_future: bool = True,
+    ) -> PermissionCancelResult:
         owner = self._owners.get(boundary_id)
         if owner is None:
-            return False
+            return PermissionCancelResult(
+                boundary_id,
+                PermissionCancelOutcome.NO_LOCAL_OWNER,
+                reason="permission owner is not in this process",
+            )
         async with owner.permission_resolution_lock:
+            outcome = PermissionCancelOutcome.CANCELED
+            generation: int | None = None
+            reason: str | None = None
             try:
                 # The resolution lock and this exact, still-pending Future
                 # prove a failed claim delivery has not reached tool execution.
@@ -1419,16 +1453,36 @@ class PermissionWaitCoordinator:
                     allow_unreleased_claim=not owner.future.done(),
                 )
                 owner.generation = int(record["generation"])
-            except ValueError:
-                return False
-            if not owner.future.done():
+                generation = owner.generation
+            except ValueError as exc:
+                current = owner.store.load(boundary_id)
+                decision = current.get("decision") if isinstance(current, dict) else None
+                if isinstance(decision, dict) and decision.get("status") in {"claimed", "applied"}:
+                    outcome = PermissionCancelOutcome.DECISION_CLAIMED
+                    generation = int(current["generation"]) if isinstance(current, dict) else None
+                    reason = "permission decision was already claimed"
+                elif isinstance(current, dict) and current.get("phase") == "CANCELED":
+                    outcome = PermissionCancelOutcome.ALREADY_CANCELED
+                    generation = int(current["generation"])
+                    reason = "permission boundary was already canceled"
+                else:
+                    outcome = PermissionCancelOutcome.FENCED
+                    reason = str(exc)
+            canceled_outcome = outcome in {
+                PermissionCancelOutcome.CANCELED,
+                PermissionCancelOutcome.ALREADY_CANCELED,
+            }
+            if canceled_outcome and not owner.future.done():
                 if cancel_future:
                     owner.future.cancel()
                 else:
                     owner.future.set_result(False)
-            if owner.timer is not None:
+            if owner.timer is not None and canceled_outcome:
                 owner.timer.cancel()
-            return True
+            return PermissionCancelResult(boundary_id, outcome, generation, reason)
+
+    async def cancel_live(self, boundary_id: str, *, cancel_future: bool = True) -> bool:
+        return bool(await self.cancel_live_result(boundary_id, cancel_future=cancel_future))
 
     async def suspend_now(self, boundary_id: str) -> bool:
         owner = self._owners.get(boundary_id)

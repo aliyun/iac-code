@@ -2492,3 +2492,33 @@ def test_critical_backup_blocked_exposes_retry_count(
     assert exc_info.value.result is not None
     assert exc_info.value.result.retry_count == 2
     assert exc_info.value.result.succeeded is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX flock semantics")
+def test_publication_in_progress_detects_held_shared_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    service = SessionBackupService()
+    monkeypatch.setattr(service, "_source_for_backup", lambda _cwd, _session_id: Path("/repo/projects/project/session"))
+    monkeypatch.setattr(service, "_backup_root", lambda: tmp_path / "backup")
+    monkeypatch.setattr(service, "_open_backup_lock_file", lambda _path: _FakeLockFile())
+    monkeypatch.setattr("fcntl.flock", lambda _fd, flags: (_ for _ in ()).throw(BlockingIOError()))
+
+    assert service.publication_in_progress("/repo", "session") is True
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX flock semantics")
+def test_publication_in_progress_reports_free_shared_lock(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    service = SessionBackupService()
+    monkeypatch.setattr(service, "_source_for_backup", lambda _cwd, _session_id: Path("/repo/projects/project/session"))
+    monkeypatch.setattr(service, "_backup_root", lambda: tmp_path / "backup")
+    monkeypatch.setattr(service, "_open_backup_lock_file", lambda _path: _FakeLockFile())
+    monkeypatch.setattr("fcntl.flock", lambda _fd, _flags: None)
+
+    assert service.publication_in_progress("/repo", "session") is False
+
+
+class _FakeLockFile:
+    def fileno(self) -> int:
+        return 10
+
+    def close(self) -> None:
+        return None

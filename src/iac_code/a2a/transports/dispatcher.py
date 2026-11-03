@@ -121,7 +121,7 @@ from iac_code.a2a.types import TASK_STATE_CANCELED
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode
 from iac_code.services.permission_wait import PermissionWaitCheckpointStore
-from iac_code.services.session_backup import SessionBackupService
+from iac_code.services.session_backup import SessionBackupPublishing, SessionBackupService
 from iac_code.services.session_backup_staging import (
     SessionBackupStagingProcess,
     create_a2a_session_backup_runtime,
@@ -1518,6 +1518,18 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         task = await self.task_store.get(params.id, context)
         if task is None:
             raise TaskNotFoundError(f"Task {params.id} not found")
+        if isinstance(self.task_store, A2ATaskStore):
+            publication_in_progress = getattr(self._backup_service, "publication_in_progress", None)
+            if callable(publication_in_progress):
+                try:
+                    context_record = await self.task_store.get_context_record(task.context_id)
+                except ValueError:
+                    context_record = None
+                if context_record is not None and publication_in_progress(
+                    context_record.cwd,
+                    context_record.session_id,
+                ):
+                    raise SessionBackupPublishing("Session backup is publishing.")
         if isinstance(self.task_store, A2ATaskStore) and not await self.task_store.is_task_active(params.id):
             durable_cancel = await self._claim_inactive_durable_permission_cancel(task)
             if durable_cancel == "lost":
@@ -1547,7 +1559,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             record = next(
                 (
                     value
-                    for value in store.list_active()
+                    for value in store.list_active(include_canceled=True)
                     if value.get("taskId") == task.id and value.get("contextId") == task.context_id
                 ),
                 None,
@@ -1620,8 +1632,26 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             return None
         return await self._reconcile_inactive_terminal_task(task, context, "canceled")
 
+    async def _has_normal_permission_boundary(self, task: Task) -> bool:
+        if not isinstance(self.task_store, A2ATaskStore):
+            return False
+        try:
+            context_record = await self.task_store.get_context_record(task.context_id)
+        except Exception:
+            return False
+        store = PermissionWaitCheckpointStore(context_record.cwd, context_record.session_id)
+        records = await asyncio.to_thread(store.list_active, include_canceled=True)
+        return any(
+            record.get("taskId") == task.id
+            and record.get("contextId") == task.context_id
+            and record.get("permissionClass") == "normal"
+            for record in records
+        )
+
     async def _cancel_inactive_normal_input_required_task(self, task: Task, context) -> Task | None:
-        if not isinstance(self.task_store, A2ATaskStore) or not _task_is_cancelable_normal_input_required(task):
+        if not isinstance(self.task_store, A2ATaskStore):
+            return None
+        if not _task_is_cancelable_normal_input_required(task) and not await self._has_normal_permission_boundary(task):
             return None
         try:
             context_record = await self.task_store.get_context_record(task.context_id)

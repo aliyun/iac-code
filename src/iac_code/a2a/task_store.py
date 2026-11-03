@@ -1422,6 +1422,22 @@ class A2ATaskStore(TaskStore):
         async with self._termination_commit_locks.setdefault(context_id, asyncio.Lock()):
             async with self._mutation_lock:
                 record = self._tasks.get(task_id)
+                if record is None and self._persistence is not None:
+                    task_snapshot = self._load_task_snapshot(task_id)
+                    if task_snapshot is not None and task_snapshot.context_id == context_id:
+                        record = _record_from_snapshot(task_snapshot)
+                        self._tasks[task_id] = record
+                if self._contexts.get(context_id) is None and self._persistence is not None:
+                    context_snapshot = self._load_context_snapshot(context_id)
+                    if context_snapshot is not None and context_snapshot.context_id == context_id:
+                        self._contexts[context_id] = A2AContextRecord(
+                            context_id=context_snapshot.context_id,
+                            session_id=context_snapshot.session_id,
+                            cwd=context_snapshot.cwd,
+                            telemetry_channel=context_snapshot.telemetry_channel,
+                            active_task_id=context_snapshot.active_task_id,
+                            lock=asyncio.Lock(),
+                        )
                 if (
                     record is None
                     or record.context_id != context_id

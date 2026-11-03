@@ -1133,3 +1133,72 @@ async def test_stale_live_owner_generation_cannot_deliver_suspend(tmp_path) -> N
     assert future.done() is False
     assert store.load(boundary_id)["phase"] == "SUSPENDING"
     coordinator.unregister_live(boundary_id)
+
+
+@pytest.mark.asyncio
+async def test_cancel_live_result_reports_no_local_owner_without_failing(tmp_path) -> None:
+    store = _store(tmp_path)
+    record = _record(store, PermissionWaitPolicy())
+    coordinator = PermissionWaitCoordinator()
+
+    result = await coordinator.cancel_live_result(record["boundaryId"])
+
+    assert result.outcome.value == "no_local_owner"
+    assert result.generation is None
+    assert not result
+
+
+@pytest.mark.asyncio
+async def test_cancel_live_result_accepts_already_canceled_boundary(tmp_path) -> None:
+    store = _store(tmp_path)
+    record = _record(store, PermissionWaitPolicy())
+    boundary_id = record["boundaryId"]
+    future: asyncio.Future[bool | PermissionWaitOutcome] = asyncio.get_running_loop().create_future()
+    coordinator = PermissionWaitCoordinator()
+    coordinator.register_live(record=record, store=store, future=future)
+    store.cancel(boundary_id)
+
+    result = await coordinator.cancel_live_result(boundary_id)
+
+    assert result.outcome.value == "already_canceled"
+    assert result.generation == store.load(boundary_id)["generation"]
+    assert result
+    assert future.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_cancel_live_result_preserves_claimed_decision_fence(tmp_path) -> None:
+    store = _store(tmp_path)
+    record = _record(store, PermissionWaitPolicy())
+    boundary_id = record["boundaryId"]
+    future: asyncio.Future[bool | PermissionWaitOutcome] = asyncio.get_running_loop().create_future()
+    coordinator = PermissionWaitCoordinator()
+    coordinator.register_live(record=record, store=store, future=future)
+    store.claim_decision(boundary_id, value="allow_once", source="user")
+
+    result = await coordinator.cancel_live_result(boundary_id)
+
+    assert result.outcome.value == "decision_claimed"
+    assert result.generation == store.load(boundary_id)["generation"]
+    assert not result
+    assert not future.done()
+
+
+@pytest.mark.asyncio
+async def test_cancel_live_result_reports_generation_fence_without_side_effects(tmp_path) -> None:
+    store = _store(tmp_path)
+    record = _record(store, PermissionWaitPolicy())
+    boundary_id = record["boundaryId"]
+    future: asyncio.Future[bool | PermissionWaitOutcome] = asyncio.get_running_loop().create_future()
+    coordinator = PermissionWaitCoordinator()
+    coordinator.register_live(record=record, store=store, future=future)
+    store.transaction(
+        boundary_id,
+        lambda value: {**value, "generation": int(value["generation"]) + 1},
+    )
+
+    result = await coordinator.cancel_live_result(boundary_id)
+
+    assert result.outcome.value == "fenced"
+    assert not result
+    assert not future.done()

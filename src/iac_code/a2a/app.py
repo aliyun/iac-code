@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import signal
+import uuid
 from contextlib import asynccontextmanager, suppress
 from email.utils import formatdate
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any, AsyncIterator, Awaitable, Callable, cast
 from a2a.auth.user import User
 from a2a.server.context import ServerCallContext
 from a2a.server.routes import create_jsonrpc_routes, create_rest_routes
+from a2a.types import CancelTaskRequest, TaskState
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
 from google.protobuf.json_format import MessageToDict
 from starlette.applications import Starlette
@@ -49,6 +51,7 @@ from iac_code.services.session_backup import (
     SESSION_BACKUP_NOT_READY_CODE,
     SessionBackupError,
     SessionBackupNotReadyError,
+    SessionBackupPublishing,
 )
 from iac_code.services.session_storage import SessionStorage
 
@@ -705,6 +708,51 @@ def create_app(
         except Exception as exc:
             return await execution_error_response(exc)
 
+    async def stop_admission(request: Request) -> JSONResponse:
+        try:
+            payload = await read_control_payload(request)
+            action = required_string(payload, "action")
+            task_id = required_string(payload, "taskId")
+            if action not in {"prepare", "commit"}:
+                raise ValueError("invalid stop-admission action")
+            call_context = _call_context_from_request(request)
+            task = await components.task_store.get(task_id, call_context)
+            if task is None:
+                return JSONResponse({"error": "Task not found."}, status_code=404)
+            context_record = await components.task_store.get_context_record(task.context_id)
+            backup_service = components.backup_service
+            publication_in_progress = getattr(backup_service, "publication_in_progress", None)
+            if callable(publication_in_progress) and publication_in_progress(
+                context_record.cwd,
+                context_record.session_id,
+            ):
+                return JSONResponse({"error": "Session backup is publishing."}, status_code=409)
+            if action == "prepare":
+                return JSONResponse(
+                    {
+                        "status": "prepared",
+                        "operationId": uuid.uuid4().hex,
+                        "taskId": task_id,
+                    }
+                )
+            canceled_task = await components.handler.on_cancel_task(
+                CancelTaskRequest(id=task_id),
+                call_context,
+            )
+            state = getattr(getattr(canceled_task, "status", None), "state", None)
+            state_name = TaskState.Name(state) if isinstance(state, int) else str(state) if state is not None else None
+            return JSONResponse(
+                {
+                    "status": "accepted",
+                    "taskId": task_id,
+                    "taskState": state_name,
+                }
+            )
+        except SessionBackupPublishing as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except Exception as exc:
+            return await execution_error_response(exc)
+
     async def terminate_execution(request: Request) -> JSONResponse:
         try:
             payload = await read_control_payload(request)
@@ -786,6 +834,7 @@ def create_app(
         Route("/iac-code/execution/state", get_execution_state, methods=["GET"]),
         Route("/iac-code/execution/resume", resume_execution, methods=["POST"]),
         Route("/iac-code/execution/terminate", terminate_execution, methods=["POST"]),
+        Route("/iac-code/execution/stop-admission", stop_admission, methods=["POST"]),
         Route("/iac-code/session/recovery", get_session_recovery, methods=["GET"]),
     ]
     install_jsonrpc_error_data_passthrough()
