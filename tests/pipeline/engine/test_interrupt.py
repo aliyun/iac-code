@@ -650,9 +650,9 @@ class TestSafeTruncate:
         "text,max_chars,from_end,expected",
         [
             # CJK head truncate: first 10 codepoints + "..."
-            ("中文测试" * 200, 10, False, "中文测试中文测试中文..."),
+            pytest.param("中文测试" * 200, 10, False, "中文测试中文测试中文...", id="long-cjk-head"),
             # CJK tail truncate: last 10 codepoints of "...中文测试中文测试", no suffix
-            ("中文测试" * 200, 10, True, "测试中文测试中文测试"),
+            pytest.param("中文测试" * 200, 10, True, "测试中文测试中文测试", id="long-cjk-tail"),
             # Short text: no truncation
             ("abc", 100, False, "abc"),
             ("", 100, False, ""),
