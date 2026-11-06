@@ -128,6 +128,9 @@ jobs:
         python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - uses: astral-sh/setup-uv@v5
         with:
@@ -178,8 +181,39 @@ jobs:
             --cov --cov-append --cov-report=term-missing \
             --junitxml=testcase.xml
 
+      - name: Generate main coverage XML
+        if: ${{ !cancelled() && matrix.python-version == '3.12' && hashFiles('.coverage') != '' }}
+        run: uv run coverage xml -o coverage.xml
+
       - name: Check coverage threshold
         run: uv run coverage report --fail-under=80
+
+      - name: Save main coverage report
+        if: ${{ !cancelled() && matrix.python-version == '3.12' && hashFiles('coverage.xml') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut-coverage-main
+          path: coverage.xml
+          if-no-files-found: error
+
+      - name: Save total coverage report
+        if: ${{ !cancelled() && matrix.python-version == '3.12' && hashFiles('coverage.xml') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut-coverage
+          path: coverage.xml
+          if-no-files-found: error
+
+      - name: Upload main coverage to Codecov
+        if: ${{ !cancelled() && matrix.python-version == '3.12' && hashFiles('coverage.xml') != '' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: aliyun/iac-code
+          files: coverage.xml
+          flags: main
+          disable_search: true
+          fail_ci_if_error: true
 
   test-windows:
     name: Test (Windows, Python 3.10)
