@@ -55,6 +55,7 @@ htmlcov/
 nosetests.xml
 coverage.xml
 testcase.xml
+/reports/
 *.cover
 *.py,cover
 .hypothesis/
