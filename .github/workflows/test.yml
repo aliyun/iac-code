@@ -157,17 +157,17 @@ jobs:
             tests/a2a/test_execution_control_review_regressions.py \
             tests/a2a/test_permission_execution_control.py \
             -v --cov --cov-report= \
-            --junitxml=execution-control-testcase.xml
+            --junitxml=reports/execution-control-testcase.xml
 
       - name: Run A2A execution-control process tests serially
         # Coverage instrumentation slows the fixture server enough to exceed
         # the scenarios' own watchdogs. Unit tests above retain source coverage.
-        run: uv run pytest tests/a2a_e2e/test_execution_control_scenarios.py -v
+        run: uv run pytest tests/a2a_e2e/test_execution_control_scenarios.py -v --junitxml=reports/execution-control-process-testcase.xml
 
       - name: Run AG-UI HTTP integration tests serially with coverage
         # Real threaded servers share the runner's I/O budget. Keep the default
         # A2A HTTP deadlines meaningful instead of competing with every worker.
-        run: uv run pytest tests/agui/test_http_sse_integration.py -v --cov --cov-append --cov-report=
+        run: uv run pytest tests/agui/test_http_sse_integration.py -v --cov --cov-append --cov-report= --junitxml=reports/agui-http-testcase.xml
 
       - name: Run remaining tests with coverage
         run: |
@@ -179,7 +179,28 @@ jobs:
             --ignore=tests/a2a_e2e/test_execution_control_scenarios.py \
             --ignore=tests/agui/test_http_sse_integration.py \
             --cov --cov-append --cov-report=term-missing \
-            --junitxml=testcase.xml
+            --junitxml=reports/testcase.xml
+
+      - name: Save main test results
+        if: ${{ !cancelled() && matrix.python-version == '3.12' && hashFiles('reports/*testcase.xml') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ut-test-results-main
+          path: reports/*testcase.xml
+          if-no-files-found: error
+
+      - name: Upload main test results to Codecov
+        if: ${{ !cancelled() && matrix.python-version == '3.12' && hashFiles('reports/*testcase.xml') != '' }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: aliyun/iac-code
+          report_type: test_results
+          files: reports/execution-control-testcase.xml,reports/execution-control-process-testcase.xml,reports/agui-http-testcase.xml,reports/testcase.xml
+          flags: main
+          name: ut-test-results-main
+          disable_search: true
+          fail_ci_if_error: true
 
       - name: Generate main coverage XML
         if: ${{ !cancelled() && matrix.python-version == '3.12' && hashFiles('.coverage') != '' }}
