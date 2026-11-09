@@ -850,10 +850,10 @@ async def test_d16_get_config_snapshot(monkeypatch: pytest.MonkeyPatch) -> None:
     sid = resp.session_id
 
     session = server.sessions[sid]
-    session.update_config({"max_tokens": 4096})
+    session.update_config({"top_p": 0.8})
 
     snapshot = session.config
-    assert snapshot == {"max_tokens": 4096}
+    assert snapshot == {"top_p": 0.8}
 
     snapshot["extra"] = "value"
     assert "extra" not in session.config
@@ -871,11 +871,11 @@ async def test_d17_config_merge_accumulates(monkeypatch: pytest.MonkeyPatch) -> 
     sid = resp.session_id
 
     await server.set_config_option(config_id="temperature", session_id=sid, value="0.5")
-    await server.set_config_option(config_id="max_tokens", session_id=sid, value=2048)
+    await server.set_config_option(config_id="top_p", session_id=sid, value=0.8)
     await server.set_config_option(config_id="temperature", session_id=sid, value="0.9")
 
     session = server.sessions[sid]
-    assert session.config == {"temperature": "0.9", "max_tokens": 2048}
+    assert session.config == {"temperature": "0.9", "top_p": 0.8}
 
 
 # ===========================================================================

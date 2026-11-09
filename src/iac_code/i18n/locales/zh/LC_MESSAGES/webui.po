@@ -2843,14 +2843,6 @@ msgid "Leave blank to use model default"
 msgstr "留空使用模型默认"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Max output tokens"
-msgstr "最大输出 tokens"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Max output tokens per reply; leave blank to use model default"
-msgstr "单次回复的输出上限,留空使用模型默认"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Thinking budget"
 msgstr "思考预算"
 

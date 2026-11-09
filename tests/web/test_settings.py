@@ -907,6 +907,47 @@ def test_kimi_code_payload_exposes_k28_models_and_exact_efforts(_isolate_config)
         web_settings._validate_effort("kimi_code", "kimi-for-coding", "medium")
 
 
+@pytest.mark.parametrize("save", [web_settings.save_provider_config, web_settings.save_active_provider])
+@pytest.mark.parametrize("retired_limit", [0, "obsolete", 40000])
+def test_provider_save_ignores_retired_output_limit(_isolate_config, save, retired_limit):
+    save(
+        {
+            "provider": "dashscope",
+            "model": "glm-5.2",
+            "thinkingBudget": 2048,
+            "maxCompletionTokens": retired_limit,
+        }
+    )
+
+    entry = _load_yaml(get_settings_path())["providers"]["dashscope"]
+    assert "maxCompletionTokens" not in entry
+    assert entry["models"]["glm-5.2"] == {"thinkingBudget": 2048}
+
+
+def test_provider_payload_ignores_legacy_output_limits_without_rewriting_settings(_isolate_config):
+    config = {
+        "providers": {
+            "dashscope": {
+                "maxCompletionTokens": 100,
+                "models": {"glm-5.2": {"maxCompletionTokens": 200, "thinkingBudget": 2048}},
+            }
+        }
+    }
+    _save_yaml(get_settings_path(), config)
+
+    providers = web_settings.providers_payload()["providers"]
+
+    for provider in providers:
+        assert "savedMaxCompletionTokens" not in provider
+        for model in provider["models"]:
+            assert "savedMaxCompletionTokens" not in model
+            assert "defaultMaxCompletionTokens" not in model
+    dashscope = next(provider for provider in providers if provider["key"] == "dashscope")
+    glm = next(model for model in dashscope["models"] if model["id"] == "glm-5.2")
+    assert glm["savedThinkingBudget"] == 2048
+    assert _load_yaml(get_settings_path()) == config
+
+
 def test_provider_payload_exposes_saved_fields(_isolate_config):
     key = _first_provider_key()
     model = _first_model(key)
@@ -916,14 +957,12 @@ def test_provider_payload_exposes_saved_fields(_isolate_config):
     entry = next(p for p in payload["providers"] if p["key"] == key)
     assert entry["savedModel"] == model
     assert entry["savedApiBase"] == "https://override.test/v1"
-    # 未写入数值上限时,两个 saved 值应为 None(前端据此留空输入框)。
+    # 未保存思考预算时留空输入框。
     assert entry["savedThinkingBudget"] is None
-    assert entry["savedMaxCompletionTokens"] is None
     # 未保存 saved 值的其它 provider 应为 None
     other = next(p for p in payload["providers"] if p["key"] != key)
     assert other["savedModel"] is None
     assert other["savedThinkingBudget"] is None
-    assert other["savedMaxCompletionTokens"] is None
 
 
 def test_model_payload_exposes_family_aware_thinking_default(_isolate_config):
@@ -956,50 +995,29 @@ def test_model_payload_reflects_thinking_budget_capability(_isolate_config):
     gpt = _model("openai", "gpt-5.5")
     assert gpt["supportsThinkingBudget"] is False
     assert gpt["defaultThinkingBudget"] is None
-    # GLM 留空由服务端决定输出额度;其他模型保留共享默认(前端 placeholder 展示)。
-    assert glm["defaultMaxCompletionTokens"] is None
-    assert gpt["defaultMaxCompletionTokens"] == 8192
 
 
-def test_save_provider_config_round_trips_output_and_budget_knobs(_isolate_config):
-    # glm-5.2 两个开关都真正生效(supports_thinking_budget + use_max_completion_tokens)。
-    # 两个旋钮按模型存于 providers.<key>.models.<id> 下,而非 provider 顶层。
-    web_settings.save_provider_config(
-        {
-            "provider": "dashscope",
-            "model": "glm-5.2",
-            "thinkingBudget": 2048,
-            "maxCompletionTokens": 40000,
-        }
-    )
+def test_save_provider_config_round_trips_thinking_budget(_isolate_config):
+    web_settings.save_provider_config({"provider": "dashscope", "model": "kimi-k2.7-code", "thinkingBudget": 2048})
     entry = _load_yaml(get_settings_path())["providers"]["dashscope"]
     assert "thinkingBudget" not in entry
-    assert "maxCompletionTokens" not in entry
-    model_entry = entry["models"]["glm-5.2"]
-    assert model_entry["thinkingBudget"] == 2048
-    assert model_entry["maxCompletionTokens"] == 40000
-    payload = web_settings.providers_payload()
-    provider = next(p for p in payload["providers"] if p["key"] == "dashscope")
-    model = next(m for m in provider["models"] if m["id"] == "glm-5.2")
+    assert entry["models"]["kimi-k2.7-code"]["thinkingBudget"] == 2048
+    provider = next(p for p in web_settings.providers_payload()["providers"] if p["key"] == "dashscope")
+    model = next(m for m in provider["models"] if m["id"] == "kimi-k2.7-code")
     assert model["savedThinkingBudget"] == 2048
-    assert model["savedMaxCompletionTokens"] == 40000
 
 
-def test_save_provider_config_knobs_are_per_model(_isolate_config):
-    # 同一 provider 下不同模型互不干扰:给 glm-5.2 设值不应波及 kimi-k2.7-code。
-    web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "maxCompletionTokens": 40000})
-    web_settings.save_provider_config(
-        {"provider": "dashscope", "model": "kimi-k2.7-code", "maxCompletionTokens": 12000}
-    )
+def test_save_provider_config_thinking_budgets_are_per_model(_isolate_config):
+    web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": 4096})
+    web_settings.save_provider_config({"provider": "dashscope", "model": "kimi-k2.7-code", "thinkingBudget": 2048})
     models_cfg = _load_yaml(get_settings_path())["providers"]["dashscope"]["models"]
-    assert models_cfg["glm-5.2"]["maxCompletionTokens"] == 40000
-    assert models_cfg["kimi-k2.7-code"]["maxCompletionTokens"] == 12000
-    payload = web_settings.providers_payload()
-    provider = next(p for p in payload["providers"] if p["key"] == "dashscope")
+    assert models_cfg["glm-5.2"]["thinkingBudget"] == 4096
+    assert models_cfg["kimi-k2.7-code"]["thinkingBudget"] == 2048
+    provider = next(p for p in web_settings.providers_payload()["providers"] if p["key"] == "dashscope")
     glm = next(m for m in provider["models"] if m["id"] == "glm-5.2")
     kimi = next(m for m in provider["models"] if m["id"] == "kimi-k2.7-code")
-    assert glm["savedMaxCompletionTokens"] == 40000
-    assert kimi["savedMaxCompletionTokens"] == 12000
+    assert glm["savedThinkingBudget"] == 4096
+    assert kimi["savedThinkingBudget"] == 2048
 
 
 def test_save_provider_config_preserves_manual_model_api_mode(_isolate_config):
@@ -1016,80 +1034,44 @@ def test_save_provider_config_preserves_manual_model_api_mode(_isolate_config):
             }
         },
     )
-    web_settings.save_provider_config({"provider": "dashscope", "model": "qwen3.8-max", "maxCompletionTokens": 10000})
+    web_settings.save_provider_config({"provider": "dashscope", "model": "qwen3.8-max", "thinkingBudget": 10000})
     web_settings.save_provider_config({"provider": "dashscope", "model": "qwen3.7-plus", "effort": "low"})
     provider = _load_yaml(get_settings_path())["providers"]["dashscope"]
     assert "apiMode" not in provider
     assert provider["models"] == {
-        "qwen3.8-max": {"apiMode": "responses", "maxCompletionTokens": 10000},
+        "qwen3.8-max": {"apiMode": "responses", "maxCompletionTokens": 8192, "thinkingBudget": 10000},
         "qwen3.7-plus": {"apiMode": "chat_completions", "maxCompletionTokens": 4096},
     }
 
 
-def test_save_provider_config_null_clears_knob_but_preserves_others(_isolate_config):
-    # 先写入两个值,再以 null 清除 thinkingBudget:该键从模型条目删除,其余键保留(回落模型默认)。
-    web_settings.save_provider_config(
-        {
-            "provider": "dashscope",
-            "model": "glm-5.2",
-            "thinkingBudget": 2048,
-            "maxCompletionTokens": 40000,
-        }
+def test_save_provider_config_null_clears_thinking_budget_but_preserves_other_keys(_isolate_config):
+    _save_yaml(
+        get_settings_path(),
+        {"providers": {"dashscope": {"models": {"glm-5.2": {"thinkingBudget": 2048, "apiMode": "responses"}}}}},
     )
-    web_settings.save_provider_config(
-        {
-            "provider": "dashscope",
-            "model": "glm-5.2",
-            "thinkingBudget": None,
-            "maxCompletionTokens": 30000,
-        }
-    )
-    model_entry = _load_yaml(get_settings_path())["providers"]["dashscope"]["models"]["glm-5.2"]
-    assert "thinkingBudget" not in model_entry
-    assert model_entry["maxCompletionTokens"] == 30000
+    web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": None})
+    assert _load_yaml(get_settings_path())["providers"]["dashscope"]["models"]["glm-5.2"] == {"apiMode": "responses"}
 
 
-def test_save_provider_config_absent_fields_preserve_existing_knobs(_isolate_config):
-    # 请求里不带该字段(_UNSET)时保持现状:仅改 effort 不应清掉已存的数值上限。
-    web_settings.save_provider_config(
-        {
-            "provider": "dashscope",
-            "model": "glm-5.2",
-            "thinkingBudget": 2048,
-            "maxCompletionTokens": 40000,
-        }
-    )
+def test_save_provider_config_absent_fields_preserve_existing_thinking_budget(_isolate_config):
+    web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": 2048})
     web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "effort": "low"})
     entry = _load_yaml(get_settings_path())["providers"]["dashscope"]
-    # effort 仍存 provider 顶层;两个数值旋钮在模型条目里保持不变。
     assert entry["effort"] == "low"
-    model_entry = entry["models"]["glm-5.2"]
-    assert model_entry["thinkingBudget"] == 2048
-    assert model_entry["maxCompletionTokens"] == 40000
+    assert entry["models"]["glm-5.2"]["thinkingBudget"] == 2048
 
 
 @pytest.mark.parametrize("bad", [0, -5, "big", True])
-def test_save_provider_config_rejects_non_positive_or_non_int_knobs(_isolate_config, bad):
-    with pytest.raises(ValueError):
-        web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "maxCompletionTokens": bad})
+def test_save_provider_config_rejects_non_positive_or_non_int_thinking_budget(_isolate_config, bad):
     with pytest.raises(ValueError):
         web_settings.save_provider_config({"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": bad})
 
 
-def test_save_active_provider_persists_output_and_budget_knobs(_isolate_config):
-    web_settings.save_active_provider(
-        {
-            "provider": "dashscope",
-            "model": "glm-5.2",
-            "thinkingBudget": 4096,
-            "maxCompletionTokens": 50000,
-        }
-    )
+def test_save_active_provider_persists_thinking_budget(_isolate_config):
+    web_settings.save_active_provider({"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": 4096})
     config = _load_yaml(get_settings_path())
     assert config["activeProvider"] == "dashscope"
-    model_entry = config["providers"]["dashscope"]["models"]["glm-5.2"]
-    assert model_entry["thinkingBudget"] == 4096
-    assert model_entry["maxCompletionTokens"] == 50000
+    assert config["providers"]["dashscope"]["models"]["glm-5.2"]["thinkingBudget"] == 4096
 
 
 def test_clear_provider_config_removes_saved_config_and_key(_isolate_config):

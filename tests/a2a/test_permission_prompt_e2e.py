@@ -5,10 +5,12 @@ import json
 import multiprocessing
 import os
 import socket
+import threading
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, suppress
 from dataclasses import asdict
 from datetime import timedelta
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -44,6 +46,7 @@ def _serve(
     max_turns: int = 3,
     parallel_candidates: int = 0,
     strict_permission_pause: bool = False,
+    listener: socket.socket | None = None,
 ) -> None:
     """Only the model and tool are fake; restart kills the actual server process."""
     import uvicorn
@@ -213,6 +216,8 @@ def _serve(
         )
 
     with ExitStack() as patches:
+        if listener is not None:
+            patches.enter_context(listener)
         patches.enter_context(patch("iac_code.a2a.executor.create_agent_runtime", runtime))
         if fault == "late-second-candidate":
             from iac_code.a2a.input_required import PermissionInputRegistry
@@ -348,7 +353,11 @@ def _serve(
         (Path(os.environ["IAC_CODE_CONFIG_DIR"]) / "fixture-owner.json").write_text(
             json.dumps(ExecutionOwnerIdentity.capture().model_dump(mode="json", by_alias=True)), encoding="utf-8"
         )
-        uvicorn.run(app, host=host, port=port, log_level="error")
+        if listener is None:
+            uvicorn.run(app, host=host, port=port, log_level="error")
+        else:
+            server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, log_level="error"))
+            server.run(sockets=[listener])
 
 
 class Server:
@@ -359,29 +368,46 @@ class Server:
         with socket.socket() as sock:
             sock.bind(("127.0.0.1", 0))
             self.port = sock.getsockname()[1]
-        self.client = httpx.Client(base_url=f"http://127.0.0.1:{self.port}", trust_env=False, timeout=15)
+        self.client = httpx.Client(
+            base_url=f"http://127.0.0.1:{self.port}",
+            trust_env=False,
+            timeout=15,
+            limits=httpx.Limits(max_connections=100, max_keepalive_connections=0),
+        )
 
     def start(self):
-        self.process = multiprocessing.get_context("spawn").Process(
-            target=_serve, args=(str(self.root), self.port), kwargs=self.options
-        )
-        self.process.start()
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            assert self.process.is_alive(), "A2A server exited before startup"
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            self.port = listener.getsockname()[1]
+            self.client.base_url = f"http://127.0.0.1:{self.port}"
+            self.process = multiprocessing.get_context("spawn").Process(
+                target=_serve, args=(str(self.root), self.port), kwargs={**self.options, "listener": listener}
+            )
             try:
-                if self.client.get("/health").status_code == 200:
-                    return
-            except httpx.TransportError:
-                pass
-            time.sleep(0.02)
-        raise AssertionError("A2A server startup timed out")
+                self.process.start()
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    assert self.process.is_alive(), "A2A server exited before startup"
+                    try:
+                        if self.client.get("/health").status_code == 200:
+                            assert self.process.is_alive(), "A2A server exited during startup"
+                            return
+                    except httpx.TransportError:
+                        pass
+                    time.sleep(0.02)
+                raise AssertionError("A2A server startup timed out")
+            except BaseException:
+                with suppress(Exception):
+                    self.stop()
+                raise
 
     def stop(self):
         if self.process is not None:
-            self.process.kill()
-            self.process.join(timeout=10)
-            assert not self.process.is_alive()
+            if self.process.pid is not None:
+                if self.process.is_alive():
+                    self.process.kill()
+                self.process.join(timeout=10)
+                assert not self.process.is_alive()
             self.process.close()
             self.process = None
 
@@ -466,6 +492,101 @@ def _reply(permission, decision="allow_once"):
             "decision": decision,
         }
     )
+
+
+class _ConnectionIdentityHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def do_GET(self):
+        body = json.dumps({"peerPort": self.client_address[1]}).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, format, *_args):
+        pass
+
+
+@pytest.mark.integration
+def test_server_client_uses_fresh_connections_between_requests(tmp_path):
+    fixture = Server(tmp_path)
+    with ThreadingHTTPServer(("127.0.0.1", 0), _ConnectionIdentityHandler) as server:
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        fixture.client.base_url = f"http://127.0.0.1:{server.server_port}"
+        try:
+            ports = [fixture.client.get("/health").json()["peerPort"] for _ in range(2)]
+            assert ports[0] != ports[1]
+        finally:
+            fixture.client.close()
+            server.shutdown()
+            thread.join(timeout=5)
+
+
+@pytest.mark.integration
+def test_server_start_owns_its_listener_when_the_previous_port_is_taken(tmp_path):
+    intended_root, foreign_root = tmp_path / "intended", tmp_path / "foreign"
+    for root in (intended_root, foreign_root):
+        (root / "workspace").mkdir(parents=True)
+    intended, foreign = Server(intended_root), Server(foreign_root)
+    try:
+        foreign.start()
+        # Reproduce a released probe port being taken before this worker starts.
+        intended.port = foreign.port
+        intended.client.base_url = foreign.client.base_url
+        intended.start()
+
+        events = intended.send("original")
+        assert not any("error" in event for event in events), events
+        assert _permission(events)["toolUseId"] == "tool-1"
+        assert (intended_root / "model-inputs.jsonl").is_file()
+        assert not (foreign_root / "model-inputs.jsonl").exists()
+    finally:
+        for server in (intended, foreign):
+            server.stop()
+            server.client.close()
+
+
+@pytest.mark.parametrize("failure_stage", ["before_process_start", "after_listener_transfer"])
+def test_server_start_failure_releases_child_and_listener(tmp_path, monkeypatch, failure_stage):
+    server = Server(tmp_path)
+    get = server.client.get
+    started_pids = []
+
+    def fail_start(process):
+        raise OSError("injected fixture startup failure")
+
+    def fail_after_transfer(*args, **kwargs):
+        response = get(*args, **kwargs)
+        if response.status_code == 200:
+            assert server.process is not None
+            started_pids.append(server.process.pid)
+            raise OSError("injected fixture startup failure")
+        return response
+
+    try:
+        with monkeypatch.context() as failing:
+            if failure_stage == "before_process_start":
+                failing.setattr(multiprocessing.process.BaseProcess, "start", fail_start)
+            else:
+                failing.setattr(server.client, "get", fail_after_transfer)
+            with pytest.raises(OSError, match="injected fixture startup failure"):
+                server.start()
+        assert not any(child.pid in started_pids for child in multiprocessing.active_children())
+        server.stop()
+        if failure_stage == "before_process_start":
+            with socket.socket() as listener:
+                listener.bind(("127.0.0.1", server.port))
+        else:
+            with pytest.raises(OSError):
+                with socket.create_connection(("127.0.0.1", server.port), timeout=1):
+                    pass
+    finally:
+        with suppress(Exception):
+            server.stop()
+        server.client.close()
 
 
 @pytest.mark.integration

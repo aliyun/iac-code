@@ -74,27 +74,26 @@ providers:
     model: glm-5.2
     thinkingEnabled: true
     thinkingBudget: 8192
-    maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
         thinkingEnabled: false
         thinkingBudget: 8192
-        maxCompletionTokens: 16384
 ```
 
 | Field | Scope | Description |
 |---|---|---|
 | `thinkingEnabled` | Provider or model | Optional boolean thinking switch. `true` asks supported providers/models to enable thinking; `false` asks them to disable it; omitted preserves the provider/model default. |
 | `thinkingBudget` | Provider or model | Positive integer reasoning/thinking budget passed to providers that support it. |
-| `maxCompletionTokens` | Provider or model | Positive integer output-limit override: `max_completion_tokens` for applicable Chat providers, or `max_output_tokens` for Responses. |
 | `effort` | Provider or model | Optional thinking effort override for models that support effort control. |
 | `apiMode` | Model only | `chat_completions` or `responses`; omitted uses the model’s built-in protocol default. See [LLM providers](./llm-providers.md) for supported providers and models. |
 
-For Responses, configure `apiMode` only under `providers.<provider>.models.<model>`. `effort` maps to `reasoning.effort`; `thinkingBudget` is not sent to this API. `maxCompletionTokens` sets the total output limit, including reasoning tokens, and must be at least `16` for DashScope Responses. The `settings.yml` field names stay the same when switching protocols.
+For Responses, configure `apiMode` only under `providers.<provider>.models.<model>`. `effort` maps to `reasoning.effort`; `thinkingBudget` is not sent to this API. The `settings.yml` field names stay the same when switching protocols.
+
+IaC Code does not impose a configurable output token limit. Chat Completions and Responses requests omit optional output-limit fields. The official Anthropic Messages API requires `max_tokens`, so IaC Code uses the model’s maximum supported output capacity. MiniMax’s Anthropic-compatible endpoint makes this field optional, so IaC Code omits it there. Provider and model limits still apply.
 
 Model-level values under `providers.<provider>.models.<model>` override provider-level values when they are valid. Invalid numeric values are ignored, so IaC Code falls back to the provider-level value or built-in model policy.
 
-For Alibaba Cloud DashScope and DashScope Token Plan, IaC Code has a built-in `thinkingBudget` of `8192` for `glm-5.2` and `kimi-k2.7-code`. When `maxCompletionTokens` is not set, the request limit is computed as the normal answer token limit plus the effective thinking budget.
+For Alibaba Cloud DashScope and DashScope Token Plan, IaC Code has a built-in `thinkingBudget` of `8192` for `glm-5.2` and `kimi-k2.7-code`.
 
 Interactive REPL users can persist the provider-level `thinkingEnabled` value with `/thinking_enabled on` or `/thinking_enabled off`; running `/thinking_enabled` without an argument opens the Enable/Disable picker when a console UI is available. One-shot headless runs can override thinking for that request with `--thinking-enabled` or `--no-thinking-enabled` without rewriting `settings.yml`.
 

@@ -706,7 +706,7 @@ class TestSetModel:
         assert cm._config.context_window == 131_072
 
         cm.set_model("claude-opus-4-7")
-        assert cm._config.context_window == 200_000
+        assert cm._config.context_window == 1_000_000
 
     def test_set_model_recomputes_system_prompt_tokens(self):
         cm = ContextManager(system_prompt="A long system prompt " * 50, model="qwen")

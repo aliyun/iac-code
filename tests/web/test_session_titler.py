@@ -24,7 +24,7 @@ class _FakeManager:
         type(self).last_kwargs = kwargs
         self._script = _SCRIPT.pop(0) if _SCRIPT else ("ok", "默认标题")
 
-    async def complete(self, messages, system, max_tokens=8192, **_):
+    async def complete(self, messages, system):
         type(self).last_system = system
         kind, value = self._script
         if kind == "raise":

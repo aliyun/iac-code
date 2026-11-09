@@ -20,7 +20,6 @@ from iac_code.providers.base import (
     Provider,
     ToolDefinition,
 )
-from iac_code.providers.output_limits import OutputTokenPolicy
 from iac_code.providers.registry import PROVIDER_REGISTRY
 from iac_code.providers.request_headers import get_provider_request_headers, merge_provider_request_headers
 from iac_code.providers.request_logging import log_provider_request_policy
@@ -77,7 +76,6 @@ class OpenAIProvider(Provider):
         effort: str | None = None,
         thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
-        max_completion_tokens: int | None = None,
         provider_key: str = "openai",
         **kwargs,
     ):
@@ -86,7 +84,6 @@ class OpenAIProvider(Provider):
         self._effort = effort
         self._thinking_enabled = bool_or_none(thinking_enabled)
         self._thinking_budget = positive_int_or_none(thinking_budget)
-        self._max_completion_tokens = positive_int_or_none(max_completion_tokens)
         if provider_key == "openai":
             self.supports_stream_options = True
         # Subclasses may set this before calling super().stream/complete to
@@ -163,25 +160,6 @@ class OpenAIProvider(Provider):
         if not spec.supports_thinking_budget:
             return None
         return self._thinking_budget if self._thinking_budget is not None else spec.default_thinking_budget
-
-    def _output_token_limit(self, max_tokens: int) -> int | None:
-        """Honor explicit limits; GLM uses its server default instead of the shared 8192 cap."""
-        return OutputTokenPolicy(self._model).resolve(max_tokens, self._max_completion_tokens)
-
-    def _token_limit_kwargs(self, max_tokens: int) -> dict[str, int]:
-        limit = self._output_token_limit(max_tokens)
-        if limit is None:
-            return {}
-        spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
-        if self._thinking_disabled() and spec.supports_disable:
-            return {"max_tokens": limit}
-        if not spec.use_max_completion_tokens:
-            return {"max_tokens": limit}
-        # use_max_completion_tokens 家族:该参数限制「含推理」的总生成量,思考预算另经
-        # extra_body 单独下发。故最终额度 = 可见输出上限 + 思考预算,否则推理会挤占用户要的输出。
-        # 显式配置的上限与调用方额度均沿用该模型的思考预算规则。
-        thinking_budget = self._effective_thinking_budget()
-        return {"max_completion_tokens": limit + (thinking_budget or 0)}
 
     def _thinking_disabled(self) -> bool:
         return bool_or_none(getattr(self, "_thinking_enabled", None)) is False
@@ -357,7 +335,6 @@ class OpenAIProvider(Provider):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None,
-        max_tokens: int,
         context: ChatRequestContext,
     ) -> dict[str, Any]:
         if tools:
@@ -378,7 +355,6 @@ class OpenAIProvider(Provider):
         }
         if context.streaming:
             kwargs["stream"] = True
-        kwargs.update(self._token_limit_kwargs(max_tokens))
         if context.streaming and self.supports_stream_options:
             kwargs["stream_options"] = {"include_usage": True}
         if tools:
@@ -466,12 +442,11 @@ class OpenAIProvider(Provider):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
     ) -> AsyncGenerator[StreamEvent, None]:
         context = self._create_chat_request_context(streaming=True)
 
         def build_kwargs() -> dict[str, Any]:
-            return self._build_chat_completion_kwargs(messages, system, tools, max_tokens, context)
+            return self._build_chat_completion_kwargs(messages, system, tools, context)
 
         message_id = f"msg_{uuid.uuid4().hex[:24]}"
         yield MessageStartEvent(message_id=message_id)
@@ -546,13 +521,12 @@ class OpenAIProvider(Provider):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
         cache_policy: str = "default",
     ) -> NonStreamingResponse:
         context = self._create_chat_request_context(streaming=False, cache_policy=cache_policy)
 
         def build_kwargs() -> dict[str, Any]:
-            return self._build_chat_completion_kwargs(messages, system, tools, max_tokens, context)
+            return self._build_chat_completion_kwargs(messages, system, tools, context)
 
         response = await self._create_chat_completion(build_kwargs, context, "chat.completions.create")
         if not hasattr(response, "choices"):

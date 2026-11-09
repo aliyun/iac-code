@@ -181,7 +181,6 @@ class TestCreateProvider:
         assert getattr(p, "_effort", None) == "low"
         assert getattr(p, "_thinking_enabled", None) is True
         assert getattr(p, "_thinking_budget", None) == 2048
-        assert getattr(p, "_max_completion_tokens", None) == 10000
 
     def test_provider_config_override_prevents_runtime_settings_reread(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -209,7 +208,6 @@ class TestCreateProvider:
         assert getattr(p, "_effort", None) == "high"
         assert getattr(p, "_thinking_enabled", None) is True
         assert getattr(p, "_thinking_budget", None) == 4096
-        assert getattr(p, "_max_completion_tokens", None) == 12000
 
     def test_request_policy_override_wins_over_settings(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -231,7 +229,6 @@ class TestCreateProvider:
         assert getattr(p, "_thinking_enabled", None) is False
         assert getattr(p, "_effort", None) == "high"
         assert getattr(p, "_thinking_budget", None) == 2048
-        assert getattr(p, "_max_completion_tokens", None) == 12288
 
     def test_session_start_settings_include_performance_parameters(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -260,7 +257,6 @@ class TestCreateProvider:
             "effort": "high",
             "thinking_enabled": False,
             "thinking_budget": 2048,
-            "max_completion_tokens": 10000,
             "stream_idle_timeout": 12.5,
             "endpoint_origin": "https://dashscope.aliyuncs.com",
             "endpoint_custom": False,
@@ -321,7 +317,6 @@ class TestCreateProvider:
         p = create_provider("kimi-k2.7-code", credentials={"dashscope": "key"})
 
         assert getattr(p, "_thinking_budget", None) == 2048
-        assert getattr(p, "_max_completion_tokens", None) == 10000
 
     def test_invalid_model_request_policy_config_falls_back_to_provider_config(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -342,7 +337,6 @@ class TestCreateProvider:
         p = create_provider("glm-5.2", credentials={"dashscope": "key"})
 
         assert getattr(p, "_thinking_budget", None) == 2048
-        assert getattr(p, "_max_completion_tokens", None) == 10000
 
     def test_float_request_policy_config_is_rejected_not_truncated(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -357,9 +351,8 @@ class TestCreateProvider:
         p = create_provider("glm-5.2", credentials={"dashscope": "key"})
 
         assert getattr(p, "_thinking_budget", None) is None
-        assert getattr(p, "_max_completion_tokens", None) is None
 
-    def test_anthropic_honors_model_thinking_budget_and_max_completion_tokens(self, monkeypatch):
+    def test_anthropic_honors_model_thinking_budget_with_legacy_output_setting(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "anthropic")
         monkeypatch.setattr(
             "iac_code.config.get_provider_config",
@@ -374,7 +367,6 @@ class TestCreateProvider:
 
         assert p.get_model_name() == "claude-sonnet-4-6"
         assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 3072}}
-        assert getattr(p, "_max_output_tokens", None) == 10000
 
     def test_effort_override_takes_precedence_over_settings(self, monkeypatch):
         monkeypatch.setattr("iac_code.config.get_active_provider_key", lambda: "dashscope")
@@ -866,7 +858,7 @@ class TestProviderManagerStreaming:
         class AnthropicCompatibleProvider:
             _base_url = "https://llm-testworkspace000000.cn-beijing.maas.aliyuncs.com/apps/anthropic"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 yield MessageStartEvent(message_id="m1")
                 yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=3, output_tokens=2))
 
@@ -1070,11 +1062,11 @@ class TestProviderManagerStreaming:
             _PROVIDER_KEY = "anthropic"
             _logical_provider_key = "anthropic"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 for event in expected:
                     yield event
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise AssertionError("accepted Fable stream must not use fallback completion")
 
         monkeypatch.setattr("iac_code.providers.manager.create_provider", lambda *args, **kwargs: FableProvider())
@@ -1090,24 +1082,24 @@ class TestProviderManagerStreaming:
             _PROVIDER_KEY = "anthropic"
             _logical_provider_key = "anthropic"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 yield MessageStartEvent(message_id="fable-refusal")
                 yield TextDeltaEvent(text="incomplete refusal text")
                 yield MessageEndEvent(stop_reason="refusal", usage=Usage(input_tokens=3, output_tokens=4))
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise AssertionError("stream refusal must fall back without retrying Fable")
 
         class OpusProvider:
             _PROVIDER_KEY = "anthropic"
             _logical_provider_key = "anthropic"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 yield MessageStartEvent(message_id="opus-follow-up")
                 yield TextDeltaEvent(text="continued with opus")
                 yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=2, output_tokens=3))
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 return NonStreamingResponse(
                     message_id="opus-fallback",
                     text="complete answer",
@@ -1333,11 +1325,11 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 await asyncio.sleep(999)
                 yield MessageEndEvent(stop_reason="never", usage=Usage())
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 return NonStreamingResponse(
                     message_id="fallback-after-timeout",
                     text="recovered",
@@ -1367,12 +1359,12 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 yield MessageStartEvent(message_id="partial-message")
                 await asyncio.sleep(999)
                 yield MessageEndEvent(stop_reason="never", usage=Usage())
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 return NonStreamingResponse(
                     message_id="fallback-after-partial-timeout",
                     text="recovered",
@@ -1418,11 +1410,11 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 await asyncio.sleep(999)
                 yield MessageEndEvent(stop_reason="never", usage=Usage())
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 return NonStreamingResponse(
                     message_id="fb",
                     text="recovered",
@@ -1432,7 +1424,7 @@ class TestProviderManagerStreaming:
                 )
 
         class HangAfterStartProvider(HangImmediatelyProvider):
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 yield MessageStartEvent(message_id="partial")
                 await asyncio.sleep(999)
                 yield MessageEndEvent(stop_reason="never", usage=Usage())
@@ -1470,11 +1462,11 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 yield MessageStartEvent(message_id="partial-before-cancel")
                 raise asyncio.CancelledError()
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise AssertionError("cancellation must not call non-streaming fallback")
 
         mgr = ProviderManager(model="claude-sonnet-4-6", credentials={"anthropic": "k"})
@@ -1516,21 +1508,21 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 yield MessageStartEvent(message_id="primary-stream")
                 raise ConnectionError("stream died")
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise Status503Error("primary complete outage")
 
         class FallbackProvider:
             def get_model_name(self) -> str:
                 return "claude-haiku-4-5-20251001"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 raise AssertionError("stream fallback should use non-streaming complete")
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 return NonStreamingResponse(
                     message_id="fallback-response",
                     text="fallback text",
@@ -1660,7 +1652,7 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 self.stream_calls += 1
                 if self.stream_calls == 1:
                     raise Status429Error("insufficient_quota")
@@ -1668,7 +1660,7 @@ class TestProviderManagerStreaming:
                 yield TextDeltaEvent(text="streamed")
                 yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=1, output_tokens=2))
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 self.complete_calls += 1
                 raise AssertionError("a retryable streaming failure must retry streaming, not downgrade")
 
@@ -1714,12 +1706,12 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 self.stream_calls += 1
                 yield MessageStartEvent(message_id="partial-stream")
                 raise Status429Error("insufficient_quota")
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 self.complete_calls += 1
                 return NonStreamingResponse(
                     message_id="downgraded-after-partial",
@@ -1763,12 +1755,12 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 self.stream_calls += 1
                 raise Status429Error("insufficient_quota")
                 yield MessageEndEvent(stop_reason="never", usage=Usage())
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 self.complete_calls += 1
                 return NonStreamingResponse(
                     message_id="downgraded-after-retries",
@@ -1804,12 +1796,12 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 self.stream_calls += 1
                 raise ValueError("this model does not support streaming")
                 yield MessageEndEvent(stop_reason="never", usage=Usage())
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 self.complete_calls += 1
                 return NonStreamingResponse(
                     message_id="downgraded-immediately",
@@ -1843,12 +1835,12 @@ class TestProviderManagerStreaming:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def stream(self, messages, system, tools=None, max_tokens=8192):
+            async def stream(self, messages, system, tools=None):
                 self.stream_calls += 1
                 await asyncio.sleep(999)
                 yield MessageEndEvent(stop_reason="never", usage=Usage())
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 return NonStreamingResponse(
                     message_id="fallback-after-timeout",
                     text="recovered",
@@ -2173,7 +2165,7 @@ class TestProviderManagerCompleteRetry:
                 self.model = model
                 self.complete_calls = 0
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 self.complete_calls += 1
                 if self.model == "claude-fable-5":
                     return NonStreamingResponse(
@@ -2265,7 +2257,7 @@ class TestProviderManagerCompleteRetry:
             def __init__(self, model):
                 self.model = model
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 if self.model == "claude-fable-5":
                     return NonStreamingResponse(
                         message_id="fable-refusal",
@@ -2383,7 +2375,7 @@ class TestProviderManagerCompleteRetry:
             _PROVIDER_KEY = "openai"
             _logical_provider_key = "openai"
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise OpenAIAPIConnectionError(request=request)
 
         fallback_provider = AsyncMock()
@@ -2442,7 +2434,7 @@ class TestProviderManagerCompleteRetry:
             _PROVIDER_KEY = "openai"
             _logical_provider_key = "openai"
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise Status401Error("invalid api key")
 
         manager = ProviderManager(
@@ -2473,7 +2465,7 @@ class TestProviderManagerCompleteRetry:
             def get_model_name(self) -> str:
                 return self.model
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 if self.fail:
                     raise Status503Error("temporary outage")
                 return NonStreamingResponse(
@@ -2517,7 +2509,7 @@ class TestProviderManagerCompleteRetry:
             _PROVIDER_KEY = "dashscope"
             _logical_provider_key = "dashscope"
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise Status503Error("temporary outage")
 
         class FallbackQwenProvider:
@@ -2528,7 +2520,7 @@ class TestProviderManagerCompleteRetry:
             def prepare_system_prompt(self, system, tools):
                 return f"{system}\nqwen-fallback-prompt"
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 assert system == "base\nqwen-fallback-prompt"
                 return NonStreamingResponse(
                     message_id="fallback-response",
@@ -2570,7 +2562,7 @@ class TestProviderManagerCompleteRetry:
                 self._logical_provider_key = provider_key
                 self.fail = fail
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 if self.fail:
                     raise Status503Error("temporary outage")
                 return NonStreamingResponse(
@@ -2616,7 +2608,7 @@ class TestProviderManagerCompleteRetry:
                 self._logical_provider_key = logical_provider_key
                 self.fail = fail
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 if self.fail:
                     raise Status503Error("temporary outage")
                 return NonStreamingResponse(
@@ -2667,7 +2659,7 @@ class TestProviderManagerCompleteRetry:
             def __init__(self, model: str):
                 self.model = model
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 if self.model != "gpt-5.6-luna":
                     raise Status503Error(f"{self.model} unavailable")
                 return NonStreamingResponse(
@@ -2707,7 +2699,7 @@ class TestProviderManagerCompleteRetry:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise Status503Error("primary temporary outage")
 
         def fake_create_provider(
@@ -2737,14 +2729,14 @@ class TestProviderManagerCompleteRetry:
             def get_model_name(self) -> str:
                 return "claude-sonnet-4-6"
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise Status503Error("primary temporary outage")
 
         class FallbackProvider:
             def get_model_name(self) -> str:
                 return "claude-haiku-4-5-20251001"
 
-            async def complete(self, messages, system, tools=None, max_tokens=8192):
+            async def complete(self, messages, system, tools=None):
                 raise RuntimeError("fallback complete failed")
 
         created_models: list[str] = []

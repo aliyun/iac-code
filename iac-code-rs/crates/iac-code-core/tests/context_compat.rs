@@ -9,7 +9,7 @@ use iac_code_protocol::provider::ToolDefinition;
 fn context_window_configs_match_python_prefixes() {
     let claude = context_window_config("claude-opus-4-7");
     assert_eq!(claude.context_window, 200_000);
-    assert_eq!(claude.max_output_tokens, 8_192);
+    assert_eq!(claude.max_output_tokens, 128_000);
     assert_eq!(claude.compact_buffer, 20_000);
     assert_eq!(claude.compact_threshold, 0.93);
     assert_eq!(claude.preserve_recent_turns, 3);

@@ -286,7 +286,6 @@ class FakeProviderManager:
         messages,
         system,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
     ):
         yield MessageStartEvent(message_id="m1")
         yield TextDeltaEvent(text="I will write.")
@@ -1029,7 +1028,7 @@ async def test_live_successor_frame_records_each_user_approval_identity(monkeypa
         def get_model_name(self) -> str:
             return "fake"
 
-        async def stream(self, messages, system, tools=None, max_tokens=8192):
+        async def stream(self, messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield ToolUseStartEvent(tool_use_id="tool-1", name="write_test")
             yield ToolUseEndEvent(tool_use_id="tool-1", name="write_test", input={"value": "first"})
@@ -1096,7 +1095,7 @@ async def test_permission_checkpoint_digest_uses_raw_transcript_input_before_pre
         def get_model_name(self) -> str:
             return "fake"
 
-        async def stream(self, messages, system, tools=None, max_tokens=8192):
+        async def stream(self, messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield ToolUseStartEvent(tool_use_id="tool-1", name="write_test")
             yield ToolUseEndEvent(tool_use_id="tool-1", name="write_test", input={"value": "raw"})
@@ -1206,7 +1205,7 @@ async def test_permission_recovery_after_tool_injected_messages_uses_persisted_t
         def get_model_name(self) -> str:
             return "fake"
 
-        async def stream(self, messages, system, tools=None, max_tokens=8192):
+        async def stream(self, messages, system, tools=None):
             self.calls += 1
             if self.calls == 1:
                 yield MessageStartEvent(message_id="load-skill")
@@ -1222,7 +1221,7 @@ async def test_permission_recovery_after_tool_injected_messages_uses_persisted_t
         def get_model_name(self) -> str:
             return "fake"
 
-        async def stream(self, messages, system, tools=None, max_tokens=8192):
+        async def stream(self, messages, system, tools=None):
             yield MessageStartEvent(message_id="continued")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 

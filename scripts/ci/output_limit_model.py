@@ -34,6 +34,18 @@ class OutputLimitModel:
 
 
 class _Handler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        fixture: OutputLimitModel = self.server.fixture
+        if fixture.protocol != "anthropic" or not self.path.startswith("/v1/models/"):
+            self.send_error(404)
+            return
+        payload = json.dumps({"id": self.path.rsplit("/", 1)[-1], "max_tokens": 128000}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def do_POST(self) -> None:
         fixture: OutputLimitModel = self.server.fixture
         try:

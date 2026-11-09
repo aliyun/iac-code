@@ -46,7 +46,7 @@ class FakeProvider:
     def get_model_name(self) -> str:
         return "fake-model"
 
-    async def stream(self, messages, system, tools=None, max_tokens=8192):
+    async def stream(self, messages, system, tools=None):
         idx = min(self._call_count, len(self._turns) - 1)
         self._call_count += 1
         for event in self._turns[idx]:

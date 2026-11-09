@@ -103,7 +103,6 @@ class Provider(ABC):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
     ) -> AsyncGenerator[StreamEvent, None]: ...
 
     @abstractmethod
@@ -112,7 +111,6 @@ class Provider(ABC):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
         cache_policy: str = "default",
     ) -> NonStreamingResponse: ...
 
@@ -127,11 +125,3 @@ class Provider(ABC):
         request fields (e.g. ``reasoning_effort``, ``extra_body.thinking``).
         """
         return {}
-
-    def _adjust_max_tokens(self, max_tokens: int) -> int:
-        """Provider-specific ``max_tokens`` adjustment.
-
-        Anthropic raises this to leave room for the configured thinking
-        budget; other providers leave it unchanged.
-        """
-        return max_tokens

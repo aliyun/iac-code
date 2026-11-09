@@ -76,7 +76,6 @@ def test_repl_log_session_started_records_runtime_parameters(tmp_path, caplog) -
             "effort": "high",
             "thinking_enabled": True,
             "thinking_budget": 2048,
-            "max_completion_tokens": 10000,
             "stream_idle_timeout": 12.5,
             "endpoint_origin": "https://dashscope.aliyuncs.com",
             "endpoint_custom": False,

@@ -472,7 +472,7 @@ class _OneCallProvider:
     def get_model_name(self) -> str:
         return "fake"
 
-    async def stream(self, messages, system, tools=None, max_tokens=8192):
+    async def stream(self, messages, system, tools=None):
         yield MessageStartEvent(message_id="message")
         yield ToolUseStartEvent(tool_use_id="tool-use", name="snapshot_tool")
         yield ToolUseEndEvent(tool_use_id="tool-use", name="snapshot_tool", input=self.tool_input)

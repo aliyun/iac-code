@@ -6,7 +6,9 @@ use iac_code_protocol::{
     TombstoneEvent, ToolInputDeltaEvent, ToolUseStartEvent, Usage,
 };
 
-use super::response::{parse_non_streaming_response, stream_events_from_response};
+use super::response::{
+    normalize_stop_reason, parse_non_streaming_response, stream_events_from_response,
+};
 use super::usage::json_u64;
 use super::StreamChatError;
 use crate::tool_input_parser::parse_tool_input_events;
@@ -255,7 +257,7 @@ impl AnthropicSseEventParser {
                     .and_then(|delta| delta.get("stop_reason"))
                     .and_then(serde_json::Value::as_str)
                 {
-                    self.stop_reason = reason.to_owned();
+                    self.stop_reason = normalize_stop_reason(reason).to_owned();
                 }
                 if let Some(delta_usage) = chunk.get("usage") {
                     self.usage.output_tokens = json_u64(delta_usage, "output_tokens");

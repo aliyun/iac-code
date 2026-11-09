@@ -1154,11 +1154,6 @@ class WebSessionManager:
                     else _provider_thinking_config(log_provider_key, log_model_name)
                 ),
                 thinking_budget=_provider_positive_int_config(log_provider_key, log_model_name, "thinkingBudget"),
-                max_completion_tokens=_provider_positive_int_config(
-                    log_provider_key,
-                    log_model_name,
-                    "maxCompletionTokens",
-                ),
                 endpoint_origin=endpoint_origin,
                 endpoint_custom=endpoint_origin is not None and is_custom_endpoint(log_endpoint_url, default_endpoint),
                 permission_mode=(

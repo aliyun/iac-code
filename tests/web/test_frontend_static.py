@@ -1932,13 +1932,13 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     workspace_source = _source(WORKSPACE_JS)
 
     assert "/static/styles.css?v=web-repl-ui-324" in html
-    assert "/static/js/app.js?v=web-repl-ui-383" in html
+    assert "/static/js/app.js?v=web-repl-ui-384" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
-    assert "./api.js?v=web-repl-ui-314" in app_source
+    assert "./api.js?v=web-repl-ui-315" in app_source
     assert "./components/composer.js?v=session-model-v23" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
@@ -1966,11 +1966,11 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-383" in index_html
+    assert "web-repl-ui-384" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-324" in app_source
-    assert "./components/workspace.js?v=cloud-creds-v60" in app_source
+    assert "./components/workspace.js?v=cloud-creds-v61" in app_source
     # ECS RAM Role 面板改动后旧 token 不得残留,否则回访浏览器仍加载旧缓存 workspace.js。
     assert "./components/workspace.js?v=cloud-creds-v57" not in app_source
     assert "workspace-cloud-vendors" in workspace_source
@@ -9033,6 +9033,42 @@ def test_workspace_model_panel_has_provider_subnav() -> None:
     assert ".workspace-model-layout.is-first-provider-selected" in styles
 
 
+def test_api_provider_save_ignores_retired_output_limit_and_preserves_thinking_budget(tmp_path) -> None:
+    output = _run_api_script(
+        tmp_path,
+        textwrap.dedent(
+            """
+            const calls = [];
+            globalThis.fetch = async (url, options) => {
+              calls.push({ url, body: JSON.parse(options.body) });
+              return {
+                ok: true,
+                headers: { get: () => "application/json" },
+                json: async () => ({}),
+              };
+            };
+            const { saveProviderConfig } = await import(__API_MODULE__);
+            await saveProviderConfig({ provider: "dashscope", model: "glm-5.2", maxCompletionTokens: 100 });
+            await saveProviderConfig({ provider: "dashscope", model: "glm-5.2", thinkingBudget: 2048 });
+            await saveProviderConfig({ provider: "dashscope", model: "glm-5.2", thinkingBudget: null });
+            console.log(JSON.stringify({ calls }));
+            """
+        ),
+    )
+
+    assert output["calls"] == [
+        {"url": "/api/providers/config", "body": {"provider": "dashscope", "model": "glm-5.2"}},
+        {
+            "url": "/api/providers/config",
+            "body": {"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": 2048},
+        },
+        {
+            "url": "/api/providers/config",
+            "body": {"provider": "dashscope", "model": "glm-5.2", "thinkingBudget": None},
+        },
+    ]
+
+
 def test_workspace_model_panel_has_collapsible_advanced_knobs() -> None:
     # 「最大输出 tokens」+「思考预算」两个高级旋钮:默认折叠,展开才可见。
     source = _source(WORKSPACE_JS)
@@ -9049,22 +9085,17 @@ def test_workspace_model_panel_has_collapsible_advanced_knobs() -> None:
     assert "advancedBody.hidden = true" in source
     assert 'advancedToggle.setAttribute("aria-expanded"' in source
 
-    # 两个字段标记 + 标签。最大输出 tokens 恒显示;思考预算按能力门控。
-    assert "workspace-model-max-tokens" in source
+    # 思考预算按能力门控。
     assert "workspace-model-thinking-budget" in source
     assert "makeNumberInput" in source
-    assert "Max output tokens" in source
     assert "Thinking budget" in source
     # 能力门控:仅 supportsThinkingBudget 的模型显示思考预算字段,占位回填 defaultThinkingBudget。
     assert "supportsThinkingBudget" in source
     assert "thinkingBudgetField.hidden = !supportsBudget" in source
     assert "defaultThinkingBudget" in source
-    # 两个字段的 placeholder 都显示留空回落的具体默认值。
-    assert "defaultMaxCompletionTokens" in source
-    assert 't("Leave blank to use model default ({value})", { value: defaultMax })' in source
+    # 思考预算 placeholder 显示模型默认值。
     assert 't("Leave blank to use model default ({value})", { value: defaultBudget })' in source
-    # 回填已保存值(可清空 → ?? "");两个旋钮按模型存储,故按选中模型回填而非 provider 级。
-    assert 'model?.savedMaxCompletionTokens ?? ""' in source
+    # 回填已保存的模型级思考预算,可清空。
     assert 'model?.savedThinkingBudget ?? ""' in source
 
     # CSS:grid/flex 容器会盖过 UA 的 [hidden] 默认,body 与门控字段都需显式复位。
@@ -9074,9 +9105,7 @@ def test_workspace_model_panel_has_collapsible_advanced_knobs() -> None:
 
     # api.js 以 undefined/int/null 三态发送(可清空),而非 effort/apiBase 的真值模式。
     assert "thinkingBudget" in api_source
-    assert "maxCompletionTokens" in api_source
     assert "thinkingBudget !== undefined" in api_source
-    assert "maxCompletionTokens !== undefined" in api_source
 
 
 def test_api_exposes_workspace_operation_routes() -> None:
@@ -9196,7 +9225,7 @@ def test_workspace_cloud_panel_prefills_secrets_and_resets_on_mode_switch() -> N
 def test_app_wires_workspace_controls_to_current_session() -> None:
     source = _source(APP_JS)
 
-    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v60";'
+    workspace_import = 'import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v61";'
     assert workspace_import in source
     assert "workspace = createWorkspaceController" in source
     assert 'tabs: byShell("workspace-tabs")' in source
@@ -11724,7 +11753,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-383" in html
+    assert "web-repl-ui-384" in html
     assert "web-repl-ui-343" not in html
 
 
@@ -12211,7 +12240,7 @@ def test_styles_define_review_step_prerequisite_progress() -> None:
 
 def test_app_uses_bumped_api_version_for_outputs() -> None:
     source = _source(APP_JS)
-    assert "./api.js?v=web-repl-ui-314" in source
+    assert "./api.js?v=web-repl-ui-315" in source
     assert "./api.js?v=web-repl-ui-311" not in source
     assert "./api.js?v=web-repl-ui-159" not in source
 

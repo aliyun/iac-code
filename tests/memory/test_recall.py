@@ -34,7 +34,6 @@ class FakeRecallProvider:
         messages,
         system,
         tools=None,
-        max_tokens=8192,
         cache_policy="default",
     ):
         self.calls.append(
@@ -42,7 +41,6 @@ class FakeRecallProvider:
                 "messages": messages,
                 "system": system,
                 "tools": tools,
-                "max_tokens": max_tokens,
                 "cache_policy": cache_policy,
             }
         )

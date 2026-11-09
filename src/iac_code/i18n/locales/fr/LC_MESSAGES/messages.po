@@ -15082,16 +15082,8 @@ msgstr ""
 "sélectionné."
 
 #: src/iac_code/providers/responses_provider.py
-msgid "Responses max_output_tokens must be a positive integer."
-msgstr "max_output_tokens de Responses doit être un entier positif."
-
-#: src/iac_code/providers/responses_provider.py
 msgid "Responses stream ended without a terminal response."
 msgstr "Le flux de Responses s’est terminé sans réponse finale."
-
-#: src/iac_code/providers/responses_provider.py
-msgid "DashScope Responses max_output_tokens must be at least 16."
-msgstr "max_output_tokens de DashScope Responses doit être au moins égal à 16."
 
 #: src/iac_code/providers/responses_provider.py
 msgid "Responses API requires a valid HTTP or HTTPS base URL."
@@ -15110,8 +15102,8 @@ msgid "The user requested {expected} candidate plans; {actual} were submitted. C
 msgstr "L’utilisateur a demandé {expected} propositions ; {actual} ont été soumises. Corrigez les propositions ou demandez des précisions ; ne modifiez pas discrètement le nombre demandé."
 
 #: src/iac_code/agent/agent_loop.py
-msgid "The model reached its output token limit. Increase the max output tokens setting and try again."
-msgstr "Le modèle a atteint sa limite de jetons de sortie. Augmentez le nombre maximal de jetons de sortie, puis réessayez."
+msgid "The model reached its output token limit. Try splitting the task into smaller steps."
+msgstr "Le modèle a atteint sa limite de tokens de sortie. Essayez de diviser la tâche en étapes plus petites."
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
 #, python-brace-format

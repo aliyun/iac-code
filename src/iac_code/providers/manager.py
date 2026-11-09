@@ -582,11 +582,8 @@ def create_provider(
     if request_policy_override is not None and request_policy_override.thinking_enabled is not None:
         thinking_enabled = request_policy_override.thinking_enabled
     thinking_budget = _get_positive_int_provider_config_value(provider_cfg, model, "thinkingBudget")
-    max_completion_tokens = _get_positive_int_provider_config_value(provider_cfg, model, "maxCompletionTokens")
     if request_policy_override is not None and request_policy_override.thinking_budget is not None:
         thinking_budget = request_policy_override.thinking_budget
-    if request_policy_override is not None and request_policy_override.max_completion_tokens is not None:
-        max_completion_tokens = request_policy_override.max_completion_tokens
     wire_provider_key = _wire_provider_key_for_openai_compatible_base(
         provider_key,
         effective_base_url,
@@ -652,8 +649,6 @@ def create_provider(
     if issubclass(provider_cls, OpenAIProvider):
         if thinking_budget is not None:
             request_policy_kwargs["thinking_budget"] = thinking_budget
-        if max_completion_tokens is not None:
-            request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
         from iac_code.providers.qwen_provider import QwenProvider
 
         if issubclass(provider_cls, QwenProvider) or uses_dashscope_responses:
@@ -663,8 +658,6 @@ def create_provider(
 
         if thinking_budget is not None and issubclass(provider_cls, AnthropicProvider):
             request_policy_kwargs["thinking_budget"] = thinking_budget
-        if max_completion_tokens is not None and issubclass(provider_cls, AnthropicProvider):
-            request_policy_kwargs["max_completion_tokens"] = max_completion_tokens
     provider_kwargs: dict[str, Any] = {
         "model": model,
         "api_key": api_key or None,
@@ -860,7 +853,6 @@ def _request_policy_with_effort_override(
             thinking_enabled=thinking_enabled,
             effort=effective_effort,
             thinking_budget=policy.thinking_budget if policy is not None else None,
-            max_completion_tokens=policy.max_completion_tokens if policy is not None else None,
         )
     )
 
@@ -1213,11 +1205,6 @@ class ProviderManager:
         """Return non-sensitive provider settings that affect session performance."""
         provider = self._provider
         policy = self._request_policy_override
-        max_completion_tokens = _first_not_none(
-            _positive_int_provider_attr(provider, "_max_completion_tokens"),
-            _positive_int_provider_attr(provider, "_max_output_tokens"),
-            policy.max_completion_tokens if policy is not None else None,
-        )
         return {
             "provider": self.get_provider_key() or None,
             "provider_display": self.get_provider_display() or None,
@@ -1235,7 +1222,6 @@ class ProviderManager:
                 _positive_int_provider_attr(provider, "_thinking_budget"),
                 policy.thinking_budget if policy is not None else None,
             ),
-            "max_completion_tokens": max_completion_tokens,
             "stream_idle_timeout": self._stream_idle_timeout,
             "endpoint_origin": _string_provider_attr(provider, "_session_endpoint_origin"),
             "endpoint_custom": _bool_provider_attr(provider, "_session_endpoint_custom"),
@@ -1292,7 +1278,6 @@ class ProviderManager:
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
         telemetry_messages: list[Any] | None = None,
         *,
         lease: ProviderRequestLease | None = None,
@@ -1303,7 +1288,6 @@ class ProviderManager:
             messages,
             system,
             tools,
-            max_tokens,
             lease=lease,
             telemetry_messages=telemetry_messages,
             captured_scope=captured_scope,
@@ -1315,7 +1299,6 @@ class ProviderManager:
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None,
-        max_tokens: int,
         *,
         lease: ProviderRequestLease | None,
         telemetry_messages: list[Any] | None,
@@ -1337,7 +1320,6 @@ class ProviderManager:
                 messages,
                 system,
                 tools,
-                max_tokens,
                 lease=active_lease,
                 telemetry_messages=telemetry_messages,
                 captured_scope=captured_scope,
@@ -1363,7 +1345,6 @@ class ProviderManager:
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None,
-        max_tokens: int,
         *,
         lease: ProviderRequestLease,
         telemetry_messages: list[Any] | None,
@@ -1390,12 +1371,11 @@ class ProviderManager:
 
         span_name = f"{Spans.LLM_CHAT} {model}"
         session_id = _safe_session_id()
-        span_attrs = {
+        span_attrs: dict[str, str | int] = {
             GenAiAttr.SPAN_KIND: GenAiSpanKind.LLM,
             GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
             GenAiAttr.PROVIDER_NAME: provider_name,
             GenAiAttr.REQUEST_MODEL: model,
-            GenAiAttr.REQUEST_MAX_TOKENS: max_tokens,
             GenAiAttr.SESSION_ID: session_id,
             GenAiAttr.CONVERSATION_ID: session_id,
             GenAiAttr.OUTPUT_TYPE: "text",
@@ -1538,7 +1518,7 @@ class ProviderManager:
                 )
             watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
             watchdog.start()
-            stream_iter = provider.stream(messages, system, tools, max_tokens)
+            stream_iter = provider.stream(messages, system, tools)
             while True:
                 try:
                     with activate_span():
@@ -1733,7 +1713,6 @@ class ProviderManager:
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None,
-        max_tokens: int,
         *,
         lease: ProviderRequestLease,
         telemetry_messages: list[Any] | None,
@@ -1767,7 +1746,6 @@ class ProviderManager:
                 messages,
                 system,
                 tools,
-                max_tokens,
                 lease=lease,
                 telemetry_messages=telemetry_messages,
                 captured_scope=captured_scope,
@@ -1829,7 +1807,6 @@ class ProviderManager:
                     GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
                     GenAiAttr.PROVIDER_NAME: provider_name,
                     GenAiAttr.REQUEST_MODEL: model,
-                    GenAiAttr.REQUEST_MAX_TOKENS: max_tokens,
                     GenAiAttr.SESSION_ID: session_id,
                     GenAiAttr.CONVERSATION_ID: session_id,
                     GenAiAttr.OUTPUT_TYPE: "text",
@@ -1904,7 +1881,7 @@ class ProviderManager:
                     replay_first_token_received = False
                     try:
                         lease._lease_token.inference_requests += 1
-                        replay_iter = provider.stream(messages, system, tools, max_tokens)
+                        replay_iter = provider.stream(messages, system, tools)
                         async for replay_event in replay_iter:
                             if isinstance(replay_event, MessageStartEvent):
                                 replay_message_ids.append(replay_event.message_id)
@@ -2017,7 +1994,6 @@ class ProviderManager:
                         messages,
                         system,
                         tools,
-                        max_tokens,
                         provider_override=provider,
                         model_override=model,
                         telemetry_messages=telemetry_messages,
@@ -2224,7 +2200,6 @@ class ProviderManager:
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
         cache_policy: str = "default",
         telemetry_messages: list[Any] | None = None,
         *,
@@ -2245,7 +2220,6 @@ class ProviderManager:
                 messages,
                 system,
                 tools,
-                max_tokens,
                 provider_override=active_lease.provider,
                 model_override=active_lease.context_window_model,
                 cache_policy=cache_policy,
@@ -2267,7 +2241,6 @@ class ProviderManager:
         messages,
         system,
         tools,
-        max_tokens,
         provider_override: Provider | None = None,
         model_override: str | None = None,
         cache_policy: str = "default",
@@ -2277,7 +2250,6 @@ class ProviderManager:
             messages,
             system,
             tools,
-            max_tokens,
             provider_override=provider_override,
             model_override=model_override,
             cache_policy=cache_policy,
@@ -2290,7 +2262,6 @@ class ProviderManager:
         messages,
         system,
         tools,
-        max_tokens,
         provider_override: Provider | None = None,
         model_override: str | None = None,
         cache_policy: str = "default",
@@ -2332,7 +2303,6 @@ class ProviderManager:
                 GenAiAttr.OPERATION_NAME: GenAiOperationName.CHAT,
                 GenAiAttr.PROVIDER_NAME: provider_name,
                 GenAiAttr.REQUEST_MODEL: model,
-                GenAiAttr.REQUEST_MAX_TOKENS: max_tokens,
                 GenAiAttr.SESSION_ID: session_id,
                 GenAiAttr.CONVERSATION_ID: session_id,
                 GenAiAttr.OUTPUT_TYPE: "text",
@@ -2356,7 +2326,7 @@ class ProviderManager:
                             },
                         )
                         request_started = time.monotonic()
-                        response = await provider.complete(messages, system, tools, max_tokens, **kwargs)
+                        response = await provider.complete(messages, system, tools, **kwargs)
                     except asyncio.CancelledError as exc:
                         self._emit_failure_telemetry(
                             provider_name,
@@ -2480,7 +2450,6 @@ class ProviderManager:
                         messages,
                         fallback_system,
                         tools,
-                        max_tokens,
                         provider_override=fallback_provider,
                         model_override=fallback,
                         cache_policy=cache_policy,

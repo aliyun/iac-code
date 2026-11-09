@@ -16,7 +16,7 @@ async def test_create_semantic_plan_with_llm_threads_provider_overrides(monkeypa
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-        async def complete(self, messages, system, *, max_tokens):
+        async def complete(self, messages, system):
             return _FakeResponse()
 
     monkeypatch.setattr(asp, "ProviderManager", _FakeManager)
@@ -26,7 +26,6 @@ async def test_create_semantic_plan_with_llm_threads_provider_overrides(monkeypa
     await asp.create_semantic_plan_with_llm(
         {"visible_nodes": []},
         model="qwen3.6-plus",
-        max_tokens=1000,
         user_prompt="x",
         credentials_override={"qwenpaw": "k"},
         provider_key_override="qwenpaw",
@@ -50,13 +49,13 @@ async def test_create_semantic_plan_with_llm_defaults_unchanged(monkeypatch):
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-        async def complete(self, messages, system, *, max_tokens):
+        async def complete(self, messages, system):
             return _FakeResponse()
 
     monkeypatch.setattr(asp, "ProviderManager", _FakeManager)
     monkeypatch.setattr(asp, "load_credentials", lambda *, model: {"default": "dk"})
 
-    await asp.create_semantic_plan_with_llm({"visible_nodes": []}, model="m", max_tokens=100, user_prompt="x")
+    await asp.create_semantic_plan_with_llm({"visible_nodes": []}, model="m", user_prompt="x")
 
     assert captured["credentials"] == {"default": "dk"}
     assert captured["provider_key_override"] is None

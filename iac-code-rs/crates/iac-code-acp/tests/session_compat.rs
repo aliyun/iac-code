@@ -127,13 +127,13 @@ fn session_dynamic_config_merges_and_returns_independent_snapshot() {
         json::string("0.5"),
     )]));
     session.update_config(BTreeMap::from([
-        ("max_tokens".to_owned(), json::number(2048)),
+        ("custom_option".to_owned(), json::number(2048)),
         ("temperature".to_owned(), json::string("0.9")),
     ]));
 
     let mut snapshot = session.config();
     assert_eq!(snapshot.get("temperature"), Some(&json::string("0.9")));
-    assert_eq!(snapshot.get("max_tokens"), Some(&json::number(2048)));
+    assert_eq!(snapshot.get("custom_option"), Some(&json::number(2048)));
 
     snapshot.insert("extra".to_owned(), json::string("value"));
     assert!(!session.config().contains_key("extra"));

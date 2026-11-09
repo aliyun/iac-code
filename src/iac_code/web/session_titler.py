@@ -15,7 +15,6 @@ from iac_code.web.runtime import WebModelSelection
 
 logger = logging.getLogger(__name__)
 
-TITLE_MAX_TOKENS = 32
 TITLE_TEXT_INPUT_LIMIT = 2000
 _TITLE_LANGUAGE_NAMES = {
     "en": "English",
@@ -84,7 +83,7 @@ async def generate_session_title(
         try:
             manager = _build_manager(selection)
             response = await asyncio.wait_for(
-                manager.complete(messages, _title_system_prompt(language), max_tokens=TITLE_MAX_TOKENS),
+                manager.complete(messages, _title_system_prompt(language)),
                 timeout=timeout,
             )
         except (asyncio.TimeoutError, Exception) as exc:  # noqa: BLE001 - best-effort side query

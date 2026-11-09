@@ -4,11 +4,12 @@ use iac_code_protocol::provider::{NonStreamingResponse, ToolDefinition};
 use iac_code_protocol::StreamEvent;
 
 use super::config::{
-    adjusted_max_tokens, is_retryable_http_status, messages_url, thinking_payload,
-    ANTHROPIC_VERSION, COMPLETE_MAX_RETRIES,
+    is_retryable_http_status, messages_url, thinking_payload, COMPLETE_MAX_RETRIES,
 };
 use super::errors::CompleteChatError;
-use super::payload::{anthropic_model_alias, convert_message, convert_tools};
+use super::payload::{
+    anthropic_model_alias, anthropic_thinking_budget, convert_message, convert_tools,
+};
 use super::response::{parse_non_streaming_response, stream_events_from_response};
 use super::sse::{parse_sse_stream_events, stream_response_events_with_sink};
 use super::{AnthropicProvider, StreamChatError};
@@ -19,9 +20,8 @@ impl AnthropicProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
-    ) -> JsonValue {
-        self.build_messages_payload_with_stream(conversation, system, tools, max_tokens, false)
+    ) -> Result<JsonValue, String> {
+        self.build_messages_payload_with_stream(conversation, system, tools, false)
     }
 
     fn build_messages_payload_with_stream(
@@ -29,21 +29,31 @@ impl AnthropicProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
         stream: bool,
-    ) -> JsonValue {
+    ) -> Result<JsonValue, String> {
         let (model, _) = anthropic_model_alias(&self.config.model);
         let mut entries = vec![
             ("model", json::string(model)),
-            (
-                "max_tokens",
-                json::number(adjusted_max_tokens(&self.config, max_tokens)),
-            ),
             ("system", json::string(system)),
             ("messages", self.build_api_messages(conversation)),
         ];
         if !tools.is_empty() {
             entries.push(("tools", convert_tools(tools)));
+        }
+        if let Some(max_tokens) = self.required_max_tokens()? {
+            if anthropic_thinking_budget(
+                &self.config.provider_key,
+                &self.config.model,
+                self.config.effort.as_deref(),
+            )
+            .is_some_and(|budget| u64::from(budget) >= max_tokens)
+            {
+                return Err(
+                    "Anthropic thinking_budget must be below the model's max_tokens capability"
+                        .to_owned(),
+                );
+            }
+            entries.push(("max_tokens", json::number(max_tokens)));
         }
         if let Some(thinking) = thinking_payload(&self.config) {
             entries.push(("thinking", thinking));
@@ -51,7 +61,7 @@ impl AnthropicProvider {
         if stream {
             entries.push(("stream", json::bool_value(true)));
         }
-        json::object(entries)
+        Ok(json::object(entries))
     }
 
     pub fn complete_chat(
@@ -59,10 +69,9 @@ impl AnthropicProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
     ) -> Result<NonStreamingResponse, String> {
         let payload =
-            self.build_messages_payload_with_stream(conversation, system, tools, max_tokens, false);
+            self.build_messages_payload_with_stream(conversation, system, tools, false)?;
         let text = self.send_messages_request_with_retry(payload)?;
         parse_non_streaming_response(&text)
     }
@@ -72,10 +81,10 @@ impl AnthropicProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
     ) -> Result<Vec<StreamEvent>, StreamChatError> {
-        let payload =
-            self.build_messages_payload_with_stream(conversation, system, tools, max_tokens, true);
+        let payload = self
+            .build_messages_payload_with_stream(conversation, system, tools, true)
+            .map_err(StreamChatError::without_partial)?;
         let text = self
             .send_messages_request(payload)
             .map_err(StreamChatError::without_partial)?;
@@ -92,24 +101,17 @@ impl AnthropicProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
         sink: &mut dyn FnMut(&StreamEvent),
     ) -> Result<Vec<StreamEvent>, StreamChatError> {
-        let payload =
-            self.build_messages_payload_with_stream(conversation, system, tools, max_tokens, true);
+        let payload = self
+            .build_messages_payload_with_stream(conversation, system, tools, true)
+            .map_err(StreamChatError::without_partial)?;
         let client = reqwest::blocking::Client::new();
-        let mut request = client
-            .post(messages_url(&self.config))
-            .header("content-type", "application/json")
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .body(payload.to_compact_json());
-        if let Some(api_key) = &self.config.api_key {
-            request = request.header("x-api-key", api_key);
-        }
-        let (_, beta_header) = anthropic_model_alias(&self.config.model);
-        if let Some(beta_header) = beta_header {
-            request = request.header("anthropic-beta", beta_header);
-        }
+        let request = self.authenticated_request(
+            client
+                .post(messages_url(&self.config))
+                .body(payload.to_compact_json()),
+        );
 
         let response = request
             .send()
@@ -156,18 +158,11 @@ impl AnthropicProvider {
 
     fn send_messages_request_once(&self, payload: JsonValue) -> Result<String, CompleteChatError> {
         let client = reqwest::blocking::Client::new();
-        let mut request = client
-            .post(messages_url(&self.config))
-            .header("content-type", "application/json")
-            .header("anthropic-version", ANTHROPIC_VERSION)
-            .body(payload.to_compact_json());
-        if let Some(api_key) = &self.config.api_key {
-            request = request.header("x-api-key", api_key);
-        }
-        let (_, beta_header) = anthropic_model_alias(&self.config.model);
-        if let Some(beta_header) = beta_header {
-            request = request.header("anthropic-beta", beta_header);
-        }
+        let request = self.authenticated_request(
+            client
+                .post(messages_url(&self.config))
+                .body(payload.to_compact_json()),
+        );
 
         let response = request
             .send()

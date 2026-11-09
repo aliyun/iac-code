@@ -317,10 +317,9 @@ class _FixtureProvider:
         messages: list[Any],
         system: str,
         tools: list[Any] | None = None,
-        max_tokens: int = 8192,
         **kwargs: Any,
     ):
-        del system, max_tokens, kwargs
+        del system, kwargs
         from iac_code.types.stream_events import (
             MessageEndEvent,
             MessageStartEvent,

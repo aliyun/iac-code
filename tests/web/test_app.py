@@ -3,6 +3,7 @@ import json
 import os
 import threading
 import uuid
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -3519,7 +3520,7 @@ async def test_manual_compaction_runtime_creation_does_not_block_other_requests(
 def test_manual_compaction_blocks_turns_and_drains_queued_input(tmp_path, monkeypatch) -> None:
     """手动 /compact 期间:并发提交被拒(不并跑),排队输入在压缩完成后自动排空为独立 turn。"""
     from iac_code.web.app import create_app
-    from iac_code.web.runtime import WebTurnRequest
+    from iac_code.web.runtime import WebModelSelection, WebTurnRequest
     from iac_code.web.session_manager import WebSessionManager
 
     compaction_started = asyncio.Event()
@@ -3541,12 +3542,12 @@ def test_manual_compaction_blocks_turns_and_drains_queued_input(tmp_path, monkey
         agent_loop = _FakeAgentLoop()
 
     monkeypatch.setattr(
-        "iac_code.services.agent_factory.create_agent_runtime",
-        lambda *_args, **_kwargs: _FakeRuntime(),
+        "iac_code.web.runtime.create_session_agent_runtime_in_thread",
+        AsyncMock(return_value=_FakeRuntime()),
     )
     monkeypatch.setattr(
-        "iac_code.web.runtime.create_agent_runtime",
-        lambda *_args, **_kwargs: _FakeRuntime(),
+        "iac_code.web.runtime.model_selection_for_session",
+        lambda _session: WebModelSelection(provider=None, model="test-model", effort=None),
     )
 
     drained: list[WebTurnRequest] = []
@@ -3592,6 +3593,7 @@ def test_manual_compaction_blocks_turns_and_drains_queued_input(tmp_path, monkey
 def test_manual_compaction_restores_queued_input_when_followup_runtime_creation_fails(tmp_path, monkeypatch) -> None:
     """A pre-start failure after compaction must not consume the queued prompt."""
     from iac_code.web.app import create_app
+    from iac_code.web.runtime import WebModelSelection
     from iac_code.web.session_manager import WebSessionManager
 
     compaction_started = asyncio.Event()
@@ -3613,12 +3615,12 @@ def test_manual_compaction_restores_queued_input_when_followup_runtime_creation_
         agent_loop = FakeAgentLoop()
 
     monkeypatch.setattr(
-        "iac_code.services.agent_factory.create_agent_runtime",
-        lambda *_args, **_kwargs: FakeRuntime(),
+        "iac_code.web.runtime.create_session_agent_runtime_in_thread",
+        AsyncMock(return_value=FakeRuntime()),
     )
     monkeypatch.setattr(
-        "iac_code.web.runtime.create_agent_runtime",
-        lambda *_args, **_kwargs: FakeRuntime(),
+        "iac_code.web.runtime.model_selection_for_session",
+        lambda _session: WebModelSelection(provider=None, model="test-model", effort=None),
     )
 
     def fail_followup_runtime(_session):

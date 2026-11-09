@@ -74,27 +74,26 @@ providers:
     model: glm-5.2
     thinkingEnabled: true
     thinkingBudget: 8192
-    maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
         thinkingEnabled: false
         thinkingBudget: 8192
-        maxCompletionTokens: 16384
 ```
 
 | 字段 | 作用范围 | 说明 |
 |---|---|---|
 | `thinkingEnabled` | Provider 或模型 | 可选的布尔 thinking 开关。`true` 表示请求支持的 provider/model 开启 thinking；`false` 表示请求关闭；省略时保留 provider/model 默认行为。 |
 | `thinkingBudget` | Provider 或模型 | 正整数 reasoning/thinking 预算，会传给支持该参数的 provider。 |
-| `maxCompletionTokens` | 提供商或模型 | 正整数输出上限覆盖值：适用的 Chat 提供商使用 `max_completion_tokens`，Responses 使用 `max_output_tokens`。 |
 | `effort` | Provider 或模型 | 可选 thinking effort 覆盖值，仅对支持 effort 控制的模型生效。 |
 | `apiMode` | 仅模型级 | `chat_completions` 或 `responses`；省略时使用模型内置的默认协议。支持范围见 [LLM 提供商](./llm-providers.md)。 |
 
-使用 Responses 时，`apiMode` 只能配置在 `providers.<provider>.models.<model>` 下。`effort` 映射为 `reasoning.effort`，`thinkingBudget` 不会发送给此 API。`maxCompletionTokens` 设置包含推理 token 在内的总输出上限，DashScope Responses 要求至少为 `16`。切换协议后，`settings.yml` 中的字段名称保持一致。
+使用 Responses 时，`apiMode` 只能配置在 `providers.<provider>.models.<model>` 下。`effort` 映射为 `reasoning.effort`，`thinkingBudget` 不会发送给此 API。切换协议后，`settings.yml` 中的字段名称保持一致。
+
+IaC Code 不设置可配置的输出 Token 上限。Chat Completions 和 Responses 请求不发送可选的输出限额字段。Anthropic 官方 Messages API 要求 `max_tokens`，因此 IaC Code 使用模型支持的最大输出能力。MiniMax 的 Anthropic 兼容端点将此字段设为可选，IaC Code 在该端点同样省略它。提供商和模型自身的上限仍然适用。
 
 `providers.<provider>.models.<model>` 下的模型级有效值会覆盖 provider 级值。无效数值会被忽略，IaC Code 会回退到 provider 级值或内置模型策略。
 
-对阿里云百炼 DashScope 和 DashScope Token Plan，IaC Code 为 `glm-5.2` 和 `kimi-k2.7-code` 内置了 `thinkingBudget=8192`。未设置 `maxCompletionTokens` 时，请求上限会按普通回答 token 上限加上有效 thinking budget 计算。
+对阿里云百炼 DashScope 和 DashScope Token Plan，IaC Code 为 `glm-5.2` 和 `kimi-k2.7-code` 内置了 `thinkingBudget=8192`。
 
 交互式 REPL 用户可以通过 `/thinking_enabled on` 或 `/thinking_enabled off` 持久化 provider 级 `thinkingEnabled` 值；直接运行 `/thinking_enabled` 时，如果有控制台 UI，会打开“启用/禁用”选择器。一次性 headless 运行可以用 `--thinking-enabled` 或 `--no-thinking-enabled` 只覆盖本次请求的 thinking 行为，不会改写 `settings.yml`。
 

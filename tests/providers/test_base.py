@@ -66,6 +66,3 @@ class TestProviderThinkingHooks:
 
     def test_default_build_thinking_kwargs_returns_empty(self):
         assert self._stub()._build_thinking_kwargs() == {}
-
-    def test_default_adjust_max_tokens_passthrough(self):
-        assert self._stub()._adjust_max_tokens(8192) == 8192

@@ -356,6 +356,8 @@ class _FixtureServer:
         self.config_dir = config_dir or run_dir / "config"
         self.suspend_trigger = suspend_trigger
         self.process: subprocess.Popen[str] | None = None
+        self._ready_path: Path | None = None
+        self._startup_nonce: str | None = None
         self._stdout = None
         self._stderr = None
 
@@ -364,9 +366,8 @@ class _FixtureServer:
         return "http://127.0.0.1:{}".format(self.port)
 
     def start(self, generation: int) -> None:
-        if generation > 1:
-            # Windows can retain a recently closed listener in TIME_WAIT.
-            self.port = _free_port()
+        self._ready_path = self.run_dir / "server-{}.ready.json".format(generation)
+        self._startup_nonce = uuid.uuid4().hex
         fixture = self.repo_root / "scripts" / "a2a" / "e2e" / "permission_wait" / "permission_wait_fixture_server.py"
         self._stdout = (self.run_dir / "server-{}.stdout.log".format(generation)).open("w", encoding="utf-8")
         self._stderr = (self.run_dir / "server-{}.stderr.log".format(generation)).open("w", encoding="utf-8")
@@ -377,7 +378,11 @@ class _FixtureServer:
             sys.executable,
             str(fixture),
             "--port",
-            str(self.port),
+            "0",
+            "--ready-file",
+            str(self._ready_path),
+            "--ready-nonce",
+            self._startup_nonce,
             "--config-dir",
             str(self.config_dir),
             "--persistence-dir",
@@ -422,7 +427,7 @@ class _FixtureServer:
     def replacement(self, *, config_dir: Path, staging_dir: Path) -> _FixtureServer:
         return _FixtureServer(
             run_dir=self.run_dir,
-            port=_free_port(),
+            port=0,
             repo_root=self.repo_root,
             mode=self.mode,
             candidate_first=self.candidate_first,
@@ -483,17 +488,49 @@ class _FixtureServer:
 
     def _wait_healthy(self) -> None:
         deadline = time.monotonic() + 20
+        pid = parent_pid = None
         while time.monotonic() < deadline:
             if self.process is not None and self.process.poll() is not None:
-                stderr = Path(self._stderr.name).read_text(encoding="utf-8", errors="replace")[-2000:]
+                stderr = (
+                    Path(self._stderr.name).read_text(encoding="utf-8", errors="replace")[-2000:]
+                    if self._stderr is not None
+                    else ""
+                )
                 raise RuntimeError("fixture A2A server exited with code {}: {}".format(self.process.returncode, stderr))
             try:
+                if self._ready_path is None or self.process is None:
+                    raise RuntimeError("fixture A2A server has not been started")
+                ready = json.loads(self._ready_path.read_text(encoding="utf-8"))
+                port = ready.get("port") if isinstance(ready, dict) else None
+                pid = ready.get("pid") if isinstance(ready, dict) else None
+                parent_pid = ready.get("parentPid") if isinstance(ready, dict) else None
+                if (
+                    not isinstance(ready, dict)
+                    or ready.get("nonce") != self._startup_nonce
+                    or any(
+                        not isinstance(value, int) or isinstance(value, bool) or value <= 0
+                        for value in (pid, parent_pid)
+                    )
+                    # Windows venv redirectors wait for a directly launched interpreter.
+                    or self.process.pid not in (pid, parent_pid)
+                    or not isinstance(port, int)
+                    or isinstance(port, bool)
+                    or not 1 <= port <= 65535
+                ):
+                    time.sleep(0.05)
+                    continue
+                self.port = port
                 with urlopen(self.url + "/health", timeout=0.5) as response:
-                    if response.status == 200:
+                    if response.status == 200 and self.process.poll() is None:
                         return
-            except (TimeoutError, URLError, OSError):
+            except (TimeoutError, URLError, OSError, ValueError):
                 time.sleep(0.05)
-        raise TimeoutError("fixture A2A server did not become healthy")
+        identity = {
+            "launcher_pid": self.process.pid if self.process is not None else None,
+            "reported_pid": pid if type(pid) is int else None,
+            "reported_parent_pid": parent_pid if type(parent_pid) is int else None,
+        }
+        raise TimeoutError("fixture A2A server did not become healthy: {}".format(json.dumps(identity)))
 
     def stop(self) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -558,7 +595,7 @@ def run_staged_backup_generation_fence(*, run_dir: Path, timeout: float) -> dict
     repo_root = Path(__file__).resolve().parents[4]
     server = _FixtureServer(
         run_dir=run_dir,
-        port=_free_port(),
+        port=0,
         repo_root=repo_root,
         mode="normal",
         candidate_first=False,
@@ -824,7 +861,7 @@ def run_scenario(
         raise ValueError("pipeline_step_id cannot be combined with handoff_first")
     server = _FixtureServer(
         run_dir=run_dir,
-        port=_free_port(),
+        port=0,
         repo_root=repo_root,
         mode=mode,
         candidate_first=candidate_first,

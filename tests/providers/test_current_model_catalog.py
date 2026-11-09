@@ -225,7 +225,7 @@ async def test_claude_bound_thinking_survives_tool_loop_but_not_prefix_changes(m
         ],
     )
     history = [user, assistant, Message.tool_result(tool_use_id="call-1", content="template")]
-    normal = p._build_kwargs(history, "system", tools, 8192)
+    normal = p._build_kwargs(history, "system", tools)
     assert normal["messages"][1]["content"][0] == {
         "type": "thinking",
         "thinking": "",
@@ -236,7 +236,7 @@ async def test_claude_bound_thinking_survives_tool_loop_but_not_prefix_changes(m
         ([Message.user("compacted conversation"), *history[1:]], "system", tools),
         (history, "system", [ToolDefinition(name="different_tool", description="Other", input_schema={})]),
     ):
-        changed = p._build_kwargs(messages, system, next_tools, 8192)
+        changed = p._build_kwargs(messages, system, next_tools)
         assert not any(
             b.get("type") == "thinking"
             for msg in changed["messages"]
@@ -284,7 +284,7 @@ async def test_claude_stream_binds_signed_and_redacted_blocks_to_request_prefix(
             ],
         ),
     ]
-    normal = p._build_kwargs(history, "system", None, 8192)
+    normal = p._build_kwargs(history, "system", None)
     assert [block["type"] for block in normal["messages"][1]["content"]] == ["thinking", "redacted_thinking", "text"]
-    changed = p._build_kwargs(history, "updated system", None, 8192)
+    changed = p._build_kwargs(history, "updated system", None)
     assert changed["messages"][1]["content"] == [{"type": "text", "text": "done"}]

@@ -42,7 +42,7 @@ def test_terra_none_effort_matches_web_thinking_state(enabled):
 
 
 @pytest.mark.parametrize("key,model", [("kimi_cn", "kimi-k3.1-pro"), ("kimi_code", "k3.1-pro")])
-def test_always_on_kimi_keeps_effort_and_completion_limit_when_disable_is_unsupported(key, model):
+def test_always_on_kimi_keeps_effort_when_disable_is_unsupported(key, model):
     provider = create_provider(
         model,
         {key: "fake"},
@@ -50,7 +50,6 @@ def test_always_on_kimi_keeps_effort_and_completion_limit_when_disable_is_unsupp
         provider_config_override={"effort": "low", "thinkingEnabled": False},
     )
     assert provider._build_thinking_kwargs() == {"reasoning_effort": "low"}
-    assert provider._token_limit_kwargs(4096) == {"max_completion_tokens": 4096}
 
 
 @pytest.mark.asyncio
@@ -99,11 +98,11 @@ async def test_claude_drops_signed_thinking_when_its_own_assistant_turn_is_edite
         ContentBlock(type="tool_use", tool_use_id="call-1", name="read_file", input={"path": "main.tf"}),
     ]
     history = [user, Message(role="assistant", content=blocks)]
-    normal = provider._build_kwargs(history, "system", None, 8192)
+    normal = provider._build_kwargs(history, "system", None)
     assert normal["messages"][1]["content"][0]["signature"] == "signed"
     # Moving the signed block past text changes the prefix before that block.
     history[1] = Message(role="assistant", content=[blocks[1], blocks[0], blocks[2]])
-    changed = provider._build_kwargs(history, "system", None, 8192)
+    changed = provider._build_kwargs(history, "system", None)
     assert [block["type"] for block in changed["messages"][1]["content"]] == ["text", "tool_use"]
 
 
@@ -119,7 +118,7 @@ def test_deepseek_documented_effort_aliases_reach_both_api_surfaces(api_mode, ef
         provider_config_override={"models": {"deepseek-flash": {"apiMode": api_mode, "effort": effort}}},
     )
     if api_mode == "responses":
-        request = provider._build_responses_kwargs([Message.user("test")], "system", None, 8192, streaming=False)
+        request = provider._build_responses_kwargs([Message.user("test")], "system", None, streaming=False)
         assert request["reasoning"] == {"effort": expected}
     else:
         assert provider._build_thinking_kwargs() == {
@@ -147,7 +146,7 @@ def test_deepseek_responses_can_disable_thinking_without_adding_none_to_chat_eff
         provider_key_override="deepseek",
         provider_config_override={"models": {model: {"apiMode": "responses", "thinkingEnabled": False}}},
     )
-    request = provider._build_responses_kwargs([Message.user("test")], "system", None, 8192, streaming=False)
+    request = provider._build_responses_kwargs([Message.user("test")], "system", None, streaming=False)
     assert request["reasoning"] == {"effort": "none"}
 
 
@@ -194,7 +193,7 @@ async def test_claude_keeps_valid_signatures_across_three_serialized_tool_turns(
                 Message.tool_result(tool_use_id=f"call-{turn}", content=f"result {turn}"),
             ]
         )
-    wire = provider._build_kwargs(history, "system", None, 8192)
+    wire = provider._build_kwargs(history, "system", None)
     assert (
         sum(
             block["type"] == "thinking"

@@ -227,7 +227,7 @@ def chunk_fingerprint(chunk: dict[str, Any]) -> str:
 
 async def complete_chunk_with_llm(prompt: str, *, model: str) -> str:
     manager = ProviderManager(model=model, credentials=load_credentials(model=model))
-    response = await manager.complete([Message.user(prompt)], SYSTEM_PROMPT, max_tokens=4000)
+    response = await manager.complete([Message.user(prompt)], SYSTEM_PROMPT)
     return response.text
 
 

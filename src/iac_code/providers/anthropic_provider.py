@@ -25,6 +25,7 @@ from iac_code.providers.thinking import (
     get_thinking_spec,
     normalize_effort,
 )
+from iac_code.services.context_manager import _MODEL_EXACT_CONFIGS
 from iac_code.types.stream_events import (
     MessageEndEvent,
     MessageStartEvent,
@@ -68,19 +69,15 @@ class AnthropicProvider(Provider):
         model: str,
         api_key: str | None = None,
         base_url: str | None = None,
-        max_tokens: int = 8192,
         client: Any = None,
         effort: str | None = None,
         thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
-        max_completion_tokens: int | None = None,
         provider_key: str = "anthropic",
         **kwargs: Any,
     ) -> None:
         self._model = model
-        self._max_tokens = max_tokens
-        # 用户配置的「最大输出 tokens」硬上限(留空为 None,沿用调用方默认)。
-        self._max_output_tokens = positive_int_or_none(max_completion_tokens)
+        self._model_output_capacity: int | None = None
         self._effort = effort
         self._thinking_enabled = bool_or_none(thinking_enabled)
         normalized_thinking_budget = positive_int_or_none(thinking_budget)
@@ -185,14 +182,23 @@ class AnthropicProvider(Provider):
             return None
         return budget
 
-    def _adjust_max_tokens(self, max_tokens: int) -> int:
-        # 用户配置的输出上限覆盖调用方默认;仍保证 max_tokens 高于思考预算,预留正文空间。
-        base = self._max_output_tokens or max_tokens
-        budget = self._effective_thinking_budget()
-        if budget is None:
-            return base
-        min_max = budget + 4096
-        return max(base, min_max)
+    async def _get_model_output_capacity(self) -> int:
+        if self._model_output_capacity is None:
+            model_id, _ = self._wire_model()
+            config = _MODEL_EXACT_CONFIGS.get(model_id.lower())
+            known_model = model_id.startswith("claude-")
+            if self._PROVIDER_KEY != "anthropic_compatible" and known_model and config:
+                capacity = config.max_output_tokens
+            else:
+                response = await self._client.models.with_raw_response.retrieve(
+                    model_id, extra_headers=get_provider_request_headers()
+                )
+                metadata = response.http_response.json()
+                capacity = metadata.get("max_tokens") if isinstance(metadata, dict) else None
+            if type(capacity) is not int or capacity <= 0:
+                raise ValueError(f"Model {model_id!r} must report a positive integer max_tokens capability")
+            self._model_output_capacity = capacity
+        return self._model_output_capacity
 
     def _thinking_disabled(self) -> bool:
         return bool_or_none(getattr(self, "_thinking_enabled", None)) is False
@@ -205,9 +211,9 @@ class AnthropicProvider(Provider):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
     ) -> AsyncGenerator[StreamEvent, None]:
-        kwargs = self._build_kwargs(messages, system, tools, max_tokens)
+        kwargs = self._build_kwargs(messages, system, tools)
+        await self._prepare_request_kwargs(kwargs)
         prefix_metadata = self._request_prefix_metadata(kwargs)
 
         log_provider_request_policy(
@@ -310,17 +316,18 @@ class AnthropicProvider(Provider):
                             provider_metadata={"response_digest": response_digest},
                         )
             usage = _anthropic_usage(final.usage)
-            yield MessageEndEvent(stop_reason=final.stop_reason or "end_turn", usage=usage)
+            stop_reason = "max_tokens" if final.stop_reason == "model_context_window_exceeded" else final.stop_reason
+            yield MessageEndEvent(stop_reason=stop_reason or "end_turn", usage=usage)
 
     async def complete(
         self,
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
         cache_policy: str = "default",
     ) -> NonStreamingResponse:
-        kwargs = self._build_kwargs(messages, system, tools, max_tokens)
+        kwargs = self._build_kwargs(messages, system, tools)
+        await self._prepare_request_kwargs(kwargs)
         prefix_metadata = self._request_prefix_metadata(kwargs)
         log_provider_request_policy(
             self._PROVIDER_KEY,
@@ -328,7 +335,8 @@ class AnthropicProvider(Provider):
             "messages.create",
             kwargs,
         )
-        response = await self._client.messages.create(**kwargs)
+        # Preserve the client's timeout while bypassing the SDK's token-count-based non-streaming rejection.
+        response = await self._client.messages.create(**kwargs, timeout=getattr(self._client, "timeout", None))
         if prefix_metadata:
             prefix_metadata["response_digest"] = self._response_content_digest(response.content)
 
@@ -359,12 +367,13 @@ class AnthropicProvider(Provider):
                 )
 
         usage = _anthropic_usage(response.usage)
+        stop_reason = "max_tokens" if response.stop_reason == "model_context_window_exceeded" else response.stop_reason
 
         return NonStreamingResponse(
             message_id=response.id,
             text="".join(text_parts),
             tool_uses=tool_uses,
-            stop_reason=response.stop_reason,
+            stop_reason=stop_reason,
             usage=usage,
             thinking="".join(thinking_parts),
             thinking_blocks=thinking_blocks,
@@ -372,21 +381,25 @@ class AnthropicProvider(Provider):
 
     # -- conversion helpers ----------------------------------------------------
 
+    async def _prepare_request_kwargs(self, kwargs: dict[str, Any]) -> None:
+        capacity = await self._get_model_output_capacity()
+        budget = kwargs.get("thinking", {}).get("budget_tokens")
+        if budget is not None and budget >= capacity:
+            raise ValueError("Anthropic thinking_budget must be below the model's max_tokens capability")
+        kwargs["max_tokens"] = capacity
+
     def _build_kwargs(
         self,
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None,
-        max_tokens: int,
     ) -> dict[str, Any]:
         thinking_kwargs = self._build_thinking_kwargs()
-        effective_max_tokens = self._adjust_max_tokens(max_tokens)
 
         model_id, extra_betas = self._wire_model()
         api_tools = self._convert_tools(tools) if tools else None
         kwargs: dict[str, Any] = {
             "model": model_id,
-            "max_tokens": effective_max_tokens,
             "system": system,
             "messages": self._convert_messages(messages, system=system, tools=api_tools),
         }

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+import socket
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,8 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--ready-file", type=Path)
+    parser.add_argument("--ready-nonce")
     parser.add_argument("--config-dir", type=Path, required=True)
     parser.add_argument("--persistence-dir", type=Path, required=True)
     parser.add_argument("--artifact-dir", type=Path, required=True)
@@ -36,7 +40,10 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--staging-dir", type=Path)
     parser.add_argument("--backup-dir", type=Path)
     parser.add_argument("--suspend-trigger", type=Path)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if (args.ready_file is None) != (args.ready_nonce is None) or args.ready_nonce == "":
+        parser.error("--ready-file and a non-empty --ready-nonce must be provided together")
+    return args
 
 
 def _create_fixture_runtime(
@@ -115,9 +122,8 @@ def _create_fixture_runtime(
             messages: list[Any],
             system: str,
             tools: list[ToolDefinition] | None = None,
-            max_tokens: int = 8192,
         ):
-            del system, tools, max_tokens
+            del system, tools
             has_tool_result = any(
                 getattr(block, "type", None) == "tool_result"
                 for message in messages
@@ -624,21 +630,38 @@ def main() -> int:
         return pipeline
 
     pipeline_executor_module.create_pipeline = create_fixture_pipeline
-    app = create_app(
-        host=args.host,
-        port=args.port,
-        token=None,
-        model="permission-wait-fixture",
-        persistence_dir=persistence_dir,
-        artifact_dir=artifact_dir,
-        auto_approve_permissions=False,
-        permission_wait={
-            "resident_timeout_seconds": args.resident_timeout_seconds,
-            "sub_pipeline_timeout_seconds": args.sub_pipeline_timeout_seconds,
-            "timeout_grace_seconds": args.timeout_grace_seconds,
-        },
-    )
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    family = socket.AF_INET6 if ":" in args.host else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as listener:
+        if os.name == "posix" and args.port != 0:
+            listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        # Retain the OS-assigned listener so another fixture cannot steal a probe port.
+        listener.bind((args.host, args.port))
+        port = listener.getsockname()[1]
+        app = create_app(
+            host=args.host,
+            port=port,
+            token=None,
+            model="permission-wait-fixture",
+            persistence_dir=persistence_dir,
+            artifact_dir=artifact_dir,
+            auto_approve_permissions=False,
+            permission_wait={
+                "resident_timeout_seconds": args.resident_timeout_seconds,
+                "sub_pipeline_timeout_seconds": args.sub_pipeline_timeout_seconds,
+                "timeout_grace_seconds": args.timeout_grace_seconds,
+            },
+        )
+        if args.ready_file is not None:
+            ready_path = args.ready_file.expanduser().resolve()
+            ready_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = ready_path.with_name(ready_path.name + ".tmp-" + args.ready_nonce)
+            temporary.write_text(
+                json.dumps({"nonce": args.ready_nonce, "pid": os.getpid(), "parentPid": os.getppid(), "port": port}),
+                encoding="utf-8",
+            )
+            temporary.replace(ready_path)
+        server = uvicorn.Server(uvicorn.Config(app, host=args.host, port=port, log_level="warning"))
+        server.run(sockets=[listener])
     return 0
 
 

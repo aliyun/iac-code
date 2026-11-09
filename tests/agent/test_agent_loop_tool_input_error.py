@@ -68,7 +68,6 @@ class _Provider:
         messages,
         system,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
     ):
         yield MessageStartEvent(message_id="m1")
         yield ToolUseStartEvent(tool_use_id="tool1", name="complete_step")
@@ -132,7 +131,7 @@ async def test_unparseable_later_tool_remains_denied_across_permission_resume() 
         def get_model_name(self) -> str:
             return "fake"
 
-        async def stream(self, messages, system, tools=None, max_tokens=8192):
+        async def stream(self, messages, system, tools=None):
             yield MessageStartEvent(message_id="mixed")
             yield ToolUseStartEvent(tool_use_id="valid", name="complete_step")
             yield ToolUseEndEvent(tool_use_id="valid", name="complete_step", input={"conclusion": {}})
@@ -149,7 +148,7 @@ async def test_unparseable_later_tool_remains_denied_across_permission_resume() 
         def get_model_name(self) -> str:
             return "fake"
 
-        async def stream(self, messages, system, tools=None, max_tokens=8192):
+        async def stream(self, messages, system, tools=None):
             yield MessageStartEvent(message_id="continued")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 

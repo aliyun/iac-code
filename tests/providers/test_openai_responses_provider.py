@@ -29,7 +29,7 @@ def provider(client, **kwargs):
 @pytest.mark.asyncio
 async def test_request_converts_images_tools_effort_and_usage():
     client = FakeResponsesClient(response([reasoning(), call(), message("checking", phase="commentary")]))
-    p = provider(client, effort="high", max_completion_tokens=321)
+    p = provider(client, effort="high")
     messages = [
         Message(
             role="user",
@@ -40,12 +40,12 @@ async def test_request_converts_images_tools_effort_and_usage():
         )
     ]
     with use_provider_request_headers({"X-Trace": "fake"}):
-        result = await p.complete(messages, "system", TOOLS, max_tokens=100)
+        result = await p.complete(messages, "system", TOOLS)
     request = client.calls[0]
     assert request["store"] is False and request["stream"] is False
     assert request["instructions"] == "system"
     assert request["reasoning"] == {"effort": "high"}
-    assert request["max_output_tokens"] == 321
+    assert "max_output_tokens" not in request
     assert request["extra_headers"] == {"X-Trace": "fake"}
     assert request["include"] == ["reasoning.encrypted_content"]
     assert request["input"][0]["content"][1] == {"type": "input_image", "image_url": "data:image/png;base64,ZmFrZQ=="}

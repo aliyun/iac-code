@@ -100,7 +100,7 @@ class TestGetThinkingSpec:
         )
         assert spec.uses_reasoning_effort_param is True
 
-    def test_dashscope_glm52_models_use_effort_and_total_output_limit_without_thinking_budget(self):
+    def test_dashscope_glm52_models_use_effort_without_thinking_budget(self):
         for model in ("glm-5.2", "glm-5.2-fast-preview"):
             spec = get_thinking_spec("dashscope", model)
             assert spec.family is ThinkingFamily.DASHSCOPE
@@ -115,7 +115,6 @@ class TestGetThinkingSpec:
             )
             assert spec.default_thinking_budget is None
             assert spec.supports_thinking_budget is False
-            assert spec.use_max_completion_tokens is True
             assert spec.uses_reasoning_effort_param is True
 
     def test_qwen38_formal_and_preview_have_distinct_thinking_modes(self):
@@ -215,13 +214,12 @@ class TestGetThinkingSpec:
             assert spec.default_effort is EffortLevel.MAX
             assert spec.uses_reasoning_effort_param is True
 
-    def test_dashscope_kimi_k27_code_has_bounded_default_request_policy(self):
+    def test_dashscope_kimi_k27_code_has_default_thinking_budget(self):
         spec = get_thinking_spec("dashscope", "kimi-k2.7-code")
         assert spec.family is ThinkingFamily.DASHSCOPE
         assert spec.allowed_efforts == ()
         assert spec.default_thinking_budget == 8192
         assert spec.supports_thinking_budget is True
-        assert spec.use_max_completion_tokens is True
         assert spec.uses_reasoning_effort_param is False
 
     def test_token_plan_glm52_and_kimi_k27_code_use_model_specific_request_policies(self):
@@ -235,13 +233,11 @@ class TestGetThinkingSpec:
         assert glm.family is ThinkingFamily.DASHSCOPE
         assert glm.default_thinking_budget is None
         assert glm.supports_thinking_budget is False
-        assert glm.use_max_completion_tokens is True
         assert glm.uses_reasoning_effort_param is True
 
         assert kimi.family is ThinkingFamily.DASHSCOPE
         assert kimi.default_thinking_budget == 8192
         assert kimi.supports_thinking_budget is True
-        assert kimi.use_max_completion_tokens is True
         assert kimi.uses_reasoning_effort_param is False
 
     def test_thinking_budget_capability_false_for_effort_families(self):
@@ -255,7 +251,6 @@ class TestGetThinkingSpec:
         ):
             spec = get_thinking_spec(provider_key, model)
             assert spec.supports_thinking_budget is False, (provider_key, model)
-            assert spec.use_max_completion_tokens is False, (provider_key, model)
             assert spec.default_thinking_budget is None, (provider_key, model)
 
     def test_dashscope_deepseek_supports_documented_efforts(self):

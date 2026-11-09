@@ -173,7 +173,7 @@ def _select_facts(config_dir: Path, pending: dict[str, Any], facts: dict[str, st
     if isinstance(review, dict):
         payload['fact_selection_review'] = review
     request = {
-        'model': DIAGNOSIS_MODEL, 'reasoning_effort': 'low', 'max_tokens': 512,
+        'model': DIAGNOSIS_MODEL, 'reasoning_effort': 'low',
         'messages': [
             {'role': 'system', 'content': (
                 'You simulate an E2E user answering the current clarification. '

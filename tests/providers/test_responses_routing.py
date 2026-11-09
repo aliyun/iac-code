@@ -131,12 +131,12 @@ def test_responses_reuses_local_provider_default_api_key(key, default_key):
 def test_gpt6_forced_chat_checks_tool_restrictions(model, effort, allowed, streaming):
     p = create("openai", model, {"effort": effort, "models": {model: {"apiMode": "chat_completions"}}})
     context = p._create_chat_request_context(streaming=streaming)
-    assert "tools" not in p._build_chat_completion_kwargs([], "system", None, 100, context)
+    assert "tools" not in p._build_chat_completion_kwargs([], "system", None, context)
     if allowed:
-        assert p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)["reasoning_effort"] == "none"
+        assert p._build_chat_completion_kwargs([], "system", TOOLS, context)["reasoning_effort"] == "none"
     else:
         with pytest.raises(ValueError, match="requires apiMode=responses"):
-            p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)
+            p._build_chat_completion_kwargs([], "system", TOOLS, context)
 
 
 @pytest.mark.parametrize(
@@ -169,10 +169,10 @@ def test_chat_tool_restrictions_follow_model_configuration(monkeypatch, tool_eff
     p = OpenAIProvider(model, client=object(), effort=effort)
     context = p._create_chat_request_context(streaming=False)
     if allowed:
-        assert p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)["tools"]
+        assert p._build_chat_completion_kwargs([], "system", TOOLS, context)["tools"]
     else:
         with pytest.raises(ValueError, match="requires apiMode=responses"):
-            p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)
+            p._build_chat_completion_kwargs([], "system", TOOLS, context)
 
 
 @pytest.mark.parametrize(
@@ -189,13 +189,13 @@ def test_chat_tool_restrictions_follow_model_configuration(monkeypatch, tool_eff
 def test_chat_tool_restrictions_do_not_affect_other_models_or_providers(key, model):
     p = OpenAIProvider(model, client=object(), provider_key=key, effort="high")
     context = p._create_chat_request_context(streaming=False)
-    assert p._build_chat_completion_kwargs([], "system", TOOLS, 100, context)["tools"]
+    assert p._build_chat_completion_kwargs([], "system", TOOLS, context)["tools"]
 
 
 def test_gpt6_astra_responses_cannot_disable_reasoning():
     p = create("openai", "gpt-6-astra", {"thinkingEnabled": False})
     with pytest.raises(ValueError, match="reasoning effort"):
-        p._build_responses_kwargs([], "system", None, 100, streaming=False)
+        p._build_responses_kwargs([], "system", None, streaming=False)
 
 
 @pytest.mark.parametrize(
@@ -219,7 +219,7 @@ def test_gpt6_astra_responses_cannot_disable_reasoning():
 )
 def test_responses_saved_unsupported_effort_uses_protocol_default(key, model, expected):
     p = create(key, model, {"effort": "ultra", "models": {model: {"apiMode": "responses"}}})
-    kwargs = p._build_responses_kwargs([], "system", None, 100, streaming=False)
+    kwargs = p._build_responses_kwargs([], "system", None, streaming=False)
     assert kwargs.get("reasoning") == ({"effort": expected} if expected is not None else None)
     assert p._effort == "ultra"
 
@@ -247,6 +247,6 @@ def test_qwen_responses_preserves_thinking_source_precedence(provider_config, mo
         },
         request_policy_override=request_policy,
     )
-    kwargs = p._build_responses_kwargs([], "system", None, 100, streaming=False)
+    kwargs = p._build_responses_kwargs([], "system", None, streaming=False)
     assert kwargs["reasoning"] == {"effort": expected}
     assert "extra_body" not in kwargs

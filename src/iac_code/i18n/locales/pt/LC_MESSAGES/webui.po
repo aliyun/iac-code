@@ -2873,16 +2873,6 @@ msgid "Leave blank to use model default"
 msgstr "Deixe em branco para usar o padrão do modelo"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Max output tokens"
-msgstr "Máximo de tokens de saída"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Max output tokens per reply; leave blank to use model default"
-msgstr ""
-"Máximo de tokens de saída por resposta; deixe em branco para usar o "
-"padrão do modelo"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Thinking budget"
 msgstr "Orçamento de raciocínio"
 

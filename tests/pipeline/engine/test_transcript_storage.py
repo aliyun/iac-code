@@ -50,7 +50,7 @@ class _FakeProvider:
     def get_model_name(self) -> str:
         return "fake-model"
 
-    async def stream(self, messages, system, tools=None, max_tokens=8192):
+    async def stream(self, messages, system, tools=None):
         self._call_count += 1
         if self._call_count > 1:
             yield MessageStartEvent(message_id="msg-2")

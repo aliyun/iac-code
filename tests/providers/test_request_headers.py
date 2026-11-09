@@ -38,7 +38,6 @@ def test_openai_provider_adds_request_local_headers() -> None:
             [Message.user("hello")],
             "system",
             None,
-            1024,
             provider._create_chat_request_context(streaming=False),
         )
 
@@ -57,7 +56,6 @@ def test_qwen_provider_merges_adapter_and_request_local_headers() -> None:
             [Message.user("hello")],
             "system",
             None,
-            1024,
             provider._create_chat_request_context(streaming=False),
         )
 
@@ -71,7 +69,7 @@ def test_anthropic_provider_merges_alias_and_request_local_headers() -> None:
     provider = AnthropicProvider(model="claude-sonnet-4-6-1m", api_key="test")
 
     with use_provider_request_headers({"X-A2A-Session": "session-1"}):
-        kwargs = provider._build_kwargs([Message.user("hello")], "system", None, 1024)
+        kwargs = provider._build_kwargs([Message.user("hello")], "system", None)
 
     assert kwargs["extra_headers"] == {
         "anthropic-beta": "context-1m-2025-08-07",
