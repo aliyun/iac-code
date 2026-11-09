@@ -156,7 +156,7 @@ class TestInterruptController:
         captured = {}
 
         class ProviderManager:
-            async def complete(self, *, messages, system, tools=None, max_tokens=8192, cache_policy="default"):
+            async def complete(self, *, messages, system, tools=None, cache_policy="default"):
                 captured["messages"] = messages
                 return type(
                     "Response",

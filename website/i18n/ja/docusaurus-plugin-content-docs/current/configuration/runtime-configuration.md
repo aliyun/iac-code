@@ -74,27 +74,26 @@ providers:
     model: glm-5.2
     thinkingEnabled: true
     thinkingBudget: 8192
-    maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
         thinkingEnabled: false
         thinkingBudget: 8192
-        maxCompletionTokens: 16384
 ```
 
 | フィールド | スコープ | 説明 |
 |---|---|---|
 | `thinkingEnabled` | Provider またはモデル | 任意の boolean thinking スイッチ。`true` は対応する provider/model に thinking の有効化を要求し、`false` は無効化を要求します。省略時は provider/model のデフォルトを維持します。 |
 | `thinkingBudget` | Provider またはモデル | 正の整数の reasoning/thinking 予算。対応している provider に渡されます。 |
-| `maxCompletionTokens` | プロバイダーまたはモデル | 正の整数で出力上限を上書きします。対応する Chat プロバイダーでは `max_completion_tokens`、Responses では `max_output_tokens` を使います。 |
 | `effort` | Provider またはモデル | thinking effort の任意の上書き値。effort 制御に対応したモデルでのみ有効です。 |
 | `apiMode` | モデルのみ | `chat_completions` または `responses`。省略時はモデルに組み込まれたデフォルトのプロトコルを使います。対応するプロバイダーとモデルは [LLM プロバイダー](./llm-providers.md)を参照してください。 |
 
-Responses の `apiMode` は、`providers.<provider>.models.<model>` の下にのみ設定します。`effort` は `reasoning.effort` として送信され、`thinkingBudget` はこの API に送信されません。`maxCompletionTokens` は推論トークンを含む総出力上限を設定し、DashScope Responses では `16` 以上が必要です。プロトコルを切り替えても、`settings.yml` のフィールド名は変わりません。
+Responses の `apiMode` は、`providers.<provider>.models.<model>` の下にのみ設定します。`effort` は `reasoning.effort` として送信され、`thinkingBudget` はこの API に送信されません。プロトコルを切り替えても、`settings.yml` のフィールド名は変わりません。
+
+IaC Code は設定可能な出力トークン上限を設けません。Chat Completions と Responses のリクエストでは、任意の出力上限フィールドを省略します。Anthropic 公式 Messages API では `max_tokens` が必須のため、モデルがサポートする最大出力容量を指定します。MiniMax の Anthropic 互換エンドポイントではこのフィールドは任意のため、IaC Code は省略します。プロバイダーとモデル自体の上限は引き続き適用されます。
 
 `providers.<provider>.models.<model>` 以下のモデル単位の有効な値は、provider 単位の値を上書きします。無効な数値は無視されるため、IaC Code は provider 単位の値または組み込みのモデルポリシーにフォールバックします。
 
-Alibaba Cloud DashScope と DashScope Token Plan では、IaC Code は `glm-5.2` と `kimi-k2.7-code` に組み込みで `thinkingBudget=8192` を設定しています。`maxCompletionTokens` が未設定の場合、リクエスト上限は通常の回答 token 上限に有効な thinking budget を加えて計算されます。
+Alibaba Cloud DashScope と DashScope Token Plan では、IaC Code は `glm-5.2` と `kimi-k2.7-code` に組み込みで `thinkingBudget=8192` を設定しています。
 
 対話 REPL では、`/thinking_enabled on` または `/thinking_enabled off` で provider 単位の `thinkingEnabled` 値を永続化できます。引数なしで `/thinking_enabled` を実行すると、コンソール UI が利用できる場合は有効化/無効化ピッカーが開きます。ワンショット headless 実行では、`--thinking-enabled` または `--no-thinking-enabled` でそのリクエストだけ thinking を上書きでき、`settings.yml` は書き換えません。
 

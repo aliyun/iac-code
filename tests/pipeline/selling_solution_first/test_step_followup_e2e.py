@@ -43,7 +43,7 @@ class ScriptedModel:
     def add(self, *calls):
         self.queue.extend(calls)
 
-    async def stream(self, messages, system, tools=None, max_tokens=8192):
+    async def stream(self, messages, system, tools=None):
         assert self.queue, [repr(m) for m in messages[-2:]]
         name, arguments = self.queue.pop(0)
         self.calls += 1
@@ -142,10 +142,10 @@ async def test_followup_answer_evidence_ignores_retracted_messages(tmp_path, mon
     saved = copy.deepcopy(flow.context.get_conclusion("solution_selection"))
     original_stream = model.stream
 
-    async def stream(messages, system, tools=None, max_tokens=8192):
+    async def stream(messages, system, tools=None):
         kind, _ = model.queue[0]
         if kind not in {"truncated", "silent", "previous"}:
-            async for event in original_stream(messages, system, tools=tools, max_tokens=max_tokens):
+            async for event in original_stream(messages, system, tools=tools):
                 yield event
             return
         model.queue.pop(0)

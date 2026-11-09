@@ -74,27 +74,26 @@ providers:
     model: glm-5.2
     thinkingEnabled: true
     thinkingBudget: 8192
-    maxCompletionTokens: 16384
     models:
       kimi-k2.7-code:
         thinkingEnabled: false
         thinkingBudget: 8192
-        maxCompletionTokens: 16384
 ```
 
 | Campo | Escopo | Descrição |
 |---|---|---|
 | `thinkingEnabled` | Provedor ou modelo | Chave booleana opcional de thinking. `true` solicita que provedores/modelos compatíveis habilitem thinking; `false` solicita a desativação; se omitida, preserva o padrão do provedor/modelo. |
 | `thinkingBudget` | Provedor ou modelo | Orçamento de reasoning/thinking como inteiro positivo, enviado aos provedores que oferecem suporte a ele. |
-| `maxCompletionTokens` | Provedor ou modelo | Inteiro positivo que substitui o limite de saída: `max_completion_tokens` para provedores Chat compatíveis ou `max_output_tokens` para Responses. |
 | `effort` | Provedor ou modelo | Substituição opcional do effort de thinking, válida apenas para modelos que oferecem controle de effort. |
 | `apiMode` | Apenas modelo | `chat_completions` ou `responses`; se omitido, usa o protocolo padrão integrado do modelo. Consulte os [provedores LLM](./llm-providers.md) para ver os provedores e modelos compatíveis. |
 
-Para Responses, configure `apiMode` apenas em `providers.<provider>.models.<model>`. `effort` é enviado como `reasoning.effort`; `thinkingBudget` não é enviado a esta API. `maxCompletionTokens` define o limite total de saída, incluindo os tokens de raciocínio, e deve ser pelo menos `16` para DashScope Responses. Os nomes dos campos de `settings.yml` continuam iguais ao mudar de protocolo.
+Para Responses, configure `apiMode` apenas em `providers.<provider>.models.<model>`. `effort` é enviado como `reasoning.effort`; `thinkingBudget` não é enviado a essa API. Os nomes dos campos de `settings.yml` permanecem iguais ao trocar de protocolo.
+
+O IaC Code não impõe um limite configurável de tokens de saída. As solicitações Chat Completions e Responses omitem os campos opcionais de limite de saída. A API Messages oficial da Anthropic exige `max_tokens`, por isso o IaC Code usa a capacidade máxima de saída suportada pelo modelo. No endpoint da MiniMax compatível com Anthropic, esse campo é opcional e o IaC Code o omite. Os limites do provedor e do modelo continuam válidos.
 
 Valores válidos no nível do modelo em `providers.<provider>.models.<model>` substituem os valores no nível do provedor. Valores numéricos inválidos são ignorados, então o IaC Code volta ao valor do provedor ou à política integrada do modelo.
 
-Para Alibaba Cloud DashScope e DashScope Token Plan, o IaC Code tem um `thinkingBudget=8192` integrado para `glm-5.2` e `kimi-k2.7-code`. Quando `maxCompletionTokens` não é definido, o limite da requisição é calculado como o limite normal de tokens de resposta mais o thinking budget efetivo.
+Para Alibaba Cloud DashScope e DashScope Token Plan, o IaC Code tem um `thinkingBudget=8192` integrado para `glm-5.2` e `kimi-k2.7-code`.
 
 No REPL interativo, `/thinking_enabled on` ou `/thinking_enabled off` permite persistir o valor `thinkingEnabled` no nível do provedor. Executar `/thinking_enabled` sem argumento abre o seletor Habilitar/Desabilitar quando há uma UI de console disponível. Execuções headless de uma única vez podem substituir thinking para essa solicitação com `--thinking-enabled` ou `--no-thinking-enabled`, sem reescrever `settings.yml`.
 

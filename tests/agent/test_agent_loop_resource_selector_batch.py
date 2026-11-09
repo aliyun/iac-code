@@ -51,7 +51,6 @@ class BatchProvider:
         messages,
         system,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
     ):
         yield MessageStartEvent(message_id="batch")
         for index, name in enumerate(self.names):

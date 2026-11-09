@@ -77,7 +77,6 @@ class ThinkingSpec:
     default_effort: EffortLevel | None = None
     default_thinking_budget: int | None = None
     supports_thinking_budget: bool = False
-    use_max_completion_tokens: bool = False
     uses_reasoning_effort_param: bool = False
     adaptive_always_on: bool = False
     supports_disable: bool = True
@@ -264,13 +263,11 @@ _DASHSCOPE_KIMI_K27_CODE_SPEC = ThinkingSpec(
     ThinkingFamily.DASHSCOPE,
     default_thinking_budget=8192,
     supports_thinking_budget=True,
-    use_max_completion_tokens=True,
 )
 
 _DASHSCOPE_GLM52_SPEC = ThinkingSpec(
     ThinkingFamily.DASHSCOPE,
     _GLM_EFFORTS,
-    use_max_completion_tokens=True,
     uses_reasoning_effort_param=True,
 )
 
@@ -403,7 +400,6 @@ _KIMI_K31_SPEC = ThinkingSpec(
     EffortLevel.MAX,
     supports_disable=False,
     thinking_enabled_by_default=True,
-    use_max_completion_tokens=True,
 )
 _KIMI_CODE_K31_SPEC = ThinkingSpec(
     ThinkingFamily.KIMI,
@@ -411,7 +407,6 @@ _KIMI_CODE_K31_SPEC = ThinkingSpec(
     EffortLevel.HIGH,
     supports_disable=False,
     thinking_enabled_by_default=True,
-    use_max_completion_tokens=True,
 )
 _KIMI_CODE_K3_SPEC = ThinkingSpec(
     ThinkingFamily.KIMI,
@@ -446,7 +441,6 @@ _VOLCENGINE_SEED_SPEC = ThinkingSpec(
     ThinkingFamily.VOLCENGINE,
     (EffortLevel.NONE, EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH),
     EffortLevel.HIGH,
-    use_max_completion_tokens=True,
     thinking_enabled_by_default=True,
     effort_aliases=(("minimal", "none"), ("xhigh", "high"), ("max", "high")),
 )
@@ -454,7 +448,6 @@ _VOLCENGINE_SEED20_SPEC = ThinkingSpec(
     ThinkingFamily.VOLCENGINE,
     (EffortLevel.NONE, EffortLevel.LOW, EffortLevel.MEDIUM, EffortLevel.HIGH),
     EffortLevel.MEDIUM,
-    use_max_completion_tokens=True,
     thinking_enabled_by_default=True,
     effort_aliases=(("minimal", "none"), ("xhigh", "high"), ("max", "high")),
 )
@@ -462,7 +455,6 @@ _VOLCENGINE_DEEPSEEK_SPEC = ThinkingSpec(
     ThinkingFamily.VOLCENGINE,
     (EffortLevel.NONE, *_DEEPSEEK_EFFORTS),
     EffortLevel.HIGH,
-    use_max_completion_tokens=True,
     thinking_enabled_by_default=True,
     effort_aliases=(("minimal", "none"), ("medium", "low"), ("xhigh", "high")),
 )
@@ -470,7 +462,6 @@ _VOLCENGINE_DEEPSEEK41_SPEC = ThinkingSpec(
     ThinkingFamily.VOLCENGINE,
     (EffortLevel.NONE, *_DEEPSEEK_EFFORTS),
     EffortLevel.HIGH,
-    use_max_completion_tokens=True,
     thinking_enabled_by_default=True,
     effort_aliases=(("minimal", "low"), ("medium", "high"), ("xhigh", "high"), ("ultra", "max")),
 )
@@ -479,7 +470,6 @@ _VOLCENGINE_GLM_SPEC = ThinkingSpec(
     _ZHIPU_GLM53_EFFORTS,
     EffortLevel.MAX,
     supports_disable=False,
-    use_max_completion_tokens=True,
     thinking_enabled_by_default=True,
     effort_aliases=(("none", "low"), ("minimal", "low"), ("medium", "high"), ("xhigh", "max")),
 )
@@ -488,7 +478,6 @@ _VOLCENGINE_KIMI_SPEC = ThinkingSpec(
     _KIMI_K3_EFFORTS,
     EffortLevel.MAX,
     supports_disable=False,
-    use_max_completion_tokens=True,
     thinking_enabled_by_default=True,
     effort_aliases=(("medium", "low"), ("xhigh", "max")),
 )

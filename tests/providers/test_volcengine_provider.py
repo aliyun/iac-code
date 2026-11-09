@@ -27,7 +27,6 @@ def test_seed_effort_and_disable_stay_on_ark_wire_format(key, model):
     assert p._build_thinking_kwargs() == {"reasoning_effort": "high"}
     p._thinking_enabled = False
     assert p._build_thinking_kwargs() == {"extra_body": {"thinking": {"type": "disabled"}}}
-    assert p._token_limit_kwargs(4096) == {"max_completion_tokens": 4096}
 
 
 @pytest.mark.parametrize(

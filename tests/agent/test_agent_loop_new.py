@@ -472,7 +472,7 @@ class TestAgentLoopInit:
 @pytest.mark.asyncio
 class TestAgentLoopStreaming:
     async def test_provider_stream_can_close_from_a_different_asyncio_context(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             assert get_span_attributes()[PipelineAttr.NAME] == "selling"
             yield TextDeltaEvent(text="Hello!")
 
@@ -492,7 +492,7 @@ class TestAgentLoopStreaming:
         assert get_span_attributes() == {}
 
     async def test_text_only(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="Hello!")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -509,7 +509,7 @@ class TestAgentLoopStreaming:
         mock_provider,
         mock_registry,
     ):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield ThinkingDeltaEvent(text="", provider_metadata={"signature": "opaque"})
             yield ThinkingDeltaEvent(text="reasoning")
@@ -579,7 +579,7 @@ class TestAgentLoopStreaming:
         assert entry_span.attrs[PipelineAttr.STEP_ID] == "intent_parsing"
 
     async def test_opaque_thinking_metadata_round_trips_through_context(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield ThinkingDeltaEvent(text="reasoning", block_index=0)
             yield ThinkingDeltaEvent(
@@ -629,7 +629,7 @@ class TestAgentLoopStreaming:
             "extra_content": {"google": {"thought_signature": "signed-thought"}},
         }
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_messages.append(messages)
             yield MessageStartEvent(message_id=f"m{len(captured_messages)}")
             if len(captured_messages) == 1:
@@ -658,7 +658,7 @@ class TestAgentLoopStreaming:
     async def test_tool_end_event_corrects_fragmentary_start_name(self, mock_provider, mock_registry):
         captured_messages = []
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_messages.append(messages)
             yield MessageStartEvent(message_id=f"m{len(captured_messages)}")
             if len(captured_messages) == 1:
@@ -684,7 +684,7 @@ class TestAgentLoopStreaming:
         assert tool_use.name == "read_file"
 
     async def test_run_returns_text(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="Hello!")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -698,7 +698,7 @@ class TestAgentLoopStreaming:
     async def test_memory_recall_is_hidden_context_message(self, mock_provider, mock_registry):
         captured_messages = []
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_messages.append(messages)
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="ok")
@@ -765,7 +765,7 @@ class TestAgentLoopStreaming:
     async def test_recalled_memory_persists_and_suppresses_duplicate_in_future_turn(self, mock_provider, mock_registry):
         captured_messages = []
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_messages.append(messages)
             yield MessageStartEvent(message_id=f"m{len(captured_messages)}")
             yield TextDeltaEvent(text="ok")
@@ -847,7 +847,7 @@ class TestAgentLoopStreaming:
         assert recall_service.surfaced == {"recent.md"}
 
     async def test_memory_recall_usage_is_recorded_in_session_usage(self, mock_provider, mock_registry, tmp_path):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="ok")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=10, output_tokens=5))
@@ -921,7 +921,7 @@ class TestAgentLoopStreaming:
 
         captured_messages = []
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_messages.append(messages)
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="ok")
@@ -976,7 +976,7 @@ class TestAgentLoopStreaming:
 
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
             yield MessageStartEvent(message_id=f"m{call_count}")
@@ -1046,7 +1046,7 @@ class TestAgentLoopStreaming:
 
         recall_service = FakeRecallService()
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             recall_service.prefetch.finished = True
             yield TextDeltaEvent(text="ok")
@@ -1105,7 +1105,7 @@ class TestAgentLoopStreaming:
 
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
             captured_messages.append(messages)
@@ -1144,7 +1144,7 @@ class TestAgentLoopStreaming:
     async def test_late_memory_recall_is_not_persisted_for_matching_next_turn(self, mock_provider, mock_registry):
         captured_messages = []
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_messages.append(messages)
             yield MessageStartEvent(message_id="m1")
             await asyncio.sleep(0.02)
@@ -1204,7 +1204,7 @@ class TestAgentLoopStreaming:
     async def test_late_memory_recall_is_not_persisted_after_different_next_turn(self, mock_provider, mock_registry):
         captured_messages = []
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_messages.append(messages)
             yield MessageStartEvent(message_id="m1")
             await asyncio.sleep(0.02)
@@ -1264,7 +1264,7 @@ class TestAgentLoopStreaming:
         second_stream_can_finish = asyncio.Event()
         captured_messages = []
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_messages.append(messages)
             yield MessageStartEvent(message_id="m1")
             if len(captured_messages) == 2:
@@ -1335,7 +1335,7 @@ class TestAgentLoopStreaming:
         stream_started = asyncio.Event()
         stream_can_finish = asyncio.Event()
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             stream_started.set()
             await stream_can_finish.wait()
@@ -1404,7 +1404,7 @@ class TestAgentLoopStreaming:
         execute_cancelled = asyncio.Event()
         execute_released = asyncio.Event()
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
             yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
@@ -1459,7 +1459,7 @@ class TestAgentLoopStreaming:
         def refresh_prompt():
             return "fresh-1" if not captured_systems else "fresh-2"
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             captured_systems.append(system)
             if len(captured_systems) == 1:
                 yield MessageStartEvent(message_id="m1")
@@ -1491,7 +1491,7 @@ class TestAgentLoopStreaming:
         assert loop.context_manager.system_prompt == "fresh-2"
 
     async def test_records_non_zero_message_end_usage(self, mock_provider, mock_registry, tmp_path):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="Hello!")
             yield MessageEndEvent(
@@ -1529,7 +1529,7 @@ class TestAgentLoopStreaming:
         assert store.load("/tmp/status-project", "usage-session").total_tokens == 15
 
     async def test_records_usage_with_runtime_provider_key(self, mock_provider, mock_registry, tmp_path, monkeypatch):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="Hello!")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=10, output_tokens=5))
@@ -1559,7 +1559,7 @@ class TestAgentLoopStreaming:
     async def test_records_usage_from_multiple_model_calls_in_one_prompt(self, mock_provider, mock_registry, tmp_path):
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1606,7 +1606,7 @@ class TestAgentLoopStreaming:
         call_messages = []
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
             call_messages.append(messages)
@@ -1660,7 +1660,7 @@ class TestAgentLoopStreaming:
     async def test_queued_input_provider_is_not_drained_without_tool_call(self, mock_provider, mock_registry):
         queued_input_provider = Mock(return_value=["should wait"])
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="done")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -1676,7 +1676,7 @@ class TestAgentLoopStreaming:
         assert user_texts == ["Hi"]
 
     async def test_react_step_span_records_round_output_when_debug_content_enabled(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="final")
             yield TextDeltaEvent(text=" answer")
@@ -1727,7 +1727,7 @@ class TestAgentLoopStreaming:
         assert output[0]["finish_reason"] == "end_turn"
 
     async def test_does_not_record_zero_message_end_usage(self, mock_provider, mock_registry, tmp_path):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="Hello!")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -1751,7 +1751,7 @@ class TestAgentLoopStreaming:
         assert not store.path_for("/tmp/status-project", "zero-session").exists()
 
     async def test_abnormal_provider_stream_emits_stream_error_end(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="partial")
 
@@ -1930,7 +1930,7 @@ class TestAgentLoopStreaming:
         assert recall_service.reset_called is True
 
     async def test_replace_session_clears_last_provider_request_snapshot(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="ok")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -1954,7 +1954,7 @@ class TestAgentLoopStreaming:
         mock_provider.reset_conversation_state.assert_called_once_with()
 
     async def test_reset_clears_last_provider_request_snapshot(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="ok")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -1990,7 +1990,7 @@ class TestAgentLoopStreaming:
 
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2065,7 +2065,7 @@ class TestAgentLoopStreaming:
 
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
             captured_messages.append(messages)
@@ -2222,7 +2222,7 @@ class TestAgentLoopStreaming:
     async def test_run_streaming_executes_tools_and_applies_extensions(self, mock_provider, mock_registry):
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
 
@@ -2274,7 +2274,7 @@ class TestAgentLoopStreaming:
     ):
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -2320,7 +2320,7 @@ class TestAgentLoopStreaming:
     async def test_tool_events_carry_render_metadata_not_renderer_tool(self, mock_provider, mock_registry):
         call_count = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal call_count
             call_count += 1
             if call_count > 1:
@@ -2385,7 +2385,7 @@ class TestAgentLoopStreaming:
 
         calls = 0
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             nonlocal calls
             calls += 1
             yield MessageStartEvent(message_id=f"m{calls}")
@@ -2434,7 +2434,7 @@ class TestAgentLoopStreaming:
     async def test_run_streaming_tombstone_discards_partial_turn(self, mock_provider, mock_registry):
         from iac_code.types.stream_events import TombstoneEvent
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="partial")
             yield TombstoneEvent(message_id="m1")
@@ -2473,7 +2473,7 @@ class TestAgentLoopStreaming:
         mock_provider.stream.assert_not_called()
 
     async def test_tool_use_exhaustion_emits_max_turns_after_tool_result(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield ToolUseStartEvent(tool_use_id="toolu_1", name="read_file")
             yield ToolUseEndEvent(tool_use_id="toolu_1", name="read_file", input={"path": "a.txt"})
@@ -2503,7 +2503,7 @@ class TestAgentLoopStreaming:
         assert events[-1].stop_reason == "max_turns"
 
     async def test_normal_completion_does_not_emit_synthetic_max_turns(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="Hello!")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -2530,7 +2530,7 @@ class TestAgentLoopStreaming:
         registry = MagicMock()
         registry.list_tools.side_effect = [[], [runtime_tool]]
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             assert tools is not None
             assert [tool.name for tool in tools] == ["read_file"]
             yield MessageStartEvent(message_id="m1")
@@ -2581,7 +2581,7 @@ class TestAgentLoopStreaming:
                 )
             ]
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             assert messages[0].content.startswith("<skill-name>demo</skill-name>")
             assert messages[1].content == "please match"
             yield MessageStartEvent(message_id="m1")
@@ -2630,7 +2630,7 @@ class TestAgentLoopStreaming:
                 )
             ]
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             assert messages[0].content.startswith("<skill-name>demo</skill-name>")
             assert messages[1].content == "please match"
             yield MessageStartEvent(message_id="m1")
@@ -2680,7 +2680,7 @@ class TestAgentLoopStreaming:
         cwd = str(tmp_path / "cwd")
         session_id = "session-a"
 
-        async def first_stream(messages, system, tools=None, max_tokens=8192):
+        async def first_stream(messages, system, tools=None):
             assert messages[0].content.startswith("<skill-name>demo</skill-name>")
             assert messages[1].content == "please match me"
             yield MessageStartEvent(message_id="m1")
@@ -2701,7 +2701,7 @@ class TestAgentLoopStreaming:
         loaded = storage.load(cwd, session_id)
         assert sum("<skill-name>demo</skill-name>" in message.get_text() for message in loaded) == 1
 
-        async def resumed_stream(messages, system, tools=None, max_tokens=8192):
+        async def resumed_stream(messages, system, tools=None):
             assert sum("<skill-name>demo</skill-name>" in message.content for message in messages) == 1
             assert messages[-1].content == "please match me again"
             yield MessageStartEvent(message_id="m2")
@@ -2755,7 +2755,7 @@ class TestAgentLoopStreaming:
                 )
             ]
 
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
 
@@ -2801,7 +2801,7 @@ class TestAgentLoopCompaction:
         assert "telemetry_messages" not in call_kwargs
 
     async def test_run_streaming_emits_started_then_finished_when_compacting(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="done")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -2818,7 +2818,7 @@ class TestAgentLoopCompaction:
         assert (compactions[1].original_tokens, compactions[1].compacted_tokens) == (1200, 400)
 
     async def test_run_streaming_emits_terminal_failed_when_auto_compact_noops(self, mock_provider, mock_registry):
-        async def fake_stream(messages, system, tools=None, max_tokens=8192):
+        async def fake_stream(messages, system, tools=None):
             yield MessageStartEvent(message_id="m1")
             yield TextDeltaEvent(text="done")
             yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
@@ -3251,7 +3251,7 @@ class TestAgentLoopSetProvider:
         new_provider.get_model_name.return_value = "claude-opus-4-7"
         loop.set_provider(new_provider)
 
-        assert loop.context_manager._config.context_window == 200_000
+        assert loop.context_manager._config.context_window == 1_000_000
 
     def test_set_provider_optionally_refreshes_system_prompt(self, mock_provider, mock_registry):
         loop = AgentLoop(provider_manager=mock_provider, system_prompt="old prompt", tool_registry=mock_registry)

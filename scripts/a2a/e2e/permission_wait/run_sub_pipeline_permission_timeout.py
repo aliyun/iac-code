@@ -90,7 +90,6 @@ class _CandidateProvider:
         messages: Any,
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
     ):
         self.turn += 1
         yield MessageStartEvent(message_id="fixture-message-{}".format(self.turn))

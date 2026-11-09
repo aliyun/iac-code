@@ -222,7 +222,6 @@ export function saveProviderConfig({
   apiBase = "",
   apiKey = "",
   thinkingBudget,
-  maxCompletionTokens,
 } = {}) {
   const payload = {
     provider,
@@ -237,12 +236,9 @@ export function saveProviderConfig({
   if (apiKey) {
     payload.apiKey = apiKey;
   }
-  // 数值上限须可清除:显式传入(int 或 null)才带上;undefined 表示保持现状。
+  // 思考预算须可清除:显式传入(int 或 null)才带上;undefined 表示保持现状。
   if (thinkingBudget !== undefined) {
     payload.thinkingBudget = thinkingBudget;
-  }
-  if (maxCompletionTokens !== undefined) {
-    payload.maxCompletionTokens = maxCompletionTokens;
   }
   return jsonFetch("/api/providers/config", {
     method: "PUT",

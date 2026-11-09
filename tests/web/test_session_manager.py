@@ -182,7 +182,7 @@ def test_create_session_logs_session_start_parameters(tmp_path, monkeypatch, cap
     assert "effort=high" in caplog.text
     assert "thinking_enabled=false" in caplog.text
     assert "thinking_budget=2048" in caplog.text
-    assert "max_completion_tokens=10000" in caplog.text
+    assert "max_completion_tokens" not in caplog.text
     assert "endpoint_origin=https://llm.example.com:8443" in caplog.text
     assert "endpoint_custom=true" in caplog.text
     assert "user:pass" not in caplog.text

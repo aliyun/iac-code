@@ -84,6 +84,18 @@ class ModelServer:
 
 
 class _Handler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:
+        fixture = self.server.fixture
+        if fixture.protocol != "anthropic" or not self.path.startswith("/v1/models/"):
+            self.send_error(404)
+            return
+        body = json.dumps({"id": self.path.rsplit("/", 1)[-1], "max_tokens": 128_000}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_POST(self) -> None:
         fixture = self.server.fixture
         payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))

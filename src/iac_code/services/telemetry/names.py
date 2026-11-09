@@ -76,7 +76,6 @@ class GenAiAttr:
     CONVERSATION_ID = "gen_ai.conversation.id"
 
     # --- Request parameters ---
-    REQUEST_MAX_TOKENS = "gen_ai.request.max_tokens"
     REQUEST_TEMPERATURE = "gen_ai.request.temperature"
     REQUEST_TOP_P = "gen_ai.request.top_p"
     REQUEST_TOP_K = "gen_ai.request.top_k"

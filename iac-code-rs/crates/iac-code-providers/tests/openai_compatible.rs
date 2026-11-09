@@ -157,6 +157,37 @@ fn local_openai_compatible_providers_use_python_dummy_api_keys() {
 }
 
 #[test]
+fn all_openai_compatible_payloads_omit_optional_output_limits() {
+    let conversation = Conversation::default();
+    for provider_key in provider_keys().iter().filter(|key| {
+        !matches!(
+            **key,
+            "anthropic" | "anthropic_compatible" | "minimax_cn" | "minimax_intl"
+        )
+    }) {
+        let descriptor = provider_descriptor(provider_key).expect("provider descriptor");
+        let provider = OpenAiCompatibleProvider::new(ProviderConfig {
+            provider_key: (*provider_key).into(),
+            model: descriptor.default_model(),
+            api_key: Some("fixture-key".into()),
+            base_url: descriptor.base_url,
+            effort: None,
+            supports_stream_options: descriptor.supports_stream_options,
+        });
+        for stream in [false, true] {
+            let payload = provider.build_chat_payload(&conversation, "", &[], stream);
+            for field in ["max_tokens", "max_completion_tokens", "max_output_tokens"] {
+                assert_eq!(
+                    object_field(&payload, field),
+                    None,
+                    "{provider_key}: {field}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn openai_compatible_payload_matches_python_message_and_tool_shape() {
     let mut conversation = Conversation::default();
     conversation.add_user_message(AgentMessageContent::Text("hello".into()));
@@ -201,14 +232,12 @@ fn openai_compatible_payload_matches_python_message_and_tool_shape() {
                 ),
             ]),
         }],
-        8192,
         true,
     );
 
     assert_eq!(
         payload,
         json::object([
-            ("max_tokens", json::number(8192)),
             (
                 "messages",
                 json::array([
@@ -288,7 +317,7 @@ fn dashscope_payload_adds_stream_options_like_python_provider() {
     let mut conversation = Conversation::default();
     conversation.add_user_message(AgentMessageContent::Text("hello".into()));
 
-    let payload = provider.build_chat_payload(&conversation, "", &[], 1024, true);
+    let payload = provider.build_chat_payload(&conversation, "", &[], true);
 
     assert_eq!(
         object_field(&payload, "stream_options"),
@@ -321,7 +350,7 @@ fn deepseek_and_gemini_payloads_add_stream_options_like_python_providers() {
         let mut conversation = Conversation::default();
         conversation.add_user_message(AgentMessageContent::Text("hello".into()));
 
-        let payload = provider.build_chat_payload(&conversation, "", &[], 1024, true);
+        let payload = provider.build_chat_payload(&conversation, "", &[], true);
 
         assert_eq!(
             object_field(&payload, "stream_options"),
@@ -350,7 +379,6 @@ fn dashscope_explicit_cache_payload_matches_python_provider() {
         &conversation,
         "STATIC\n\n--- DYNAMIC_BOUNDARY ---\n\nDYNAMIC",
         &[],
-        1024,
         false,
     );
 
@@ -416,7 +444,7 @@ fn openai_payload_adds_reasoning_effort_like_python_provider() {
     let mut conversation = Conversation::default();
     conversation.add_user_message(AgentMessageContent::Text("hello".into()));
 
-    let payload = provider.build_chat_payload(&conversation, "", &[], 1024, true);
+    let payload = provider.build_chat_payload(&conversation, "", &[], true);
 
     assert_eq!(
         object_field(&payload, "reasoning_effort"),
@@ -444,7 +472,7 @@ fn gemini_payload_adds_reasoning_effort_without_extra_body_like_python_provider(
     let mut conversation = Conversation::default();
     conversation.add_user_message(AgentMessageContent::Text("hello".into()));
 
-    let payload = provider.build_chat_payload(&conversation, "", &[], 1024, true);
+    let payload = provider.build_chat_payload(&conversation, "", &[], true);
 
     assert_eq!(
         object_field(&payload, "reasoning_effort"),
@@ -512,7 +540,7 @@ fn openai_compatible_complete_posts_payload_and_parses_response() {
     conversation.add_user_message(AgentMessageContent::Text("hello".into()));
 
     let response = provider
-        .complete_chat(&conversation, "", &[], 2048)
+        .complete_chat(&conversation, "", &[])
         .expect("complete response");
     server.join().expect("server thread");
 
@@ -578,7 +606,7 @@ fn openai_compatible_complete_recovers_concatenated_tool_inputs_like_python() {
     conversation.add_user_message(AgentMessageContent::Text("hello".into()));
 
     let response = provider
-        .complete_chat(&conversation, "", &[], 2048)
+        .complete_chat(&conversation, "", &[])
         .expect("complete response");
     server.join().expect("server thread");
 
@@ -635,7 +663,7 @@ fn openrouter_complete_sends_python_default_headers() {
     conversation.add_user_message(AgentMessageContent::Text("hello".into()));
 
     provider
-        .complete_chat(&conversation, "", &[], 2048)
+        .complete_chat(&conversation, "", &[])
         .expect("complete response");
     server.join().expect("server thread");
     let request = request_rx.recv().expect("captured request");
@@ -1410,6 +1438,13 @@ fn read_http_request(stream: &mut std::net::TcpStream) -> String {
             })
             .unwrap_or(0);
         if body.len() >= content_length {
+            let payload: serde_json::Value = serde_json::from_str(body).expect("request JSON");
+            for field in ["max_tokens", "max_completion_tokens", "max_output_tokens"] {
+                assert!(
+                    payload.get(field).is_none(),
+                    "unexpected output limit: {field}"
+                );
+            }
             return text.to_string();
         }
     }

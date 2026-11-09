@@ -20,11 +20,10 @@ impl OpenAiCompatibleProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
     ) -> Result<NonStreamingResponse, String> {
         let mut last_error = None;
         for attempt in 0..=COMPLETE_MAX_RETRIES {
-            match self.complete_chat_once(conversation, system, tools, max_tokens) {
+            match self.complete_chat_once(conversation, system, tools) {
                 Ok(response) => return Ok(response),
                 Err(error) => {
                     let should_retry = error.retryable && attempt < COMPLETE_MAX_RETRIES;
@@ -43,12 +42,11 @@ impl OpenAiCompatibleProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
     ) -> Result<NonStreamingResponse, CompleteChatError> {
         let url = self
             .chat_completions_url()
             .map_err(CompleteChatError::non_retryable)?;
-        let payload = self.build_chat_payload(conversation, system, tools, max_tokens, false);
+        let payload = self.build_chat_payload(conversation, system, tools, false);
         let client = reqwest::blocking::Client::new();
         let request = self.build_chat_request(&client, url, payload);
 
@@ -77,12 +75,11 @@ impl OpenAiCompatibleProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
     ) -> Result<Vec<StreamEvent>, StreamChatError> {
         let url = self
             .chat_completions_url()
             .map_err(StreamChatError::without_partial)?;
-        let payload = self.build_chat_payload(conversation, system, tools, max_tokens, true);
+        let payload = self.build_chat_payload(conversation, system, tools, true);
         let client = reqwest::blocking::Client::new();
         let request = self.build_chat_request(&client, url, payload);
 
@@ -119,13 +116,12 @@ impl OpenAiCompatibleProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
         sink: &mut dyn FnMut(&StreamEvent),
     ) -> Result<Vec<StreamEvent>, StreamChatError> {
         let url = self
             .chat_completions_url()
             .map_err(StreamChatError::without_partial)?;
-        let payload = self.build_chat_payload(conversation, system, tools, max_tokens, true);
+        let payload = self.build_chat_payload(conversation, system, tools, true);
         let client = reqwest::blocking::Client::new();
         let request = self.build_chat_request(&client, url, payload);
 

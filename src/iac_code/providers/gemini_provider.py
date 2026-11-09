@@ -25,7 +25,6 @@ class GeminiProvider(OpenAIProvider):
         provider_key: str = "gemini",
         thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
-        max_completion_tokens: int | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -35,7 +34,6 @@ class GeminiProvider(OpenAIProvider):
             effort=effort,
             thinking_enabled=thinking_enabled,
             thinking_budget=thinking_budget,
-            max_completion_tokens=max_completion_tokens,
             provider_key=provider_key,
             **kwargs,
         )

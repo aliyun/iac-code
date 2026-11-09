@@ -2127,7 +2127,6 @@ async def create_semantic_plan_with_llm(
     architecture_context: dict[str, Any],
     *,
     model: str,
-    max_tokens: int,
     effort_override: str | None = None,
     user_prompt: str | None = None,
     messages: list[Message] | None = None,
@@ -2161,7 +2160,6 @@ async def create_semantic_plan_with_llm(
     response = await manager.complete(
         messages,
         SYSTEM_PROMPT,
-        max_tokens=max_tokens,
     )
     semantic_plan, parse_error = try_extract_semantic_plan_json(response.text)
     return response.text, semantic_plan, response.usage, parse_error
@@ -2184,7 +2182,6 @@ async def create_semantic_plan_for_architecture_with_llm(
     template_content: str,
     *,
     model: str | None = None,
-    max_tokens: int = 3000,
     max_attempts: int = MAX_SEMANTIC_PLAN_ATTEMPTS,
     effort_override: str | None = "none",
     credentials_override: dict[str, str] | None = None,
@@ -2218,7 +2215,6 @@ async def create_semantic_plan_for_architecture_with_llm(
         raw_output, parsed_semantic_plan, _usage, parse_error = await create_semantic_plan_with_llm(
             llm_architecture_context,
             model=selected_model,
-            max_tokens=max_tokens,
             effort_override=effective_effort,
             user_prompt=user_prompt,
             messages=request_messages,
@@ -4493,8 +4489,6 @@ def _record_terminal_child_command(args: argparse.Namespace, *, width: int) -> l
         "--quiet",
         "--width",
         str(width),
-        "--max-tokens",
-        str(args.max_tokens),
         "--max-attempts",
         str(max(1, args.max_attempts)),
     ]
@@ -4830,7 +4824,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Render a ROS template architecture diagram with real LLM semantics.")
     parser.add_argument("template", type=Path, help="ROS template YAML file path.")
     parser.add_argument("--model", default=None, help="Override model. Defaults to saved iac-code model.")
-    parser.add_argument("--max-tokens", type=int, default=3000, help="Max tokens for the semantic plan. Default: 3000.")
     parser.add_argument(
         "--max-attempts",
         type=int,
@@ -5050,7 +5043,6 @@ async def async_main(argv: list[str]) -> int:
         raw_output, parsed_semantic_plan, usage, parse_error = await create_semantic_plan_with_llm(
             llm_architecture_context,
             model=model,
-            max_tokens=args.max_tokens,
             effort_override=effort_override,
             user_prompt=user_prompt,
             messages=request_messages,

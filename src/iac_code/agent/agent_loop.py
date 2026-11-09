@@ -117,9 +117,9 @@ _OUTPUT_LIMIT_CONTINUATION_PROMPT = "Continue from where you stopped. Do not rep
 
 
 def _output_limit_error_event() -> ErrorEvent:
-    message_id = "The model reached its output token limit. Increase the max output tokens setting and try again."
+    message_id = "The model reached its output token limit. Try splitting the task into smaller steps."
     return ErrorEvent(
-        error=_("The model reached its output token limit. Increase the max output tokens setting and try again."),
+        error=_("The model reached its output token limit. Try splitting the task into smaller steps."),
         is_retryable=False,
         i18n_message_id=message_id,
     )
@@ -2008,8 +2008,7 @@ class AgentLoop:
                     # Bailian can silently drop input at ~80% of its window.
                     # Proactive compaction already ran; reject an oversized tail
                     # rather than sending a known over-budget tool/history chain.
-                    output_limit = getattr(provider, "_max_completion_tokens", None) or 8192
-                    if self.context_manager.get_total_tokens() + output_limit > self.context_manager.context_window:
+                    if self.context_manager.get_total_tokens() > self.context_manager.context_window:
                         self._release_request_lease(
                             kwargs.get("request_manager") or self._provider_manager, kwargs.get("lease")
                         )
@@ -2145,13 +2144,7 @@ class AgentLoop:
 
             # Auto-compact if needed
             try:
-                provider = getattr(lease, "provider", None)
-                ratio = getattr(provider, "input_window_ratio", 1.0)
-                if isinstance(ratio, (int, float)) and ratio < 1.0:
-                    output_limit = getattr(provider, "_max_completion_tokens", None) or 8192
-                    needs_compaction = self.context_manager.needs_compaction(reserved_output_tokens=output_limit)
-                else:
-                    needs_compaction = self.context_manager.needs_compaction()
+                needs_compaction = self.context_manager.needs_compaction()
             except BaseException:
                 self._release_request_lease(request_manager, lease)
                 raise
@@ -3271,7 +3264,6 @@ class AgentLoop:
         messages: list[Any],
         system: str,
         tools: list[Any] | None = None,
-        max_tokens: int | None = None,
         cache_policy: str | None = None,
     ) -> Any:
         begin_request = (
@@ -3285,8 +3277,6 @@ class AgentLoop:
             kwargs: dict[str, Any] = {"messages": messages, "system": effective_system}
             if tools is not None:
                 kwargs["tools"] = tools
-            if max_tokens is not None:
-                kwargs["max_tokens"] = max_tokens
             if cache_policy is not None:
                 kwargs["cache_policy"] = cache_policy
             if lease is not None:

@@ -227,7 +227,7 @@ fn acp_set_config_option_updates_session_config_like_python() {
     );
     let second = handle_acp_jsonrpc(
         &format!(
-            r#"{{"jsonrpc":"2.0","id":"set-config-2","method":"session/set_config_option","params":{{"sessionId":"{session_id}","configId":"max_tokens","value":2048}}}}"#
+            r#"{{"jsonrpc":"2.0","id":"set-config-2","method":"session/set_config_option","params":{{"sessionId":"{session_id}","configId":"custom_option","value":2048}}}}"#
         ),
         &mut runtime,
     );
@@ -257,7 +257,7 @@ fn acp_set_config_option_updates_session_config_like_python() {
         .expect("session should remain active");
     let config = session.config();
     assert_eq!(config.get("temperature"), Some(&json::string("0.9")));
-    assert_eq!(config.get("max_tokens"), Some(&json::number(2048)));
+    assert_eq!(config.get("custom_option"), Some(&json::number(2048)));
 }
 
 #[test]

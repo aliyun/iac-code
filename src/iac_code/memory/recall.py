@@ -212,7 +212,6 @@ class MemoryRecallService:
                 messages=[Message.user(prompt)],
                 system=self._build_system_prompt(),
                 tools=None,
-                max_tokens=512,
                 cache_policy="no_explicit_cache",
             )
             if timeout_seconds is None:

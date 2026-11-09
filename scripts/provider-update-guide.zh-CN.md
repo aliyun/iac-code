@@ -210,7 +210,8 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
 
 - 只有同一前缀下所有模型容量一致时才复用前缀配置；endpoint 特有模型使用精确 model ID 配置。
 - context window 影响自动压缩阈值，不能只记录在调研表或 registry 注释中。
-- 最大输出没有精确官方证据时保持保守值，并在证据附录说明，不要从 context window 反推。
+- 最大输出缺少精确官方证据时，仅在 `context_manager.py` 能力元数据中保留保守占位值并注明证据缺口，
+  不要从 context window 反推，也不要将占位值用作可选请求的输出限额。
 - 同一模型在官方、代理或命名空间端点下可能使用不同 ID；默认模型、alias 和 endpoint 变体都要覆盖。
 - provider 会持久化的可见 thinking、signature 和 encrypted block 必须进入 token 估算，否则长工具循环会延迟压缩。
 - 在 `tests/services/test_context_manager.py` 断言精确容量，并把该测试加入聚焦命令。
@@ -220,7 +221,7 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
 修改 [`src/iac_code/providers/thinking.py`](../src/iac_code/providers/thinking.py)：
 
 - 按 `(provider_key, model_id)` 登记，不要只按 model ID 登记。
-- 确认 `ThinkingFamily`、允许的 effort、默认 effort、budget 和输出 token 策略。
+- 确认 `ThinkingFamily`、允许的 effort、默认 effort 和 budget；不要恢复可选的输出限额字段。
 - 仅在 CN/Intl 或套餐版协议完全一致时使用 `_THINKING_FALLBACK` 复用。
 - 未确认的组合应保持 `ThinkingFamily.NONE`，不要猜测“新版本应该兼容旧参数”。
 - 区分 UI 标准枚举与 wire alias；选择器只展示标准值，adapter 可按明确证据映射兼容 alias。
@@ -260,9 +261,15 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
   `/openai/v1/` 基础地址和部署名称；[百炼 Token Plan](https://help.aliyun.com/zh/model-studio/codex)
   的模型支持范围应按套餐独立核验。[阿里云 Coding Plan](https://help.aliyun.com/zh/model-studio/coding-plan-faq)
   明确不支持 Responses；其他编程套餐需分别核验端点、模型和请求格式，不能直接继承此结论。
-- Responses 的 effort、输出限制、工具 schema 和输入窗口规则由 `responses_provider.py` 组装。
-  更新时核对 `_responses_effort()`、`max_output_tokens` 和 DashScope 输入窗口比例，不能直接复制
-  Chat 的 `enable_thinking`、`thinking_budget` 或 `max_completion_tokens` 请求字段。
+- Responses 的 effort、工具 schema 和输入窗口规则由 `responses_provider.py` 组装。
+  更新时核对 `_responses_effort()` 和 DashScope 输入窗口比例，不能直接复制
+  Chat 的 `enable_thinking` 或 `thinking_budget` 请求字段。
+- Chat Completions 和 Responses 不发送可选的最大输出 Token 字段。Anthropic 官方 Messages API 的
+  `max_tokens` 为必填项，使用模型支持的最大输出能力；不恢复人工限额或固定的小预算。
+  [MiniMax 官方 Anthropic 兼容端点](https://platform.minimax.io/docs/api-reference/text-chat-anthropic)
+  将 `max_tokens` 设为可选，实际 HTTP JSON 同样省略此字段。
+  SDK 函数签名的必填项不代表兼容端点的 HTTP 协议要求：`MiniMaxProvider` 使用 `NOT_GIVEN`
+  省略字段，不因此查询 Models 元数据。
 - [`responses_codec.py`](../src/iac_code/providers/responses_codec.py) 维护 Responses input/output 与
   SSE 转换。只更新已有格式下的模型能力时，应更新配置；官方协议本身变化时才修改 codec/adapter。
 - 用户可见的 Responses 错误使用 `ResponsesConfigurationError`、`ResponsesProtocolError` 或
@@ -295,7 +302,7 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
 - 未配置思考参数时是否应该省略字段，而不是擅自开启或关闭。
 - `thinking_enabled=False` 对 always-on 模型应如何处理。
 - 非法 effort 是忽略、回退默认值，还是应在上层拒绝。
-- `max_completion_tokens` 是否需要包含思考 budget。
+- 请求是否仍省略可选的输出限额字段（包括 MiniMax 兼容端点）；Anthropic 官方 API 的必填额度是否使用模型最大输出能力。
 - 流式和非流式是否都能解析 thinking/reasoning content。
 - 带工具调用的历史 assistant message 是否需要回传 reasoning content。
 - 回传历史 reasoning 是否还要求 `preserve_thinking` 一类请求开关；该开关必须按官方支持列表发送，
@@ -311,7 +318,7 @@ SDK schema、另一条 URL 或另一模型推断。UI 只展示稳定的标准�
 | Provider/接入方式 | 典型形态 | 维护注意点 |
 | --- | --- | --- |
 | OpenAI 官方 Chat | `reasoning_effort` | effort 枚举与工具调用限制按模型声明 |
-| OpenAI / DashScope Responses | `input`、`reasoning.effort`、`max_output_tokens` | 按模型配置选择；工具与历史使用 Responses item 格式 |
+| OpenAI / DashScope Responses | `input`、`reasoning.effort` | 按模型配置选择；工具与历史使用 Responses item 格式 |
 | Anthropic 新模型 | `thinking.type=adaptive` + `output_config.effort` | 部分模型 adaptive always-on，旧模型仍使用 `budget_tokens` |
 | DashScope 兼容端点 | `extra_body.enable_thinking`，部分模型再带 budget/effort | 托管的 Kimi/GLM 也按 DashScope 协议处理 |
 | Kimi 官方 | 新旧代际可能分别使用 `reasoning_effort`、always-on 或 `extra_body.thinking` | 必须逐模型核验 |
@@ -500,6 +507,9 @@ git diff HEAD -- iac-code-rs
 本表用于说明本次代码为何这样实现，并与回归测试互相核对。它是带日期的历史证据，不替代下次更新
 时的重新调研。
 
+当前实现已移除人工输出限额。下表及后续附录中的保守输出值只可作为能力元数据占位；
+Chat Completions 和 Responses 不发送可选额度字段，不能据此恢复 8192 等请求限额。
+
 | 范围 | 2026-07-21 核验结论 | 代码/测试落点 | 官方证据 |
 | --- | --- | --- | --- |
 | OpenAI | 当前 `OpenAIProvider` 固定调用 Chat Completions，因此排除 `gpt-5.5-pro`、`gpt-5.4-pro`、`gpt-5.2-pro` 等 Responses-only 模型；`gpt-5.3-codex` 支持 Chat Completions 及 `low/medium/high/xhigh`，应保留；`gpt-5.6`、`gpt-5.5`、`gpt-5.4` 的 context 为 105 万、最大输出为 12.8 万，`gpt-5.4-mini/nano`、`gpt-5.3-codex`、`gpt-5.2` 为 40 万/12.8 万；`gpt-5.6` 系列单独支持 `none` 和 `max`，`gpt-5.5` 默认 effort 为 `medium`；SDK 的 connection/timeout、408/409/429 和所有 5xx 异常必须进入重试和 fallback，而 `o3/o4-mini` 不开放 `none` | `registry.py`、`thinking.py`、`openai_provider.py`、`manager.py`、`context_manager.py` 及对应测试 | [Models](https://developers.openai.com/api/docs/models)、[GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol)、[GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5)、[OpenAI Python retries](https://github.com/openai/openai-python#retries)、[GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4)、[GPT-5.4 mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini)、[GPT-5.3 Codex](https://developers.openai.com/api/docs/models/gpt-5.3-codex)、[GPT-5.2](https://developers.openai.com/api/docs/models/gpt-5.2) |
@@ -507,7 +517,7 @@ git diff HEAD -- iac-code-rs
 | Anthropic | Fable 5 adaptive thinking always-on，context 为 100 万、最大输出为 12.8 万；Fable 以 HTTP 200 和 `stop_reason=refusal` 返回拒绝，因此流式消息要暂存到 `MessageEnd` 确认可接受后再向下游发布，拒答片段必须直接丢弃并只降级到获准的 Opus 4.8；即使 Opus 出现可重试故障，也不得沿普通降级链继续到 Sonnet；一旦 Opus 接受请求，当前会话的后续轮次必须固定到 Opus，直到会话重置或重新配置，避免再次请求 Fable 并丢弃 Opus metadata；Opus 4.8 与 Sonnet 5 的 context 均为 100 万、最大输出为 12.8 万；Sonnet 5 可关闭思考；4.6 模型支持 `max` 但不支持 `xhigh`，显式 `budget_tokens` 仍可使用，provider/model settings 中的 `thinkingBudget` 必须实际透传；工具循环必须原样回传 thinking signature 和 redacted thinking，且不得跨 provider、endpoint 或 model 回传；可见 thinking 与 opaque metadata 都要计入上下文估算 | `thinking.py`、`anthropic_provider.py`、`manager.py`、`agent/message.py`、`context_manager.py`、`token_counter.py` 及对应测试 | [Models](https://platform.claude.com/docs/en/about-claude/models/overview)、[Sonnet 5](https://platform.claude.com/docs/en/about-claude/models/whats-new-sonnet-5)、[Refusals and fallback](https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback)、[Fallback credit](https://platform.claude.com/docs/en/build-with-claude/fallback-credit)、[Adaptive thinking](https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking)、[Extended thinking](https://platform.claude.com/docs/en/build-with-claude/extended-thinking)、[Effort](https://platform.claude.com/docs/en/build-with-claude/effort) |
 | Gemini | 稳定目录登记 `gemini-3.6-flash`（默认 `medium`）和 `gemini-3.5-flash-lite`（默认 `minimal`），两者均支持 `minimal/low/medium/high`、1,048,576 context、65,536 最大输出和多模态；3.x/2.5 各模型 effort、默认值和可关闭能力不同，2.5 的兼容接口接受 `minimal`；`gemini-2.0-flash` 已于 2026-06-01 下线；Gemini 3 的 function call 和非工具文本 thought signature 都必须原样回传并计入持久化上下文的 token 估算，但只能回传到同一 provider、endpoint 和 model | `registry.py`、`thinking.py`、`gemini_provider.py`、`openai_provider.py`、`context_manager.py`、`telemetry/constants.py`、`token_counter.py` 及 Gemini 回归测试 | [Latest models](https://ai.google.dev/gemini-api/docs/latest-model)、[Thinking](https://ai.google.dev/gemini-api/docs/thinking)、[Models](https://ai.google.dev/gemini-api/docs/models)、[OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)、[Thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures)、[Changelog](https://ai.google.dev/gemini-api/docs/changelog) |
 | DashScope / Token Plan | Token Plan 的 `qwen3.8-max-preview` 支持视觉输入、1M context，只能思考，effort 为 `low/medium/xhigh`；它不发送 `enable_thinking`，工具循环通过 `extra_body.preserve_thinking=true` 保留思考状态；该参数仅向端点参数文档明确列出的 Qwen 与 Kimi 模型发送，包含 `qwen3.6-flash`；`thinking_budget` 在 OpenAI-compatible Chat 参数页中限定于 Qwen3.x，GLM-5.2 只发送 `enable_thinking`、`reasoning_effort` 和总输出限制；DashScope 的 `glm-5.1` 以及 Token Plan 的 `glm-5.1/glm-5` 接受 `none/minimal/low/medium/high/xhigh`，不得误用仅 `glm-5.2` 支持的 `max`；`MiniMax/MiniMax-M3` 使用 adaptive/disabled thinking；已核实的百炼容量要按 model ID 精确配置，不能统一落到 `qwen` 的 128K 默认值 | `registry.py`、`thinking.py`、`dashscope_provider.py`、`context_manager.py`、DashScope 调研回归测试 | [OpenAI-compatible Chat](https://help.aliyun.com/zh/model-studio/qwen-api-via-openai-chat-completions)、[Token Plan](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview)、[文本生成](https://help.aliyun.com/zh/model-studio/text-generation-model)、[GLM on DashScope](https://help.aliyun.com/zh/model-studio/glm)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)、[Kimi on DashScope](https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai)、[MiniMax on DashScope](https://help.aliyun.com/en/model-studio/minimax-api-by-minimax) |
-| DashScope K3 接入边界与容量 | `kimi/kimi-k3` 上下文为 100 万 token，仅支持公网 URL 图片和隐式缓存；当前附件适配器只生成 Data URL，因此不开放多模态标记；K3 的 `preserve_thinking` 默认关闭，工具循环必须显式开启；最大输出缺少精确证据，运行时保持 8192 的保守值 | `registry.py`、`dashscope_provider.py`、`context_manager.py` 及对应测试 | [K3 上架说明](https://help.aliyun.com/zh/model-studio/newly-released-models)、[Kimi on DashScope](https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai)、[Context Cache](https://help.aliyun.com/zh/model-studio/context-cache) |
+| DashScope K3 接入边界与容量 | `kimi/kimi-k3` 上下文为 100 万 token，仅支持公网 URL 图片和隐式缓存；当前附件适配器只生成 Data URL，因此不开放多模态标记；K3 的 `preserve_thinking` 默认关闭，工具循环必须显式开启；最大输出缺少精确证据，`context_manager.py` 中的 8192 仅为能力元数据保守占位，不限制当前可选协议请求输出 | `registry.py`、`dashscope_provider.py`、`context_manager.py` 及对应测试 | [K3 上架说明](https://help.aliyun.com/zh/model-studio/newly-released-models)、[Kimi on DashScope](https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai)、[Context Cache](https://help.aliyun.com/zh/model-studio/context-cache) |
 | Kimi 官方 | K3 始终思考并支持 `low/high/max`，context 为 100 万；K2.7 始终思考，关闭参数会报错；K2.6 可启停；K2.5/K2.6/K2.7 的 context 为 256K | `kimi_provider.py`、`context_manager.py`、Kimi 调研回归测试 | [Kimi API Platform](https://platform.kimi.ai/)、[Models overview](https://platform.kimi.ai/docs/api/models-overview) |
 | MiniMax 官方 | 中国/国际直连 provider 使用 MiniMax 官方兼容端点，默认模型 `MiniMax-M3` 的 context 为 100 万；DashScope 托管的 `MiniMax/MiniMax-M3` 也必须按其独立模型信息页配置为 1,048,576，仍需按完整 model ID 分别验证其他能力和参数 | `registry.py`、`thinking.py`、`minimax_provider.py`、`context_manager.py`、direct/DashScope provider 调研回归测试 | [Models](https://platform.minimax.io/docs/guides/models-intro)、[百炼 MiniMax M3](https://help.aliyun.com/zh/model-studio/minimax-m3) |
 | Z.AI / GLM 官方 | 中国、国际和 Coding Plan provider 均登记 `glm-5.2`，使用 Chat Completions 的 `thinking.type=enabled/disabled` 协议；直连 GLM-5.2 支持 `reasoning_effort=high/max`、默认 `max`，context 为 100 万、最大输出为 12.8 万 | `registry.py`、`thinking.py`、`zhipu_provider.py`、`context_manager.py`、direct provider 调研回归测试 | [GLM-5.2](https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2)、[Migration](https://docs.bigmodel.cn/cn/guide/start/migrate-to-glm-new)、[Chat Completion](https://docs.z.ai/api-reference/llm/chat-completion) |
@@ -546,7 +556,7 @@ git diff HEAD -- iac-code-rs
 
 | 范围 | 2026-08-27 核验结论 | 代码/测试落点 | 官方证据 |
 | --- | --- | --- | --- |
-| DashScope / Qwen | 按完整百炼 Chat Completions 模型目录重新核验，而不是只看 2026-08-18 之后的增量：新增 `qwen3.8-flash`、优速模式 `qwen3.8-max-prime`、开源服务 `qwen3.8-2.4t-a95b` / `qwen3.8-27b`，并补齐 `qwen3.6-35b-a3b` / `qwen3.6-27b`。官方没有 `qwen3.8-35b`：Qwen3.8 当前开放权重只有 2.4T-A95B 与 27B，35B 的精确 ID 属于 Qwen3.6。Qwen3.8 两款开源服务均为 1M context / 131,072 最大输出并支持显式缓存；Qwen3.6 两款为 262,144 / 65,536 且不支持显式缓存。上述开源模型为可启停的混合思考模型，使用 `enable_thinking` 与可选 `thinking_budget`，不套用仅 Max 支持的 `reasoning_effort`。`qwen3.8-flash` 同时进入标准百炼与 Token Plan 个人版，并支持视觉输入和 1M context；其最大输出未在当前公开页给出，运行时继续使用保守默认值 | `registry.py`、`thinking.py`、`dashscope_provider.py`、`manager.py`、`context_manager.py`、遥测及对应测试 | [模型上下架与更新](https://help.aliyun.com/zh/model-studio/newly-released-models)、[模型价格](https://help.aliyun.com/zh/model-studio/model-pricing)、[Qwen3.8-2.4T-A95B](https://help.aliyun.com/zh/model-studio/qwen3-8-2-4t-a95b)、[Qwen3.8-27B](https://help.aliyun.com/zh/model-studio/qwen3-8-27b)、[Qwen3.6-35B-A3B](https://help.aliyun.com/zh/model-studio/qwen3-6-35b-a3b)、[Qwen3.6-27B](https://help.aliyun.com/zh/model-studio/qwen3-6-27b)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)、[优速模式](https://help.aliyun.com/zh/model-studio/fast-mode)、[Token Plan 个人版](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview) |
+| DashScope / Qwen | 按完整百炼 Chat Completions 模型目录重新核验，而不是只看 2026-08-18 之后的增量：新增 `qwen3.8-flash`、优速模式 `qwen3.8-max-prime`、开源服务 `qwen3.8-2.4t-a95b` / `qwen3.8-27b`，并补齐 `qwen3.6-35b-a3b` / `qwen3.6-27b`。官方没有 `qwen3.8-35b`：Qwen3.8 当前开放权重只有 2.4T-A95B 与 27B，35B 的精确 ID 属于 Qwen3.6。Qwen3.8 两款开源服务均为 1M context / 131,072 最大输出并支持显式缓存；Qwen3.6 两款为 262,144 / 65,536 且不支持显式缓存。上述开源模型为可启停的混合思考模型，使用 `enable_thinking` 与可选 `thinking_budget`，不套用仅 Max 支持的 `reasoning_effort`。`qwen3.8-flash` 同时进入标准百炼与 Token Plan 个人版，并支持视觉输入和 1M context；其最大输出未在当时公开页给出，能力元数据保留保守占位值；当前请求不发送可选输出限额字段 | `registry.py`、`thinking.py`、`dashscope_provider.py`、`manager.py`、`context_manager.py`、遥测及对应测试 | [模型上下架与更新](https://help.aliyun.com/zh/model-studio/newly-released-models)、[模型价格](https://help.aliyun.com/zh/model-studio/model-pricing)、[Qwen3.8-2.4T-A95B](https://help.aliyun.com/zh/model-studio/qwen3-8-2-4t-a95b)、[Qwen3.8-27B](https://help.aliyun.com/zh/model-studio/qwen3-8-27b)、[Qwen3.6-35B-A3B](https://help.aliyun.com/zh/model-studio/qwen3-6-35b-a3b)、[Qwen3.6-27B](https://help.aliyun.com/zh/model-studio/qwen3-6-27b)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)、[优速模式](https://help.aliyun.com/zh/model-studio/fast-mode)、[Token Plan 个人版](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview) |
 | DashScope / 第三方直供 | 补入百炼自部署 `kimi-k3`（与月之暗面直供的 `kimi/kimi-k3` 是不同服务边界）、小米直供 `xiaomi/mimo-v2.5-pro` 和阶跃星辰直供 `stepfun/step-3.7-flash`。百炼 `kimi-k3` 为仅思考模型，`enable_thinking` 不可关闭且 `preserve_thinking` 默认开启，支持 Base64 图片；MiMo 为默认开启但可关闭的混合思考纯文本模型，不支持 effort/budget/preserve；Stepfun 为多模态混合思考模型，支持 `low/medium/high` effort，不支持 budget/preserve。三个命名空间/重名模型均按百炼兼容端点协议单独登记，避免复用厂商直连协议 | `config.py`、`registry.py`、`thinking.py`、`dashscope_provider.py`、`manager.py`、`context_manager.py`、遥测及对应测试 | [百炼 Kimi](https://help.aliyun.com/zh/model-studio/kimi-api)、[kimi-k3 模型信息](https://help.aliyun.com/zh/model-studio/aliyun-kimi-k3)、[MiMo](https://help.aliyun.com/zh/model-studio/mimo)、[MiMo-V2.5-Pro 模型信息](https://help.aliyun.com/zh/model-studio/mimo-v2-5-pro)、[Stepfun](https://help.aliyun.com/zh/model-studio/stepfun)、[Step 3.7 Flash 模型信息](https://help.aliyun.com/zh/model-studio/step-3-7-flash) |
 | Z.AI / GLM 官方 | `glm-5.3` 已同时开放标准 Model API 与 Coding Plan，不再只限 Coding Plan，因此进入中国站、国际站的标准 provider 并成为默认；2026-08-26 新发布 `glm-5.3-flash`，同时开放 Model API 与 Coding Plan，支持 1M context、原生图片/视频/文件输入、Function Calling 与结构化输出。其文本参数与 GLM-5.3 一致：思考始终开启，`thinking.type` 仅接受 `enabled`，`reasoning_effort` 支持 `low/high/max`（推荐 `max`）；当前附件适配器使用官方明确支持的 Base64 Data URL，因此开放图片输入标记。关闭思考时继续按 GLM-5.3 迁移规则降级为 `enabled + low` | `config.py`、`registry.py`、`thinking.py`、`zhipu_provider.py`、`manager.py`、`context_manager.py`、遥测及对应测试 | [GLM-5.3（CN）](https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3)、[GLM-5.3（Intl）](https://docs.z.ai/guides/llm/glm-5.3)、[GLM-5.3-Flash](https://docs.z.ai/guides/vlm/glm-5.3-flash)、[发布公告](https://z.ai/blog/glm-5.3-flash) |
 | DashScope 智谱直供 | 百炼华北2（北京）新增智谱原厂直供 `ZHIPU/GLM-5.3`，精确 model ID 包含大写命名空间；仅文本输入，context 为 1,048,576、最大输出为 131,072，支持 Function Calling 与隐式缓存。模型信息页把结构化输出标为支持，但端点级调用页标为不支持，本次不依赖该能力并以端点级限制为准。模型始终思考，`enable_thinking` 必须保持 `true`，`reasoning_effort` 接受 `low/high/max`；关闭请求降级为 `enable_thinking=true + low`。该模型未进入 Token Plan 目录，且按百炼兼容端点协议发送参数，不能复用 Z.AI 直连的 `thinking.type` wire format | `config.py`、`registry.py`、`thinking.py`、`dashscope_provider.py`、`manager.py`、`context_manager.py`、遥测及对应测试 | [GLM-智谱直供调用](https://help.aliyun.com/zh/model-studio/glm-zhipu)、[ZHIPU/GLM-5.3 模型信息](https://help.aliyun.com/zh/model-studio/glm-5-3-by-zhipu)、[Token Plan 个人版目录](https://help.aliyun.com/zh/model-studio/token-plan-personal-overview) |
@@ -620,15 +630,15 @@ git diff HEAD -- iac-code-rs
   Sonnet/Haiku 在 `xhigh/max` 下不接受关闭。签名按 provider、endpoint、model 隔离保存；
   另保存请求前缀的摘要，system、tools 或历史被压缩/修改后丢弃失效思考块，保留正文与工具轮次。
   模型和前缀绑定见 [5.5 变更说明](https://platform.claude.com/docs/en/models/opus-5-5/whats-new-opus-5-5)。
-- Gemini 4 Argon 的 1,048,576 是输入、思考和输出共享窗口；当前同步 Chat adapter 的输出上限为
-  65,536，不能把原生后台长解码的 1M 上限用在这里。UI effort 仅展示 `low/medium/high`，默认
+- Gemini 4 Argon 的 1,048,576 是输入、思考和输出共享窗口；同步 Chat 接口记录的模型输出能力为
+  65,536，不能把原生后台长解码的 1M 能力用于这里的元数据；当前 Chat 请求不下发可选输出限额。UI effort 仅展示 `low/medium/high`，默认
   `medium`；兼容接口将 `minimal` 映射到 `low`，不作为额外 UI 档位。
 - 公共 Kimi K3.1 的 effort 为 `low/high/max`、默认 `max`，仅思考，支持 Base64 图片；
   Kimi Code 同名系列的默认为 `high`，ID 不含 `kimi-`。百炼 `kimi/` 命名空间仅支持 `max`，
   图片传输能力独立核验，未确认前保持纯文本选择标记。[百炼月之暗面接口](https://help.aliyun.com/zh/model-studio/kimi-api-by-moonshot-ai)。
 - MiniMax M3.1 Flash 直连使用 `output_config.effort`，百炼使用 `reasoning_effort`；均为五档、
   默认 `max`，不发送关闭思考字段。百炼不发送 `enable_thinking`；完整回传思考和工具历史。
-  已确认 1M context，最大输出未有端点级精确上限时维持保守值。
+  已确认 1M context；最大输出缺少端点级精确证据时，保守值仅作能力元数据占位，不控制可选请求输出。
 - 百炼 `glm-5.3` 与 `ZHIPU/GLM-5.3-FlashX` 使用 `enable_thinking` 和 `low/high/max`，
   不是 Z.AI 的 `thinking.type`。[托管 GLM](https://help.aliyun.com/zh/model-studio/glm)、
   [智谱直供](https://help.aliyun.com/zh/model-studio/glm-zhipu)。Token Plan 仅新增其套餐列出的 ID。
@@ -661,8 +671,8 @@ smoke test；新 model ID 的公开文档核验、离线协议测试与账号实
   需要经过 `create_provider()` 后仍实际发送到请求中，不能只测试 adapter 私有方法。
 - GPT-6.1 Terra 的 `effort=none` 应在 Web 会话中显示思考关闭，即使 `thinkingEnabled=true`。
   [Terra effort](https://developers.openai.com/api/docs/models/gpt-6.1-terra)
-- Kimi K3.1 不支持关闭思考时，保留已选 effort 和 `max_completion_tokens` 字段，不能因旧配置的
-  `thinkingEnabled=false` 丢掉 effort 或切回 `max_tokens`。
+- Kimi K3.1 不支持关闭思考时，保留已选 effort，不能因旧配置的 `thinkingEnabled=false`
+  丢掉 effort；请求仍不发送可选的输出限额字段。
   [公共 API 参数](https://platform.kimi.ai/docs/guide/kimi-k3-1-pro-quickstart)
 - Claude 的绑定检查同时保存 assistant 返回块序列的摘要，防止同一条消息内的块重排、删改绕过此前
   只校验历史前缀的逻辑。流式在最终内容完整后附加摘要；摘要与签名只用于私有历史回传。

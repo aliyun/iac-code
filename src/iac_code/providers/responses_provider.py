@@ -81,22 +81,15 @@ class ResponsesProvider(OpenAIProvider):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None,
-        max_tokens: int,
         *,
         streaming: bool,
     ) -> dict[str, Any]:
-        requested_limit = self._max_completion_tokens or max_tokens
-        if not isinstance(requested_limit, int) or isinstance(requested_limit, bool) or requested_limit < 1:
-            raise ResponsesConfigurationError("Responses max_output_tokens must be a positive integer.")
-        limit = self._output_token_limit(requested_limit)
         kwargs: dict[str, Any] = {
             "model": self._model,
             "input": encode_input(messages, self._responses_identity),
             "store": False,
             "stream": streaming,
         }
-        if limit is not None:
-            kwargs["max_output_tokens"] = limit
         if system:
             kwargs["instructions"] = system
         if tools:
@@ -130,9 +123,8 @@ class ResponsesProvider(OpenAIProvider):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
     ) -> AsyncGenerator[StreamEvent, None]:
-        kwargs = self._build_responses_kwargs(messages, system, tools, max_tokens, streaming=True)
+        kwargs = self._build_responses_kwargs(messages, system, tools, streaming=True)
         log_provider_request_policy(self._PROVIDER_KEY, self._model, "responses.stream", kwargs)
         yield MessageStartEvent(message_id=str(uuid.uuid4()))
         response = await self._create_response(kwargs)
@@ -160,10 +152,9 @@ class ResponsesProvider(OpenAIProvider):
         messages: list[Message],
         system: str,
         tools: list[ToolDefinition] | None = None,
-        max_tokens: int = 8192,
         cache_policy: str = "default",
     ) -> NonStreamingResponse:
-        kwargs = self._build_responses_kwargs(messages, system, tools, max_tokens, streaming=False)
+        kwargs = self._build_responses_kwargs(messages, system, tools, streaming=False)
         log_provider_request_policy(self._PROVIDER_KEY, self._model, "responses.create", kwargs)
         response = await self._create_response(kwargs)
         return decode_response(response, self._responses_identity, tools)
@@ -203,10 +194,3 @@ class DashScopeResponsesProvider(ResponsesProvider):
             # Ignore saved efforts from other families, using this protocol's default.
             return default_effort
         return effort
-
-    def _build_responses_kwargs(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
-        result = super()._build_responses_kwargs(*args, **kwargs)
-        limit = result.get("max_output_tokens")
-        if limit is not None and limit < 16:
-            raise ResponsesConfigurationError("DashScope Responses max_output_tokens must be at least 16.")
-        return result

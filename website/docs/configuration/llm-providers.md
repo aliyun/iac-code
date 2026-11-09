@@ -101,4 +101,4 @@ Set `apiMode` to `chat_completions` to switch back. Omitting it restores the mod
 
 If you explicitly select Chat, the model must support tool calls with the selected reasoning effort. Use Responses when the model's Chat API does not support that combination.
 
-See [runtime configuration](./runtime-configuration.md) for request settings and output limits.
+See [runtime configuration](./runtime-configuration.md) for request settings.

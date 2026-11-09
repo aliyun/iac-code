@@ -1,8 +1,244 @@
+import json
+
+import anthropic
+import httpx
 import pytest
 
 from iac_code.providers.anthropic_provider import AnthropicProvider
 from iac_code.providers.base import Message, ToolDefinition
+from iac_code.providers.request_headers import use_provider_request_headers
 from tests.providers._fakes import FakeAnthropicClient, ns
+
+
+class AnthropicSDKTransport:
+    def __init__(self, capacity=196608, stop_reason="end_turn"):
+        self.capacity = capacity
+        self.stop_reason = stop_reason
+        self.requests = []
+
+    def __call__(self, request):
+        self.requests.append(request)
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "id": request.url.path.rsplit("/", 1)[-1],
+                    "type": "model",
+                    "display_name": "Test model",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "max_tokens": self.capacity,
+                },
+            )
+        response = {
+            "id": "msg_test",
+            "type": "message",
+            "role": "assistant",
+            "model": json.loads(request.content)["model"],
+            "content": [{"type": "text", "text": "done"}],
+            "stop_reason": self.stop_reason,
+            "stop_sequence": None,
+            "usage": {"input_tokens": 3, "output_tokens": 1},
+        }
+        if not json.loads(request.content).get("stream"):
+            return httpx.Response(200, json=response)
+        events = [
+            ("message_start", {"message": {**response, "content": [], "stop_reason": None}}),
+            ("content_block_start", {"index": 0, "content_block": {"type": "text", "text": ""}}),
+            ("content_block_delta", {"index": 0, "delta": {"type": "text_delta", "text": "done"}}),
+            ("content_block_stop", {"index": 0}),
+            ("message_delta", {"delta": {"stop_reason": self.stop_reason}, "usage": {"output_tokens": 1}}),
+            ("message_stop", {}),
+        ]
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/event-stream"},
+            content="".join(f"event: {kind}\ndata: {json.dumps({'type': kind, **data})}\n\n" for kind, data in events),
+        )
+
+
+@pytest.mark.asyncio
+class TestAnthropicModelCapacity:
+    @pytest.mark.parametrize("operation", ["stream", "complete"])
+    @pytest.mark.parametrize(
+        "server_reason,internal_reason",
+        [
+            ("model_context_window_exceeded", "max_tokens"),
+            ("max_tokens", "max_tokens"),
+            ("end_turn", "end_turn"),
+        ],
+    )
+    async def test_context_window_stop_reason_uses_existing_truncation_contract(
+        self, operation, server_reason, internal_reason
+    ):
+        transport = AnthropicSDKTransport(stop_reason=server_reason)
+        async with anthropic.AsyncAnthropic(
+            api_key="fake", auth_token="fake", http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        ) as client:
+            provider = AnthropicProvider(model="claude-sonnet-4-6", client=client)
+            if operation == "stream":
+                events = [event async for event in provider.stream([Message.user("hello")], "system")]
+                assert events[-1].stop_reason == internal_reason
+            else:
+                response = await provider.complete([Message.user("hello")], "system")
+                assert response.stop_reason == internal_reason
+
+    @pytest.mark.parametrize("operation", ["stream", "complete"])
+    @pytest.mark.parametrize(
+        "model,capacity",
+        [
+            ("claude-fable-5-1", 128000),
+            ("claude-opus-5-5", 128000),
+            ("claude-sonnet-5-5", 128000),
+            ("claude-haiku-5-5", 128000),
+            ("claude-fable-5", 128000),
+            ("claude-opus-5", 128000),
+            ("claude-opus-4-8", 128000),
+            ("claude-sonnet-5", 128000),
+            ("claude-opus-4-7", 128000),
+            ("claude-opus-4-6", 128000),
+            ("claude-sonnet-4-6", 128000),
+            ("claude-sonnet-4-6-1m", 128000),
+            ("claude-haiku-4-5-20251001", 64000),
+        ],
+    )
+    async def test_registered_claude_uses_full_model_capacity(self, operation, model, capacity):
+        transport = AnthropicSDKTransport()
+        async with anthropic.AsyncAnthropic(
+            api_key="fake", auth_token="fake", http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        ) as client:
+            provider = AnthropicProvider(model=model, client=client)
+            if operation == "stream":
+                _ = [event async for event in provider.stream([Message.user("hello")], "system")]
+            else:
+                assert (await provider.complete([Message.user("hello")], "system")).text == "done"
+
+        assert len(transport.requests) == 1
+        assert json.loads(transport.requests[0].content)["max_tokens"] == capacity
+
+    @pytest.mark.parametrize("operation", ["stream", "complete"])
+    @pytest.mark.parametrize(
+        "provider_key,model,metadata_url",
+        [
+            ("anthropic", "custom-model", "https://custom.example/api/v1/models/custom-model"),
+            ("anthropic_compatible", "custom-model", "https://custom.example/api/v1/models/custom-model"),
+            ("anthropic_compatible", "claude-sonnet-4-6", "https://custom.example/api/v1/models/claude-sonnet-4-6"),
+            ("minimax_cn", "MiniMax-M2.5", "https://custom.example/api/v1/models/MiniMax-M2.5"),
+        ],
+    )
+    async def test_unknown_model_queries_its_endpoint_and_caches_capacity(
+        self, operation, provider_key, model, metadata_url
+    ):
+        transport = AnthropicSDKTransport()
+        async with anthropic.AsyncAnthropic(
+            api_key="fake", auth_token="fake",
+            base_url="https://custom.example/api",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport)),
+        ) as client:
+            provider = AnthropicProvider(model=model, provider_key=provider_key, client=client)
+            for _ in range(2):
+                if operation == "stream":
+                    _ = [event async for event in provider.stream([Message.user("hello")], "system")]
+                else:
+                    await provider.complete([Message.user("hello")], "system")
+
+        assert [request.method for request in transport.requests] == ["GET", "POST", "POST"]
+        assert transport.requests[0].url == metadata_url
+        assert all(json.loads(request.content)["max_tokens"] == 196608 for request in transport.requests[1:])
+
+    @pytest.mark.parametrize("operation", ["stream", "complete"])
+    async def test_model_metadata_and_messages_forward_request_headers(self, operation):
+        transport = AnthropicSDKTransport()
+        async with anthropic.AsyncAnthropic(
+            api_key="fake", auth_token="fake",
+            base_url="https://custom.example/api",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport)),
+        ) as client:
+            provider = AnthropicProvider(model="custom-model", provider_key="anthropic_compatible", client=client)
+            for authorization in ["Bearer request-token-1", "Bearer request-token-2"]:
+                with use_provider_request_headers({"Authorization": authorization, "X-A2A-Session": "session-1"}):
+                    if operation == "stream":
+                        _ = [event async for event in provider.stream([Message.user("hello")], "system")]
+                    else:
+                        await provider.complete([Message.user("hello")], "system")
+
+        assert [request.method for request in transport.requests] == ["GET", "POST", "POST"]
+        assert [
+            (request.headers.get("Authorization"), request.headers.get("X-A2A-Session"))
+            for request in transport.requests
+        ] == [
+            ("Bearer request-token-1", "session-1"),
+            ("Bearer request-token-1", "session-1"),
+            ("Bearer request-token-2", "session-1"),
+        ]
+
+    @pytest.mark.parametrize("capacity", [None, 0, -1, True, "64000", 64000.5])
+    async def test_unknown_model_rejects_invalid_capacity_without_sending_message(self, capacity):
+        transport = AnthropicSDKTransport(capacity)
+        async with anthropic.AsyncAnthropic(
+            api_key="fake", auth_token="fake", http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        ) as client:
+            provider = AnthropicProvider(model="custom-model", client=client)
+            with pytest.raises(ValueError, match="max_tokens"):
+                await provider.complete([Message.user("hello")], "system")
+        assert [request.method for request in transport.requests] == ["GET"]
+
+    @pytest.mark.parametrize("provider_key", ["minimax_cn", "minimax_intl"])
+    @pytest.mark.parametrize(
+        "model",
+        [
+            "MiniMax-M3",
+            "MiniMax-M3.1-Flash",
+            "MiniMax-M2.7",
+            "MiniMax-M2.7-highspeed",
+            "MiniMax-M2.5",
+            "MiniMax-M2.5-highspeed",
+            "MiniMax-M2.1",
+            "MiniMax-M2",
+            "custom-minimax-model",
+        ],
+    )
+    @pytest.mark.parametrize("operation", ["stream", "complete"])
+    @pytest.mark.parametrize("thinking_enabled", [False, True])
+    async def test_minimax_omits_optional_output_limit_without_model_lookup(
+        self, provider_key, model, operation, thinking_enabled
+    ):
+        from iac_code.providers.minimax_provider import MiniMaxProvider
+
+        transport = AnthropicSDKTransport()
+        async with anthropic.AsyncAnthropic(
+            api_key="fake", auth_token="fake", http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        ) as client:
+            provider = MiniMaxProvider(
+                model=model, provider_key=provider_key, client=client, thinking_enabled=thinking_enabled
+            )
+            if operation == "stream":
+                _ = [event async for event in provider.stream([Message.user("hello")], "system")]
+            else:
+                await provider.complete([Message.user("hello")], "system")
+        assert [request.method for request in transport.requests] == ["POST"]
+        assert {"max_tokens", "max_completion_tokens", "max_output_tokens"}.isdisjoint(
+            json.loads(transport.requests[0].content)
+        )
+
+    @pytest.mark.parametrize("budget", [128000, 128001])
+    async def test_thinking_budget_must_leave_room_within_model_capacity(self, budget):
+        client = FakeAnthropicClient()
+        provider = AnthropicProvider(model="claude-sonnet-4-6", client=client, thinking_budget=budget)
+        with pytest.raises(ValueError, match="thinking_budget.*model"):
+            await provider.complete([Message.user("hello")], "system")
+        assert client.messages.create_calls == []
+
+    @pytest.mark.parametrize("budget", [1024, 127999])
+    async def test_valid_thinking_budget_does_not_resize_model_capacity(self, budget):
+        transport = AnthropicSDKTransport()
+        async with anthropic.AsyncAnthropic(
+            api_key="fake", auth_token="fake", http_client=httpx.AsyncClient(transport=httpx.MockTransport(transport))
+        ) as client:
+            provider = AnthropicProvider(model="claude-sonnet-4-6", client=client, thinking_budget=budget)
+            await provider.complete([Message.user("hello")], "system")
+        payload = json.loads(transport.requests[0].content)
+        assert payload["max_tokens"] == 128000
+        assert payload["thinking"] == {"type": "enabled", "budget_tokens": budget}
 
 
 class TestAnthropicProvider:
@@ -310,35 +546,30 @@ class TestAnthropicBuildThinkingKwargs:
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", effort="high")
         kwargs = p._build_thinking_kwargs()
         assert kwargs == {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_max_uses_adaptive_output_effort(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", effort="max")
         assert p._build_thinking_kwargs() == {"thinking": {"type": "adaptive"}, "output_config": {"effort": "max"}}
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_auto_returns_empty(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", effort="auto")
         assert p._build_thinking_kwargs() == {}
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_no_effort_returns_empty(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", effort=None)
         assert p._build_thinking_kwargs() == {}
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_enabled_true_uses_default_effort(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
 
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", thinking_enabled=True)
         assert p._build_thinking_kwargs() == {"thinking": {"type": "adaptive"}, "output_config": {"effort": "high"}}
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_enabled_false_disables_configurable_adaptive_thinking(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -354,7 +585,6 @@ class TestAnthropicBuildThinkingKwargs:
             "thinking": {"type": "disabled"},
             "output_config": {"effort": "high"},
         }
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_disabled_thinking_ignores_invalid_manual_budget(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -367,7 +597,6 @@ class TestAnthropicBuildThinkingKwargs:
         )
 
         assert p._build_thinking_kwargs() == {"thinking": {"type": "disabled"}}
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_explicit_thinking_budget_is_ignored_without_manual_budget_support(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -375,7 +604,6 @@ class TestAnthropicBuildThinkingKwargs:
         p = AnthropicProvider(model="claude-opus-4-7", api_key="k", thinking_budget=2048)
 
         assert p._build_thinking_kwargs() == {}
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_claude_46_explicit_thinking_budget_uses_manual_mode(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -383,7 +611,6 @@ class TestAnthropicBuildThinkingKwargs:
         p = AnthropicProvider(model="claude-sonnet-4-6", api_key="k", thinking_budget=2048)
 
         assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 2048}}
-        assert p._adjust_max_tokens(8192) == 8192
 
     def test_claude_46_manual_budget_preserves_explicit_effort(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -414,7 +641,6 @@ class TestAnthropicBuildThinkingKwargs:
         p = AnthropicProvider(model="claude-haiku-4-5-20251001", api_key="k", effort="high")
 
         assert p._build_thinking_kwargs() == {"thinking": {"type": "enabled", "budget_tokens": 16384}}
-        assert p._adjust_max_tokens(8192) >= 16384 + 4096
 
     def test_legacy_haiku_rejects_manual_thinking_budget_below_minimum(self):
         from iac_code.providers.anthropic_provider import AnthropicProvider
@@ -437,39 +663,6 @@ class TestAnthropicBuildThinkingKwargs:
             thinking_enabled=False,
         )._build_thinking_kwargs() == {"output_config": {"effort": "high"}}
 
-
-class TestAnthropicMaxOutputTokens:
-    def test_configured_cap_overrides_request_default_without_thinking(self):
-        from iac_code.providers.anthropic_provider import AnthropicProvider
-
-        p = AnthropicProvider(
-            model="claude-opus-4-7",
-            api_key="k",
-            effort="auto",
-            max_completion_tokens=32000,
-        )
-        # 无思考预算时,配置的输出上限直接覆盖调用方默认(8192)。
-        assert p._adjust_max_tokens(8192) == 32000
-        kwargs = p._build_kwargs([Message.user("hi")], "sys", None, 8192)
-        assert kwargs["max_tokens"] == 32000
-
-    def test_configured_cap_is_respected_for_adaptive_thinking(self):
-        from iac_code.providers.anthropic_provider import AnthropicProvider
-
-        # Adaptive thinking has no separate manual budget in the current capability table.
-        p = AnthropicProvider(
-            model="claude-opus-4-7",
-            api_key="k",
-            effort="high",  # 16384 budget
-            max_completion_tokens=1000,
-        )
-        assert p._adjust_max_tokens(8192) == 1000
-
-    def test_blank_config_falls_back_to_request_default(self):
-        from iac_code.providers.anthropic_provider import AnthropicProvider
-
-        p = AnthropicProvider(model="claude-opus-4-7", api_key="k", effort="auto")
-        assert p._adjust_max_tokens(8192) == 8192
 
 
 @pytest.mark.asyncio
@@ -591,6 +784,7 @@ class TestAnthropicStream:
         end = out[-2]
         assert end.tool_use_id == "toolu_1"
         assert end.input == {"cmd": "ls"}
+        assert out[-1].stop_reason == "tool_use"
 
     async def test_thinking_delta_yields_thinking_event(self):
         events = [

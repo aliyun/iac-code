@@ -5,8 +5,21 @@ from iac_code.services.session_logging import (
     log_session_configured,
     log_session_start_safely,
     log_session_started,
+    log_session_started_from_provider_settings,
     sanitize_endpoint_origin,
 )
+
+
+def test_session_started_ignores_retired_output_limit_in_provider_settings(caplog) -> None:
+    caplog.set_level(logging.INFO, logger="iac_code.services.session_logging")
+
+    log_session_started_from_provider_settings(
+        session_id="legacy-settings",
+        provider_settings={"thinking_budget": 2048, "max_completion_tokens": 100},
+    )
+
+    assert "thinking_budget=2048" in caplog.text
+    assert "max_completion_tokens" not in caplog.text
 
 
 def test_session_started_log_quotes_values_with_spaces(caplog) -> None:

@@ -24,7 +24,6 @@ from iac_code.config import (
 )
 from iac_code.i18n import LANGUAGE_DISPLAY_NAMES, SUPPORTED_LANGUAGES, _, set_language
 from iac_code.pipeline.config import is_selling_review_step_enabled, save_selling_review_step_enabled
-from iac_code.providers.output_limits import OutputTokenPolicy
 from iac_code.providers.registry import PROVIDER_GROUPS, PROVIDER_REGISTRY, ProviderDescriptor
 from iac_code.providers.thinking import get_thinking_spec, normalize_effort, resolve_thinking_active
 from iac_code.services.providers.aliyun import CREDENTIAL_MODES, DEFAULT_REGION, AliyunCredential, AliyunCredentials
@@ -407,7 +406,6 @@ def _partner_payloads() -> list[dict[str, Any]]:
                 "savedApiBase": None,
                 "savedEffort": None,
                 "savedThinkingBudget": None,
-                "savedMaxCompletionTokens": None,
                 "savedApiKey": None,
             }
         )
@@ -422,7 +420,6 @@ def save_active_provider(data: dict[str, Any]) -> dict[str, Any]:
     api_base = _optional_string(data, "apiBase")
     api_key = _optional_string(data, "apiKey")
     thinking_budget = _optional_int_field(data, "thinkingBudget")
-    max_completion_tokens = _optional_int_field(data, "maxCompletionTokens")
 
     provider = PROVIDER_REGISTRY.get(provider_key)
     if provider is None:
@@ -431,7 +428,6 @@ def save_active_provider(data: dict[str, Any]) -> dict[str, Any]:
     if effort is not None:
         _validate_effort(provider_key, model, effort)
     _validate_positive_int(thinking_budget, "thinkingBudget")
-    _validate_positive_int(max_completion_tokens, "maxCompletionTokens")
 
     _save_active_provider_config(
         provider,
@@ -439,7 +435,6 @@ def save_active_provider(data: dict[str, Any]) -> dict[str, Any]:
         effort=effort,
         api_base=api_base,
         thinking_budget=thinking_budget,
-        max_completion_tokens=max_completion_tokens,
     )
     if api_key is not None:
         _save_llm_key(provider_key, api_key)
@@ -454,7 +449,6 @@ def save_provider_config(data: dict[str, Any]) -> dict[str, Any]:
     api_base = _optional_string(data, "apiBase")
     api_key = _optional_string(data, "apiKey")
     thinking_budget = _optional_int_field(data, "thinkingBudget")
-    max_completion_tokens = _optional_int_field(data, "maxCompletionTokens")
 
     provider = PROVIDER_REGISTRY.get(provider_key)
     if provider is None:
@@ -463,7 +457,6 @@ def save_provider_config(data: dict[str, Any]) -> dict[str, Any]:
     if effort is not None:
         _validate_effort(provider_key, model, effort)
     _validate_positive_int(thinking_budget, "thinkingBudget")
-    _validate_positive_int(max_completion_tokens, "maxCompletionTokens")
 
     _write_provider_config(
         provider,
@@ -472,7 +465,6 @@ def save_provider_config(data: dict[str, Any]) -> dict[str, Any]:
         api_base=api_base,
         activate=False,
         thinking_budget=thinking_budget,
-        max_completion_tokens=max_completion_tokens,
     )
     if api_key is not None:
         _save_llm_key(provider_key, api_key)
@@ -853,7 +845,6 @@ def _provider_payload(
         "savedApiBase": _string_or_none(provider_config.get("apiBase")),
         "savedEffort": _string_or_none(provider_config.get("effort")),
         "savedThinkingBudget": _int_or_none(provider_config.get("thinkingBudget")),
-        "savedMaxCompletionTokens": _int_or_none(provider_config.get("maxCompletionTokens")),
         # 本地单用户工作台:回填已保存密钥,便于在页面上以密文形式查看/编辑。
         "savedApiKey": _string_or_none(credentials.get(provider.key)),
     }
@@ -882,11 +873,8 @@ def _model_payload(provider_key: str, model, provider_config: dict[str, Any] | N
         # 「思考预算」字段仅对支持独立预算的模型可见(能力门控);其余家族走 effort 推导。
         "supportsThinkingBudget": thinking.supports_thinking_budget,
         "defaultThinkingBudget": thinking.default_thinking_budget,
-        # GLM 留空使用服务端默认;其余模型展示请求层默认,与 provider 策略一致。
-        "defaultMaxCompletionTokens": OutputTokenPolicy(model.id).default_limit,
-        # 已保存的两个旋钮按模型回填(providers.<key>.models.<id>,回落 provider 顶层)。
+        # 已保存的思考预算按模型回填,回落 provider 顶层。
         "savedThinkingBudget": _saved("thinkingBudget"),
-        "savedMaxCompletionTokens": _saved("maxCompletionTokens"),
     }
 
 
@@ -915,7 +903,6 @@ def _write_provider_config(
     api_base: str | None,
     activate: bool,
     thinking_budget: Any = _UNSET,
-    max_completion_tokens: Any = _UNSET,
 ) -> None:
     settings_path = get_settings_path()
     config = _load_yaml(settings_path)
@@ -932,14 +919,13 @@ def _write_provider_config(
         entry["apiBase"] = effective_api_base
     if effort is not None:
         entry["effort"] = effort
-    # 「最大输出 tokens」/「思考预算」按模型存于 providers.<key>.models.<model> 下
+    # 「思考预算」按模型存于 providers.<key>.models.<model> 下
     # (读路径 manager._get_positive_int_provider_config_value 亦先查模型级、再回落 provider 顶层),
     # 使同一 provider 下不同模型互不干扰。effort 仍存 provider 顶层,不受影响。
     _apply_model_int_knobs(
         entry,
         model,
         thinking_budget=thinking_budget,
-        max_completion_tokens=max_completion_tokens,
     )
 
     providers[provider.key] = entry
@@ -959,7 +945,6 @@ def _save_active_provider_config(
     effort: str | None,
     api_base: str | None,
     thinking_budget: Any = _UNSET,
-    max_completion_tokens: Any = _UNSET,
 ) -> None:
     _write_provider_config(
         provider,
@@ -968,7 +953,6 @@ def _save_active_provider_config(
         api_base=api_base,
         activate=True,
         thinking_budget=thinking_budget,
-        max_completion_tokens=max_completion_tokens,
     )
 
 
@@ -1114,12 +1098,11 @@ def _apply_model_int_knobs(
     model: str,
     *,
     thinking_budget: Any,
-    max_completion_tokens: Any,
 ) -> None:
-    """按模型把两个数值旋钮写入 providers.<key>.models.<model> 下。
+    """按模型把思考预算写入 providers.<key>.models.<model> 下。
 
     沿用 _apply_int_key 的三态语义(_UNSET 保持 / None 清除 / 正整数覆盖),仅触碰该模型
-    条目里的这两个键,保留其它模型与该模型的其它键;写完清理空的 models.<model> 与空 models,
+    条目里的思考预算,保留其它模型与该模型的其它键;写完清理空的 models.<model> 与空 models,
     避免残留空字典。
     """
     models_raw = entry.get("models")
@@ -1127,7 +1110,6 @@ def _apply_model_int_knobs(
     model_raw = models_map.get(model)
     model_entry: dict[str, Any] = dict(model_raw) if isinstance(model_raw, dict) else {}
     _apply_int_key(model_entry, "thinkingBudget", thinking_budget)
-    _apply_int_key(model_entry, "maxCompletionTokens", max_completion_tokens)
     if model_entry:
         models_map[model] = model_entry
     else:

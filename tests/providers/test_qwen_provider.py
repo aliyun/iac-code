@@ -129,7 +129,7 @@ class _ManagerFakeProvider:
     def prepare_system_prompt(self, system, tools):
         return f"{system}\nqwen:{self.model}"
 
-    def stream(self, messages, system, tools=None, max_tokens=8192):
+    def stream(self, messages, system, tools=None):
         self.stream_calls.append((system, tools))
         outcome = self.streams.pop(0)
 
@@ -141,7 +141,7 @@ class _ManagerFakeProvider:
 
         return generate()
 
-    async def complete(self, messages, system, tools=None, max_tokens=8192, **kwargs):
+    async def complete(self, messages, system, tools=None, **kwargs):
         self.complete_calls += 1
         if isinstance(self.completion, BaseException):
             raise self.completion

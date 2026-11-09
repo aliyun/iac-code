@@ -249,10 +249,9 @@ class QwenProvider(DashScopeProvider):
         messages,
         system,
         tools,
-        max_tokens,
         context: ChatRequestContext,
     ) -> dict[str, Any]:
-        kwargs = super()._build_chat_completion_kwargs(messages, system, tools, max_tokens, context)
+        kwargs = super()._build_chat_completion_kwargs(messages, system, tools, context)
         if kwargs.get("tool_choice") == "required" and _request_enables_thinking(kwargs):
             kwargs.pop("tool_choice", None)
         if not context.streaming:

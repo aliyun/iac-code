@@ -661,10 +661,8 @@ function createModelPanel(api, context) {
     id: "api-key",
     fieldLabel: t("API key"),
   });
-  // 高级设置(默认折叠):最大输出 tokens(全模型生效)、思考预算(仅支持独立预算的模型可见)。
-  const maxTokensInput = makeNumberInput("workspace-model-max-tokens", t("Leave blank to use model default"));
+  // 高级设置(默认折叠):思考预算仅支持独立预算的模型可见。
   const thinkingBudgetInput = makeNumberInput("workspace-model-thinking-budget", t("Leave blank to use model default"));
-  const maxTokensField = makeField(t("Max output tokens"), maxTokensInput, t("Max output tokens per reply; leave blank to use model default"));
   const thinkingBudgetField = makeField(t("Thinking budget"), thinkingBudgetInput, t("Token budget allocated to the thinking process; leave blank to use model default"));
   const advancedToggle = makeElement("button", {
     className: "workspace-advanced-toggle",
@@ -675,7 +673,6 @@ function createModelPanel(api, context) {
     makeElement("span", { className: "workspace-advanced-title", textContent: t("Advanced settings") }),
   );
   const advancedBody = appendChildren(makeElement("div", { className: "workspace-advanced-body" }), [
-    maxTokensField,
     thinkingBudgetField,
   ]);
   advancedBody.hidden = true;
@@ -738,16 +735,14 @@ function createModelPanel(api, context) {
     effortChoice.value = activeEffort || "";
   };
 
-  // 高级设置回填 + 能力门控:最大输出 tokens 恒显示;思考预算仅在模型 supportsThinkingBudget 时显示。
+  // 高级设置回填 + 能力门控:思考预算仅在模型 supportsThinkingBudget 时显示。
   const fillAdvanced = () => {
     const model = selectedModelItem();
-    // 两个旋钮按模型存储(providers.<key>.models.<id>),故按选中模型回填,而非 provider 级。
-    maxTokensInput.value = model?.savedMaxCompletionTokens ?? "";
+    // 思考预算按模型存储,故按选中模型回填,而非 provider 级。
     thinkingBudgetInput.value = model?.savedThinkingBudget ?? "";
-    const defaultMax = model?.defaultMaxCompletionTokens;
-    maxTokensInput.placeholder = defaultMax ? t("Leave blank to use model default ({value})", { value: defaultMax }) : t("Leave blank to use model default");
     const supportsBudget = Boolean(model?.supportsThinkingBudget);
     thinkingBudgetField.hidden = !supportsBudget;
+    advancedSection.hidden = !supportsBudget;
     const defaultBudget = model?.defaultThinkingBudget;
     thinkingBudgetInput.placeholder =
       supportsBudget && defaultBudget ? t("Leave blank to use model default ({value})", { value: defaultBudget }) : t("Leave blank to use model default");
@@ -889,7 +884,6 @@ function createModelPanel(api, context) {
         provider.hasApiKey ||
         provider.savedApiBase ||
         provider.savedEffort ||
-        provider.savedMaxCompletionTokens ||
         provider.savedThinkingBudget,
     );
     clearButton.disabled = isActive || !hasSavedConfig;
@@ -971,8 +965,6 @@ function createModelPanel(api, context) {
       effort: effortChoice.value,
       apiBase: apiBaseInput.value.trim(),
       apiKey: apiKeyInput.value,
-      // 最大输出 tokens 对所有模型生效,始终提交(int 或 null)。
-      maxCompletionTokens: parsePositiveInt(maxTokensInput.value),
     };
     // 思考预算仅在字段可见(模型支持独立预算)时提交,避免给不支持的模型写入。
     if (!thinkingBudgetField.hidden) {

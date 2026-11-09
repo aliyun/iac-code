@@ -2686,9 +2686,26 @@ fn headless_cli_uses_anthropic_compatible_provider_protocol() {
         .expect("test server should be nonblocking");
     let addr = listener.local_addr().expect("server addr");
     let server = thread::spawn(move || {
+        let (mut metadata, _) = accept_with_timeout(listener.try_clone().expect("clone listener"));
+        configure_test_stream(&metadata);
+        let metadata_request = read_http_request(&mut metadata);
+        assert!(
+            metadata_request.starts_with("GET /v1/models/fixture-claude-model HTTP/1.1"),
+            "{metadata_request}"
+        );
+        assert!(metadata_request.contains("x-api-key: fixture-anthropic-key"));
+        write_http_response(
+            &mut metadata,
+            r#"{"id":"fixture-claude-model","max_tokens":262144}"#,
+        );
+        drop(metadata);
         let (mut stream, _) = accept_with_timeout(listener);
         configure_test_stream(&stream);
         let request = read_http_request(&mut stream);
+        assert!(
+            request.contains("\"max_tokens\":262144"),
+            "model maximum missing: {request}"
+        );
         assert!(
             request.starts_with("POST /v1/messages HTTP/1.1"),
             "unexpected request line: {request}"

@@ -95,19 +95,11 @@ async def test_qwen_reasoning_event_maps_to_existing_thinking_event():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("model", ["qwen3.8-max", "qwen3.7-max", "qwen3.6-plus", "qwen3.5-plus"])
-async def test_output_limit_is_sent_as_configured(model):
+async def test_output_limit_uses_server_default(model):
     client = FakeResponsesClient(response(), base_url=BASE)
-    p = DashScopeResponsesProvider(model=model, client=client, max_completion_tokens=123)
-    await p.complete([Message.user("go")], "system", max_tokens=1000)
-    assert client.calls[0]["max_output_tokens"] == 123
-
-
-@pytest.mark.asyncio
-async def test_qwen_validates_output_limit_locally():
-    client = FakeResponsesClient(base_url=BASE)
-    with pytest.raises(ValueError, match="at least 16"):
-        await provider(client, max_completion_tokens=15).complete([Message.user("go")], "system")
-    assert client.calls == []
+    p = DashScopeResponsesProvider(model=model, client=client)
+    await p.complete([Message.user("go")], "system")
+    assert "max_output_tokens" not in client.calls[0]
 
 
 @pytest.mark.asyncio

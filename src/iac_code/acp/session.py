@@ -347,7 +347,7 @@ class ACPSession:
         self.mcp_pending_configs = mcp_pending_configs if mcp_pending_configs is not None else []
         self._mcp_warnings_pushed_count = 0
         self.command_registry = command_registry
-        # Dynamic session configuration (temperature, max_tokens, etc.)
+        # Dynamic session configuration (temperature, etc.)
         self._config: dict[str, Any] = {}
         # Whether this session has been closed
         self._closed: bool = False
@@ -429,7 +429,7 @@ class ACPSession:
         """Update dynamic session configuration.
 
         Merges *config* into the current session config.  Keys like
-        ``temperature``, ``max_tokens`` etc. can be used by the agent loop
+        ``temperature`` etc. can be used by the agent loop
         when supported.
         """
         self._config.update(config)

@@ -27,7 +27,7 @@ class ScriptedProvider:
     def get_model_name(self) -> str:
         return "fake"
 
-    async def stream(self, messages, system, tools=None, max_tokens=8192):
+    async def stream(self, messages, system, tools=None):
         self.messages.append(list(messages))
         for event in self.replies[len(self.messages) - 1]:
             yield event

@@ -35,7 +35,6 @@ pub mod gen_ai_attr {
     pub const RESPONSE_MODEL: &str = "gen_ai.response.model";
     pub const RESPONSE_ID: &str = "gen_ai.response.id";
     pub const CONVERSATION_ID: &str = "gen_ai.conversation.id";
-    pub const REQUEST_MAX_TOKENS: &str = "gen_ai.request.max_tokens";
     pub const REQUEST_TEMPERATURE: &str = "gen_ai.request.temperature";
     pub const REQUEST_TOP_P: &str = "gen_ai.request.top_p";
     pub const REQUEST_TOP_K: &str = "gen_ai.request.top_k";

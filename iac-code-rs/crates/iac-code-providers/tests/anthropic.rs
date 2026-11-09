@@ -12,6 +12,377 @@ use iac_code_protocol::{
 use iac_code_providers::{AnthropicProvider, EventProvider, ProviderConfig};
 
 #[test]
+fn anthropic_context_window_stop_uses_the_internal_truncation_reason() {
+    for streaming in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("server addr");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("messages request");
+            let _request = read_http_request(&mut stream);
+            let body = if streaming {
+                concat!(
+                    "data: {\"type\":\"message_start\",\"message\":{\"id\":\"context_stop\"}}\n\n",
+                    "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"model_context_window_exceeded\"}}\n\n",
+                    "data: {\"type\":\"message_stop\"}\n\n",
+                )
+            } else {
+                r#"{"id":"context_stop","content":[],"stop_reason":"model_context_window_exceeded"}"#
+            };
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("write context-window stop");
+        });
+        let provider = AnthropicProvider::new(ProviderConfig {
+            provider_key: "anthropic".into(),
+            model: "claude-opus-4-7".into(),
+            api_key: Some("fixture-key".into()),
+            base_url: Some(format!("http://{addr}")),
+            effort: None,
+            supports_stream_options: false,
+        });
+        let conversation = Conversation::default();
+        let reason = if streaming {
+            let events = provider
+                .stream_chat(&conversation, "", &[])
+                .expect("stream response");
+            match events.last().expect("message end") {
+                StreamEvent::MessageEnd(end) => end.stop_reason.clone(),
+                event => panic!("expected message end, got {event:?}"),
+            }
+        } else {
+            provider
+                .complete_chat(&conversation, "", &[])
+                .expect("complete response")
+                .stop_reason
+        };
+        server.join().expect("server thread");
+        assert_eq!(reason, "max_tokens", "streaming: {streaming}");
+    }
+}
+
+#[test]
+fn anthropic_unknown_model_uses_provider_metadata_maximum() {
+    for (provider_key, model) in [
+        ("anthropic", "custom-model"),
+        ("anthropic_compatible", "custom-model"),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        listener.set_nonblocking(true).expect("set nonblocking");
+        let addr = listener.local_addr().expect("server addr");
+        let server = thread::spawn(move || {
+            let Some(mut stream) = accept_tcp_with_timeout(&listener, "model metadata") else {
+                return false;
+            };
+            let request = read_http_request(&mut stream);
+            assert!(
+                request.starts_with(&format!("GET /v1/models/{model} HTTP/1.1")),
+                "{request}"
+            );
+            assert!(request.contains("x-api-key: fixture-key"));
+            let body = r#"{"id":"custom-model","max_tokens":196608}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("write metadata response");
+            true
+        });
+        let provider = AnthropicProvider::new(ProviderConfig {
+            provider_key: provider_key.into(),
+            model: model.into(),
+            api_key: Some("fixture-key".into()),
+            base_url: Some(format!("http://{addr}/v1")),
+            effort: None,
+            supports_stream_options: false,
+        });
+        let payload = provider
+            .build_messages_payload(&Conversation::default(), "", &[])
+            .expect("model capability");
+        let payload: serde_json::Value =
+            serde_json::from_str(&payload.to_compact_json()).expect("request JSON");
+        assert!(
+            server.join().expect("server thread"),
+            "metadata request was missing"
+        );
+        assert_eq!(payload["max_tokens"], 196608);
+    }
+}
+
+#[test]
+fn minimax_messages_omit_optional_output_limits_without_model_lookup() {
+    for provider_key in ["minimax_cn", "minimax_intl"] {
+        for model in [
+            "MiniMax-M3",
+            "MiniMax-M3.1-Flash",
+            "MiniMax-M2.7",
+            "MiniMax-M2.7-highspeed",
+            "MiniMax-M2.5",
+            "MiniMax-M2.5-highspeed",
+            "custom-minimax-model",
+        ] {
+            let provider = AnthropicProvider::new(ProviderConfig {
+                provider_key: provider_key.into(),
+                model: model.into(),
+                api_key: Some("fixture-key".into()),
+                base_url: Some("http://127.0.0.1:9/anthropic".into()),
+                effort: None,
+                supports_stream_options: false,
+            });
+            let payload = provider
+                .build_messages_payload(&Conversation::default(), "", &[])
+                .expect("MiniMax capacity");
+            let payload: serde_json::Value =
+                serde_json::from_str(&payload.to_compact_json()).unwrap();
+            for field in ["max_tokens", "max_completion_tokens", "max_output_tokens"] {
+                assert!(
+                    payload.get(field).is_none(),
+                    "{provider_key}: {model}: {field}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn minimax_complete_stream_and_sink_requests_omit_output_limits() {
+    for provider_key in ["minimax_cn", "minimax_intl"] {
+        for mode in 0..3 {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+            let addr = listener.local_addr().expect("server addr");
+            let server = thread::spawn(move || {
+                let (mut stream, _) = listener.accept().expect("messages request");
+                let request = read_http_request(&mut stream);
+                assert!(
+                    request.starts_with("POST /anthropic/v1/messages HTTP/1.1"),
+                    "{request}"
+                );
+                let (_, body) = request.split_once("\r\n\r\n").expect("request body");
+                let payload: serde_json::Value = serde_json::from_str(body).expect("request JSON");
+                assert_eq!(payload["model"], "MiniMax-M2.7");
+                assert_eq!(
+                    payload
+                        .get("stream")
+                        .and_then(serde_json::Value::as_bool)
+                        .unwrap_or(false),
+                    mode != 0
+                );
+                for field in ["max_tokens", "max_completion_tokens", "max_output_tokens"] {
+                    assert!(
+                        payload.get(field).is_none(),
+                        "unexpected output limit: {field}"
+                    );
+                }
+                let body = r#"{"id":"minimax-message","content":[],"stop_reason":"end_turn"}"#;
+                write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+                .expect("write messages response");
+            });
+            let provider = AnthropicProvider::new(ProviderConfig {
+                provider_key: provider_key.into(),
+                model: "MiniMax-M2.7".into(),
+                api_key: Some("fixture-key".into()),
+                base_url: Some(format!("http://{addr}/anthropic")),
+                effort: None,
+                supports_stream_options: false,
+            });
+            let conversation = Conversation::default();
+            match mode {
+                0 => {
+                    provider
+                        .complete_chat(&conversation, "", &[])
+                        .expect("complete response");
+                }
+                1 => {
+                    provider
+                        .stream_chat(&conversation, "", &[])
+                        .expect("stream response");
+                }
+                _ => {
+                    provider
+                        .stream_chat_with_sink(&conversation, "", &[], &mut |_| {})
+                        .expect("sink response");
+                }
+            }
+            server.join().expect("server thread");
+        }
+    }
+}
+
+#[test]
+fn anthropic_metadata_without_a_positive_integer_capacity_is_rejected() {
+    for capacity in ["null", "0", "-1", "1.5", "true", "\"131072\""] {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("server addr");
+        let body = format!(r#"{{"max_tokens":{capacity}}}"#);
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("metadata request");
+            let _request = read_http_request(&mut stream);
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .expect("write invalid metadata");
+        });
+        let provider = AnthropicProvider::new(ProviderConfig {
+            provider_key: "anthropic_compatible".into(),
+            model: "unknown-model".into(),
+            api_key: Some("fixture-key".into()),
+            base_url: Some(format!("http://{addr}")),
+            effort: None,
+            supports_stream_options: false,
+        });
+        let error = provider
+            .build_messages_payload(&Conversation::default(), "", &[])
+            .expect_err("invalid capability");
+        server.join().expect("server thread");
+        assert!(
+            error.contains("positive max_tokens capability"),
+            "{capacity}: {error}"
+        );
+    }
+}
+
+#[test]
+fn anthropic_metadata_http_error_does_not_expose_url_credentials() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    let addr = listener.local_addr().expect("server addr");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("metadata request");
+        let _request = read_http_request(&mut stream);
+        write!(
+            stream,
+            "HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n"
+        )
+        .expect("write metadata error");
+    });
+    let provider = AnthropicProvider::new(ProviderConfig {
+        provider_key: "anthropic_compatible".into(),
+        model: "unknown-model".into(),
+        api_key: Some("fixture-key".into()),
+        base_url: Some(format!("http://{addr}/v1?access_token=fixture-secret")),
+        effort: None,
+        supports_stream_options: false,
+    });
+    let error = provider
+        .build_messages_payload(&Conversation::default(), "", &[])
+        .expect_err("HTTP error");
+    server.join().expect("server thread");
+    assert!(error.contains("403"), "{error}");
+    assert!(
+        !error.contains("fixture-secret"),
+        "URL credentials leaked: {error}"
+    );
+}
+
+#[test]
+fn anthropic_compatible_model_alias_uses_gateway_metadata() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+    listener.set_nonblocking(true).expect("set nonblocking");
+    let addr = listener.local_addr().expect("server addr");
+    let server = thread::spawn(move || {
+        let Some(mut stream) = accept_tcp_with_timeout(&listener, "gateway metadata") else {
+            return false;
+        };
+        let request = read_http_request(&mut stream);
+        assert!(
+            request.contains("content-type: application/json"),
+            "{request}"
+        );
+        assert!(
+            request.contains("anthropic-version: 2023-06-01"),
+            "{request}"
+        );
+        assert!(request.contains("x-api-key: fixture-key"), "{request}");
+        assert!(
+            request.starts_with("GET /v1/models/claude-sonnet-4-6 HTTP/1.1"),
+            "{request}"
+        );
+        let body = r#"{"id":"claude-sonnet-4-6","max_tokens":262144}"#;
+        write!(
+            stream,
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .expect("write gateway capability");
+        true
+    });
+    let provider = AnthropicProvider::new(ProviderConfig {
+        provider_key: "anthropic_compatible".into(),
+        model: "claude-sonnet-4-6".into(),
+        api_key: Some("fixture-key".into()),
+        base_url: Some(format!("http://{addr}")),
+        effort: Some("high".into()),
+        supports_stream_options: false,
+    });
+    let payload = provider
+        .build_messages_payload(&Conversation::default(), "", &[])
+        .expect("gateway capability");
+    assert!(
+        server.join().expect("server thread"),
+        "metadata request was missing"
+    );
+    let payload: serde_json::Value = serde_json::from_str(&payload.to_compact_json()).unwrap();
+    assert_eq!(payload["max_tokens"], 262144);
+    assert!(payload.get("thinking").is_none());
+}
+
+#[test]
+fn anthropic_thinking_budget_cannot_exceed_model_capability() {
+    let provider = AnthropicProvider::new(ProviderConfig {
+        provider_key: "anthropic".into(),
+        model: "claude-haiku-4-5-20251001".into(),
+        api_key: Some("fixture-key".into()),
+        base_url: None,
+        effort: Some("max".into()),
+        supports_stream_options: false,
+    });
+    assert!(provider
+        .build_messages_payload(&Conversation::default(), "", &[])
+        .is_err());
+}
+
+#[test]
+fn anthropic_messages_use_model_maximum_instead_of_caller_budget() {
+    for provider_key in ["anthropic"] {
+        for (model, expected) in [
+            ("claude-opus-4-7", 128_000),
+            ("claude-opus-4-6", 128_000),
+            ("claude-sonnet-4-6", 128_000),
+            ("claude-sonnet-4-6-1m", 128_000),
+            ("claude-haiku-4-5-20251001", 64_000),
+        ] {
+            let provider = AnthropicProvider::new(ProviderConfig {
+                provider_key: provider_key.into(),
+                model: model.into(),
+                api_key: Some("fixture-key".into()),
+                base_url: None,
+                effort: None,
+                supports_stream_options: false,
+            });
+            let payload = provider
+                .build_messages_payload(&Conversation::default(), "", &[])
+                .expect("model capability");
+            let payload: serde_json::Value =
+                serde_json::from_str(&payload.to_compact_json()).expect("request JSON");
+            assert_eq!(payload["max_tokens"], expected, "{provider_key}: {model}");
+        }
+    }
+}
+
+#[test]
 fn anthropic_provider_streams_sse_text_thinking_tools_and_usage() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
     let addr = listener.local_addr().expect("server addr");
@@ -202,28 +573,30 @@ fn anthropic_provider_recovers_concatenated_tool_inputs_like_python() {
 }
 
 #[test]
-fn anthropic_compatible_does_not_emit_thinking_payload_like_python() {
+fn anthropic_without_effort_does_not_emit_thinking_payload() {
     let provider = AnthropicProvider::new(ProviderConfig {
-        provider_key: "anthropic_compatible".into(),
+        provider_key: "anthropic".into(),
         model: "claude-sonnet-4-6".into(),
         api_key: Some("fixture-key".into()),
         base_url: None,
-        effort: Some("high".into()),
+        effort: None,
         supports_stream_options: false,
     });
     let mut conversation = Conversation::default();
     conversation.add_user_message(AgentMessageContent::Text("hello".into()));
 
-    let payload = provider.build_messages_payload(&conversation, "system prompt", &[], 8192);
+    let payload = provider
+        .build_messages_payload(&conversation, "system prompt", &[])
+        .expect("model capability");
     let request_body = payload.to_compact_json();
 
     assert!(
-        request_body.contains("\"max_tokens\":8192"),
-        "anthropic_compatible should keep the caller max_tokens unchanged: {request_body}"
+        request_body.contains("\"max_tokens\":128000"),
+        "anthropic should use the model maximum: {request_body}"
     );
     assert!(
         !request_body.contains("\"thinking\"") && !request_body.contains("\"budget_tokens\""),
-        "anthropic_compatible should not emit Anthropic thinking payload: {request_body}"
+        "anthropic should not emit Anthropic thinking payload: {request_body}"
     );
 }
 
@@ -377,8 +750,8 @@ fn anthropic_provider_retries_retryable_non_streaming_fallback_like_python() {
     });
 
     let provider = AnthropicProvider::new(ProviderConfig {
-        provider_key: "anthropic_compatible".into(),
-        model: "custom-claude".into(),
+        provider_key: "anthropic".into(),
+        model: "claude-haiku-4-5-20251001".into(),
         api_key: Some("fixture-key".into()),
         base_url: Some(format!("http://{addr}")),
         effort: None,

@@ -2845,14 +2845,6 @@ msgid "Leave blank to use model default"
 msgstr "空欄の場合はモデルのデフォルトを使用します"
 
 #: src/iac_code/web/static/js/components/workspace.js
-msgid "Max output tokens"
-msgstr "最大出力トークン数"
-
-#: src/iac_code/web/static/js/components/workspace.js
-msgid "Max output tokens per reply; leave blank to use model default"
-msgstr "返信ごとの最大出力トークン数。空欄の場合はモデルのデフォルトを使用します"
-
-#: src/iac_code/web/static/js/components/workspace.js
 msgid "Thinking budget"
 msgstr "思考バジェット"
 

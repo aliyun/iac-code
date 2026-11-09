@@ -7,6 +7,13 @@ use iac_code_protocol::{
 
 use super::usage::usage_from_value;
 
+pub(super) fn normalize_stop_reason(reason: &str) -> &str {
+    match reason {
+        "model_context_window_exceeded" => "max_tokens",
+        _ => reason,
+    }
+}
+
 pub(super) fn parse_non_streaming_response(text: &str) -> Result<NonStreamingResponse, String> {
     let value: serde_json::Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
     let content = value
@@ -63,11 +70,13 @@ pub(super) fn parse_non_streaming_response(text: &str) -> Result<NonStreamingRes
             .to_owned(),
         text: text_parts,
         tool_uses,
-        stop_reason: value
-            .get("stop_reason")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("end_turn")
-            .to_owned(),
+        stop_reason: normalize_stop_reason(
+            value
+                .get("stop_reason")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("end_turn"),
+        )
+        .to_owned(),
         usage: usage_from_value(value.get("usage").unwrap_or(&serde_json::Value::Null)),
         thinking: String::new(),
     })

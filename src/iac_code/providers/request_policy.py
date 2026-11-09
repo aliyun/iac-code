@@ -9,13 +9,11 @@ class ProviderRequestPolicy:
     thinking_enabled: bool | None = None
     effort: str | None = None
     thinking_budget: int | None = None
-    max_completion_tokens: int | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "thinking_enabled", bool_or_none(self.thinking_enabled))
         object.__setattr__(self, "effort", _stripped_or_none(self.effort))
         object.__setattr__(self, "thinking_budget", positive_int_or_none(self.thinking_budget))
-        object.__setattr__(self, "max_completion_tokens", positive_int_or_none(self.max_completion_tokens))
 
     @property
     def has_values(self) -> bool:
@@ -23,7 +21,6 @@ class ProviderRequestPolicy:
             self.thinking_enabled is not None
             or self.effort is not None
             or self.thinking_budget is not None
-            or self.max_completion_tokens is not None
         )
 
 

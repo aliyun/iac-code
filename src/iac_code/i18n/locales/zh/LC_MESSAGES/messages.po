@@ -13649,16 +13649,8 @@ msgid "The selected reasoning effort is not supported by this Responses model."
 msgstr "此 Responses 模型不支持所选的推理强度。"
 
 #: src/iac_code/providers/responses_provider.py
-msgid "Responses max_output_tokens must be a positive integer."
-msgstr "Responses 的 max_output_tokens 必须是正整数。"
-
-#: src/iac_code/providers/responses_provider.py
 msgid "Responses stream ended without a terminal response."
 msgstr "Responses 流已结束，但没有最终响应。"
-
-#: src/iac_code/providers/responses_provider.py
-msgid "DashScope Responses max_output_tokens must be at least 16."
-msgstr "DashScope Responses 的 max_output_tokens 必须至少为 16。"
 
 #: src/iac_code/providers/responses_provider.py
 msgid "Responses API requires a valid HTTP or HTTPS base URL."
@@ -13677,8 +13669,8 @@ msgid "The user requested {expected} candidate plans; {actual} were submitted. C
 msgstr "用户要求 {expected} 个候选方案，但提交了 {actual} 个。请修正候选方案或向用户澄清；不要擅自更改要求的数量。"
 
 #: src/iac_code/agent/agent_loop.py
-msgid "The model reached its output token limit. Increase the max output tokens setting and try again."
-msgstr "模型已达到输出 Token 上限。请提高最大输出 Token 数设置后重试。"
+msgid "The model reached its output token limit. Try splitting the task into smaller steps."
+msgstr "模型已达到输出 Token 上限。请尝试将任务拆分为更小的步骤。"
 
 #: src/iac_code/tools/cloud/aliyun/ros_validation/rules/eip_association.py
 #, python-brace-format

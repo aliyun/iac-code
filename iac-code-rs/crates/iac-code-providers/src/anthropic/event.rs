@@ -16,24 +16,21 @@ impl EventProvider for AnthropicProvider {
         tools: &[ToolDefinition],
         _max_turns: u32,
     ) -> Vec<StreamEvent> {
-        match self.stream_chat(conversation, system, tools, 8192) {
+        match self.stream_chat(conversation, system, tools) {
             Ok(events) => events,
             Err(stream_error) => {
                 let mut events = stream_error.partial_events;
                 let tombstones = tombstone_events_for_orphaned_messages(&events);
-                match self.complete_chat(conversation, system, tools, 8192) {
+                match self.complete_chat(conversation, system, tools) {
                     Ok(response) => {
                         events.extend(tombstones);
                         events.extend(stream_events_from_response(response));
                         events
                     }
                     Err(primary_complete_error) => {
-                        if let Some(response) = self.complete_chat_with_degraded_model(
-                            conversation,
-                            system,
-                            tools,
-                            8192,
-                        ) {
+                        if let Some(response) =
+                            self.complete_chat_with_degraded_model(conversation, system, tools)
+                        {
                             events.extend(tombstones);
                             events.extend(stream_events_from_response(response));
                             return events;
@@ -61,12 +58,12 @@ impl EventProvider for AnthropicProvider {
         _max_turns: u32,
         sink: &mut dyn FnMut(&StreamEvent),
     ) -> Vec<StreamEvent> {
-        match self.stream_chat_with_sink(conversation, system, tools, 8192, sink) {
+        match self.stream_chat_with_sink(conversation, system, tools, sink) {
             Ok(events) => events,
             Err(stream_error) => {
                 let mut events = stream_error.partial_events;
                 let tombstones = tombstone_events_for_orphaned_messages(&events);
-                match self.complete_chat(conversation, system, tools, 8192) {
+                match self.complete_chat(conversation, system, tools) {
                     Ok(response) => {
                         for event in &tombstones {
                             sink(event);
@@ -80,12 +77,9 @@ impl EventProvider for AnthropicProvider {
                         events
                     }
                     Err(primary_complete_error) => {
-                        if let Some(response) = self.complete_chat_with_degraded_model(
-                            conversation,
-                            system,
-                            tools,
-                            8192,
-                        ) {
+                        if let Some(response) =
+                            self.complete_chat_with_degraded_model(conversation, system, tools)
+                        {
                             for event in &tombstones {
                                 sink(event);
                             }
@@ -124,13 +118,10 @@ impl AnthropicProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
     ) -> Option<NonStreamingResponse> {
         let fallback = fallback_model(&self.config.model)?;
         let provider = Self::new(self.config.with_model(fallback));
-        provider
-            .complete_chat(conversation, system, tools, max_tokens)
-            .ok()
+        provider.complete_chat(conversation, system, tools).ok()
     }
 }
 

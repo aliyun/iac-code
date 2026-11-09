@@ -275,7 +275,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         provider = DashScopeProvider(model=model, api_key="k")
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
         assert "max_completion_tokens" not in call_kwargs
@@ -283,7 +283,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
         assert "reasoning_effort" not in call_kwargs
 
-    async def test_glm52_enabled_false_disables_budget_and_max_completion_tokens(self):
+    async def test_glm52_enabled_false_disables_thinking(self):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -294,7 +294,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         provider = DashScopeProvider(model="glm-5.2", api_key="k", effort="high", thinking_enabled=False)
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
         assert "max_tokens" not in call_kwargs
@@ -302,7 +302,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         assert call_kwargs["extra_body"] == {"enable_thinking": False}
         assert "reasoning_effort" not in call_kwargs
 
-    async def test_kimi_k27_code_defaults_to_bounded_thinking_budget_and_max_completion_tokens(self):
+    async def test_kimi_k27_code_preserves_thinking_budget_without_output_limit(self):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -313,10 +313,10 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         provider = DashScopeProvider(model="kimi-k2.7-code", api_key="k")
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_completion_tokens"] == 16384
+        assert "max_completion_tokens" not in call_kwargs
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {
             "enable_thinking": True,
@@ -325,7 +325,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         }
         assert "reasoning_effort" not in call_kwargs
 
-    async def test_qwen_request_policy_keeps_existing_max_tokens_behavior(self):
+    async def test_qwen_request_policy_uses_server_output_limit(self):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -336,10 +336,10 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         provider = DashScopeProvider(model="qwen3.7-max", api_key="k")
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
-        assert call_kwargs["max_tokens"] == 8192
+        assert "max_tokens" not in call_kwargs
         assert "max_completion_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True, "preserve_thinking": True}
 
@@ -354,7 +354,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         provider = DashScopeProvider(model="glm-5.2", api_key="k", provider_key="dashscope_token_plan")
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
         assert "max_completion_tokens" not in call_kwargs
@@ -373,7 +373,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         provider = DashScopeProvider(model=model, api_key="k", effort="low")
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
         assert call_kwargs["reasoning_effort"] == "low"
@@ -437,7 +437,7 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         provider = DashScopeProvider(model="kimi-k2.7-code", api_key="k", effort="high")
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
         assert "reasoning_effort" not in call_kwargs
@@ -452,14 +452,14 @@ class TestDashScopeThinkingBudgetRequestPolicy:
         provider = DashScopeProvider(model="glm-5.2", api_key="k")
         provider._client = client
 
-        await provider.complete(messages=[Message.user("hi")], system="", max_tokens=8192)
+        await provider.complete(messages=[Message.user("hi")], system="")
 
         call_kwargs = client.chat.completions.calls[0]
         assert "max_completion_tokens" not in call_kwargs
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
-    async def test_glm52_ignores_unsupported_thinking_budget_but_uses_output_limit(self):
+    async def test_glm52_ignores_unsupported_thinking_budget_without_output_limit(self):
         chunks = [
             ns(
                 usage=ns(prompt_tokens=1, completion_tokens=1),
@@ -471,15 +471,14 @@ class TestDashScopeThinkingBudgetRequestPolicy:
             model="glm-5.2",
             api_key="k",
             thinking_budget=2048,
-            max_completion_tokens=10000,
         )
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
-        # glm-5.2 由 effort 驱动思考，不支持独立思考预算；显式输出上限不叠加 2048。
-        assert call_kwargs["max_completion_tokens"] == 10000
+        # glm-5.2 由 effort 驱动思考，不支持独立思考预算。
+        assert "max_completion_tokens" not in call_kwargs
         assert "max_tokens" not in call_kwargs
         assert call_kwargs["extra_body"] == {"enable_thinking": True}
 
@@ -495,11 +494,10 @@ class TestDashScopeThinkingBudgetRequestPolicy:
             model="glm-5.2",
             api_key="k",
             thinking_budget=2048.9,
-            max_completion_tokens=10000.5,
         )
         provider._client = client
 
-        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="", max_tokens=8192)]
+        _ = [event async for event in provider.stream(messages=[Message.user("hi")], system="")]
 
         call_kwargs = client.chat.completions.calls[0]
         assert "max_completion_tokens" not in call_kwargs

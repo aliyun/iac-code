@@ -108,7 +108,6 @@ def _diagnose_wait(config_dir: Path, *, expected: str, transcript: str) -> dict[
                 "content": json.dumps({"expected": expected, "terminal_tail": excerpt}, ensure_ascii=False),
             },
         ],
-        "max_tokens": 512,
         "reasoning_effort": "low",
     }
     try:

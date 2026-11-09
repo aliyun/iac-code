@@ -74,7 +74,7 @@ class PlanningModel:
     def get_model_name(self):
         return "deterministic-p18-fixture"
 
-    async def stream(self, messages, system, tools=None, max_tokens=8192):
+    async def stream(self, messages, system, tools=None):
         script = [
             (BATCH_ID, "show_architecture_plan", OUTLINE),
             ("candidate-detail", "show_candidate_detail", DETAIL),

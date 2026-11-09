@@ -21,13 +21,11 @@ impl OpenAiCompatibleProvider {
         conversation: &Conversation,
         system: &str,
         tools: &[ToolDefinition],
-        max_tokens: u32,
         stream: bool,
     ) -> JsonValue {
         let mut entries = vec![
             ("model", json::string(&self.config.model)),
             ("messages", self.build_api_messages(conversation, system)),
-            ("max_tokens", json::number(max_tokens)),
         ];
         if stream {
             entries.push(("stream", json::bool_value(true)));

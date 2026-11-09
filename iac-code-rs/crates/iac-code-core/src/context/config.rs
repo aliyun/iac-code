@@ -19,7 +19,13 @@ pub fn context_window_config(model: &str) -> ContextWindowConfig {
         ("o4", ContextWindowConfig::new(200_000, 8_192, 20_000)),
     ] {
         if model.starts_with(prefix) {
-            return config;
+            return ContextWindowConfig {
+                max_output_tokens: iac_code_providers::AnthropicProvider::known_max_output_tokens(
+                    &model,
+                )
+                .unwrap_or(config.max_output_tokens),
+                ..config
+            };
         }
     }
     ContextWindowConfig::new(128_000, 8_192, 15_000)

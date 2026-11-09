@@ -49,7 +49,6 @@ class VolcengineProvider(OpenAIProvider):
         provider_key: str = "volcengine_cn",
         thinking_enabled: bool | None = None,
         thinking_budget: int | None = None,
-        max_completion_tokens: int | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(
@@ -59,7 +58,6 @@ class VolcengineProvider(OpenAIProvider):
             effort=effort,
             thinking_enabled=thinking_enabled,
             thinking_budget=thinking_budget,
-            max_completion_tokens=max_completion_tokens,
             provider_key=provider_key,
             **kwargs,
         )
@@ -75,13 +73,6 @@ class VolcengineProvider(OpenAIProvider):
             return {}
         selected = effort if effort in spec.effort_values else spec.default_effort_value
         return {"reasoning_effort": selected} if selected is not None else {}
-
-    def _token_limit_kwargs(self, max_tokens: int) -> dict[str, int]:
-        spec = get_thinking_spec(self._PROVIDER_KEY, self._model)
-        if spec.family is not ThinkingFamily.VOLCENGINE:
-            return super()._token_limit_kwargs(max_tokens)
-        limit = self._output_token_limit(max_tokens)
-        return {"max_completion_tokens": limit} if limit is not None else {}
 
     def _create_stream_response_adapter(self, tools: list[ToolDefinition] | None) -> OpenAIStreamResponseAdapter:
         return _VolcengineStreamAdapter(self, tools)

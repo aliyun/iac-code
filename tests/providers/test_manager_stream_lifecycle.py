@@ -105,10 +105,10 @@ class FakeProvider:
         )
         self.complete_calls = 0
 
-    def stream(self, messages, system, tools=None, max_tokens=8192):
+    def stream(self, messages, system, tools=None):
         return self.iterator
 
-    async def complete(self, messages, system, tools=None, max_tokens=8192, **kwargs):
+    async def complete(self, messages, system, tools=None, **kwargs):
         self.complete_calls += 1
         if isinstance(self.completion, BaseException):
             raise self.completion
@@ -576,7 +576,7 @@ async def test_inflight_cancel_records_one_cancelled_terminal_and_runs_provider_
     finalized = asyncio.Event()
 
     class WaitingProvider(FakeProvider):
-        def stream(self, messages, system, tools=None, max_tokens=8192):
+        def stream(self, messages, system, tools=None):
             async def wait_forever():
                 try:
                     await asyncio.Event().wait()
@@ -613,7 +613,7 @@ async def test_concurrent_direct_aclose_runtime_error_is_not_a_manager_terminal(
     finalized = asyncio.Event()
 
     class WaitingProvider(FakeProvider):
-        def stream(self, messages, system, tools=None, max_tokens=8192):
+        def stream(self, messages, system, tools=None):
             async def wait_forever():
                 try:
                     entered.set()
@@ -703,7 +703,7 @@ async def test_cross_task_close_uses_creation_scope_and_restores_closing_scope(m
 @pytest.mark.parametrize("creation_result", ["raise", "none"])
 async def test_stream_iterator_creation_failure_and_none_guard_fall_back_once(monkeypatch, creation_result) -> None:
     class InvalidStreamProvider(FakeProvider):
-        def stream(self, messages, system, tools=None, max_tokens=8192):
+        def stream(self, messages, system, tools=None):
             if creation_result == "raise":
                 raise RuntimeError("stream creation failed")
             return None
@@ -794,14 +794,14 @@ async def test_recursive_completion_fallback_fatal_base_exception_has_one_termin
         _PROVIDER_KEY = "anthropic"
         _logical_provider_key = "anthropic"
 
-        async def complete(self, messages, system, tools=None, max_tokens=8192, **kwargs):
+        async def complete(self, messages, system, tools=None, **kwargs):
             raise Status503Error("primary unavailable")
 
     class FatalFallbackProvider:
         _PROVIDER_KEY = "anthropic"
         _logical_provider_key = "anthropic"
 
-        async def complete(self, messages, system, tools=None, max_tokens=8192, **kwargs):
+        async def complete(self, messages, system, tools=None, **kwargs):
             raise FatalProviderError("fatal fallback")
 
     created_models: list[str] = []

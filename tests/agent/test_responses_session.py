@@ -234,21 +234,21 @@ async def test_context_limit_without_compactible_history_reports_error(tmp_path)
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("input_fraction,output_limit", [(0.72, None), (0.65, 128_000)])
+@pytest.mark.parametrize("input_fraction,compact", [(0.72, True), (0.65, False)])
 async def test_dashscope_proactive_compaction_precedes_service_truncation_threshold(
-    tmp_path, input_fraction, output_limit
+    tmp_path, input_fraction, compact
 ):
-    client = FakeResponsesClient(response([message("summary")]), [terminal(response([message("done")]))])
+    results = ([response([message("summary")])] if compact else []) + [[terminal(response([message("done")]))]]
+    client = FakeResponsesClient(*results)
     loop, provider, _, _ = setup_loop(tmp_path, client, "dashscope")
-    provider._max_completion_tokens = output_limit
     loop.context_manager.load_messages(native_history(provider))
     original_window = loop.context_manager._config.context_window
     for msg in loop.context_manager.get_messages():
         msg.token_count = int(original_window * input_fraction / len(loop.context_manager.get_messages()))
     assert not loop.context_manager.needs_compaction()
     events = [event async for event in loop.run_streaming("go")]
-    assert any(isinstance(event, CompactionEvent) and event.phase == "started" for event in events)
-    assert [request["stream"] for request in client.calls] == [False, True]
+    assert any(isinstance(event, CompactionEvent) and event.phase == "started" for event in events) == compact
+    assert [request["stream"] for request in client.calls] == ([False, True] if compact else [True])
     assert loop.context_manager._config.context_window == int(original_window * 0.75)
 
 
