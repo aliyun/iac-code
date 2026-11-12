@@ -433,7 +433,63 @@ def test_windows_sync_worker_reaps_synchronously_when_reaper_thread_cannot_start
     assert spawn_receipt.wait() == "still-alive"
 
 
-def test_windows_desktop_browser_uses_high_lane_and_clean_environment(monkeypatch) -> None:
+def test_windows_desktop_browser_uses_url_association_and_dll_boundary(monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_DESKTOP_RUNTIME", "1")
+    monkeypatch.setattr(external_env.os, "name", "nt")
+    monkeypatch.setattr(external_env, "_WINDOWS_PRELOAD_READY", True)
+    monkeypatch.setattr(external_env, "_WINDOWS_DLL_DIRECTORY", "bundle")
+    calls = []
+    monkeypatch.setattr(external_env, "_set_windows_dll_directory", lambda path: calls.append(("dll", path)))
+
+    def startfile(url, operation):
+        calls.append(("open", url, operation))
+
+    monkeypatch.setattr(external_env.os, "startfile", startfile, raising=False)
+
+    class Receipt:
+        def wait(self):
+            calls.append(("wait",))
+            return self.factory()
+
+    def submit(factory, *, cleanup=False):
+        assert cleanup is False
+        receipt = Receipt()
+        receipt.factory = factory
+        calls.append(("submit",))
+        return receipt
+
+    monkeypatch.setattr(external_env, "submit_windows_spawn", submit)
+    url = "https://example.test/oauth?scope=openid,profile&redirect_uri=http%3A%2F%2F127.0.0.1%2Fcallback"
+    assert external_env.open_desktop_browser(url) is True
+    assert calls == [("submit",), ("wait",), ("dll", None), ("open", url, "open"), ("dll", "bundle")]
+
+
+def test_windows_desktop_browser_failure_restores_dll_directory(monkeypatch) -> None:
+    monkeypatch.setenv("IAC_CODE_DESKTOP_RUNTIME", "1")
+    monkeypatch.setattr(external_env.os, "name", "nt")
+    monkeypatch.setattr(external_env, "_WINDOWS_PRELOAD_READY", True)
+    monkeypatch.setattr(external_env, "_WINDOWS_DLL_DIRECTORY", "bundle")
+    directories = []
+    monkeypatch.setattr(external_env, "_set_windows_dll_directory", directories.append)
+
+    def startfile(*args):
+        raise OSError("No browser is associated")
+
+    class Receipt:
+        def __init__(self, factory):
+            self.factory = factory
+
+        def wait(self):
+            return self.factory()
+
+    monkeypatch.setattr(external_env.os, "startfile", startfile, raising=False)
+    monkeypatch.setattr(external_env, "submit_windows_spawn", Receipt)
+    with pytest.raises(OSError, match="No browser is associated"):
+        external_env.open_desktop_browser("https://example.test/oauth")
+    assert directories == [None, "bundle"]
+
+
+def test_windows_explicit_browser_uses_high_lane_and_clean_environment(monkeypatch) -> None:
     monkeypatch.setenv("IAC_CODE_DESKTOP_RUNTIME", "1")
     monkeypatch.setenv("LD_LIBRARY_PATH", "/bundle")
     monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/system")
@@ -464,8 +520,9 @@ def test_windows_desktop_browser_uses_high_lane_and_clean_environment(monkeypatc
     monkeypatch.setattr(external_env, "popen_external", popen)
     monkeypatch.setattr(external_env, "submit_windows_spawn", submit)
 
-    assert external_env.open_desktop_browser("https://example.test/oauth") is True
-    assert received["command"] == ["explorer.exe", "https://example.test/oauth"]
+    command = ["custom-browser", "https://example.test/oauth"]
+    assert external_env.open_desktop_browser("https://example.test/oauth", command=command) is True
+    assert received["command"] == command
     assert received["cleanup"] is False
     assert received["detached"] is True
     environment = received["env"]

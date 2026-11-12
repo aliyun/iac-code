@@ -1931,15 +1931,15 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-324" in html
-    assert "/static/js/app.js?v=web-repl-ui-384" in html
+    assert "/static/styles.css?v=web-repl-ui-325" in html
+    assert "/static/js/app.js?v=web-repl-ui-385" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
     # 已归档面板复刻(archived tab)新增 listArchivedSessions/deleteArchivedSessions,
     # 同样需 bump api.js 版本位,否则回访浏览器拿不到新导出。
     assert "./api.js?v=web-repl-ui-315" in app_source
-    assert "./components/composer.js?v=session-model-v23" in app_source
+    assert "./components/composer.js?v=session-model-v24" in app_source
     # 图片灯箱模块(composer 缩略图 + 消息内图片共用),改动需 bump 其 import 版本位。
     assert "./components/image_lightbox.js?v=image-lightbox-v1" in app_source
     assert "./components/tool_cards.js?v=live-inline-tools-v26" in app_source
@@ -1966,7 +1966,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-384" in index_html
+    assert "web-repl-ui-385" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-324" in app_source
@@ -3601,6 +3601,85 @@ def test_composer_handles_send_queue_interrupt_attachments_and_suggestions() -> 
     assert 'event.key === "Escape"' in source
     assert 'addEventListener("paste"' in source
     assert 'addEventListener("drop"' in source
+
+
+def test_composer_resizes_typed_restored_and_recalled_drafts(tmp_path: Path) -> None:
+    output = _run_composer_submission_script(
+        tmp_path,
+        """
+        const ui = elements();
+        let columns = 80;
+        let observed, resizeObserver;
+        const listeners = {};
+        globalThis.addEventListener = (type, listener) => { listeners[type] = listener; };
+        globalThis.ResizeObserver = class {
+          constructor(callback) { resizeObserver = callback; }
+          observe(element) { observed = element; }
+        };
+        Object.defineProperty(ui.textarea, "scrollHeight", {
+          get() {
+            const lines = ui.textarea.value.split("\\n")
+              .reduce((total, line) => total + Math.max(1, Math.ceil(line.length / columns)), 0);
+            return Math.max(44, lines * 22, Number.parseFloat(ui.textarea.style.height) || 0);
+          },
+        });
+        const controller = createComposerController(ui, { postMessage: async () => ({}) });
+        controller.setSession("session-a");
+        const heights = { empty: ui.textarea.style.height };
+        ui.textarea.value = Array(6).fill("line").join("\\n");
+        ui.textarea.dispatch("input");
+        heights.typed = ui.textarea.style.height;
+        ui.textarea.value = "short";
+        ui.textarea.dispatch("input");
+        heights.deleted = ui.textarea.style.height;
+        controller.setDraft("a".repeat(240), { force: true });
+        heights.draft = ui.textarea.style.height;
+        columns = 20;
+        resizeObserver([{ contentRect: { width: 200 } }]);
+        heights.narrowed = ui.textarea.style.height;
+        columns = 40;
+        listeners.resize();
+        heights.widened = ui.textarea.style.height;
+        controller.restoreDraft({ draft: Array(8).fill("restored").join("\\n") });
+        heights.restored = ui.textarea.style.height;
+        await controller.submit();
+        heights.sent = ui.textarea.style.height;
+        controller.setInputHistory([Array(5).fill("history").join("\\n")]);
+        ui.textarea.dispatch("keydown", { key: "ArrowUp" });
+        heights.history = ui.textarea.style.height;
+        ui.textarea.dispatch("keydown", { key: "ArrowDown" });
+        heights.historyCleared = ui.textarea.style.height;
+        controller.setDraft(Array(5).fill("session A").join("\\n"), { force: true });
+        controller.setSession("session-b");
+        heights.switched = ui.textarea.style.height;
+        console.log(JSON.stringify({ heights, observedTextarea: observed === ui.textarea }));
+        """,
+    )
+    assert output == {
+        "heights": {
+            "empty": "44px",
+            "typed": "132px",
+            "deleted": "44px",
+            "draft": "66px",
+            "narrowed": "264px",
+            "widened": "132px",
+            "restored": "176px",
+            "sent": "44px",
+            "history": "110px",
+            "historyCleared": "44px",
+            "switched": "44px",
+        },
+        "observedTextarea": True,
+    }
+
+
+def test_composer_height_is_capped_with_internal_scrolling() -> None:
+    styles = _source(STYLES_CSS)
+    textarea = _css_block(styles, ".transcript-panel .composer textarea")
+    assert "min-height: 2.75rem;" in textarea
+    assert "max-height: min(16rem, 40vh);" in textarea
+    assert "overflow-y: auto;" in textarea
+    assert "scrollbar-width: thin;" in textarea
 
 
 def test_composer_disables_send_until_text_or_attachment_exists(tmp_path) -> None:
@@ -11753,7 +11832,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-384" in html
+    assert "web-repl-ui-385" in html
     assert "web-repl-ui-343" not in html
 
 

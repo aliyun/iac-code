@@ -8713,12 +8713,13 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
 .transcript-panel .composer textarea {
   min-height: 2.75rem;
   height: 2.75rem;
+  max-height: min(16rem, 40vh);
   overflow-y: auto;
-  scrollbar-width: none;
+  scrollbar-width: thin;
 }
 
 .transcript-panel .composer textarea::-webkit-scrollbar {
-  display: none;
+  width: 6px;
 }
 
 .transcript-panel .send-action {
