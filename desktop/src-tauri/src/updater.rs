@@ -12,10 +12,10 @@ use uuid::Uuid;
 #[cfg(windows)]
 use iac_code_desktop_helpers::windows_update::{
     current_process_creation_time, load_marker, open_source_process, save_marker, sha256_file,
-    verify_helper_integrity, UpdateAttempt, UpdateAttemptPhase, MARKER_NAME,
+    stage_updater_helper, verify_helper_integrity, UpdateAttempt, UpdateAttemptPhase, MARKER_NAME,
 };
 #[cfg(windows)]
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 #[cfg(windows)]
 use std::io::Write;
 #[cfg(windows)]
@@ -686,9 +686,7 @@ fn stage_windows_update(app: &AppHandle, target_version: &str, bytes: &[u8]) -> 
     )
     .context("verify bundled Windows updater helper")?;
     let helper_path = attempt_dir.join("iac-code-desktop-updater.exe");
-    fs::copy(&helper_source, &helper_path).context("stage Windows updater helper")?;
-    File::open(&helper_path)?.sync_all()?;
-    let helper_path = helper_path.canonicalize()?;
+    let helper_path = stage_updater_helper(&helper_source, &helper_path)?;
     verify_helper_integrity(
         &helper_path,
         &helper_manifest.sha256,

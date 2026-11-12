@@ -1113,14 +1113,23 @@ async def popen_external_async(*args: Any, detached: bool = False, **kwargs: Any
 
 
 def open_desktop_browser(url: str, *, command: list[str] | None = None) -> bool:
-    """Open one URL without letting a frozen sidecar environment leak into the browser."""
+    """Open a URL through the system handler or an isolated explicit browser command."""
     if not is_desktop_runtime():
         raise RuntimeError("Desktop browser adapter requires the Desktop runtime")
+    if command is None and os.name == "nt":
+        # Explorer parses its own command line (including commas in OAuth URLs)
+        # as folder navigation. Use the URL association instead, under the same
+        # DLL-directory boundary and high-priority lane as other Windows opens.
+        receipt = submit_windows_spawn(
+            lambda: create_external_process(getattr(os, "startfile"), url, "open", add_creation_flags=False)
+        )
+        if receipt is None:
+            return False
+        receipt.wait()
+        return True
     resolved_command = command
     if resolved_command is None:
-        if os.name == "nt":
-            resolved_command = ["explorer.exe", url]
-        elif sys.platform == "darwin":
+        if sys.platform == "darwin":
             resolved_command = ["open", url]
         else:
             resolved_command = ["xdg-open", url]

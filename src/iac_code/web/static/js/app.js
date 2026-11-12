@@ -1,5 +1,5 @@
 import * as api from "./api.js?v=web-repl-ui-315";
-import { createComposerController } from "./components/composer.js?v=session-model-v23";
+import { createComposerController } from "./components/composer.js?v=session-model-v24";
 import {
   destroyResourceSelectionPanels,
   renderBlockingPanels,

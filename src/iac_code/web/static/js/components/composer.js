@@ -579,6 +579,17 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   const modelControl = elements.modelControl;
   const modelMenu = elements.modelMenu;
 
+  function resizeTextarea() {
+    if (!textarea?.style || !Number.isFinite(textarea.scrollHeight)) {
+      return;
+    }
+    // Reset first so deleting text shrinks the field too. CSS supplies the
+    // minimum height and caps growth; overflowing content scrolls inside it.
+    textarea.style.height = "0px";
+    textarea.style.height = `${textarea.scrollHeight}px`;
+    positionSuggestions();
+  }
+
   let sessionId = "";
   let sessionRevision = 0;
   let restoreRevision = 0;
@@ -1532,6 +1543,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     }
     await withSubmissionLock(async () => {
       textarea.value = `${beforeCursor.slice(0, beforeCursor.length - prefix.length)}${afterCursor}`.trimStart();
+      resizeTextarea();
       localDraftDirty = Boolean(text(textarea.value).trim());
       try {
         const result = await api.postCommand?.(sessionId, commandText);
@@ -1565,6 +1577,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
         renderAttachmentChips();
       }
       textarea.value = `${beforeCursor.slice(0, beforeCursor.length - prefix.length)}${afterCursor}`.trimStart();
+      resizeTextarea();
       localDraftDirty = true;
       textarea.focus();
       clearSuggestions();
@@ -1576,6 +1589,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
         command: skillCommandValue(suggestion),
       };
       textarea.value = `${beforeCursor.slice(0, beforeCursor.length - prefix.length)}${afterCursor}`.trimStart();
+      resizeTextarea();
       localDraftDirty = true;
       renderSkillChip();
       syncSendButtonState();
@@ -1588,6 +1602,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       return;
     }
     textarea.value = `${beforeCursor.slice(0, beforeCursor.length - prefix.length)}${suggestion.value} ${afterCursor}`;
+    resizeTextarea();
     localDraftDirty = true;
     syncSendButtonState();
     textarea.focus();
@@ -1748,6 +1763,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     if (textarea) {
       if (!submittedDraft || textarea.value === submittedDraft) {
         textarea.value = "";
+        resizeTextarea();
       }
     }
     if (!textarea || !textarea.value) {
@@ -1953,6 +1969,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       return;
     }
     textarea.value = value;
+    resizeTextarea();
     const end = textarea.value.length;
     try {
       textarea.setSelectionRange(end, end);
@@ -2065,6 +2082,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
     }
   });
 
+  textarea?.addEventListener("input", resizeTextarea);
   textarea?.addEventListener("input", refreshSuggestions);
   textarea?.addEventListener("input", () => {
     localDraftDirty = true;
@@ -2164,6 +2182,17 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
   if (sendButton) {
     sendButton.title = ENTER_HELP;
   }
+  resizeTextarea();
+  globalThis.addEventListener?.("resize", resizeTextarea);
+  if (textarea && typeof ResizeObserver === "function") {
+    let previousWidth;
+    new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width !== previousWidth) {
+        previousWidth = entry.contentRect.width;
+        resizeTextarea();
+      }
+    }).observe(textarea);
+  }
   syncPlaceholder();
   syncSendButtonState();
   renderPermissionControls();
@@ -2179,6 +2208,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
         pendingSubmission = null;
         if (textarea) {
           textarea.value = "";
+          resizeTextarea();
         }
         localDraftDirty = false;
         clearSelectedSkill();
@@ -2271,6 +2301,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       }
       if (textarea && textarea.value !== text(draft)) {
         textarea.value = text(draft);
+        resizeTextarea();
       }
       localDraftDirty = false;
       resetHistoryNav();
@@ -2293,6 +2324,7 @@ export function createComposerController(elements = {}, api = {}, options = {}) 
       clearSelectedSkill();
       if (textarea) {
         textarea.value = text(payload.draft);
+        resizeTextarea();
       }
       localDraftDirty = Boolean(text(payload.draft).trim()) || attachments.length > 0;
       resetHistoryNav();

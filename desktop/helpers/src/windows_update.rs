@@ -34,6 +34,24 @@ use windows::Win32::System::Threading::{
 
 pub const MARKER_NAME: &str = "windows-update-attempt.json";
 
+pub fn stage_updater_helper(source: &Path, destination: &Path) -> Result<PathBuf> {
+    let mut input = File::open(source).context("open bundled Windows updater helper")?;
+    let mut output = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(destination)
+        .context("create staged Windows updater helper")?;
+    std::io::copy(&mut input, &mut output).context("stage Windows updater helper")?;
+    // Windows FlushFileBuffers requires GENERIC_WRITE. Reopening the copied
+    // helper with File::open() yields a read-only handle and fails with error 5.
+    output
+        .sync_all()
+        .context("sync staged Windows updater helper")?;
+    destination
+        .canonicalize()
+        .context("resolve staged Windows updater helper")
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UpdateAttemptPhase {
@@ -358,6 +376,29 @@ pub fn wait_for_process_identity_exit(
 mod tests {
     use super::*;
     use std::process::Command;
+
+    #[test]
+    fn staged_helper_is_synced_through_a_writable_handle() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("bundled.exe");
+        let destination = directory.path().join("staged.exe");
+        fs::write(&source, b"verified helper bytes").unwrap();
+
+        let staged = stage_updater_helper(&source, &destination).unwrap();
+        assert_eq!(staged, destination.canonicalize().unwrap());
+        assert_eq!(fs::read(&staged).unwrap(), b"verified helper bytes");
+        assert_eq!(sha256_file(&source).unwrap(), sha256_file(&staged).unwrap());
+        // Reproduce the previous failure on Windows, even for an administrator.
+        assert_eq!(
+            File::open(&staged)
+                .unwrap()
+                .sync_all()
+                .unwrap_err()
+                .raw_os_error(),
+            Some(5)
+        );
+        assert!(stage_updater_helper(&source, &destination).is_err());
+    }
 
     #[test]
     fn bundle_manifest_hash_rejects_tampered_helper() {
