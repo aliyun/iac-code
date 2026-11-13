@@ -111,21 +111,25 @@ class ACPTerminalBashTool(Tool):
             if output.exit_status:
                 exit_status = output.exit_status
 
+            output_text = output.output
+            if output.truncated:
+                output_text = _("[truncated]") + "\n" + output_text
+
             # TODO: Push TerminalToolCallContent via session_update for streaming output.
             # Currently Tool.execute only returns ToolResult; streaming will be handled
             # at the session layer in a future phase.
 
             if exit_status.signal:
                 return ToolResult.error(
-                    _("Command terminated by signal: {signal}").format(signal=exit_status.signal) + "\n" + output.output
+                    _("Command terminated by signal: {signal}").format(signal=exit_status.signal) + "\n" + output_text
                 )
             if exit_status.exit_code not in (None, 0):
                 return ToolResult.error(
                     _("Command failed with exit code {exit_code}").format(exit_code=exit_status.exit_code)
                     + "\n"
-                    + output.output
+                    + output_text
                 )
-            return ToolResult.success(output.output)
+            return ToolResult.success(output_text)
         except asyncio.CancelledError:
             if terminal_id is not None:
                 with suppress(Exception):
