@@ -309,14 +309,22 @@ async def test_terminal_release_called_on_exception() -> None:
 
 
 @pytest.mark.asyncio
-async def test_terminal_output_truncated() -> None:
-    conn = FakeConn(truncated=True, output="partial output...")
+@pytest.mark.parametrize(
+    ("exit_code", "signal", "is_error", "prefix"),
+    [
+        (0, None, False, ""),
+        (1, None, True, "Command failed with exit code 1\n"),
+        (0, "SIGKILL", True, "Command terminated by signal: SIGKILL\n"),
+    ],
+)
+async def test_terminal_output_truncated(exit_code, signal, is_error, prefix) -> None:
+    conn = FakeConn(exit_code=exit_code, signal=signal, truncated=True, output="partial output...")
     tool = ACPTerminalBashTool(OriginalBash(), conn, "s1")
 
     result = await tool.execute(tool_input={"command": "cat big_file"}, context=ToolContext(cwd="/tmp"))
 
-    assert result.is_error is False
-    assert result.content == "partial output..."
+    assert result.is_error is is_error
+    assert result.content == prefix + "[truncated]\npartial output..."
     assert conn.released is True
 
 
