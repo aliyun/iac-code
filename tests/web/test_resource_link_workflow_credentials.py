@@ -39,8 +39,11 @@ def setup(tmp_path, monkeypatch):
         atomic_write(path, "aliyun: {mode: AK, access_key_id: fake-old}\n", private=True)
         aliases.append(path)
     calls = []
+    run = subprocess.run
 
     def invoke(argv, **kwargs):
+        if argv[0] == "icacls":
+            return run(argv, **kwargs)
         calls.append(argv)
         assert argv[:3] == ["aliyun", "sts", "GetCallerIdentity"]
         assert argv[argv.index("--profile") + 1] == "test-guima"

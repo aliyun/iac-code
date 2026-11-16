@@ -358,7 +358,7 @@ def test_actual_runtime_click_binds_own_native_source_not_an_existing_resource(r
         assert not calls
     else:
         result = runtime.tool(job, token, "click", {"scene": scene})
-        assert result["source_evidence"] == str((output / "QUERY-product-source.json").relative_to(store.root))
+        assert result["source_evidence"] == (output / "QUERY-product-source.json").relative_to(store.root).as_posix()
         assert result["source_sha256"] == digest(output / "QUERY-product-source.json")
         assert len(calls) == 1
         runtime.tool(job, token, "cleanup", {"dimension": "QUERY"})

@@ -26,8 +26,8 @@ def runtime(tmp_path):
         "node": "fixture-node",
         "macmini": {
             "ip_resolver": "/local/bin/macmini-ip",
-            "identity_file": "/local/ssh/key",
-            "known_hosts": "/local/ssh/known_hosts",
+            "identity_file": str(tmp_path / "local/ssh/key"),
+            "known_hosts": str(tmp_path / "local/ssh/known_hosts"),
             "user": "fixture",
             "python": "/usr/bin/python3",
             "chrome_executable": "/remote/apps/chrome",

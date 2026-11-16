@@ -151,7 +151,7 @@ def handoff_readonly_plan(store: Any, connection: sqlite3.Connection, plan: dict
             "predecessor_frozen_sha256": proof["predecessor_frozen_sha256"],
             "successor_frozen_sha256": proof["successor_frozen_sha256"],
             "prior_task_states": {task["id"]: task["state"] for task in unresolved},
-            "evidence": str(path.relative_to(store.root)),
+            "evidence": path.relative_to(store.root).as_posix(),
             "evidence_sha256": digest(path),
             "scene_ids": scenes,
             "sol_thread": sol,

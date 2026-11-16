@@ -76,7 +76,7 @@ def reviewed_additional_nas(
     else:
         permission.update(question=human["human_question_verbatim"], reply=human["human_reply_verbatim"])
     return {**base, "kind": proof["kind"], "human_sha256": digest(human_path),
-            "proposal": str(proposal_path.relative_to(root)), "proposal_sha256": digest(proposal_path),
+            "proposal": proposal_path.relative_to(root).as_posix(), "proposal_sha256": digest(proposal_path),
             "original_admission": proof["original_admission"],
             **delegated, "human_permission_id": hashlib.sha256(canonical(permission).encode()).hexdigest()}
 

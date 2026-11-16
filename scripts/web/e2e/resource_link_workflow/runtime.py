@@ -830,7 +830,7 @@ class Runtime:
             "dimension_authorities": {**reviewed_authorities(self.root, packet, review), **sample_authorities},
         }
         if "execution_selection" in packet or identity_review or "hourly_cost" in packet:
-            value["proposal_evidence"] = str(contained(self.root, str(proposal)).relative_to(self.root))
+            value["proposal_evidence"] = contained(self.root, str(proposal)).relative_to(self.root).as_posix()
             value["proposal_sha256"] = digest(contained(self.root, str(proposal)))
         if "additional_source_request" in packet:
             value["additional_source_request"] = packet["additional_source_request"]
@@ -1475,7 +1475,7 @@ class Runtime:
                         "state": record["state"], "absence_verified": False,
                     })
                 context["artifact_index"] = [
-                    {"path": str(path.relative_to(self.root)), "sha256": digest(path), "bytes": path.stat().st_size}
+                    {"path": path.relative_to(self.root).as_posix(), "sha256": digest(path), "bytes": path.stat().st_size}
                     for worker in workers
                     for path in sorted((self.root / "jobs" / worker / "output").glob("*.json"))
                 ]
@@ -2070,7 +2070,7 @@ class Runtime:
                     value = read_json(generated)
                     if value.get("session_id") != arguments["session_id"]:
                         raise WorkflowError("creation source/session mismatch")
-                    binding = {**binding, "source_evidence": str(generated.relative_to(self.root)),
+                    binding = {**binding, "source_evidence": generated.relative_to(self.root).as_posix(),
                                "source_sha256": digest(generated)}
                     references = self.proven_references(
                         job_id, scene["dimension"], arguments["session_id"], binding["account"],
@@ -2089,7 +2089,7 @@ class Runtime:
                     raise WorkflowError("click requires this new session original product source")
                 binding = {
                     **binding,
-                    "source_evidence": str(generated.relative_to(self.root)),
+                    "source_evidence": generated.relative_to(self.root).as_posix(),
                     "source_sha256": digest(generated),
                 }
                 generated_value = read_json(generated)
@@ -2353,7 +2353,7 @@ class Runtime:
             json_write(session_file, {"job_id": job_id, "target": slot["target"], "origin": slot["origin"],
                                       "session_id": session})
         if operation in {"source", "cleanup-source"}:
-            result["source_evidence"] = str(Path(result["source_evidence"]).relative_to(self.root))
+            result["source_evidence"] = Path(result["source_evidence"]).relative_to(self.root).as_posix()
             result["sha256"] = digest(contained(self.root, result["source_evidence"]))
             if operation == "cleanup-source":
                 result["original_cleanup_responses"] = wire_evidence.cleanup_execution(
@@ -2383,12 +2383,12 @@ class Runtime:
             elif scene["mode"] == "creation":
                 result["creation_source_verified"] = request["creation_source_verified"]
                 result["eligible_for_automatic_verdict"] = False
-            result["screenshot"] = str(Path(result["screenshot"]).resolve().relative_to(self.root))
+            result["screenshot"] = Path(result["screenshot"]).resolve().relative_to(self.root).as_posix()
             supplemental = result.get("console_inspection", {}).get("screenshot")
             if supplemental:
-                result["console_inspection"]["screenshot"] = str(Path(supplemental).resolve().relative_to(self.root))
+                result["console_inspection"]["screenshot"] = Path(supplemental).resolve().relative_to(self.root).as_posix()
             for capture in result.get("console_inspection", {}).get("supplemental_captures", []):
-                capture["screenshot"] = str(Path(capture["screenshot"]).resolve().relative_to(self.root))
+                capture["screenshot"] = Path(capture["screenshot"]).resolve().relative_to(self.root).as_posix()
                 capture["sha256"] = digest(contained(self.root, capture["screenshot"]))
             raw = Path(context["output_dir"]) / f"{scene['id']}.json"
             json_write(raw, result)
@@ -2713,7 +2713,7 @@ class Runtime:
             if path.exists():
                 raise WorkflowError("verification evidence is immutable")
             json_write(path, value)
-            return {"path": str(path.relative_to(self.root)), "sha256": digest(path)}
+            return {"path": path.relative_to(self.root).as_posix(), "sha256": digest(path)}
         if operation == "transport_evidence":
             # Read-only, original bounded events for this resource. Do not expose
             # capability files, arbitrary jobs or streaming reasoning/config.
@@ -2734,7 +2734,7 @@ class Runtime:
                 )
                 if method.startswith(("transport/", "script/")) or method == "turn/completed" or rejected:
                     events.append({"line": line_number, "event": event})
-            return {"source": str(path.relative_to(self.root)), "sha256": digest(path), "events": events}
+            return {"source": path.relative_to(self.root).as_posix(), "sha256": digest(path), "events": events}
         if operation in {"read_code", "search_code"}:
             if context["purpose"] not in {"prepare", "repair"}:
                 raise WorkflowError("source inspection is not an acceptance substitute")
@@ -2774,7 +2774,7 @@ class Runtime:
                 json_write(path, json.loads(arguments["text"]), private=True)
             else:
                 atomic_write(path, arguments["text"])
-            return {"path": str(path.relative_to(self.root)), "sha256": digest(path)}
+            return {"path": path.relative_to(self.root).as_posix(), "sha256": digest(path)}
         if operation == "approve":
             self.store.approve_packet(job_id, token, arguments["packet"])
             return {"staged": True}
@@ -2866,7 +2866,7 @@ class Runtime:
                 },
             )
             return {
-                "path": str(evidence.relative_to(self.root)),
+                "path": evidence.relative_to(self.root).as_posix(),
                 "sha256": digest(evidence),
                 "exit_code": exit_code,
             }

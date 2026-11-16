@@ -121,12 +121,12 @@ def inspect(runtime, original_job: str) -> dict:
                 raise WorkflowError("pre-click diagnostic must retain the original product/scene identity")
             rejected = preclick_rejection(root, job, ros_scene["id"], click)
         bound_click = (click.get("actual_ui_click") is True
-                       and click.get("source_evidence") == str(source_file.relative_to(root))
+                       and click.get("source_evidence") == source_file.relative_to(root).as_posix()
                        and click.get("source_sha256") == digest(source_file))
         if ((not rejected and not bound_click) or click.get("session_id") != session["session_id"]
                 or source.get("session_id") != session["session_id"]
                 or not db.execute("SELECT 1 FROM inspected WHERE job_id=? AND artifact=? AND sha=?",
-                                  (review["id"], str(image.relative_to(root)), digest(image))).fetchone()
+                                  (review["id"], image.relative_to(root).as_posix(), digest(image))).fetchone()
                 or db.execute("SELECT 1 FROM verdicts WHERE task_id=? AND status='pass' AND scene IN (?,?)",
                               (task["id"], *[s["id"] for s in scenes])).fetchone()
                 or any((output / name).exists() for name in
@@ -172,10 +172,10 @@ def inspect(runtime, original_job: str) -> dict:
                   "authority": execution_authority(root, packet, "ROS"),
                   "packet": {"path": task["packet"], "sha256": digest(packet_file)},
                   "original_terminal": terminal(root, job), "review_terminal": terminal(root, review),
-                  "self_created_session": {"path": str(session_file.relative_to(root)), "sha256": digest(session_file)},
-                  "capture_source": {"path": str(source_file.relative_to(root)), "sha256": digest(source_file)},
-                  "original_click": {"path": str(click_file.relative_to(root)), "sha256": digest(click_file)},
-                  "original_png": {"path": str(image.relative_to(root)), "sha256": digest(image)},
+                  "self_created_session": {"path": session_file.relative_to(root).as_posix(), "sha256": digest(session_file)},
+                  "capture_source": {"path": source_file.relative_to(root).as_posix(), "sha256": digest(source_file)},
+                  "original_click": {"path": click_file.relative_to(root).as_posix(), "sha256": digest(click_file)},
+                  "original_png": {"path": image.relative_to(root).as_posix(), "sha256": digest(image)},
                   "ownership": owners, "notice_title": "RocketMQ for AI：全新轻量主题模型上线",
                   "new_creation_quota": 0, "additional_identity_reads": 0, "old_calls_refilled": False,
                   "pass_added": False, "query_authority": execution_authority(root, packet, "QUERY")}
@@ -210,7 +210,7 @@ def inspect(runtime, original_job: str) -> dict:
                 if any(registration[k] != result[k] for k in ("scope", "authority", "account", "session")):
                     raise WorkflowError("cleanup identity belongs to another original generation")
                 result["pending_cleanup_identity"] = {"id": g["id"], "call": json.loads(g["call"]),
-                    "evidence": str(Path(registration["evidence"]).relative_to(root)),
+                    "evidence": Path(registration["evidence"]).relative_to(root).as_posix(),
                     "sha256": registration["evidence_sha256"]}
                 continue
             if (not original or g["authority"] != result["authority"] or not used or used[0] != g["used"]
@@ -257,7 +257,7 @@ def queue(runtime, original_job: str, evidence: str) -> dict:
             raise WorkflowError("maintenance changed before capture queue")
         value = {"kind": "retained_ros_capture", "dimension": "ROS", "original_job_id": original_job,
                  "scope": proof["scope"], "session_id": proof["session"],
-                 "evidence": str(path.relative_to(runtime.root)), "evidence_sha256": digest(path),
+                 "evidence": path.relative_to(runtime.root).as_posix(), "evidence_sha256": digest(path),
                  "capture_source": proof["capture_source"], "delete_call": proof["delete_call"]}
         if proof.get("pending_cleanup_identity"):
             value["identity_grant_id"] = proof["pending_cleanup_identity"]["id"]

@@ -129,7 +129,7 @@ output "mount_target_domain" { value = alicloud_nas_mount_target.mount_target.mo
     def save(name, value):
         path = directory / name
         json_write(path, value)
-        return {"path": str(path.relative_to(root)), "sha256": digest(path)}
+        return {"path": path.relative_to(root).as_posix(), "sha256": digest(path)}
 
     original = save("raw.json", {"fixture": "offline-only"})
     network = {

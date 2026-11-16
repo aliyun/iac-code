@@ -38,8 +38,8 @@ def terminal(root: Path, job: Any, *, statuses=("completed",)) -> dict[str, str]
                        and event.get("params", {}).get("turn", {}).get("status") in statuses]
     if len(terminal_events) != 1:
         raise WorkflowError("exact owning-backend completed event required")
-    return {"path": str(path.relative_to(root)), "sha256": digest(path),
-            "transport_path": str(transport_path.relative_to(root)), "transport_sha256": digest(transport_path)}
+    return {"path": path.relative_to(root).as_posix(), "sha256": digest(path),
+            "transport_path": transport_path.relative_to(root).as_posix(), "transport_sha256": digest(transport_path)}
 
 
 def inspect(runtime, original_job: str, repair_evidence: str) -> dict[str, Any]:
@@ -107,8 +107,8 @@ def inspect(runtime, original_job: str, repair_evidence: str) -> dict[str, Any]:
             "scope": original_job + ":QUERY", "authority": execution_authority(root, packet, "QUERY"),
             "account": next(iter(packet["scenes"].values()))["account"],
             "packet": {"path": task["packet"], "sha256": digest(packet_path)},
-            "self_created_session": {"path": str(session_path.relative_to(root)), "sha256": digest(session_path)},
-            "repair": {"path": str(repair_path.relative_to(root)), "sha256": digest(repair_path)},
+            "self_created_session": {"path": session_path.relative_to(root).as_posix(), "sha256": digest(session_path)},
+            "repair": {"path": repair_path.relative_to(root).as_posix(), "sha256": digest(repair_path)},
             "original_terminal": terminal(root, job), "repair_terminal": terminal(root, repair_job),
             "ownership": owners, "additional_identity_reads": 1,
             "grant_id": "ops-native-identity-" + original_job[:12],
@@ -272,12 +272,12 @@ def inspect_managed(runtime, original_job: str, *, renew_identity: bool = False,
                   "scope": original_job + ":TF", "authority": execution_authority(root, packet, "TF"),
                   "account": next(iter(packet["scenes"].values()))["account"],
                   "packet": {"path": task["packet"], "sha256": digest(packet_path)},
-                  "self_created_session": {"path": str(session_path.relative_to(root)),
+                  "self_created_session": {"path": session_path.relative_to(root).as_posix(),
                                            "sha256": digest(session_path)},
                   "original_terminal": terminal(root, job), "review_terminal": terminal(root, review),
                   "ownership": owners, "additional_identity_reads": 0, "new_creation_quota": 0,
                   "old_calls_refilled": False, "pass_added": False,
-                  "original_artifacts": [{"path": str(p.relative_to(root)), "sha256": digest(p)}
+                  "original_artifacts": [{"path": p.relative_to(root).as_posix(), "sha256": digest(p)}
                                          for p in sorted(output.glob("*.json"))]}
         if failed:
             previous_path = contained(root, previous["evidence"])
@@ -288,7 +288,7 @@ def inspect_managed(runtime, original_job: str, *, renew_identity: bool = False,
                           previous_continuation_count=db.execute(
                               "SELECT count(*) FROM jobs WHERE task_id=? AND purpose='continuation'", (task["id"],),
                           ).fetchone()[0], capacity_failure=capacity_terminal,
-                          failed_artifacts=[{"path": str(p.relative_to(root)), "sha256": digest(p)}
+                          failed_artifacts=[{"path": p.relative_to(root).as_posix(), "sha256": digest(p)}
                                             for p in sorted((root / "jobs" / failed["id"] / "output").glob("*.json"))])
         if capture_only:
             if not failed or failed["submission"] != "result_staged":
@@ -297,7 +297,7 @@ def inspect_managed(runtime, original_job: str, *, renew_identity: bool = False,
             value = read_json(source)
             if value.get("session_id") != result["session"]:
                 raise WorkflowError("capture-only must preserve the latest full-session source")
-            result.update(capture_only=True, capture_source={"path": str(source.relative_to(root)),
+            result.update(capture_only=True, capture_source={"path": source.relative_to(root).as_posix(),
                                                            "sha256": digest(source)})
     path = root / "execution-gate.sqlite3"
     with gate.database(path) as wire:
@@ -429,7 +429,7 @@ def queue_managed(runtime, original_job: str, evidence: str) -> dict[str, Any]:
                      (str(proof["slot"]), proof["scope"], proof["session"]))
         recovery = {"kind": "managed_read_continuation", "original_job_id": original_job, "dimension": "TF",
                     "scope": proof["scope"], "session_id": proof["session"],
-                    "evidence": str(path.relative_to(runtime.root)), "evidence_sha256": digest(path)}
+                    "evidence": path.relative_to(runtime.root).as_posix(), "evidence_sha256": digest(path)}
         if proof.get("renew_identity"):
             recovery["identity_grant_id"] = proof["identity_grant_id"]
         if proof.get("capture_only"):
@@ -453,7 +453,7 @@ def queue(runtime, original_job: str, evidence: str) -> dict[str, Any]:
         raise WorkflowError("owner-only independent native recovery review required")
     proof = read_json(path)
     proof_sha = digest(path)
-    candidate = inspect(runtime, original_job, str(Path(proof["repair"]["path"]).relative_to("inputs")))
+    candidate = inspect(runtime, original_job, Path(proof["repair"]["path"]).relative_to("inputs").as_posix())
     if proof != {**candidate, "approved": True}:
         raise WorkflowError("OPS review must exactly bind current original generation and remaining authority")
     # Both durable databases are backed up before this trusted operation. A crash
@@ -504,7 +504,7 @@ def queue(runtime, original_job: str, evidence: str) -> dict[str, Any]:
         active = wire.execute("SELECT * FROM active WHERE slot=?", (str(proof["slot"]),)).fetchone()
         if gate.nas_native_continuation(wire, active) is None:
             raise WorkflowError("product rejected exact native signer review")
-        recovery = {"original_job_id": original_job, "dimension": "QUERY", "evidence": str(path.relative_to(root)),
+        recovery = {"original_job_id": original_job, "dimension": "QUERY", "evidence": path.relative_to(root).as_posix(),
                     "evidence_sha256": digest(path), "scope": proof["scope"], "session_id": proof["session"]}
         db.execute("INSERT INTO meta VALUES(?,?)", ("native_continuation:" + proof["task_id"], json.dumps(recovery)))
         db.execute("UPDATE tasks SET state='continuation_pending',reason=NULL WHERE id=?", (proof["task_id"],))

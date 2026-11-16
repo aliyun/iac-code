@@ -237,7 +237,7 @@ def visually_reviewed(failed):
             {
                 "method": "thread/read",
                 "job_binding": row,
-                "transport_evidence": {"path": str(trace.relative_to(runtime.root)), "state": "present"},
+                "transport_evidence": {"path": trace.relative_to(runtime.root).as_posix(), "state": "present"},
                 "thread": {"id": row["thread_id"], "turns": [{"id": row["turn_id"], "status": "completed"}]},
             },
         )
@@ -389,7 +389,9 @@ def repaired_gap(failed):
     image = folder / "output/gap.png"
     image.parent.mkdir(parents=True, exist_ok=True)
     image.write_bytes(b"offline diagnostic only")
-    data = {"actual_ui_click": False, "session_id": "ws~native", "screenshot": str(image.relative_to(runtime.root))}
+    data = {
+        "actual_ui_click": False, "session_id": "ws~native", "screenshot": image.relative_to(runtime.root).as_posix(),
+    }
     json_write(folder / "output/gap.json", data)
     with runtime.store.transaction() as db:
         db.execute(
@@ -433,7 +435,7 @@ def repaired_gap(failed):
             {
                 "method": "thread/read",
                 "job_binding": row,
-                "transport_evidence": {"path": str(trace.relative_to(runtime.root)), "state": "present"},
+                "transport_evidence": {"path": trace.relative_to(runtime.root).as_posix(), "state": "present"},
                 "thread": {"id": row["thread_id"], "turns": [{"id": row["turn_id"], "status": "completed"}]},
             },
         )
@@ -446,7 +448,7 @@ def repaired_gap(failed):
         {
             **repair,
             "job_id": "fresh-repair",
-            "repair_request": {"path": str(diagnosis.relative_to(runtime.root)), "sha256": digest(diagnosis)},
+            "repair_request": {"path": diagnosis.relative_to(runtime.root).as_posix(), "sha256": digest(diagnosis)},
         },
     )
     return runtime, task_id, job_id
@@ -556,7 +558,7 @@ def test_repaired_gap_retains_only_own_signed_additional_creation(repaired_gap, 
     )
     path = runtime.root / "jobs/native/output/fileset.json"
     json_write(path, record)
-    binding = {"path": str(path.relative_to(runtime.root)), "sha256": digest(path)}
+    binding = {"path": path.relative_to(runtime.root).as_posix(), "sha256": digest(path)}
     with runtime.store.transaction() as db:
         db.execute(
             "INSERT INTO owned VALUES('fileset',?,'QUERY',?,'present',?)",
