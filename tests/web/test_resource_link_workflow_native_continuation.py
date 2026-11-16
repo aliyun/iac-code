@@ -5,6 +5,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -300,7 +301,7 @@ def test_exact_no_turn_review_only_rejection_requeues_same_continuation(retained
         "symlink",
     ],
 )
-def test_recovery_refuses_drift_and_never_mutates_original(retained, damage):
+def test_recovery_refuses_drift_and_never_mutates_original(retained, damage, monkeypatch):
     runtime, _, native = retained
     approved(runtime)
     with runtime.store.transaction() as db:
@@ -343,6 +344,9 @@ def test_recovery_refuses_drift_and_never_mutates_original(retained, damage):
         json_write(path, value, private=True)
     elif damage == "permissions":
         (runtime.root / "inputs/approved.json").chmod(0o644)
+        # Exercise the POSIX permission contract even on Windows, whose chmod
+        # cannot express these bits. Do not change the process-wide os.name.
+        monkeypatch.setattr(continuation, "os", SimpleNamespace(name="posix"))
     elif damage == "symlink":
         shutil.move(runtime.root / "inputs/approved.json", runtime.root / "inputs/real.json")
         (runtime.root / "inputs/approved.json").symlink_to("real.json")

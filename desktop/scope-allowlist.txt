@@ -1,5 +1,6 @@
 # Desktop-owned production, build, tests and documentation.
 # Shared integration and offline regression paths reviewed for resource links.
+.github/workflows/test.yml
 scripts/web/e2e/resource_link_workflow/catalog.example.json
 src/iac_code/resource_selector/query.py
 tests/agent/test_agent_loop_output_limit.py
