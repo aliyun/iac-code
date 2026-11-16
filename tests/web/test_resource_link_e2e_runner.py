@@ -57,7 +57,7 @@ def test_persisted_files_keep_bytes_and_use_a_writable_sync_handle(tmp_path, mon
     runner._persist_file(source, target)
     assert source.read_bytes() == target.read_bytes() == b"original offline bytes"
     runner._atomic_write_json(tmp_path / "proof.json", {"fixture": True})
-    assert json.loads((tmp_path / "proof.json").read_text()) == {"fixture": True}
+    assert json.loads((tmp_path / "proof.json").read_text(encoding="utf-8")) == {"fixture": True}
     assert len(descriptors) == 2
 
 
