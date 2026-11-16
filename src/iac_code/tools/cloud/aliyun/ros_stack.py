@@ -10,6 +10,7 @@ import time
 from typing import Any, Literal
 
 from alibabacloud_ros20190910 import models as ros_models
+from alibabacloud_tea_util.models import RuntimeOptions
 
 from iac_code.a2a.backup import await_fenced, run_sync_fenced, run_sync_fenced_with_cancel_completion
 from iac_code.a2a.execution_control import (
@@ -28,6 +29,7 @@ from iac_code.services.telemetry.sanitize import (
     sanitize_terraform_provider,
 )
 from iac_code.tools.base import ToolContext, ToolResult
+from iac_code.tools.cloud.aliyun.permission_evidence import access_denied_detail
 from iac_code.tools.cloud.aliyun.ros_client import RosClientFactory, public_ecs_credential_message
 from iac_code.tools.cloud.aliyun.template_source import (
     check_local_template_url_read_permission,
@@ -45,6 +47,8 @@ from iac_code.types.stream_events import ResourceObservedEvent
 _TERRAFORM_TRANSFORM_PREFIXES = ("Aliyun::Terraform-", "Aliyun::OpenTofu-")
 _HCL_RESOURCE_RE = re.compile(r'resource\s+"([^"]+)"\s+"[^"]+"\s*\{', re.MULTILINE)
 _FLAT_PARAMETER_RE = re.compile(r"^Parameters\.(\d+)\.(ParameterKey|ParameterValue)$")
+_PERMISSION_ERROR_RE = re.compile(r"Forbidden|NoPermission|AccessDenied|Unauthorized|not authorized", re.IGNORECASE)
+_REQUEST_ID_RE = re.compile(r"\bRequestId:\s*([A-Za-z0-9-]+)", re.IGNORECASE)
 
 _ROS_ERROR_CATEGORIES = {
     "InvalidTemplateBody": "syntax",
@@ -342,6 +346,133 @@ class RosStack(BaseCloudStack):
         if status.status == "DELETE_COMPLETE" or action == "DeleteStack":
             return action == "DeleteStack" and status.status == "DELETE_COMPLETE"
         return super().is_action_success(action, status)
+
+    async def get_failure_diagnostics(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        status: StackStatus,
+        resources: list[ResourceStatus],
+    ) -> dict[str, object]:
+        reasons = [status.status_reason, *(r.status_reason for r in resources)]
+        if not any(_PERMISSION_ERROR_RE.search(reason) for reason in reasons):
+            return {}
+        policy: dict[str, object] = {"source": "ros:GenerateTemplatePolicy", "status": "unavailable"}
+        diagnostics: dict[str, Any] = {
+            "denied_action_status": "unknown",
+            "explanation": (
+                "ROS did not return AccessDeniedDetail.AuthAction, so the exact denied action is unknown. "
+                "Do not infer RAM actions or permission policies from the ROS resource type."
+            ),
+            "template_policy": policy,
+        }
+        result: dict[str, object] = {"permission_diagnostics": diagnostics}
+        failed_resources = [
+            {
+                "name": r.name,
+                "resource_type": r.resource_type,
+                "status": r.status,
+                "status_reason": r.status_reason,
+                "source": "ros:ListStackResources",
+            }
+            for r in resources
+            if r.status.endswith("_FAILED") or _PERMISSION_ERROR_RE.search(r.status_reason)
+        ]
+        result["failed_resources"] = failed_resources
+        if match := _REQUEST_ID_RE.search(status.status_reason):
+            diagnostics["error_request_id"] = match.group(1)
+        operation = "CreateStack" if action == "ContinueCreateStack" else action
+        policy["operation_type"] = operation
+        # Reuse the operation's effective credential, including A2A request overrides.
+        try:
+            client = self._get_client(region)
+        except Exception:
+            return result
+        runtime = RuntimeOptions(connect_timeout=2000, read_timeout=2000, autoretry=False)
+        try:
+            response = await run_sync_fenced(
+                client.list_stack_events_with_options,
+                ros_models.ListStackEventsRequest(
+                    stack_id=status.stack_id,
+                    region_id=region,
+                    page_size=50,
+                    status=["CREATE_FAILED", "UPDATE_FAILED", "DELETE_FAILED", "IMPORT_CREATE_FAILED"],
+                ),
+                runtime,
+            )
+            # Rollback can clear resource status/reason. Match the current failure,
+            # rather than attributing an older failed operation to this request.
+            for event in response.body.to_map().get("StackEvents", []):
+                reason = event.get("StatusReason", "")
+                if (
+                    not reason
+                    or event.get("ResourceType") == "ALIYUN::ROS::Stack"
+                    or not any(reason in current for current in reasons)
+                ):
+                    continue
+                if any(
+                    r["name"] == event.get("LogicalResourceId")
+                    and r["resource_type"] == event.get("ResourceType")
+                    and r["status_reason"] == reason
+                    for r in failed_resources
+                ):
+                    continue
+                failed_resources.append(
+                    {
+                        "name": event.get("LogicalResourceId", ""),
+                        "resource_type": event.get("ResourceType", ""),
+                        "status": event.get("Status", ""),
+                        "status_reason": reason,
+                        "source": "ros:ListStackEvents",
+                    }
+                )
+        except Exception:
+            diagnostics["events_query_status"] = "unavailable"
+        try:
+            source = {
+                key: params[key]
+                for key in ("TemplateBody", "TemplateURL", "TemplateId", "TemplateVersion")
+                if params.get(key)
+            }
+            if not any(source.get(key) for key in ("TemplateBody", "TemplateURL", "TemplateId")):
+                response = await run_sync_fenced(
+                    client.get_template_with_options,
+                    ros_models.GetTemplateRequest(
+                        stack_id=status.stack_id, region_id=region, template_stage="Original"
+                    ),
+                    runtime,
+                )
+                source = {"TemplateBody": response.body.to_map()["TemplateBody"]}
+            if isinstance(source.get("TemplateBody"), dict):
+                source["TemplateBody"] = json.dumps(source["TemplateBody"], ensure_ascii=False)
+            response = await run_sync_fenced(
+                client.generate_template_policy_with_options,
+                ros_models.GenerateTemplatePolicyRequest().from_map({**source, "OperationTypes": [operation]}),
+                runtime,
+            )
+            data = response.body.to_map()
+            statements = data["Policy"]["Statement"]
+            actions = sorted(
+                {
+                    a
+                    for statement in statements
+                    if statement.get("Effect") == "Allow"
+                    for a in statement.get("Action", [])
+                    if isinstance(a, str)
+                }
+            )
+            policy.update(
+                {
+                    "status": "available",
+                    "required_actions": actions,
+                    "meaning": "template_requirements_not_confirmed_missing_permissions",
+                    "request_id": data.get("RequestId", ""),
+                }
+            )
+        except Exception:
+            pass
+        return result
 
     def _log_event_best_effort(self, event_name: str, metadata: dict[str, Any]) -> None:
         try:
@@ -688,6 +819,12 @@ class RosStack(BaseCloudStack):
             # inside the SDK envelope), so surface both as public, actionable text.
             if message := public_ecs_credential_message(error, action=action, region=region):
                 raise ValueError(message) from error
+            detail = access_denied_detail(getattr(error, "data", None)) or access_denied_detail(
+                {"AccessDeniedDetail": getattr(error, "accessDeniedDetail", None)}
+            )
+            if detail:
+                message = self._clean_error_message(str(error))
+                raise ValueError(f"{message} AccessDeniedDetail: {json.dumps(detail)}") from error
             raise
         raise ValueError(f"Unsupported: {action}")
 

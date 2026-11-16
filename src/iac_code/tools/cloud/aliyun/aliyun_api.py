@@ -515,6 +515,8 @@ def _redact_target_error_detail(value: str) -> str:
 
 
 def _target_http_error_detail(response: Any) -> str | None:
+    from iac_code.tools.cloud.aliyun.permission_evidence import access_denied_detail
+
     if not isinstance(response.body, Mapping):
         return None
     details: list[str] = []
@@ -526,6 +528,8 @@ def _target_http_error_detail(response: Any) -> str | None:
                 if redacted:
                     details.append(f"{public_name}: {redacted}")
                 break
+    if detail := access_denied_detail(response.body):
+        details.append(f"AccessDeniedDetail: {json.dumps(detail, ensure_ascii=False)}")
     return "; ".join(details) or None
 
 

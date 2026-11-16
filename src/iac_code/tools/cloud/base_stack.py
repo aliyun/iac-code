@@ -222,6 +222,16 @@ class BaseCloudStack(Tool):
     ) -> None:
         return None
 
+    async def get_failure_diagnostics(
+        self,
+        action: str,
+        params: dict,
+        region: str,
+        status: StackStatus,
+        resources: list[ResourceStatus],
+    ) -> dict[str, object]:
+        return {}
+
     def on_polling_error(
         self,
         action: str,
@@ -426,6 +436,14 @@ class BaseCloudStack(Tool):
                     }
                     if action_success and status.outputs:
                         result_data["outputs"] = status.outputs
+                    if not action_success:
+                        try:
+                            result_data.update(
+                                await self.get_failure_diagnostics(action, params, region, status, resources)
+                            )
+                        except Exception:
+                            # Optional diagnostics must never replace the operation failure.
+                            pass
                     try:
                         self.on_terminal_status(action, params, region, status, resources, elapsed)
                     except Exception:

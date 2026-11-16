@@ -96,6 +96,34 @@ class TestAliyunApiProperties:
         assert "01234567" not in detail
         assert "<redacted>" in detail
 
+    def test_target_error_preserves_only_allowlisted_authorization_evidence(self) -> None:
+        response = MagicMock()
+        response.body = {
+            "Code": "Forbidden.RAM",
+            "Message": "User not authorized",
+            "AccessDeniedDetail": {
+                "AuthAction": "vpc:CreateVpc",
+                "NoPermissionType": "ExplicitDeny",
+                "PolicyType": "Custom",
+                "AuthPrincipalOwnerId": "private-owner",
+                "EncodedDiagnosticMessage": "private-diagnostic",
+            },
+        }
+        detail = aliyun_api_module._target_http_error_detail(response)
+        assert detail is not None
+        assert "User not authorized" in detail
+        assert '"AuthAction": "vpc:CreateVpc"' in detail
+        assert '"NoPermissionType": "ExplicitDeny"' in detail
+        assert '"PolicyType": "Custom"' in detail
+        assert "private" not in detail
+        assert "ecs:CreateVpc" not in detail
+
+    @pytest.mark.parametrize("auth_action", [None, {}, "vpc:CreateVpc AccessKeySecret=private", "invalid-action"])
+    def test_target_error_does_not_guess_denied_action(self, auth_action: object) -> None:
+        response = MagicMock()
+        response.body = {"Message": "Forbidden.RAM", "AccessDeniedDetail": {"AuthAction": auth_action}}
+        assert aliyun_api_module._target_http_error_detail(response) == "Message: Forbidden.RAM"
+
     def test_input_schema_has_product(self, api: AliyunApi) -> None:
         schema = api.input_schema
         assert "product" in schema["properties"]
@@ -2742,6 +2770,36 @@ async def test_target_success_emits_queryable_api_call_span() -> None:
         AliyunApiAttr.HTTP_STATUS_CODE: 200,
         AliyunApiAttr.REQUEST_ID: "request-success-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_production_target_permission_error_exposes_exact_action_to_model() -> None:
+    services, _, _, transport = _production_services()
+    transport.responses["DescribeInstances"] = NormalizedApiResponse(
+        status=403,
+        headers=MappingProxyType({"x-acs-request-id": "test-denied-request"}),
+        body={
+            "Code": "Forbidden.RAM",
+            "Message": "User not authorized",
+            "AccessDeniedDetail": {
+                "AuthAction": "ecs:DescribeInstances",
+                "NoPermissionType": "ExplicitDeny",
+                "EncodedDiagnosticMessage": "private-diagnostic",
+            },
+        },
+        content_type="application/json",
+        content_encoding=None,
+        size=256,
+    )
+    result = await _production_execute(
+        AliyunApi(services=services),
+        {"product": "Ecs", "action": "DescribeInstances", "region_id": "cn-hangzhou"},
+    )
+    assert result.is_error
+    assert "User not authorized" in result.content
+    assert '"AuthAction": "ecs:DescribeInstances"' in result.content
+    assert '"NoPermissionType": "ExplicitDeny"' in result.content
+    assert "private-diagnostic" not in result.content
 
 
 @pytest.mark.asyncio
