@@ -33,6 +33,7 @@ from iac_code.agent.message import (
 )
 from iac_code.i18n import _
 from iac_code.services.context_manager import ContextManager
+from iac_code.services.first_token_timing import mark_timing, timed_phase
 from iac_code.services.permission_wait import canonical_digest, permission_execution_identity
 from iac_code.services.permissions.audit import (
     PermissionAuditRecord,
@@ -913,6 +914,7 @@ class AgentLoop:
                 provider_messages.append(provider_message)
         return provider_messages
 
+    @timed_phase("context_messages")
     def _get_provider_messages_with_telemetry(self):
         """Build provider wire messages and their non-wire telemetry sidecar together."""
         from collections import defaultdict, deque
@@ -1979,6 +1981,13 @@ class AgentLoop:
                         return
                 if isinstance(event, (ToolUseStartEvent, ToolUseEndEvent)):
                     adapter = None
+                if _is_first_output_delta(event) and not getattr(event, "is_metadata_only", False):
+                    mark_timing(
+                        "agent_first_text_received"
+                        if isinstance(event, TextDeltaEvent)
+                        else "agent_first_thinking_received",
+                        once=True,
+                    )
                 yield event
         except asyncio.CancelledError:
             if (
@@ -2048,6 +2057,7 @@ class AgentLoop:
                     lease=lease, messages=messages, system=system, tools=tools or None, telemetry_messages=telemetry
                 )
 
+    @timed_phase("tool_execution")
     async def _execute_tool_batch_with_execution_control(
         self,
         requests: list[ToolCallRequest],
@@ -2057,6 +2067,7 @@ class AgentLoop:
             async with execution_non_advancing_wait():
                 return await self._tool_executor.execute_batch(requests, context)
 
+    @timed_phase("context_prepare")
     def _prepare_request_lease(
         self,
         request_manager: Any,
@@ -3183,6 +3194,7 @@ class AgentLoop:
                 filename = f"{filename}.md"
             mark_files_read([filename])
 
+    @timed_phase("input_prepare")
     async def _apply_auto_triggers(self, user_input: str | list[ContentBlock]) -> None:
         if not self._auto_trigger_skills:
             return
@@ -3289,6 +3301,7 @@ class AgentLoop:
                 self._provider_requests_in_flight = max(0, self._provider_requests_in_flight - 1)
                 self._sync_pending_provider_context_if_idle()
 
+    @timed_phase("context_compact")
     async def _auto_compact(self, request_manager: Any | None = None) -> CompactionEvent | None:
         """Perform automatic context compaction via provider."""
         from iac_code.services.telemetry import log_event

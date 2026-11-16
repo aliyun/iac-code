@@ -13,6 +13,7 @@ from iac_code.a2a.signing import AgentCardSignature, agent_card_signature_jwks_u
 from iac_code.a2a.transport import A2AAuthConfig, A2ATransportBinding, UnsupportedA2ATransportError, headers_for_auth
 from iac_code.a2a.transports.base import A2ATransportClient, TransportClientOptions, binding_from_url
 from iac_code.a2a.transports.http import HttpA2AClient
+from iac_code.services.first_token_timing import timing_headers
 from iac_code.services.session_backup import SESSION_BACKUP_NOT_READY_CODE
 
 
@@ -149,7 +150,7 @@ class A2AClient:
 
     async def discover(self, base_url: str) -> dict[str, Any]:
         url = base_url.rstrip("/") + "/.well-known/agent-card.json"
-        response = await self._http_client.get(url, headers=headers_for_auth(self._auth))
+        response = await self._http_client.get(url, headers={**headers_for_auth(self._auth), **timing_headers()})
         response.raise_for_status()
         data = response.json()
         if not isinstance(data, dict):
@@ -637,7 +638,7 @@ class A2AClient:
         return data
 
     def _jsonrpc_headers(self) -> dict[str, str]:
-        return {"A2A-Version": "1.0", **headers_for_auth(self._auth)}
+        return {"A2A-Version": "1.0", **headers_for_auth(self._auth), **timing_headers()}
 
     @staticmethod
     def select_endpoint_url(card: Mapping[str, Any], *, fallback_url: str) -> str:

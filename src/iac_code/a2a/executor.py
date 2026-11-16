@@ -151,6 +151,7 @@ from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.resource_selector.capability import ResourceSelectorCapability
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.capabilities.multimodal import is_model_multimodal
+from iac_code.services.first_token_timing import bind_timing, mark_timing, timed_lock, timing_phase
 from iac_code.services.permission_wait import (
     PermissionWaitCheckpointStore,
     RecoveredPermissionAuditBoundary,
@@ -1763,6 +1764,11 @@ class IacCodeA2AExecutor(AgentExecutor):
             context_id,
             self._resolve_telemetry_channel(metadata),
         )
+        bind_timing(
+            context_id=context_id,
+            task_id=context.task_id,
+            message_id=getattr(getattr(context, "message", None), "message_id", None),
+        )
         try:
             if (
                 permission_response is not None or resource_selection_response is not None or pipeline_input_response
@@ -2465,6 +2471,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         await release_context_execution()
 
         def runtime_factory(session_id: str) -> Any:
+            bind_timing(context_id=context_id, task_id=task_id, iac_code_session_id=session_id)
             session_storage = SessionStorage()
             ensure_v2_session = getattr(session_storage, "ensure_v2_session_dir_for_new_session", None)
             if callable(ensure_v2_session):
@@ -2509,6 +2516,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                     cwd=cwd,
                     runtime_factory=runtime_factory,
                 )
+                bind_timing(context_id=context_id, task_id=task_id, iac_code_session_id=ctx.session_id)
                 await activate_llm_headers()
                 control = current_execution_control()
                 if control is not None:
@@ -2574,7 +2582,8 @@ class IacCodeA2AExecutor(AgentExecutor):
 
         lock = ctx.lock
         try:
-            await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
+            with timing_phase("session_lock_wait"):
+                await asyncio.wait_for(lock.acquire(), timeout=_CONTEXT_LOCK_ACQUIRE_TIMEOUT_SECONDS)
         except asyncio.CancelledError:
             task.active_task = None
             task.state = TASK_STATE_CANCELED
@@ -5084,7 +5093,7 @@ class IacCodeA2AExecutor(AgentExecutor):
         reconcile = getattr(self._backup_service, "reconcile_session", None)
         if not callable(reconcile):
             return None
-        async with self._task_store.reconciliation_lock(context_id):
+        async with timed_lock(self._task_store.reconciliation_lock(context_id)):
             await self._task_store.ensure_context_reconciliation_safe(context_id)
             return await self._reconcile_session_before_route_locked(
                 context_id=context_id,
@@ -5101,12 +5110,15 @@ class IacCodeA2AExecutor(AgentExecutor):
     ) -> SessionReconcileResult | None:
         reconcile = getattr(self._backup_service, "reconcile_session", None)
         if not callable(reconcile):
+            mark_timing("backup_restore_skipped", once=True, restore_action="not_configured")
             return None
         try:
             context = await self._task_store.get_context_record(context_id)
         except Exception:
+            mark_timing("backup_restore_skipped", once=True, restore_action="new_context")
             return None
         if context.cwd != cwd:
+            mark_timing("backup_restore_skipped", once=True, restore_action="context_mismatch")
             return None
         reconcile_kwargs: dict[str, Any] = {
             "attempted_proof_validator": lambda key, proof: self._validate_attempted_publication_proof(

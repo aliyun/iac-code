@@ -19,6 +19,7 @@ from pathlib import Path, PureWindowsPath
 from typing import Any, Callable, Iterable, Literal, Mapping, NoReturn
 
 from iac_code.i18n import _
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.services.session_backup_state import BackupPublicationProof, SessionBackupState, SessionBackupStateError
 from iac_code.services.session_layout import (
     UnsupportedSessionLayoutError,
@@ -442,6 +443,7 @@ class SessionBackupService:
             return None
         return self._read_state(source, session_id=session_id)
 
+    @timed_phase("backup_restore", restore_result=True)
     def reconcile_session(
         self,
         cwd: str,

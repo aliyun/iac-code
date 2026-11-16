@@ -10,6 +10,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from iac_code.services.first_token_timing import timed_phase
+
 
 @dataclass(frozen=True)
 class AgentFactoryOptions:
@@ -114,6 +116,7 @@ _A2A_SAFE_NORMAL_TOOL_NAMES = frozenset(
 )
 
 
+@timed_phase("runtime_prepare")
 def create_agent_runtime(options: AgentFactoryOptions) -> AgentRuntime:
     from iac_code.config import get_config_dir
     from iac_code.tools.cloud.aliyun.runtime import create_aliyun_runtime_services
