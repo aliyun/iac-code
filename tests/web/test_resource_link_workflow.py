@@ -5914,7 +5914,8 @@ def test_http_restart_does_not_reset_actions(store):
             [
                 sys.executable,
                 "-c",
-                "import os, sys; from pathlib import Path; "
+                "import faulthandler, os, sys; from pathlib import Path; "
+                "faulthandler.dump_traceback_later(8); "
                 "from scripts.web.e2e.resource_link_workflow.runtime import Runtime; "
                 "from scripts.web.e2e.resource_link_workflow.server import serve; "
                 "native = Runtime.process_identity; "
@@ -5951,14 +5952,14 @@ def test_http_restart_does_not_reset_actions(store):
         action = call(store.root, "next")["actions"][0]
     finally:
         first.terminate()
-        first.wait(timeout=3)
+        first.communicate(timeout=3)
     second = start()
     try:
         assert call(store.root, "next")["actions"][0] == action
         assert call(store.root, "status")["completed"] == 0
     finally:
         second.terminate()
-        second.wait(timeout=3)
+        second.communicate(timeout=3)
 
 
 def test_append_ids_and_import_exact_old_pass(tmp_path):

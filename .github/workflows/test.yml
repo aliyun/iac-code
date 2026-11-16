@@ -253,6 +253,13 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
+      - name: Run resource-link recovery lifecycle tests serially
+        run: >-
+          uv run pytest
+          tests/web/test_resource_link_workflow.py::test_http_restart_does_not_reset_actions
+          tests/web/test_resource_link_execution_gate.py::test_native_handoff_renewal_chain_preserves_raw_owners_and_finishes_graph_and_cleanup
+          -v --no-header
+
       - name: Run A2A lifecycle and execution-control tests serially
         # These async lifecycle tests can terminate an xdist worker without a
         # Python traceback on Windows. Execution-control tests also gate real
@@ -280,13 +287,6 @@ jobs:
           tests/skill_bridge/test_alicloud_ros_agent_bridge.py
           tests/skill_bridge/test_ros_remote_cli_diagnostics.py
           tests/services/test_permission_wait.py
-          -v --no-header
-
-      - name: Run resource-link recovery lifecycle tests serially
-        run: >-
-          uv run pytest
-          tests/web/test_resource_link_workflow.py::test_http_restart_does_not_reset_actions
-          tests/web/test_resource_link_execution_gate.py::test_native_handoff_renewal_chain_preserves_raw_owners_and_finishes_graph_and_cleanup
           -v --no-header
 
       - name: Run remaining tests
