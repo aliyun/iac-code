@@ -71,7 +71,7 @@ def _read_continuation_turn(root: Path, job: sqlite3.Row) -> tuple[dict[str, Any
            and item.get("success") is True for operation, item in operations):
         raise WorkflowError("continuation already submitted a state-changing request")
     evidence = {
-        "path": str(path.relative_to(root)),
+        "path": path.relative_to(root).as_posix(),
         "sha256": digest(path),
         "thread_id": job["thread_id"],
         "turn_id": job["turn_id"],
@@ -265,7 +265,7 @@ def inspect(runtime: Any) -> dict[str, Any]:
         "account": review["account"],
         "active_phase": active["phase"],
         "original_review": {"path": ORIGINAL_REVIEW, "sha256": review_sha},
-        "cleanup_intent": {"path": str(cleanup_intent.relative_to(root)), "sha256": digest(cleanup_intent),
+        "cleanup_intent": {"path": cleanup_intent.relative_to(root).as_posix(), "sha256": digest(cleanup_intent),
                            "state": intent["state"]},
         "transport_failure": transport_evidence,
         "browser_snapshot": {"session_id": snapshot["session_id"], "busy": snapshot["busy"],
@@ -336,7 +336,7 @@ def write_proposal(runtime: Any, output: str) -> dict[str, Any]:
         raise WorkflowError("OPS identity recovery proposal is immutable")
     proposal = inspect(runtime)
     json_write(path, proposal, private=True)
-    return {"proposal": str(path.relative_to(root)), "sha256": digest(path),
+    return {"proposal": path.relative_to(root).as_posix(), "sha256": digest(path),
             "approved": False, "identity_only": True, "cloud_calls": 0}
 
 
@@ -417,5 +417,5 @@ def execute(runtime: Any, evidence: str) -> dict[str, Any]:
     json_write(marker, {**intent, "state": "submitted", "target": result.get("target")}, private=True)
     return {"identity_request_submitted": True, "identity_result_verified": False,
             "codex_glm_job_created": False, "delete_replayed": False,
-            "marker": str(marker.relative_to(root)),
+            "marker": marker.relative_to(root).as_posix(),
             "next": "inspect original Web session and wire result; do not repeat"}

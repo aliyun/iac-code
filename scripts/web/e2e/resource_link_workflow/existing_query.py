@@ -57,7 +57,7 @@ def propose(runtime: Any, task_id: str, handoff: str) -> dict[str, Any]:
         raise WorkflowError("exact independently read existing-sample handoff required")
     sources = seed["independent_reads"] + [{"path": seed["human_declaration"],
                                           "sha256": digest(contained(root, seed["human_declaration"]))},
-                                         {"path": str(seed_path.relative_to(root)), "sha256": digest(seed_path)}]
+                                         {"path": seed_path.relative_to(root).as_posix(), "sha256": digest(seed_path)}]
     for source in sources:
         if digest(contained(root, source["path"])) != source["sha256"]:
             raise WorkflowError("existing sample raw evidence changed")
@@ -146,7 +146,7 @@ def propose(runtime: Any, task_id: str, handoff: str) -> dict[str, Any]:
                   "slot": slot["id"], "target": slot["target"], "origin": slot["origin"],
                   "account": binding["account"], "binding": binding, "sources": sources,
                   "original_packet": original_packet, "retained_owners": owners,
-                  "packet": {"path": str(packet_path.relative_to(root)), "sha256": digest(packet_path)},
+                  "packet": {"path": packet_path.relative_to(root).as_posix(), "sha256": digest(packet_path)},
                   "old_scope": original["id"] + ":QUERY", "new_creation_quota": 0, "pass_added": False,
                   "cleanup_owner": "ops_after_original_sol_screenshot_review",
                   "manual_test_resources": [{"id": binding["dataflow_id"], "kind": "DataFlow"},
@@ -189,7 +189,7 @@ def queue(runtime: Any, evidence: str) -> dict[str, Any]:
                 or db.execute("SELECT 1 FROM actions WHERE state='issued'").fetchone()
                 or snapshot_wire(runtime.root, proof["old_scope"]) != proof["retained_wire"]):
             raise WorkflowError("existing query original state changed")
-        record = {"evidence": str(path.relative_to(runtime.root)), "evidence_sha256": digest(path)}
+        record = {"evidence": path.relative_to(runtime.root).as_posix(), "evidence_sha256": digest(path)}
         db.execute("INSERT INTO meta VALUES(?,?)", ("existing_query:" + task["id"], json.dumps(record)))
         load(runtime.root, db, task["id"])
         packet = read_json(contained(runtime.root, proof["packet"]["path"]))
@@ -312,7 +312,7 @@ def propose_capture(runtime: Any, task_id: str, diagnosis: str) -> dict[str, Any
             raise WorkflowError("actual unchanged same-source click and successful native readonly diagnosis required")
         value = read_json(contained(root, click["source_evidence"]))
         references(root, proof, source["id"], session["session_id"], value["references"]["items"])
-        sources = [{"path": str(p.relative_to(root)), "sha256": digest(p)} for p in (
+        sources = [{"path": p.relative_to(root).as_posix(), "sha256": digest(p)} for p in (
             path, contained(root, diagnostic["screenshot"]),
             path.with_name(path.stem + "-path.png"), output / "R0036-QUERY-1-iframe.json",
             contained(root, click["screenshot"]), contained(root, click["source_evidence"]),
@@ -336,7 +336,7 @@ def queue_capture(runtime: Any, evidence: str) -> dict[str, Any]:
     proof = read_json(path)
     if proof.get("approved") is not True:
         raise WorkflowError("independent capture review required")
-    diagnosis = str(contained(runtime.root, proof["sources"][0]["path"]).relative_to(runtime.root / "inputs"))
+    diagnosis = contained(runtime.root, proof["sources"][0]["path"]).relative_to(runtime.root / "inputs").as_posix()
     proposed = propose_capture(runtime, proof["task_id"], diagnosis)
     if {**proof, "approved": False} != proposed:
         raise WorkflowError("capture task/source/terminal/cumulative wire changed")
@@ -347,7 +347,7 @@ def queue_capture(runtime: Any, evidence: str) -> dict[str, Any]:
                 or db.execute("SELECT 1 FROM jobs WHERE state!='complete'").fetchone()
                 or db.execute("SELECT 1 FROM actions WHERE state='issued'").fetchone()):
             raise WorkflowError("capture admission state changed")
-        record = {"evidence": str(path.relative_to(runtime.root)), "evidence_sha256": digest(path)}
+        record = {"evidence": path.relative_to(runtime.root).as_posix(), "evidence_sha256": digest(path)}
         db.execute("INSERT INTO meta VALUES(?,?)", ("existing_query_capture:" + proof["task_id"], json.dumps(record)))
         load_capture(runtime.root, db, proof["task_id"])
         db.execute("UPDATE tasks SET state='continuation_pending',reason=NULL WHERE id=?", (proof["task_id"],))

@@ -133,7 +133,7 @@ def _unexecuted_gap(root: Path, db: Any, failed: Any, task: Any, session: str) -
                 or not image.is_relative_to(root / "jobs" / failed["id"] / "output")
                 or not image.is_file() or not raw.is_file() or read_json(raw) != data):
             raise WorkflowError("only original unchanged explicitly unclicked diagnostic observations may retry")
-        evidence.append({"scene": row["scene"], "json": str(raw.relative_to(root)), "json_sha256": digest(raw),
+        evidence.append({"scene": row["scene"], "json": raw.relative_to(root).as_posix(), "json_sha256": digest(raw),
                          "screenshot": data["screenshot"], "sha256": digest(image)})
     if not evidence:
         raise WorkflowError("product retry requires actual unclicked diagnostic artifacts")
@@ -235,7 +235,7 @@ def inspect(runtime: Any, failed_job_id: str, repair_evidence: str) -> dict[str,
             "failed_job_id": failed_job_id, "failed_turn_id": failed["turn_id"],
             "original_review": {"path": recovery["evidence"], "sha256": digest(original_path)},
             "failed_terminal": native_continuation.terminal(root, failed), "transport_failure": transport_failure,
-            "repair": {"path": str(repair_path.relative_to(root)), "sha256": digest(repair_path)},
+            "repair": {"path": repair_path.relative_to(root).as_posix(), "sha256": digest(repair_path)},
             "repair_terminal": native_continuation.terminal(root, repair_job),
             "slot": slot["id"], "target": slot["target"], "origin": slot["origin"],
             "scope": recovery["scope"], "session": recovery["session_id"], "account": original["account"],
@@ -274,7 +274,7 @@ def queue(runtime: Any, failed_job_id: str, evidence: str) -> dict[str, Any]:
     path = contained(runtime.root / "inputs", evidence)
     proof = read_json(path)
     repair_path = contained(runtime.root, proof["repair"]["path"])
-    repair_relative = str(repair_path.relative_to(runtime.root / "inputs"))
+    repair_relative = repair_path.relative_to(runtime.root / "inputs").as_posix()
     if (path.is_symlink() or (os.name != "nt" and path.stat().st_mode & 0o077)
             or proof.get("approved") is not True
             or {**proof, "approved": False} != inspect(runtime, failed_job_id, repair_relative)):
@@ -285,7 +285,7 @@ def queue(runtime: Any, failed_job_id: str, evidence: str) -> dict[str, Any]:
                 or db.execute("SELECT 1 FROM jobs WHERE state!='complete'").fetchone()
                 or db.execute("SELECT value FROM meta WHERE key='paused'").fetchone()[0] != "true"):
             raise WorkflowError("native script retry changed before registration")
-        record = {"original_job_id": proof["original_job_id"], "evidence": str(path.relative_to(runtime.root)),
+        record = {"original_job_id": proof["original_job_id"], "evidence": path.relative_to(runtime.root).as_posix(),
                   "evidence_sha256": digest(path)}
         if "previous_retry" in proof:
             previous = db.execute("SELECT value FROM meta WHERE key=?",
@@ -351,7 +351,7 @@ def inspect_cleanup(runtime: Any, source_job_id: str, screenshot_review: str) ->
                   "authority": original["authority"], "slot": original["slot"], "target": original["target"],
                   "source_terminal": native_continuation.terminal(root, source),
                   "sol_terminal": native_continuation.terminal(root, latest),
-                  "screenshot_review": {"path": str(path.relative_to(root)), "sha256": digest(path)},
+                  "screenshot_review": {"path": path.relative_to(root).as_posix(), "sha256": digest(path)},
                   "verified_scenes": expected, "cloud_quota_added": 0, "pass_added": False}
         from .existing_cleanup import restored
 
@@ -377,13 +377,13 @@ def inspect_cleanup(runtime: Any, source_job_id: str, screenshot_review: str) ->
 def queue_cleanup(runtime: Any, source_job_id: str, evidence: str) -> dict[str, Any]:
     path = contained(runtime.root / "inputs", evidence)
     proof = read_json(path)
-    visual = str(contained(runtime.root, proof["screenshot_review"]["path"]).relative_to(runtime.root / "inputs"))
+    visual = contained(runtime.root, proof["screenshot_review"]["path"]).relative_to(runtime.root / "inputs").as_posix()
     if (path.is_symlink() or (os.name != "nt" and path.stat().st_mode & 0o077)
             or proof != {**inspect_cleanup(runtime, source_job_id, visual), "approved": True}):
         raise WorkflowError("exact independent native cleanup review required")
     runtime.store.queue_cleanup(proof["task_id"], {
         "original_job_id": proof["original_job_id"], "dimension": "QUERY", "native": True,
-        "source_job_id": source_job_id, "evidence": str(path.relative_to(runtime.root)),
+        "source_job_id": source_job_id, "evidence": path.relative_to(runtime.root).as_posix(),
         "evidence_sha256": digest(path), "authority": proof["authority"],
     })
     return {"cleanup_queued": proof["task_id"], "only_luna_dispatches": True, "cloud_quota_added": 0,

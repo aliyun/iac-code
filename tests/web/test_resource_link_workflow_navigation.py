@@ -136,7 +136,7 @@ def navigation(tmp_path):
         "session_binding_sha256": digest(output / "self-created-session.json"),
         "sources": {
             "ROS": {
-                "path": str((output / "ROS-product-source.json").relative_to(root)),
+                "path": (output / "ROS-product-source.json").relative_to(root).as_posix(),
                 "sha256": digest(output / "ROS-product-source.json"),
             }
         },
@@ -369,7 +369,7 @@ def sae_capture_fixture(navigation):
         "messages": {"tools": {"call_original_ros": tool}},
     }
     json_write(output / "QUERY-product-source.json", source)
-    source_path = str((output / "QUERY-product-source.json").relative_to(root))
+    source_path = (output / "QUERY-product-source.json").relative_to(root).as_posix()
     source_sha = digest(output / "QUERY-product-source.json")
     packet = read_json(root / "packets/original.json")
     packet["requests"] = {"QUERY": "read only"}
@@ -391,7 +391,7 @@ def sae_capture_fixture(navigation):
         "actual_ui_click": True,
         "source_evidence": source_path,
         "source_sha256": source_sha,
-        "screenshot": str(png.relative_to(root)),
+        "screenshot": png.relative_to(root).as_posix(),
         "clicked_occurrence": {"index": 1, "focus": "offline-focus", "href": "https://example.invalid/own"},
     }
     json_write(output / f"{scene}.json", click)
@@ -437,7 +437,7 @@ def sae_capture_fixture(navigation):
             "remediation_sha256": digest(root / "inputs/R0020/diagnosis.json"),
             "original_clicks": {
                 scene: {
-                    "path": str((output / f"{scene}.json").relative_to(root)),
+                    "path": (output / f"{scene}.json").relative_to(root).as_posix(),
                     "sha256": digest(output / f"{scene}.json"),
                     "screenshot": click["screenshot"],
                     "screenshot_sha256": digest(png),
@@ -533,7 +533,7 @@ def oos_capture_fixture(navigation):
         "references": {"items": [reference]},
         "messages": {"tools": {"call_original_ros": tool}},
     }
-    source_path = str((output / "QUERY-product-source.json").relative_to(root))
+    source_path = (output / "QUERY-product-source.json").relative_to(root).as_posix()
     json_write(root / source_path, source)
     source_sha = digest(root / source_path)
     binding.update(
@@ -555,12 +555,12 @@ def oos_capture_fixture(navigation):
             "actual_ui_click": True,
             "source_evidence": source_path,
             "source_sha256": source_sha,
-            "screenshot": str(png.relative_to(root)),
+            "screenshot": png.relative_to(root).as_posix(),
             "clicked_occurrence": {"index": 0, "focus": "own-occurrence", "href": "https://example.invalid/own"},
         }
         json_write(artifact, click)
         original_clicks[scene] = {
-            "path": str(artifact.relative_to(root)),
+            "path": artifact.relative_to(root).as_posix(),
             "sha256": digest(artifact),
             "screenshot": click["screenshot"],
             "screenshot_sha256": digest(png),

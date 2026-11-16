@@ -435,7 +435,7 @@ def main() -> None:
             raise WorkflowError("existing query proposal is immutable")
         proposal = existing_query.propose(Runtime(Store(root)), args.task_id, args.handoff)
         json_write(output, proposal, private=True)
-        result = {"proposal": str(output.relative_to(root)), "sha256": digest(output), "cloud_calls": 0}
+        result = {"proposal": output.relative_to(root).as_posix(), "sha256": digest(output), "cloud_calls": 0}
     elif args.command == "queue-existing-query":
         from . import existing_query
 
@@ -448,7 +448,7 @@ def main() -> None:
             raise WorkflowError("capture proposal is immutable")
         proposal = existing_query.propose_capture(Runtime(Store(root)), args.task_id, args.diagnosis)
         json_write(output, proposal, private=True)
-        result = {"proposal": str(output.relative_to(root)), "sha256": digest(output), "cloud_calls": 0}
+        result = {"proposal": output.relative_to(root).as_posix(), "sha256": digest(output), "cloud_calls": 0}
     elif args.command == "queue-existing-query-capture":
         from . import existing_query
 
@@ -461,7 +461,7 @@ def main() -> None:
             raise WorkflowError("native continuation proposal is immutable")
         proposal = native_continuation.inspect(Runtime(Store(root)), args.job_id, args.repair)
         json_write(output, proposal, private=True)
-        result = {"proposal": str(output.relative_to(root)), "approved": False, "cloud_calls": 0}
+        result = {"proposal": output.relative_to(root).as_posix(), "approved": False, "cloud_calls": 0}
     elif args.command == "queue-native-continuation":
         from . import native_continuation
 
@@ -476,7 +476,7 @@ def main() -> None:
                                                        renew_identity=args.renew_identity,
                                                        capture_only=args.capture_only)
         json_write(output, proposal, private=True)
-        result = {"proposal": str(output.relative_to(root)), "approved": False, "cloud_calls": 0}
+        result = {"proposal": output.relative_to(root).as_posix(), "approved": False, "cloud_calls": 0}
     elif args.command == "queue-managed-continuation":
         from . import native_continuation
 
@@ -488,7 +488,7 @@ def main() -> None:
         if output.exists():
             raise WorkflowError("retained capture proposal is immutable")
         json_write(output, retained_capture.inspect(Runtime(Store(root)), args.job_id), private=True)
-        result = {"proposal": str(output.relative_to(root)), "cloud_calls": 0, "approved": False}
+        result = {"proposal": output.relative_to(root).as_posix(), "cloud_calls": 0, "approved": False}
     elif args.command == "queue-retained-capture":
         from . import retained_capture
 
@@ -501,7 +501,7 @@ def main() -> None:
             raise WorkflowError("native retry proposal is immutable")
         proposal = native_retry.inspect(Runtime(Store(root)), args.job_id, args.repair)
         json_write(output, proposal, private=True)
-        result = {"proposal": str(output.relative_to(root)), "approved": False, "cloud_calls": 0}
+        result = {"proposal": output.relative_to(root).as_posix(), "approved": False, "cloud_calls": 0}
     elif args.command == "queue-native-retry":
         from . import native_retry
 
@@ -514,7 +514,7 @@ def main() -> None:
             raise WorkflowError("native cleanup proposal is immutable")
         proposal = native_retry.inspect_cleanup(Runtime(Store(root)), args.job_id, args.screenshot_review)
         json_write(output, proposal, private=True)
-        result = {"proposal": str(output.relative_to(root)), "sha256": digest(output), "cloud_calls": 0}
+        result = {"proposal": output.relative_to(root).as_posix(), "sha256": digest(output), "cloud_calls": 0}
     elif args.command == "queue-native-cleanup":
         from . import native_retry
 

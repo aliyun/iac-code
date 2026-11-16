@@ -139,7 +139,7 @@ def propose(runtime: Any, task_id: str, visual: str, reports: list[dict]) -> dic
     return {"kind": "ops_existing_query_cleanup_restore_review", "approved": False, "task_id": task_id,
             "attempt": task["attempt"], "scope": prior["scope"], "session_id": prior["session"],
             "existing_review": {"path": existing["evidence"], "sha256": existing["evidence_sha256"]},
-            "visual_review": {"path": str(path.relative_to(root)), "sha256": digest(path)},
+            "visual_review": {"path": path.relative_to(root).as_posix(), "sha256": digest(path)},
             "sol_terminal": sol_terminal, "external_cleanup": sources, "previous_active": dict(active),
             "query_grants": grants, "query_attempts": attempts, "restored_active": {**prior, "phase": "cleanup"},
             "new_creation_quota": 0, "cloud_calls": 0, "pass_added": False}
@@ -149,7 +149,7 @@ def restore(runtime: Any, evidence: str) -> dict:
     root = runtime.root
     path = contained(root / "inputs", evidence)
     proof = read_json(path)
-    visual = str(contained(root, proof["visual_review"]["path"]).relative_to(root / "inputs"))
+    visual = contained(root, proof["visual_review"]["path"]).relative_to(root / "inputs").as_posix()
     if (path.is_symlink() or (os.name != "nt" and path.stat().st_mode & 0o077)
             or proof != {**propose(runtime, proof["task_id"], visual, proof["external_cleanup"]), "approved": True}):
         raise WorkflowError("exact independently approved original-cleanup restoration required")
@@ -165,7 +165,7 @@ def restore(runtime: Any, evidence: str) -> dict:
         active = proof["restored_active"]
         wire.execute("UPDATE active SET scope=?,session=?,account=?,expires=?,phase='cleanup' WHERE slot=?",
                      (active["scope"], active["session"], active["account"], active["expires"], active["slot"]))
-        record = {"evidence": str(path.relative_to(root)), "sha256": digest(path)}
+        record = {"evidence": path.relative_to(root).as_posix(), "sha256": digest(path)}
         db.execute("INSERT INTO meta VALUES(?,?)", (key, json.dumps(record)))
         runtime.store.event(db, "ops_existing_cleanup_restored", {**record, "task_id": proof["task_id"],
                                                                  "new_creation_quota": 0, "pass_added": False})

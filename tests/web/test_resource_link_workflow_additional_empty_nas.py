@@ -39,7 +39,7 @@ def additional(candidate, tmp_path, monkeypatch):  # noqa: F811
     def save(name, value):
         path = directory / name
         json_write(path, value)
-        return {"path": str(path.relative_to(tmp_path)), "sha256": digest(path)}
+        return {"path": path.relative_to(tmp_path).as_posix(), "sha256": digest(path)}
 
     initial = read_json(directory / "admission.json")
     initial["frozen_plan_sha256"] = hashlib.sha256(frozen.encode()).hexdigest()

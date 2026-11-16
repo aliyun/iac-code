@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import copy
 import json
-import os
 import socket
 import sqlite3
 import subprocess
@@ -25,18 +24,6 @@ from scripts.web.e2e.resource_link_workflow.store import Store
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jN1sAAAAASUVORK5CYII=")
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW_DATA = Path("synthetic-workflow-data-created-by-fixture")
-
-
-@pytest.fixture(autouse=True)
-def _offline_controller_identity(monkeypatch):
-    original = Runtime.process_identity
-
-    def identity(pid):
-        # These contracts exercise loaded-code and workflow state, not native
-        # OS process discovery. Other PIDs retain their actual ownership checks.
-        return "offline test controller" if pid == os.getpid() else original(pid)
-
-    monkeypatch.setattr(Runtime, "process_identity", staticmethod(identity))
 
 
 @pytest.mark.parametrize("purpose", ["prepare", "repair"])
@@ -2629,7 +2616,7 @@ def test_creation_evidence_binds_current_product_generation_not_preparation_inpu
         return
     result = runtime.tool(worker["job_id"], key, "evidence", {"scene": scene["id"]})
     expected_source = source if source_case != "missing" else store.root / "inputs/cloud.json"
-    assert result["source_evidence"] == str(expected_source.relative_to(store.root))
+    assert result["source_evidence"] == expected_source.relative_to(store.root).as_posix()
     assert result["source_sha256"] == digest(expected_source)
     assert result["creation_source_verified"] is (source_case == "valid")
     assert not result["actual_ui_click"] and not result["eligible_for_automatic_verdict"]
@@ -2660,7 +2647,7 @@ def test_worker_wait_never_uses_browser_or_installs_cloud_capabilities(store, mo
         context["cleanup_recovery"] = {
             "original_job_id": worker["job_id"],
             "dimension": "ROS",
-            "evidence": str(evidence.relative_to(store.root)),
+            "evidence": evidence.relative_to(store.root).as_posix(),
             "evidence_sha256": digest(evidence),
         }
     runtime = Runtime(store)
@@ -4169,7 +4156,7 @@ def test_sol_repair_can_view_original_pixels_without_acceptance_authority(store)
     other.parent.mkdir(parents=True, exist_ok=True)
     other.write_bytes(PNG)
     with pytest.raises(WorkflowError, match="does not belong"):
-        store.inspected(repair["job_id"], key, str(other.relative_to(store.root)))
+        store.inspected(repair["job_id"], key, other.relative_to(store.root).as_posix())
     with pytest.raises(WorkflowError, match="exact bound Sol review"):
         store.accept(repair["job_id"], key, {})
     with store.transaction() as connection:
@@ -4805,7 +4792,7 @@ def test_dead_resume_before_turn_start_can_reconcile_without_fabricating_turn(
                     "result": {"data": [{"id": turn}], "nextCursor": "missing" if paged == "incomplete" else None},
                 },
                 {
-                    "path": str(page.relative_to(store.root)),
+                    "path": page.relative_to(store.root).as_posix(),
                     "sha256": "changed" if paged == "changed" else digest(page),
                 },
             ],
@@ -5822,11 +5809,11 @@ def test_query_sample_cleanup_report_preserves_owned_evidence(
                 "resource": resource,
                 "absent": True,
                 "failed": False,
-                "source_evidence": str(source.relative_to(store.root)),
+                "source_evidence": source.relative_to(store.root).as_posix(),
                 "source_sha256": digest(source),
             },
         )
-        binding = {"path": str(proof.relative_to(store.root)), "sha256": digest(proof)}
+        binding = {"path": proof.relative_to(store.root).as_posix(), "sha256": digest(proof)}
         state = "deleted" if owner_state in {"deleted", "missing_proof", "mixed"} else owner_state
         with store.transaction() as db:
             db.execute(
@@ -5925,13 +5912,15 @@ def test_http_restart_does_not_reset_actions(store):
         process = subprocess.Popen(
             [
                 sys.executable,
-                "-m",
-                "scripts.web.e2e.resource_link_workflow",
-                "--state",
+                "-c",
+                "import os, sys; from pathlib import Path; "
+                "from scripts.web.e2e.resource_link_workflow.runtime import Runtime; "
+                "from scripts.web.e2e.resource_link_workflow.server import serve; "
+                "native = Runtime.process_identity; "
+                "Runtime.process_identity = staticmethod(lambda pid: "
+                "'offline test controller' if pid == os.getpid() else native(pid)); "
+                "serve(Path(sys.argv[1]), 0)",
                 str(store.root),
-                "serve",
-                "--port",
-                "0",
             ],
             cwd=REPO,
             env=dict(os.environ),
@@ -6159,7 +6148,7 @@ def test_review_reads_exact_original_json_pointer_and_retains_full_sha(store):
         review["job_id"],
         key,
         "read_artifact",
-        {"path": str(source.relative_to(store.root)), "pointer": "/messages/tools/real"},
+        {"path": source.relative_to(store.root).as_posix(), "pointer": "/messages/tools/real"},
     )
     assert json.loads(result["text"]) == {"isError": False}
     assert result["sha256"] == digest(source)

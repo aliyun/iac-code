@@ -292,7 +292,7 @@ class Store:
             connection.execute("UPDATE runs SET budget=? WHERE id=?", (budget_cents, plan_id))
             self.event(connection, "run_budget_amended", {
                 **required, "task_id": task["id"], "old_budget_cents": run["budget"],
-                "frozen_plan_sha256": frozen_sha, "evidence": str(proof_path.relative_to(self.root)),
+                "frozen_plan_sha256": frozen_sha, "evidence": proof_path.relative_to(self.root).as_posix(),
                 "evidence_sha256": proof_sha, "human_authorization_sha256": digest(human_path),
                 "reservations_preserved": True, "wire_unchanged": True,
             })
@@ -1021,7 +1021,7 @@ class Store:
             evidence = recovery["evidence"]
             if digest(contained(self.root, evidence)) != recovery["evidence_sha256"]:
                 raise WorkflowError("navigation recovery review changed")
-        path = contained(self.root / "inputs", str(Path(evidence).relative_to("inputs")))
+        path = contained(self.root / "inputs", Path(evidence).relative_to("inputs").as_posix())
         proof = read_json(path)
         if (proof.get("schema_version") != 1 or proof.get("kind") != "ops_navigation_only_review"
                 or proof.get("approved") is not True or proof.get("task_id") != task["id"]
@@ -1086,7 +1086,7 @@ class Store:
             ):
                 raise WorkflowError("only independently reviewed exact QUERY field capture may recover missing pixels")
             remediation = contained(self.root, capture_recovery.get("remediation_evidence", ""))
-            if (not str(remediation.relative_to(self.root)).startswith("inputs/" + task["resource_id"] + "/")
+            if (not remediation.relative_to(self.root).as_posix().startswith("inputs/" + task["resource_id"] + "/")
                     or digest(remediation) != capture_recovery.get("remediation_sha256")):
                 raise WorkflowError("exact own sampler diagnosis required")
             diagnosis = read_json(remediation)
@@ -1116,7 +1116,7 @@ class Store:
         for dimension in dimensions:
             source = output / f"{dimension}-product-source.json"
             item = proof["sources"][dimension]
-            if (item != {"path": str(source.relative_to(self.root)), "sha256": digest(source)}
+            if (item != {"path": source.relative_to(self.root).as_posix(), "sha256": digest(source)}
                     or read_json(source).get("session_id") != bound["session_id"]
                     or (output / f"{dimension}-cleanup-intent.json").exists()):
                 raise WorkflowError("original navigation source/session changed or cleanup started")
@@ -1128,7 +1128,7 @@ class Store:
                                          (task["id"], scene["id"])).fetchone()
             if capture_recovery is not None:
                 artifacts = capture_recovery.get("original_clicks", {})
-                original_json = str((output / f"{scene['id']}.json").relative_to(self.root))
+                original_json = (output / f"{scene['id']}.json").relative_to(self.root).as_posix()
                 png = contained(self.root, old.get("screenshot", ""))
                 original_artifact = {"path": original_json, "sha256": digest(output / f"{scene['id']}.json"),
                                      "screenshot": old.get("screenshot"), "screenshot_sha256": digest(png)}
@@ -1187,7 +1187,7 @@ class Store:
                 binder = (bind_oos_state_configuration_source if profile[0] == "oos_state_configuration_list"
                           else bind_sae_application_source)
                 binder(inspection, refs, source_value.get("messages", {}).get("tools", {}))
-        return {**proof, "evidence": str(path.relative_to(self.root)), "evidence_sha256": digest(path)}
+        return {**proof, "evidence": path.relative_to(self.root).as_posix(), "evidence_sha256": digest(path)}
 
     def queue_navigation(self, original_job_id, evidence):
         """OPS checkpoints existing provenance; only Luna reserves the next GLM turn."""
@@ -2176,7 +2176,7 @@ class Store:
             from .hourly_budget import release_verified
 
             release_verified(self, connection, task["id"], {
-                "kind": "sol_verified_cleanup", "evidence": str(receipt_path.relative_to(self.root)),
+                "kind": "sol_verified_cleanup", "evidence": receipt_path.relative_to(self.root).as_posix(),
                 "sha256": digest(receipt_path), "job_id": job_id,
             })
             connection.execute("UPDATE slots SET task_id=NULL WHERE task_id=?", (task["id"],))
@@ -2184,7 +2184,7 @@ class Store:
             self.event(connection, "acceptance_committed", {
                 "task_id": task["id"], "retry": needs_retry,
                 "job_id": job_id, "attempt": task["attempt"],
-                "receipt_path": str(receipt_path.relative_to(self.root)), "receipt_sha256": digest(receipt_path),
+                "receipt_path": receipt_path.relative_to(self.root).as_posix(), "receipt_sha256": digest(receipt_path),
                 "deferred_remaining": [scene["id"] for scene in remaining] if selected_packet else [],
                 "complete": next_state == "complete",
                 "repair_scope": repair_scope if needs_retry else None,
@@ -2386,7 +2386,7 @@ class Store:
             connection.execute("UPDATE tasks SET state='repair',reason=? WHERE id=?", (reason, task_id))
             self.set_repair_scope(connection, task_id, "input")
             self.event(connection, "ops_input_repair", {
-                "task_id": task_id, "reason": reason, "evidence": str(path.relative_to(self.root)),
+                "task_id": task_id, "reason": reason, "evidence": path.relative_to(self.root).as_posix(),
                 "input_path": path.relative_to(self.root / "inputs").as_posix(), "sha256": digest(path),
                 "diagnostic_only": True, "formal_observations_unchanged": True,
                 "diagnostic_image_paths": [item["path"] for item in proof["diagnostic_images"]],
@@ -2439,7 +2439,7 @@ class Store:
             connection.execute("UPDATE tasks SET state='repair',reason=? WHERE id=?", (reason, task_id))
             self.set_repair_scope(connection, task_id, "product")
             self.event(connection, "ops_preserved_repair", {
-                "task_id": task_id, "reason": reason, "evidence": str(path.relative_to(self.root)),
+                "task_id": task_id, "reason": reason, "evidence": path.relative_to(self.root).as_posix(),
                 "input_path": path.relative_to(self.root / "inputs").as_posix(), "sha256": sha,
                 "ownership_preserved": True, "execution_recovery_authorized": False,
                 "cloud_calls_authorized": False, "pass_count_unchanged": True,
@@ -2511,7 +2511,7 @@ class Store:
                 {
                     "task_id": task_id,
                     "reason": reason,
-                    "evidence": str(path.relative_to(self.root)),
+                    "evidence": path.relative_to(self.root).as_posix(),
                     "input_path": path.relative_to(self.root / "inputs").as_posix(),
                     "sha256": digest(path),
                 },
@@ -2537,7 +2537,7 @@ class Store:
             if not owner:
                 raise WorkflowError("PendingDelete cannot invent ownership")
             validate(self.root, task_id, owner["id"], json.loads(owner["resource"]), proof)
-            binding = {"path": str(path.relative_to(self.root)), "sha256": digest(path)}
+            binding = {"path": path.relative_to(self.root).as_posix(), "sha256": digest(path)}
             if owner["state"] == "deleted":
                 if json.loads(owner["evidence"]) != binding:
                     raise WorkflowError("PendingDelete cannot overwrite an existing cleanup disposition")

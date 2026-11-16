@@ -119,7 +119,7 @@ def reviewed_scope(root: Path, task: Any, run: Any, evidence: str) -> dict[str, 
         bindings["ROS"]["table_name"] == bindings["TF"]["table_name"]
     ):
         raise WorkflowError("two distinct table names must use the same verified existing parent")
-    return {**required, "evidence": str(proof_path.relative_to(root)), "evidence_sha256": digest(proof_path),
+    return {**required, "evidence": proof_path.relative_to(root).as_posix(), "evidence_sha256": digest(proof_path),
             "execution_sha256": execution_digest(packet), "execution_grants": grants,
             "budget_cents": packet["budget_cents"],
             "accounts": sorted({item["account"] for item in packet["scenes"].values()}),
@@ -265,7 +265,7 @@ def reviewed_native_rocketmq(root: Path, task: Any, run: Any, path: Path, proof:
             raise WorkflowError("original official source/cost evidence and limitations required")
         for reference in review["official_sources"]:
             _input(root, reference)
-    return {**required, "evidence": str(path.relative_to(root)), "evidence_sha256": digest(path),
+    return {**required, "evidence": path.relative_to(root).as_posix(), "evidence_sha256": digest(path),
             "execution_sha256": execution_digest(packet), "execution_grants": {"ROS": grants["ROS"]},
             "budget_cents": 0, "accounts": accounts, "sample_bindings": {"ROS": binding},
             "operation_authorization_required": True}
@@ -324,7 +324,7 @@ def native_rocketmq_followup_authority(
     accepted = [json.loads(row[0]) for row in connection.execute(
         "SELECT data FROM events WHERE kind='acceptance_committed'")]
     event = next((e for e in accepted if e.get("task_id") == task["id"]
-                  and e.get("receipt_path") == str(receipt_path.relative_to(root))
+                  and e.get("receipt_path") == receipt_path.relative_to(root).as_posix()
                   and e.get("receipt_sha256") == digest(receipt_path)), None)
     sol = connection.execute("SELECT role,purpose,state,thread_id,turn_id FROM jobs WHERE id=?",
                              (event.get("job_id"),)).fetchone() if event else None
@@ -481,7 +481,7 @@ def reviewed_hourly_managed_tf(root: Path, task: Any, run: Any, path: Path, proo
         raise WorkflowError("independent source review must bind the entire literal hosted stack and dependencies")
     for reference in source["official_sources"]:
         _input(root, reference)
-    return {**required, "evidence": str(path.relative_to(root)), "evidence_sha256": digest(path),
+    return {**required, "evidence": path.relative_to(root).as_posix(), "evidence_sha256": digest(path),
             "execution_sha256": execution_digest(packet), "execution_grants": grants,
             "budget_cents": packet["budget_cents"], "accounts": accounts,
             "sample_bindings": {"TF": binding}, "hourly_cost": packet["hourly_cost"],
@@ -539,8 +539,8 @@ def reviewed_native_nas_query(root: Path, task: Any, run: Any, path: Path, proof
         raise WorkflowError("native NAS source review must bind the complete own dependency graph and cleanup")
     for reference in source["official_sources"]:
         _input(root, reference)
-    return {**required, "evidence": str(path.relative_to(root)), "evidence_sha256": digest(path),
-            "proposal": str(proposal_path.relative_to(root)), "proposal_sha256": digest(proposal_path),
+    return {**required, "evidence": path.relative_to(root).as_posix(), "evidence_sha256": digest(path),
+            "proposal": proposal_path.relative_to(root).as_posix(), "proposal_sha256": digest(proposal_path),
             "execution_sha256": execution_digest(packet), "execution_grants": grants,
             "budget_cents": packet["budget_cents"], "accounts": accounts, "sample_bindings": {"QUERY": binding},
             "hourly_cost": packet["hourly_cost"], "operation_authorization_required": True}
@@ -712,7 +712,7 @@ output "mount_target_domain" {{ value = alicloud_nas_mount_target.mount_target.m
             cleanup["read_policy"].get("after_delete") != create["id"]
         ):
             raise WorkflowError("NAS both child disappearance reads are mandatory after owning stack deletion")
-    return {**required, "evidence": str(path.relative_to(root)), "evidence_sha256": digest(path),
+    return {**required, "evidence": path.relative_to(root).as_posix(), "evidence_sha256": digest(path),
             "execution_sha256": execution_digest(packet), "execution_grants": packet["execution_grants"],
             "budget_cents": 0, "accounts": [proof["account"]], "sample_bindings": {"TF": binding},
             "operation_authorization_required": True}
@@ -943,7 +943,7 @@ def reviewed_additional_empty_table(
         or operation_review.get("carry_forward_dimensions") != {}
         or operation_review.get("temporary_template_corrections")
         or operation_review.get("paid_operation_review", {}).get("human_authorization")
-        != str(human_path.relative_to(root))
+        != human_path.relative_to(root).as_posix()
         or operation_review.get("paid_operation_review", {}).get("human_sha256") != digest(human_path)
     ):
         raise WorkflowError("one exact human-approved additional OTS TF iframe operation required")
@@ -982,8 +982,8 @@ def reviewed_additional_empty_table(
                for key in ("instance_name", "table_name"))
     ):
         raise WorkflowError("additional table cannot create dependencies or change parent/name")
-    return {**required, "evidence": str(path.relative_to(root)), "evidence_sha256": digest(path),
-            "human_sha256": digest(human_path), "proposal": str(proposal_path.relative_to(root)),
+    return {**required, "evidence": path.relative_to(root).as_posix(), "evidence_sha256": digest(path),
+            "human_sha256": digest(human_path), "proposal": proposal_path.relative_to(root).as_posix(),
             "human_permission_id": hashlib.sha256(canonical({
                 "task_id": task["id"],
                 "question": human.get("human_question_verbatim", human["verbatim_user_message"]),

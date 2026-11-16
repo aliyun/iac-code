@@ -253,7 +253,7 @@ def test_selection_rejects_unproven_or_erased_deferrals(staged, damage):
         else:
             path = store.root / "receipts" / ("a" * 32 + ".json")
             for item in deferred.values():
-                item["path"] = str(path.relative_to(store.root))
+                item["path"] = path.relative_to(store.root).as_posix()
         json_write(path, value)
         for item in deferred.values():
             item["sha256"] = digest(path)

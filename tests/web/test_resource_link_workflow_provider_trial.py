@@ -141,7 +141,7 @@ def trial(correction, monkeypatch):  # noqa: F811
         path = store.root / f"inputs/header-{key}.txt"
         path.write_text(body, encoding="utf-8")
         url = "https://raw.githubusercontent.com/aliyun/terraform-provider-alicloud/v1.260.0/" + suffix
-        sources[key] = {"path": str(path.relative_to(store.root)), "sha256": digest(path), "url": url}
+        sources[key] = {"path": path.relative_to(store.root).as_posix(), "sha256": digest(path), "url": url}
     capability = {
         "actual_account": account,
         "calls": [

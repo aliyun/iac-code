@@ -187,7 +187,7 @@ def adopt_oauth(store: Store, cli_config: Path, account: str, region: str) -> di
             "profile": "test-guima",
             "identity": identity,
             "raw_identity_stdout": result.stdout,
-            "backup": str(backup.relative_to(store.root)),
+            "backup": backup.relative_to(store.root).as_posix(),
             "shared_slots": len(aliases),
             "cli_policy": "temporary STS snapshot; never refresh the original OAuth CLI profile during this run",
         }
@@ -197,8 +197,8 @@ def adopt_oauth(store: Store, cli_config: Path, account: str, region: str) -> di
             "account": account,
             "region": region,
             "shared_slots": len(aliases),
-            "evidence": str(marker.relative_to(store.root)),
-            "backup": str(backup.relative_to(store.root)),
+            "evidence": marker.relative_to(store.root).as_posix(),
+            "backup": backup.relative_to(store.root).as_posix(),
             "new_pass": 0,
         }
 

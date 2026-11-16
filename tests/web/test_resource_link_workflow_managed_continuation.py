@@ -422,8 +422,8 @@ def test_capacity_failure_only_retains_prior_review_after_readonly_inspection(ma
         json.dumps({"method": "script/request", "params": {"operation": operation}}) + "\n", encoding="utf-8"
     )
     evidence = {
-        "path": str(raw_path.relative_to(runtime.root)),
-        "transport_path": str(trace_path.relative_to(runtime.root)),
+        "path": raw_path.relative_to(runtime.root).as_posix(),
+        "transport_path": trace_path.relative_to(runtime.root).as_posix(),
     }
     monkeypatch.setattr(
         continuation,

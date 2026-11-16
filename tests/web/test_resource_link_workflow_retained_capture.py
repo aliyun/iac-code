@@ -135,8 +135,8 @@ def retained(reviewed, monkeypatch):  # noqa: F811
             "actual_ui_click": True,
             "session_id": "ws~full",
             "source_identifier": identifier,
-            "screenshot": str(png.relative_to(store.root)),
-            "source_evidence": str((output / "ROS-product-source.json").relative_to(store.root)),
+            "screenshot": png.relative_to(store.root).as_posix(),
+            "source_evidence": (output / "ROS-product-source.json").relative_to(store.root).as_posix(),
             "source_sha256": digest(output / "ROS-product-source.json"),
         },
     )
@@ -164,7 +164,9 @@ def retained(reviewed, monkeypatch):  # noqa: F811
             "INSERT INTO owned VALUES(?,?,?,?,?,?)",
             ("own", packet["task_id"], "ROS", dumps({"id": "own-stack"}), "present", "offline-wire"),
         )
-        db.execute("INSERT INTO inspected VALUES(?,?,?)", ("review", str(png.relative_to(store.root)), digest(png)))
+        db.execute(
+            "INSERT INTO inspected VALUES(?,?,?)", ("review", png.relative_to(store.root).as_posix(), digest(png))
+        )
     store.pause(True)
     monkeypatch.setattr(retained_capture, "terminal", lambda root, job: {"path": "offline", "sha256": "fake"})
     monkeypatch.setattr(
@@ -266,7 +268,7 @@ def test_preclick_diagnostic_continuation_reuses_current_source_and_calls(retain
         lambda root, job: {
             "path": "offline",
             "sha256": "fake",
-            "transport_path": str(trace.relative_to(root)),
+            "transport_path": trace.relative_to(root).as_posix(),
             "transport_sha256": digest(trace),
         },
     )
@@ -309,7 +311,7 @@ def test_preclick_checkpoint_rejects_unknown_or_different_capture(retained, monk
         lambda root, job: {
             "path": "offline",
             "sha256": "fake",
-            "transport_path": str(trace.relative_to(root)),
+            "transport_path": trace.relative_to(root).as_posix(),
             "transport_sha256": digest(trace),
         },
     )

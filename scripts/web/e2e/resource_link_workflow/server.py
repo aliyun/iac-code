@@ -544,7 +544,7 @@ def reconcile(store: Store, job_id: str, raw: dict[str, Any]) -> dict[str, Any]:
                         (job_id,),
                     )
                     store.event(connection, "native_continuation_no_turn_requeued", {
-                        "job_id": job_id, "archived_launch": str(archived.relative_to(store.root)),
+                        "job_id": job_id, "archived_launch": archived.relative_to(store.root).as_posix(),
                         "read_evidence_sha256": hashlib.sha256(
                             json.dumps(raw, ensure_ascii=False, sort_keys=True).encode()
                         ).hexdigest(), "wire_unchanged": True, "no_turn_or_tool_input": True,

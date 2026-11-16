@@ -10,7 +10,7 @@ import re
 import shlex
 import signal
 import subprocess
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from .files import WorkflowError, digest, json_write, read_json
@@ -33,7 +33,7 @@ def mini(config: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(value, dict) or any(not isinstance(value.get(key), str) or not value[key] for key in required):
         raise WorkflowError("Mac mini needs explicit SSH, Chrome profile and worker cwd configuration")
     for key in ("identity_file", "known_hosts", "chrome_executable", "chrome_profile", "worker_cwd"):
-        path = Path(value[key])
+        path = Path(value[key]) if key in {"identity_file", "known_hosts"} else PurePosixPath(value[key])
         if not path.is_absolute() or len(path.parts) < 3 or any(part in {"..", "~"} for part in path.parts):
             raise WorkflowError("Mac mini paths must be explicit absolute non-root paths")
     if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", value["user"]):

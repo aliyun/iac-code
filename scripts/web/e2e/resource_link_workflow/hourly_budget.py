@@ -263,7 +263,7 @@ def register(store: Store, plan_id: str, evidence: str) -> dict[str, Any]:
     path = contained(store.root / "inputs", evidence.removeprefix("inputs/"))
     if not path.is_file():
         raise WorkflowError("hourly allowance review file is missing")
-    reference = {"path": str(path.relative_to(store.root)), "sha256": digest(path)}
+    reference = {"path": path.relative_to(store.root).as_posix(), "sha256": digest(path)}
     with store.transaction() as connection:
         if connection.execute("SELECT value FROM meta WHERE key='paused'").fetchone()[0] != "true":
             raise WorkflowError("pause dispatch before hourly allowance registration")

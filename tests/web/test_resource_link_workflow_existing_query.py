@@ -226,7 +226,7 @@ def test_reviewed_existing_query_queue_tracks_manual_owners_without_cloud_write(
     for i, body in enumerate(bodies):
         file = root / f"inputs/raw-{i}.json"
         json_write(file, {"exit_code": 0, "body": body, "call": query if i == 2 else {}})
-        sources.append({"path": str(file.relative_to(root)), "sha256": digest(file)})
+        sources.append({"path": file.relative_to(root).as_posix(), "sha256": digest(file)})
     json_write(root / "inputs/human.json", {"origin": "user_manual_console_creation_not_glm_wire"})
     seed = {
         "kind": "ops_user_created_nas_sample_handoff",

@@ -4,6 +4,7 @@ import copy
 import json
 import sqlite3
 import time
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -66,7 +67,7 @@ def initial_query(tmp_path):
     json_write(tmp_path / "inputs/old.json", old)
     json_write(tmp_path / "inputs/remediation.json", {"offline": "actual repair fixture"})
     json_write(tmp_path / f"packets/{prepare}/packet.json", old)
-    with sqlite3.connect(tmp_path / "state.sqlite3") as db:
+    with closing(sqlite3.connect(tmp_path / "state.sqlite3")) as db, db:
         db.executescript(
             "CREATE TABLE jobs(id,task_id,role,state,turn_id,created,purpose);CREATE TABLE owned(task_id,state);"
             "CREATE TABLE events(id INTEGER PRIMARY KEY,kind,data,created);"
@@ -89,7 +90,7 @@ def initial_query(tmp_path):
                 20,
             ),
         )
-    with sqlite3.connect(tmp_path / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(tmp_path / "execution-gate.sqlite3")) as db, db:
         db.executescript(
             "CREATE TABLE grants(scope,id,authority,quota,used,kind,call);"
             "CREATE TABLE attempts(scope,grant_id,state,response);CREATE TABLE authority_limits(authority,id,used);"
@@ -170,7 +171,7 @@ def test_initial_query_supplement_uses_real_sol_approval_without_inventing_old_p
 @pytest.fixture
 def initial_query_identity_continuation(initial_query):
     root, old, _, _ = initial_query
-    with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
         db.execute("UPDATE grants SET used=0 WHERE kind='read'")
         db.execute("UPDATE authority_limits SET used=0 WHERE id='snapshots'")
         db.execute("DELETE FROM attempts WHERE grant_id='snapshots'")
@@ -238,7 +239,7 @@ def test_initial_query_identity_continuation_keeps_unused_read_and_original_auth
     validate_authorization(root, "R0019", new)
     assert original == {name: (root / name).read_bytes() for name in original}
     # Live successor consumption must not rerun exhausted-predecessor admission.
-    with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
         db.execute("UPDATE authority_limits SET used=2 WHERE id='identity'")
     validate_authorization(root, "R0019", new)
     drifted = copy.deepcopy(new)
@@ -273,7 +274,7 @@ def test_initial_query_identity_continuation_refuses_unproven_or_expanded_permis
 ):
     root, old, new, proof = initial_query_identity_continuation
     if damage in {"no_event", "prepare_active", "glm_active", "outstanding"}:
-        with sqlite3.connect(root / "state.sqlite3") as db:
+        with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
             db.execute(
                 {
                     "no_event": "DELETE FROM events",
@@ -283,7 +284,7 @@ def test_initial_query_identity_continuation_refuses_unproven_or_expanded_permis
                 }[damage]
             )
     elif damage in {"unknown_identity", "foreign_identity", "identity_not_exhausted"}:
-        with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+        with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
             if damage == "unknown_identity":
                 db.execute("UPDATE attempts SET state='unknown'")
             elif damage == "foreign_identity":
@@ -333,7 +334,7 @@ def sae_custom_query(initial_query):
     json_write(root / "inputs/old.json", old)
     packet_path = root / ("packets/" + "b" * 32 + "/packet.json")
     json_write(packet_path, old)
-    with sqlite3.connect(root / "state.sqlite3") as db:
+    with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
         db.execute(
             "UPDATE events SET data=?",
             (
@@ -345,7 +346,7 @@ def sae_custom_query(initial_query):
                 ),
             ),
         )
-    with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
         db.execute("DELETE FROM grants")
         db.execute("DELETE FROM attempts")
         db.execute("DELETE FROM authority_limits")
@@ -438,11 +439,11 @@ def sae_application_query(sae_custom_query):
     json_write(root / "inputs/old.json", old)
     packet_path = root / ("packets/" + "b" * 32 + "/packet.json")
     json_write(packet_path, old)
-    with sqlite3.connect(root / "state.sqlite3") as db:
+    with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
         db.execute(
             "UPDATE events SET data=?", (json.dumps({"task_id": old["task_id"], "packet_sha": digest(packet_path)}),)
         )
-    with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
         db.execute("DELETE FROM grants")
         db.execute("DELETE FROM authority_limits")
         for entry in old["execution_grants"]["QUERY"]:
@@ -697,7 +698,7 @@ def test_sae_reselection_rejects_unreviewed_or_wider_operations(sae_application_
     elif damage == "extra-review":
         proof["query_parameter_reviews"]["unbound"] = copy.deepcopy(review)
     else:
-        with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+        with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
             db.execute(
                 {
                     "unknown": "UPDATE attempts SET state='unknown'",
@@ -875,7 +876,7 @@ def test_sae_custom_read_exception_refuses_unreviewed_or_wider_calls(sae_custom_
     elif damage == "extra_review":
         proof["query_parameter_reviews"]["unbound-operation"] = copy.deepcopy(review)
     else:
-        with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+        with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
             statement = {
                 "unknown_predecessor": "UPDATE attempts SET state='unknown'",
                 "unused_predecessor": "UPDATE grants SET used=0",
@@ -935,7 +936,7 @@ def test_initial_query_supplement_rejects_unproven_or_drifted_predecessor(initia
         "outstanding",
         "malformed_event",
     }:
-        with sqlite3.connect(root / "state.sqlite3") as db:
+        with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
             statements = {
                 "no_event": "DELETE FROM events",
                 "wrong_event_task": "UPDATE events SET data='{}'",
@@ -974,7 +975,7 @@ def test_initial_query_supplement_rejects_unproven_or_drifted_predecessor(initia
         "wire_call_changed",
         "wire_kind_changed",
     }:
-        with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+        with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
             db.execute(
                 {
                     "unknown_wire": "UPDATE attempts SET state='unknown'",
@@ -1046,11 +1047,11 @@ def source(tmp_path):
         },
     )
     job = "a" * 32
-    with sqlite3.connect(tmp_path / "state.sqlite3") as db:
+    with closing(sqlite3.connect(tmp_path / "state.sqlite3")) as db, db:
         db.executescript("CREATE TABLE jobs(id,task_id,role,state,turn_id);CREATE TABLE owned(task_id,state);")
         db.execute("INSERT INTO jobs VALUES(?,?,?,?,?)", (job, "plan:R0015", "glm", "complete", "original-turn"))
         db.execute("INSERT INTO owned VALUES(?,?)", ("plan:R0015", "deleted"))
-    with sqlite3.connect(tmp_path / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(tmp_path / "execution-gate.sqlite3")) as db, db:
         db.executescript(
             "CREATE TABLE grants(scope,id,authority,quota,used,kind,call);"
             "CREATE TABLE attempts(scope,grant_id,state,response);CREATE TABLE authority_limits(authority,id,used);"
@@ -1114,10 +1115,10 @@ def paid_source(source):
             "authorization_sha256": digest(root / "inputs/review.json"),
         },
     )
-    with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
         db.execute("UPDATE grants SET authority=?", (execution_digest(old) + ":ROS",))
         db.execute("UPDATE authority_limits SET authority=?", (execution_digest(old) + ":ROS",))
-    with sqlite3.connect(root / "state.sqlite3") as db:
+    with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
         db.executescript(
             "CREATE TABLE tasks(id,run_id);CREATE TABLE runs(id,budget);"
             "CREATE TABLE budget_reservations(task_id,amount);"
@@ -1195,7 +1196,7 @@ def test_paid_additional_operation_preserves_truthful_budget_and_wire(paid_sourc
     assert dispatch_reservation_increment(root, new) == (0 if reuse else 100)
     assert new["budget_cents"] == 100
     assert (root / "execution-gate.sqlite3").read_bytes() == before
-    with sqlite3.connect(root / "state.sqlite3") as db:
+    with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
         assert db.execute("SELECT amount FROM budget_reservations").fetchall() == [(100,)]
 
 
@@ -1253,7 +1254,7 @@ def test_paid_additional_operation_rejects_missing_or_drifted_fee_scope(paid_sou
     elif damage == "wrong_task":
         proof["budget_reservation_reuse"]["task_id"] = "plan:other"
     elif damage in {"missing_reservation", "reserve_changed", "run_low_cap"}:
-        with sqlite3.connect(root / "state.sqlite3") as db:
+        with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
             db.execute(
                 {
                     "missing_reservation": "DELETE FROM budget_reservations",
@@ -1380,7 +1381,7 @@ def test_additional_source_preserves_known_execute_signature_rejection_after_ver
     deletion = copy.deepcopy(entries[2]["call"])
     deletion["params"]["StackId"] = "stack-offline"
     gate.finish(gate.reserve(deletion, "ws~original", signer, read_only=False), {"RequestId": "deleted"}, True)
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db, db:
         if damage == "unknown_write":
             db.execute("UPDATE attempts SET state='unknown' WHERE grant_id='create'")
         elif damage == "missing_identity":
@@ -1390,7 +1391,7 @@ def test_additional_source_preserves_known_execute_signature_rejection_after_ver
             value["body"]["Code"] = "AccessDenied"
             db.execute("UPDATE attempts SET response=? WHERE grant_id='detail'", (json.dumps(value),))
     if damage == "outstanding":
-        with sqlite3.connect(root / "state.sqlite3") as db:
+        with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
             db.execute("UPDATE owned SET state='present'")
     path.replace(root / "execution-gate.sqlite3")
     before = (root / "execution-gate.sqlite3").read_bytes()
@@ -1418,7 +1419,7 @@ def test_additional_source_only_recognizes_exact_negative_nas_read_without_rewri
         response["RequestId"] = ""
     elif damage == "unfiltered":
         del call["params"]["AccessGroupName"]
-    with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
         if damage != "orphan":
             db.execute(
                 "INSERT INTO grants VALUES(?,?,?,?,?,?,?)",
@@ -1467,12 +1468,12 @@ def test_additional_source_requires_exact_review_cleanup_and_consumed_success(so
     elif case == "paid":
         new["budget_cents"] = 1
     elif case in {"outstanding", "active"}:
-        with sqlite3.connect(root / "state.sqlite3") as db:
+        with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
             db.execute(
                 "UPDATE owned SET state='present'" if case == "outstanding" else "UPDATE jobs SET state='running'"
             )
     elif case in {"unknown", "unused", "failed"}:
-        with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+        with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
             db.execute(
                 {
                     "unknown": "UPDATE attempts SET state='unknown'",
@@ -1611,7 +1612,7 @@ def multiple_source(source):
     }
     json_write(authorization_path(root, old), approval)
     job = "a" * 32
-    with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
         db.execute("UPDATE grants SET authority=? WHERE scope=?", (execution_digest(old) + ":ROS", job + ":ROS"))
         db.execute("UPDATE authority_limits SET authority=?", (execution_digest(old) + ":ROS",))
         for dimension in ("CREATE", "QUERY"):
@@ -1680,7 +1681,7 @@ def test_multiple_operations_never_implicitly_refill_unaudited_dimensions(multip
     elif damage == "changed_read":
         new["execution_grants"]["QUERY"][1]["quota"] = 20
     elif damage in {"unknown", "unused"}:
-        with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+        with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
             db.execute(
                 "UPDATE attempts SET state='unknown' WHERE scope LIKE '%:QUERY'"
                 if damage == "unknown"
@@ -1724,10 +1725,10 @@ def reduced_query(source):
         "authorization_sha256": digest(root / "inputs/review.json"),
     }
     json_write(authorization_path(root, old), approval)
-    with sqlite3.connect(root / "state.sqlite3") as db:
+    with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
         db.execute("INSERT INTO jobs VALUES(?,?,?,?,?)", ("b" * 32, old["task_id"], "glm", "complete", "first-turn"))
     authority = execution_digest(old) + ":QUERY"
-    with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+    with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
         for entry in old["execution_grants"]["QUERY"]:
             db.execute(
                 "INSERT INTO grants VALUES(?,?,?,?,?,?,?)",
@@ -1871,10 +1872,10 @@ def test_query_identity_reduction_is_exact_readonly_review_not_quota_reset(reduc
             "active_turn": ("state", "running"),
             "missing_turn": ("turn_id", None),
         }[damage]
-        with sqlite3.connect(root / "state.sqlite3") as db:
+        with closing(sqlite3.connect(root / "state.sqlite3")) as db, db:
             db.execute(f"UPDATE jobs SET {field}=? WHERE id=?", (value, "b" * 32))
     else:
-        with sqlite3.connect(root / "execution-gate.sqlite3") as db:
+        with closing(sqlite3.connect(root / "execution-gate.sqlite3")) as db, db:
             scope = "b" * 32 + ":QUERY"
             if damage == "unconsumed_limit":
                 db.execute("UPDATE authority_limits SET used=1 WHERE id='identity'")

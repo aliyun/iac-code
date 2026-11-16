@@ -1,5 +1,6 @@
 """Keep resource-link regression data separate from local cloud acceptance state."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,22 @@ from tests.web.resource_link_data import workflow_data
 @pytest.fixture
 def offline_workflow_data(tmp_path):
     return workflow_data(tmp_path / "synthetic-workflow-data")
+
+
+@pytest.fixture(autouse=True)
+def _offline_controller_identity(request, monkeypatch):
+    if not request.module.__name__.rsplit(".", 1)[-1].startswith("test_resource_link_workflow"):
+        return
+    from scripts.web.e2e.resource_link_workflow.runtime import Runtime
+
+    original = Runtime.process_identity
+
+    def identity(pid):
+        # Offline workflow contracts keep real code/SHA fences; only their own
+        # controller identity is synthetic. Foreign PIDs keep native checks.
+        return "offline test controller" if pid == os.getpid() else original(pid)
+
+    monkeypatch.setattr(Runtime, "process_identity", staticmethod(identity))
 
 
 @pytest.fixture(autouse=True)

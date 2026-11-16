@@ -7,6 +7,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -319,6 +320,8 @@ def test_startup_attestation_is_opt_in_private_and_contains_no_credentials(activ
     import json
 
     path, _ = active
+    chmod = Mock(wraps=gate.os.chmod)
+    monkeypatch.setattr(gate.os, "chmod", chmod)
     gate.attest_web_runtime()
     marker = path.parent / "runtime-attestations/slot-0.json"
     value = json.loads(marker.read_text(encoding="utf-8"))
@@ -340,7 +343,9 @@ def test_startup_attestation_is_opt_in_private_and_contains_no_credentials(activ
     assert {item["relative_path"] for item in value["assets"]} == set(gate.ATTEST_ASSETS)
     assert all(item["sha256"] and Path(item["path"]).is_file() for item in value["assets"])
     assert "fake-secret" not in marker.read_text(encoding="utf-8")
-    assert marker.stat().st_mode & 0o777 == 0o600
+    assert any(Path(args[0]).parent == marker.parent and args[1] == 0o600 for args, _ in chmod.call_args_list)
+    # Windows stat exposes CRT mode bits; it cannot report a POSIX 0600 mode.
+    assert marker.stat().st_mode & 0o777 == (0o666 if gate.os.name == "nt" else 0o600)
     monkeypatch.delenv(gate.ENV)
     monkeypatch.setattr(gate.importlib, "import_module", lambda *_: pytest.fail("ordinary startup must not attest"))
     gate.attest_web_runtime()
