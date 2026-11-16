@@ -33,6 +33,7 @@ if str(SRC_ROOT) not in sys.path:
 
 from jsonschema import Draft202012Validator, FormatChecker  # noqa: E402
 
+from iac_code.a2a.execution_control import _pid_alive  # noqa: E402
 from iac_code.tools.cloud.aliyun import resource_reference_extractors  # noqa: E402
 from iac_code.tools.cloud.aliyun.resource_reference_extractors import (  # noqa: E402
     direct_api_response_contracts,
@@ -5989,11 +5990,7 @@ def _matrix_lock():
                 owner = int(lock_path.read_text(encoding="ascii").strip())
             except (OSError, ValueError) as read_error:
                 raise MatrixError(f"resource-link runner lock is unreadable: {lock_path}") from read_error
-            try:
-                os.kill(owner, 0)
-            except PermissionError:
-                pass
-            except OSError:
+            if not _pid_alive(owner):
                 try:
                     lock_path.unlink()
                 except FileNotFoundError:
