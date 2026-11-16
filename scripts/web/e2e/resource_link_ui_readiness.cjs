@@ -4,7 +4,7 @@ function completedOwnReply({key,targets}) {
   const send=document.querySelector('[data-app-shell=composer-send]');
   return active?.getAttribute('data-session-id')===key&&Boolean(send)&&!send.classList.contains('is-stopping')&&
    targets.every(target=>[...document.querySelectorAll('a.resource-link[data-resource-link][href]')].some(n=>
-    n.getAttribute('aria-label')===target&&n.href.includes('console.aliyun.com')&&!n.closest('details:not([open])')&&n.getClientRects().length>0));
+    n.getAttribute('aria-label')===target&&/^https:\/\/(?:[a-z0-9-]+\.)?console\.aliyun\.com(?:[/?#]|$)/i.test(n.href)&&!n.closest('details:not([open])')&&n.getClientRects().length>0));
  };
  return matches();
 }
@@ -14,14 +14,14 @@ function readinessSnapshot({key,targets}) {
  const anchors=[...document.querySelectorAll('a.resource-link[data-resource-link][href]')];
  return {scope:'readiness_only_not_click_evidence',origin:location.origin,visibility:document.visibilityState,
   exactSessionActive:active===key,composerButtonCount:send?1:0,stopping:send?.classList.contains('is-stopping')??null,
-  targets:targets.map(target=>{const exact=anchors.filter(n=>n.getAttribute('aria-label')===target&&n.href.includes('console.aliyun.com'));
+  targets:targets.map(target=>{const exact=anchors.filter(n=>n.getAttribute('aria-label')===target&&/^https:\/\/(?:[a-z0-9-]+\.)?console\.aliyun\.com(?:[/?#]|$)/i.test(n.href));
    return {target,exactCount:exact.length,openVisibleCount:exact.filter(n=>!n.closest('details:not([open])')&&n.getClientRects().length>0).length};})};
 }
 async function waitForOwnTargets(page,key,targets,timeout) {
  const handle=await page.waitForFunction(({key,targets})=>
   document.querySelector('.session-item.is-active[data-session-id]')?.getAttribute('data-session-id')===key&&
   targets.every(target=>[...document.querySelectorAll('a.resource-link[data-resource-link][href]')].some(n=>
-   n.getAttribute('aria-label')===target&&n.href.includes('console.aliyun.com'))),
+   n.getAttribute('aria-label')===target&&/^https:\/\/(?:[a-z0-9-]+\.)?console\.aliyun\.com(?:[/?#]|$)/i.test(n.href))),
   {key,targets},{timeout,polling:100});
  try {if(await handle.jsonValue()!==true)throw Error('exact target gate returned non-true');}
  finally {await handle.dispose();}
@@ -35,7 +35,7 @@ function ownReplyEnded({key,targets}) {
  const send=document.querySelector('[data-app-shell=composer-send]');
  return active?.getAttribute('data-session-id')===key&&Boolean(send)&&!send.classList.contains('is-stopping')&&
   targets.every(target=>[...document.querySelectorAll('a.resource-link[data-resource-link][href]')].some(n=>
-   n.getAttribute('aria-label')===target&&n.href.includes('console.aliyun.com')));
+   n.getAttribute('aria-label')===target&&/^https:\/\/(?:[a-z0-9-]+\.)?console\.aliyun\.com(?:[/?#]|$)/i.test(n.href)));
 }
 async function waitForOwnReplyEnd(page,key,targets,timeout) {
  const handle=await page.waitForFunction(ownReplyEnded,{key,targets},{timeout,polling:100});
@@ -82,7 +82,7 @@ async function prepareOwnTargetSubset(page,key,targets,deadline) {
  const handle=await page.waitForFunction(({key,targets})=>
   document.querySelector('.session-item.is-active[data-session-id]')?.getAttribute('data-session-id')===key&&
   targets.some(target=>[...document.querySelectorAll('a.resource-link[data-resource-link][href]')].some(n=>
-   n.getAttribute('aria-label')===target&&n.href.includes('console.aliyun.com'))),
+   n.getAttribute('aria-label')===target&&/^https:\/\/(?:[a-z0-9-]+\.)?console\.aliyun\.com(?:[/?#]|$)/i.test(n.href))),
   {key,targets},{timeout:Math.max(1,deadline-Date.now()),polling:100});
  try {if(await handle.jsonValue()!==true)throw Error('any exact target gate returned non-true');}
  finally {await handle.dispose();}

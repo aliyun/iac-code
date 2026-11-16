@@ -72,7 +72,7 @@ def test_real_script_http_and_original_image_copy(tmp_path, capsys, image):
             target = Path(result["image_path"])
             assert target.read_bytes() == pixels
             assert result["sha256"] == hashlib.sha256(target.read_bytes()).hexdigest()
-            assert stat.S_IMODE(target.stat().st_mode) == 0o600
+            assert stat.S_IMODE(target.stat().st_mode) == (0o666 if os.name == "nt" else 0o600)
     finally:
         server.shutdown()
         server.server_close()
@@ -135,7 +135,7 @@ def test_client_argument_file_and_private_local_install(tmp_path, monkeypatch, c
     result = agent_transport.install_local(tmp_path / "sandbox", "# fixture\n", descriptor)
     assert result["script_sha256"] == hashlib.sha256(b"# fixture\n").hexdigest()
     for target in (tmp_path / "sandbox").iterdir():
-        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+        assert stat.S_IMODE(target.stat().st_mode) == (0o666 if os.name == "nt" else 0o600)
     argument_file = tmp_path / "arguments.json"
     argument_file.write_text(json.dumps({"report": "原始证据"}), encoding="utf-8")
     calls = []

@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import copy
 import json
+import os
 import socket
 import sqlite3
 import subprocess
@@ -24,6 +25,18 @@ from scripts.web.e2e.resource_link_workflow.store import Store
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jN1sAAAAASUVORK5CYII=")
 REPO = Path(__file__).resolve().parents[2]
 WORKFLOW_DATA = Path("synthetic-workflow-data-created-by-fixture")
+
+
+@pytest.fixture(autouse=True)
+def _offline_controller_identity(monkeypatch):
+    original = Runtime.process_identity
+
+    def identity(pid):
+        # These contracts exercise loaded-code and workflow state, not native
+        # OS process discovery. Other PIDs retain their actual ownership checks.
+        return "offline test controller" if pid == os.getpid() else original(pid)
+
+    monkeypatch.setattr(Runtime, "process_identity", staticmethod(identity))
 
 
 @pytest.mark.parametrize("purpose", ["prepare", "repair"])

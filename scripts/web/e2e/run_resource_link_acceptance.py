@@ -4075,7 +4075,9 @@ def register_route_cloud_source(report_path: Path, source_type: str, region_id: 
     return proof
 
 
-def _source_evidence_record(entry: dict[str, Any], source: str, contract_id: str) -> dict[str, Any]:
+def _source_evidence_record(
+    entry: dict[str, Any], source: str, contract_id: str, *, applicability: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if source in {"route_catalog", "ros_stack"}:
         if source == "route_catalog":
             proof = _route_cloud_source(entry["sourceType"])
@@ -4083,7 +4085,8 @@ def _source_evidence_record(entry: dict[str, Any], source: str, contract_id: str
                 if contract_id != proof["contractId"]:
                     raise MatrixError("route cloud source contract mismatch")
                 return {key: proof[key] for key in ("status", "sampleLevel", "actualApiCalled", "sourceEvidenceDigest")}
-        applicability = _load_applicability()
+        if applicability is None:
+            applicability = _load_applicability()
         ros_contract = next(
             item
             for item in applicability["dimensions"]["ros_stack"]["contracts"]
@@ -4328,7 +4331,7 @@ def _persist_file(source: Path, target: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(target.name + ".tmp")
     shutil.copyfile(source, temporary)
-    with temporary.open("rb") as handle:
+    with temporary.open("r+b") as handle:
         os.fsync(handle.fileno())
     temporary.replace(target)
 
@@ -4957,6 +4960,7 @@ def build_batch_plan(
         raise MatrixError("batch size must be between 1 and 5 resource types")
     completed = _completed_contracts(matrix)[source]
     raw_candidates: list[dict[str, Any]] = []
+    applicability = None
     if source == "route_catalog":
         applicability = _load_applicability()
         ros_by_type = {
@@ -5020,7 +5024,10 @@ def build_batch_plan(
         if receipt_source == "query_api" and contract_id not in query_statuses:
             skipped_pending += 1
             continue
-        source_record = _source_evidence_record(entry, receipt_source, contract_id)
+        source_record = (
+            _source_evidence_record(entry, receipt_source, contract_id) if applicability is None
+            else _source_evidence_record(entry, receipt_source, contract_id, applicability=applicability)
+        )
         if (receipt_source == "route_catalog" and not source_record["actualApiCalled"]) or (
             receipt_source == "create_api" and not source_record["actualApiCalled"]
         ):
@@ -5614,7 +5621,7 @@ def _atomic_write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
-    with temporary.open("rb") as handle:
+    with temporary.open("r+b") as handle:
         os.fsync(handle.fileno())
     temporary.replace(path)
 

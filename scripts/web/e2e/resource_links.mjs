@@ -37,7 +37,8 @@ const server = http.createServer((request, response) => {
   const url = new URL(request.url, "http://localhost");
   if (apiOrigin && (url.pathname.startsWith('/api/') || url.pathname.startsWith('/fixture/'))) {
     // This target is the loopback child fixture, never a client-supplied URL.
-    const upstream=http.request(new URL(request.url,apiOrigin),{method:request.method,headers:request.headers},(incoming)=>{
+    const upstream=http.request({hostname:'127.0.0.1',port:new URL(apiOrigin).port,
+      path:url.pathname+url.search,method:request.method,headers:request.headers},(incoming)=>{
       response.writeHead(incoming.statusCode,incoming.headers); incoming.pipe(response);
     });
     upstream.on('error',()=>{response.writeHead(502);response.end();});
@@ -130,7 +131,9 @@ try {
     if (target.protocol!=='http:' || target.hostname!=='127.0.0.1' || !allowedPorts.has(target.port)) {
       deny();return;
     }
-    const upstream=http.request(target,{method:request.method,headers:request.headers},incoming=>{
+    const port=[...allowedPorts].find(value=>value===target.port);
+    const upstream=http.request({hostname:'127.0.0.1',port,path:target.pathname+target.search,
+      method:request.method,headers:request.headers},incoming=>{
       response.writeHead(incoming.statusCode,incoming.headers);incoming.pipe(response);
     });
     upstream.on('error',()=>{if(!response.headersSent)response.writeHead(502);response.end();});
