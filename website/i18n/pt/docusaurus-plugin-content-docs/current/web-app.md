@@ -29,9 +29,11 @@ Por padrão, ele se vincula a `127.0.0.1:8766` e abre o seu navegador padrão em
 
 | Opção | Padrão | Descrição |
 |---|---|---|
-| `--host` | `127.0.0.1` | Host do servidor HTTP. Apenas endereços de loopback são aceitos. |
+| `--host` | `127.0.0.1` | Host do servidor HTTP. O modo local aceita endereços de loopback; outras IPs exigem `--access-token-file`. |
 | `--port` | `8766` | Porta do servidor HTTP. |
 | `--open` / `--no-open` | `--open` | Abre o navegador ao iniciar. Use `--no-open` para desativar. |
+| `--debug`, `-d` | `false` | Ativar os registros de depuração do servidor nesta execução. |
+| `--access-token-file <path>` | — | Arquivo de token para acesso remoto explícito com transporte de API criptografado. |
 
 ```bash
 iac-code web --port 9000 --no-open
@@ -39,7 +41,7 @@ iac-code web --port 9000 --no-open
 
 ### Segurança
 
-O servidor web vincula-se apenas a interfaces de loopback (`127.0.0.1`, `localhost` ou `::1`). Ele foi projetado para uso na sua própria máquina e rejeita endereços de vínculo públicos. Não o exponha diretamente em uma rede; coloque-o atrás do seu próprio proxy autenticado caso precise de acesso remoto.
+Sem `--access-token-file`, o servidor aceita apenas hosts de loopback (`127.0.0.1`, `localhost` ou `::1`) e verifica as solicitações locais. O modo explícito de token também aceita outras IPs e protege as solicitações de API pelo transporte de token criptografado.
 
 ## Visão geral da interface
 
@@ -65,6 +67,8 @@ A área de composição é onde você escreve suas solicitações. Ela oferece o
 
 ### Chat normal e modo pipeline
 
+Escolha o modo ao criar uma conversa e também o pipeline se selecionar o modo pipeline. As conversas no mesmo aplicativo podem usar modos diferentes sem reiniciar o servidor.
+
 Uma sessão é executada como chat normal ou no modo **pipeline**. O chat normal transmite em linha as respostas do assistente, as chamadas de ferramentas e os resultados. O modo pipeline adiciona um espaço de trabalho que exibe as linhas do tempo das etapas, os diagnósticos, os diagramas, o progresso da implantação, a limpeza e os detalhes de transferência conforme o pipeline é executado. Consulte [Modo pipeline](./automation/pipeline-mode.md) para saber o que os pipelines fazem.
 
 O [pipeline `selling_solution_first`](./automation/solution-first-pipeline.md) usa esse espaço de trabalho para um fluxo de compra em três etapas: comparar arquiteturas candidatas, implementar a solução selecionada e implantá-la após a confirmação. As aprovações de ferramentas aparecem como cartões de permissão localizados sob a etapa que as solicitou; as aprovações pendentes retornam à mesma etapa quando a sessão é restaurada.
@@ -88,4 +92,4 @@ O aplicativo web está disponível em sete idiomas —English, 简体中文, 日
 
 ## Relação com a CLI
 
-O aplicativo web é uma interface alternativa, não um produto separado. Ele usa os mesmos provedores, credenciais, habilidades, ferramentas e armazenamento de sessões do terminal. Configure os provedores e as credenciais uma única vez com `/auth` na CLI, ou pelas configurações do aplicativo web, e ambas as interfaces os compartilharão.
+Web, Desktop e headless compartilham provedores, credenciais, skills, ferramentas e sessões. Configure o modelo e o acesso à nuvem uma vez em Configurações para reutilizá-los nessas entradas.

@@ -12,7 +12,7 @@ iac-code
 iac-code web --no-open
 ```
 
-ターミナル UI は `iac-code tui` で引き続き利用できますが、更新とメンテナンスは終了しています。今後は Web 版またはデスクトップ版をご利用ください。
+[対話モード](./interactive-mode.md):
 
 ```bash
 iac-code tui

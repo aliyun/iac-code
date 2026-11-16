@@ -5,8 +5,6 @@ description: Create and use reusable prompt templates as slash commands.
 
 # Skills
 
-The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
-
 Skills are reusable prompt templates that extend IaC Code with custom slash commands. They let you package complex instructions, tool configurations, and workflow patterns into named commands that can be invoked during a conversation.
 
 ## Skill File Format
@@ -80,6 +78,8 @@ paths:
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
 
 ## Managing Skills
+
+In Web and Desktop, open **Settings → Plugins → Skills** to search skills and enable or disable user and project skills.
 
 Run `/skills` in the interactive REPL to open the skill management picker. The picker lists discovered bundled, user, and project skills with their source, size, and enabled state. You can search by name or description, sort by name/source/size, and toggle user or project skills on and off.
 

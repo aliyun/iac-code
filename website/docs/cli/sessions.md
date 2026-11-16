@@ -5,7 +5,7 @@ description: Persist and resume conversations across runs.
 
 # Sessions
 
-The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
+In Web and Desktop, select the project and open a conversation from the sidebar. Use the conversation menu to rename it. The terminal commands below operate on the same session store.
 
 IaC Code automatically persists every conversation to disk. You can resume any previous session to continue where you left off.
 
@@ -61,8 +61,8 @@ iac-code tui --continue
 The short flags `-r` and `-c` are also available:
 
 ```bash
-iac-code -r <session-id-or-name>
-iac-code -c
+iac-code tui -r <session-id-or-name>
+iac-code tui -c
 ```
 
 ### Cross-project Sessions

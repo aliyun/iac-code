@@ -25,19 +25,13 @@ Use `selling_solution_first` si desea:
 
 ## Iniciar el pipeline
 
-La interfaz de terminal se conserva como `iac-code tui`, pero ya no recibe actualizaciones ni mantenimiento. Para seguir utilizando el producto, usa la aplicación web o de escritorio.
+Inicie la aplicación web de la forma habitual (o abra la aplicación de escritorio):
 
 ```bash
-IAC_CODE_MODE=pipeline \
-IAC_CODE_PIPELINE_NAME=selling_solution_first \
-iac-code tui
+iac-code
 ```
 
-En la aplicación web local, seleccione el modo Pipeline al crear la conversación e inicie el servidor con el nombre del pipeline:
-
-```bash
-IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
-```
+Al crear una conversación en la aplicación web o de escritorio, seleccione **Modo pipeline → Pipeline de ventas (solución primero)** (`selling_solution_first`). Elija el pipeline en la interfaz, sin variables de entorno ni reinicios del servidor.
 
 Con A2A, el cliente puede elegir el modo y el pipeline en cada mensaje sin modificar el valor predeterminado del servidor:
 

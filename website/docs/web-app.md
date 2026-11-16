@@ -29,9 +29,11 @@ By default it binds to `127.0.0.1:8766` and opens your default browser at `http:
 
 | Option | Default | Description |
 |---|---|---|
-| `--host` | `127.0.0.1` | HTTP server host. Only loopback addresses are accepted. |
+| `--host` | `127.0.0.1` | HTTP server host. Local mode accepts loopback addresses; other IP addresses require `--access-token-file`. |
 | `--port` | `8766` | HTTP server port. |
 | `--open` / `--no-open` | `--open` | Open the browser on startup. Use `--no-open` to disable. |
+| `--debug`, `-d` | `false` | Enable server debug logging for this run. |
+| `--access-token-file <path>` | — | Token file for explicit remote access with encrypted API transport. |
 
 ```bash
 iac-code web --port 9000 --no-open
@@ -39,7 +41,7 @@ iac-code web --port 9000 --no-open
 
 ### Security
 
-The web server binds to loopback interfaces only (`127.0.0.1`, `localhost`, or `::1`). It is intended for use on your own machine and rejects public bind addresses. Do not expose it directly to a network; put it behind your own authenticated proxy if remote access is required.
+Without `--access-token-file`, the server accepts only loopback hosts (`127.0.0.1`, `localhost`, or `::1`) and checks local requests. Explicit token mode also accepts other IP addresses and protects API requests with the encrypted token transport.
 
 ## Interface Overview
 
@@ -65,6 +67,8 @@ The composer is where you type requests. It exposes the same controls the CLI of
 
 ### Normal Chat and Pipeline Mode
 
+Choose the mode and, for Pipeline mode, the pipeline when creating a conversation. Conversations in the same app can use different modes without restarting the server.
+
 A session runs either as a normal chat or in **pipeline** mode. Normal chat streams the assistant's replies, tool calls, and results inline. Pipeline mode adds a workspace that shows step timelines, diagnostics, diagrams, deployment progress, cleanup, and handoff details as the pipeline runs. See [Pipeline Mode](./automation/pipeline-mode.md) for what pipelines do.
 
 The [`selling_solution_first` pipeline](./automation/solution-first-pipeline.md) uses this workspace for a three-stage purchase flow: compare architecture candidates, implement the selected solution, then deploy it after confirmation. Tool approvals appear as localized permission cards under the step that requested them, and unresolved approvals return to the same step when you restore the session.
@@ -88,4 +92,4 @@ The web app is available in seven languages — English, 简体中文, 日本語
 
 ## Relationship to the CLI
 
-The web app is an alternative front end, not a separate product. It uses the same providers, credentials, skills, tools, and session storage as the terminal. Configure providers and credentials once with `/auth` in the CLI, or through the settings in the web app, and both interfaces share them.
+Web, Desktop, and headless use the same providers, credentials, skills, tools, and session store. Configure providers and cloud access in Settings once, then reuse them across these entry points.

@@ -5,7 +5,7 @@ description: Referencia completa dos comandos interativos integrados.
 
 # Comandos slash
 
-A interface de terminal continua disponível com `iac-code tui`, mas não recebe mais atualizações nem manutenção. Para continuar usando o produto, prefira o aplicativo web ou desktop.
+Esta página descreve os comandos da [interface de terminal](./interactive-mode.md), iniciada com `iac-code tui`. Web e Desktop oferecem seus próprios menus de comandos e configurações.
 
 Os comandos slash controlam o IaC Code de dentro de uma sessao interativa. Digite `/` para ver os comandos disponiveis e continue digitando para filtrar a lista. Um comando so e reconhecido quando aparece no inicio da sua mensagem.
 

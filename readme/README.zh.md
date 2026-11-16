@@ -63,16 +63,10 @@ pip install iac-code
 iac-code
 ```
 
-### 终端界面（停止维护）
-
-终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
-
-```bash
-iac-code tui
-```
+默认会在浏览器中打开 `http://127.0.0.1:8766`（仅限回环地址）。详见 [Web 应用指南](https://aliyun.github.io/iac-code/zh-Hans/docs/web-app)。
 
 <p align="center">
-  <img src="../website/static/img/demo_zh.gif" alt="iac-code 演示" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-web-cn.jpg" alt="IaC Code Web 应用" width="100%">
 </p>
 
 ### 非交互模式
@@ -89,19 +83,14 @@ iac-code --prompt "创建一个 VPC 和两台 ECS 实例"
 echo "创建一个 OSS Bucket" | iac-code --prompt -
 ```
 
-### Web 应用
-
-默认安装已包含 Web 和 HTTP 运行时依赖。`[http]` 扩展保留为兼容别名，无需单独安装。在仓库检出环境中运行 `uv sync` 即可。
+### [终端界面](../website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/cli/interactive-mode.md)
 
 ```bash
-pip install iac-code
-iac-code web
+iac-code tui
 ```
 
-默认会在浏览器中打开 `http://127.0.0.1:8766`（仅限回环地址）。详见 [Web 应用指南](https://aliyun.github.io/iac-code/zh-Hans/web-app)。
-
 <p align="center">
-  <img src="../website/static/img/screenshots/iac-code-web-cn.jpg" alt="IaC Code Web 应用" width="100%">
+  <img src="../website/static/img/demo_zh.gif" alt="iac-code 演示" width="100%">
 </p>
 
 ### Agent Skill

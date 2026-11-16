@@ -21,34 +21,17 @@ Pipeline 本身是通用能力。IaC Code 内置两条面向阿里云购买场�
 
 ## 启动 Pipeline 模式
 
-Pipeline 模式支持 Web、桌面版、A2A 和 SDK process 模式。保留的 `iac-code tui` 入口已停止维护。单次 `--prompt` 模式不支持流水线。
+Pipeline 模式支持 Web、桌面版、A2A 和 SDK process 模式。单次 `--prompt` 模式不支持流水线。
 
-在 macOS 或 Linux 上：
-
-```bash
-IAC_CODE_MODE=pipeline iac-code web
-```
-
-在 PowerShell 上：
-
-```powershell
-$env:IAC_CODE_MODE = "pipeline"
-iac-code web
-```
-
-默认 pipeline 名称是 `selling`。如需显式指定：
+正常启动 Web 应用（或直接打开桌面版）：
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code web
+iac-code
 ```
 
-如需先选择架构、再生成对应模板：
+新建会话时，在界面选择**普通模式**或**流水线模式**。流水线模式下可选择**售卖流水线**（`selling`）或**售卖流水线（先选方案）**（`selling_solution_first`）。同一个应用中的不同会话可以使用不同模式和流水线，无需设置环境变量或重启服务。
 
-```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
-```
-
-对于 SDK 子进程客户端，可以用 stream-json 输入和输出启动 process 模式：
+对于 SDK 子进程客户端，可以通过环境变量选择默认的 Pipeline 模式，并使用 stream-json 输入和输出：
 
 ```bash
 IAC_CODE_MODE=pipeline iac-code --input-format stream-json --output-format stream-json
@@ -62,9 +45,11 @@ IAC_CODE_MODE=pipeline iac-code --input-format stream-json --output-format strea
 | `selling` pipeline | 先生成并评估候选模板，再由用户选择一个方案部署；它仍是默认值。 |
 | `selling_solution_first` pipeline | 先由用户选择架构，再只为该方案生成模板、执行预览和询价，最后部署。 |
 
-可通过 `IAC_CODE_PIPELINE_NAME` 选择其中一条。三阶段流程、独立的部署确认与权限边界以及恢复行为，请参阅[方案优先流水线](./solution-first-pipeline.md)。
+Web 和桌面版在新建会话时选择具体流水线；A2A 和 SDK process 模式可通过 `IAC_CODE_PIPELINE_NAME` 设置默认流水线。三阶段流程、独立的部署确认与权限边界以及恢复行为，请参阅[方案优先流水线](./solution-first-pipeline.md)。
 
 ## 环境变量
+
+以下变量用于设置 A2A、SDK process 模式及保留的 TUI 的启动默认值。Web 和桌面版按会话选择模式和流水线；只有 Web API 请求未提供对应字段时，才会回退到 `IAC_CODE_MODE` 和 `IAC_CODE_PIPELINE_NAME`。
 
 | 变量 | 用途 |
 |---|---|
@@ -96,7 +81,7 @@ Pipeline 运行时可能会暂停等待用户输入，例如：
 - 需要执行工具或部署操作，必须先经过权限确认。
 - 运行过程中被中断，需要恢复或继续。
 
-如果进程退出或会话中断，IaC Code 会保存 pipeline 状态。之后使用 `--resume` 回到该会话时，可以继续查看之前的进度，并从可恢复的位置继续。
+如果进程退出或会话中断，IaC Code 会保存流水线状态。在 Web 或桌面版的侧栏重新打开该会话，即可查看已有进度，并从可恢复的位置继续。
 
 当 pipeline 完成、失败、提前退出或被取消后，IaC Code 会切回普通聊天。这样你可以继续追问、修改方案，或处理部署后的问题。
 
@@ -113,9 +98,8 @@ ACP 目前不支持 Pipeline 模式。`--prompt` / [非交互模式](./non-inter
 ## 当前限制
 
 - 当前内置 `selling` 和 `selling_solution_first`，两者主要面向阿里云基础设施工作流；`selling` 仍是默认值。
-- Pipeline 模式支持交互式 REPL 和 SDK process 模式；当 `IAC_CODE_MODE=pipeline` 时，`--prompt` 会被拒绝。
-- Pipeline 模式支持文本输入。Pipeline 激活时，粘贴到 REPL 的图片会被忽略。
-- Pipeline 运行期间，shell escape、技能触发器和大多数 slash command 会被限制，除非 pipeline 定义显式允许。`/help`、`/status`、`/resume`、`/exit` 等基础命令仍然可用。
+- 在终端的 Pipeline 模式下，粘贴到 REPL 的图片会被忽略。
+- `iac-code tui`: Pipeline 运行期间，shell escape、技能触发器和大多数 slash command 会被限制，除非 pipeline 定义显式允许。`/help`、`/status`、`/resume`、`/exit` 等基础命令仍然可用。
 
 
 ## 备份检查点

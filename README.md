@@ -61,16 +61,10 @@ Run `iac-code` in a terminal to start the local Web app and open your browser. O
 iac-code
 ```
 
-### Terminal UI (Unmaintained)
-
-The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
-
-```bash
-iac-code tui
-```
+By default it opens `http://127.0.0.1:8766` in your browser (loopback only). See the [Web App guide](https://aliyun.github.io/iac-code/docs/web-app) for details.
 
 <p align="center">
-  <img src="website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+  <img src="website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web app" width="100%">
 </p>
 
 ### Non-Interactive Mode
@@ -87,19 +81,14 @@ Reading from stdin is also supported:
 echo "Create an OSS Bucket" | iac-code --prompt -
 ```
 
-### Web App
-
-Web and HTTP runtime dependencies are included in the default installation. The `[http]` extra remains a compatibility alias; a separate installation is no longer required. From a checkout, `uv sync` is sufficient.
+### [Terminal UI](website/docs/cli/interactive-mode.md)
 
 ```bash
-pip install iac-code
-iac-code web
+iac-code tui
 ```
 
-By default it opens `http://127.0.0.1:8766` in your browser (loopback only). See the [Web App guide](https://aliyun.github.io/iac-code/web-app) for details.
-
 <p align="center">
-  <img src="website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web app" width="100%">
+  <img src="website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
 </p>
 
 ### Agent Skill

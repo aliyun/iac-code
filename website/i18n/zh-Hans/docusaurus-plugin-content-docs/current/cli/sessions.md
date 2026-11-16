@@ -5,7 +5,7 @@ description: 持久化并恢复跨运行的对话。
 
 # 会话管理
 
-终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
+在 Web 或桌面版中，选择项目后，从侧栏打开历史会话即可继续；会话菜单可用于重命名。下面的终端命令使用同一套会话存储。
 
 IaC Code 会自动将每次对话持久化到磁盘。你可以恢复任何历史会话，从中断处继续工作。
 
@@ -61,8 +61,8 @@ iac-code tui --continue
 也可使用短标志 `-r` 和 `-c`：
 
 ```bash
-iac-code -r <session-id-or-name>
-iac-code -c
+iac-code tui -r <session-id-or-name>
+iac-code tui -c
 ```
 
 ### 跨项目会话

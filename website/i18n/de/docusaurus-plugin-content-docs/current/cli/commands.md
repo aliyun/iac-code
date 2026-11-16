@@ -5,7 +5,7 @@ description: Vollstaendige Referenz fuer eingebaute interaktive Befehle.
 
 # Slash-Befehle
 
-Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
+Diese Seite beschreibt Befehle der [Terminaloberfläche](./interactive-mode.md), die mit `iac-code tui` gestartet wird. Web und Desktop bieten eigene Befehlsmenüs und Einstellungen.
 
 Slash-Befehle steuern IaC Code innerhalb einer interaktiven Sitzung. Tippen Sie `/`, um verfuegbare Befehle anzuzeigen, und tippen Sie weiter, um die Liste zu filtern. Ein Befehl wird nur erkannt, wenn er am Anfang Ihrer Nachricht steht.
 

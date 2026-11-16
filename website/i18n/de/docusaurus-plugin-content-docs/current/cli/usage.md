@@ -12,7 +12,7 @@ iac-code
 iac-code web --no-open
 ```
 
-Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
+[Interaktiver Modus](./interactive-mode.md):
 
 ```bash
 iac-code tui

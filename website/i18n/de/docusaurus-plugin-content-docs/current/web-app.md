@@ -29,9 +29,11 @@ Standardmäßig bindet er an `127.0.0.1:8766` und öffnet Ihren Standardbrowser 
 
 | Option | Standard | Beschreibung |
 |---|---|---|
-| `--host` | `127.0.0.1` | Host des HTTP-Servers. Es werden nur Loopback-Adressen akzeptiert. |
+| `--host` | `127.0.0.1` | HTTP-Serverhost. Der lokale Modus akzeptiert Loopback-Adressen; andere IP-Adressen erfordern `--access-token-file`. |
 | `--port` | `8766` | Port des HTTP-Servers. |
 | `--open` / `--no-open` | `--open` | Beim Start den Browser öffnen. Mit `--no-open` deaktivieren. |
+| `--debug`, `-d` | `false` | Server-Debugprotokolle für diesen Lauf aktivieren. |
+| `--access-token-file <path>` | — | Token-Datei für expliziten Fernzugriff mit verschlüsseltem API-Transport. |
 
 ```bash
 iac-code web --port 9000 --no-open
@@ -39,7 +41,7 @@ iac-code web --port 9000 --no-open
 
 ### Sicherheit
 
-Der Web-Server bindet ausschließlich an Loopback-Schnittstellen (`127.0.0.1`, `localhost` oder `::1`). Er ist für die Nutzung auf Ihrem eigenen Rechner gedacht und weist öffentliche Bind-Adressen ab. Machen Sie ihn nicht direkt in einem Netzwerk zugänglich; stellen Sie ihn hinter Ihren eigenen authentifizierten Proxy, falls Fernzugriff erforderlich ist.
+Ohne `--access-token-file` akzeptiert der Server nur Loopback-Hosts (`127.0.0.1`, `localhost` oder `::1`) und prüft lokale Anfragen. Der explizite Token-Modus akzeptiert auch andere IP-Adressen und schützt API-Anfragen über den verschlüsselten Token-Transport.
 
 ## Überblick über die Oberfläche
 
@@ -65,6 +67,8 @@ Im Eingabebereich formulieren Sie Ihre Anfragen. Er bietet dieselben Steuereleme
 
 ### Normaler Chat und Pipeline-Modus
 
+Wählen Sie beim Erstellen einer Unterhaltung den Modus und bei Pipeline-Modus auch die Pipeline. Unterhaltungen in derselben App können unterschiedliche Modi nutzen, ohne den Server neu zu starten.
+
 Eine Sitzung läuft entweder als normaler Chat oder im **Pipeline**-Modus. Der normale Chat streamt die Antworten des Assistenten, Werkzeugaufrufe und Ergebnisse inline. Der Pipeline-Modus ergänzt einen Arbeitsbereich, der während der Ausführung Schritt-Zeitleisten, Diagnosen, Diagramme, Bereitstellungsfortschritt, Aufräumarbeiten und Übergabedetails anzeigt. Was Pipelines leisten, erfahren Sie unter [Pipeline-Modus](./automation/pipeline-mode.md).
 
 Die [`selling_solution_first`-Pipeline](./automation/solution-first-pipeline.md) nutzt diesen Arbeitsbereich für einen dreistufigen Kaufablauf: Architekturvarianten vergleichen, die ausgewählte Lösung umsetzen und sie nach Bestätigung bereitstellen. Tool-Genehmigungen erscheinen als lokalisierte Berechtigungskarten unter dem auslösenden Schritt; offene Genehmigungen werden beim Wiederherstellen der Sitzung demselben Schritt zugeordnet.
@@ -88,4 +92,4 @@ Die Web-App ist in sieben Sprachen verfügbar — English, 简体中文, 日本�
 
 ## Verhältnis zur CLI
 
-Die Web-App ist eine alternative Oberfläche, kein eigenständiges Produkt. Sie nutzt dieselben Anbieter, Anmeldedaten, Skills, Werkzeuge und den Sitzungsspeicher wie das Terminal. Konfigurieren Sie Anbieter und Anmeldedaten einmal mit `/auth` in der CLI oder über die Einstellungen der Web-App, und beide Oberflächen teilen sie.
+Web, Desktop und Headless verwenden dieselben Anbieter, Zugangsdaten, Skills, Werkzeuge und Sitzungen. Richten Sie Modell und Cloud-Zugriff einmal in den Einstellungen ein, um sie über diese Einstiege hinweg zu nutzen.

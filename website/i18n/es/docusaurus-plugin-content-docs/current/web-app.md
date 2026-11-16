@@ -29,9 +29,11 @@ De forma predeterminada, se enlaza a `127.0.0.1:8766` y abre tu navegador predet
 
 | Opción | Predeterminado | Descripción |
 |---|---|---|
-| `--host` | `127.0.0.1` | Host del servidor HTTP. Solo se aceptan direcciones de bucle invertido (loopback). |
+| `--host` | `127.0.0.1` | Host del servidor HTTP. El modo local acepta direcciones de bucle local; otras IP requieren `--access-token-file`. |
 | `--port` | `8766` | Puerto del servidor HTTP. |
 | `--open` / `--no-open` | `--open` | Abre el navegador al iniciar. Usa `--no-open` para desactivarlo. |
+| `--debug`, `-d` | `false` | Activar los registros de depuración del servidor para esta ejecución. |
+| `--access-token-file <path>` | — | Archivo de token para acceso remoto explícito con transporte de API cifrado. |
 
 ```bash
 iac-code web --port 9000 --no-open
@@ -39,7 +41,7 @@ iac-code web --port 9000 --no-open
 
 ### Seguridad
 
-El servidor web solo se enlaza a interfaces de bucle invertido (`127.0.0.1`, `localhost` o `::1`). Está pensado para usarse en tu propia máquina y rechaza las direcciones de enlace públicas. No lo expongas directamente en una red; colócalo detrás de tu propio proxy autenticado si necesitas acceso remoto.
+Sin `--access-token-file`, el servidor solo acepta hosts de bucle local (`127.0.0.1`, `localhost` o `::1`) y comprueba las solicitudes locales. El modo de token explícito también acepta otras IP y protege las solicitudes de API mediante el transporte de token cifrado.
 
 ## Descripción general de la interfaz
 
@@ -65,6 +67,8 @@ La zona de redacción es donde escribes tus solicitudes. Ofrece los mismos contr
 
 ### Chat normal y modo canalización
 
+Seleccione el modo al crear una conversación y el pipeline si elige el modo pipeline. Las conversaciones de la misma aplicación pueden usar modos distintos sin reiniciar el servidor.
+
 Una sesión se ejecuta como chat normal o en modo **canalización** (pipeline). El chat normal transmite en línea las respuestas del asistente, las llamadas a herramientas y los resultados. El modo canalización añade un espacio de trabajo que muestra las líneas de tiempo de los pasos, los diagnósticos, los diagramas, el progreso del despliegue, la limpieza y los detalles de traspaso a medida que se ejecuta la canalización. Consulta [Modo canalización](./automation/pipeline-mode.md) para saber qué hacen las canalizaciones.
 
 La [canalización `selling_solution_first`](./automation/solution-first-pipeline.md) usa este espacio de trabajo para un proceso de compra en tres etapas: comparar arquitecturas candidatas, implementar la solución elegida y desplegarla tras la confirmación. Las aprobaciones de herramientas aparecen como tarjetas de permiso localizadas bajo el paso que las solicitó; las aprobaciones pendientes vuelven al mismo paso al restaurar la sesión.
@@ -88,4 +92,4 @@ La aplicación web está disponible en siete idiomas —English, 简体中文, �
 
 ## Relación con la CLI
 
-La aplicación web es una interfaz alternativa, no un producto independiente. Utiliza los mismos proveedores, credenciales, habilidades, herramientas y almacenamiento de sesiones que la terminal. Configura los proveedores y las credenciales una sola vez con `/auth` en la CLI, o mediante la configuración de la aplicación web, y ambas interfaces las compartirán.
+Web, Desktop y headless comparten proveedores, credenciales, skills, herramientas y sesiones. Configure el modelo y el acceso a la nube una vez en Configuración para reutilizarlos entre estas entradas.

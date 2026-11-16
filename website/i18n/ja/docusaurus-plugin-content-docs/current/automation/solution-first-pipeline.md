@@ -25,19 +25,13 @@ description: ROS テンプレートを生成・デプロイする前にアーキ
 
 ## Pipeline の開始
 
-ターミナル UI は `iac-code tui` で引き続き利用できますが、更新とメンテナンスは終了しています。今後は Web 版またはデスクトップ版をご利用ください。
+通常どおり Web アプリを起動します（またはデスクトップアプリを開きます）。
 
 ```bash
-IAC_CODE_MODE=pipeline \
-IAC_CODE_PIPELINE_NAME=selling_solution_first \
-iac-code tui
+iac-code
 ```
 
-ローカル Web アプリでは、会話の作成時に Pipeline モードを選択し、Pipeline 名を指定してサーバーを起動します。
-
-```bash
-IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
-```
+Web 版またはデスクトップ版で会話を作成するときに、**パイプラインモード → 販売パイプライン（ソリューション優先）**（`selling_solution_first`）を選択してください。画面で会話ごとに選択でき、環境変数の設定やサーバーの再起動は不要です。
 
 A2A では、サーバーのデフォルト値を変更せず、メッセージごとにモードと Pipeline を選択できます。
 

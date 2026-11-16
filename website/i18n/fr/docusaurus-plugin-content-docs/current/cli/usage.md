@@ -12,7 +12,7 @@ iac-code
 iac-code web --no-open
 ```
 
-L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
+[Mode interactif](./interactive-mode.md):
 
 ```bash
 iac-code tui

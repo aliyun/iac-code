@@ -5,8 +5,6 @@ description: Create and use reusable prompt templates as slash commands.
 
 # Skills
 
-L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
-
 Skills are reusable prompt templates that extend IaC Code with custom slash commands. They let you package complex instructions, tool configurations, and workflow patterns into named commands that can be invoked during a conversation.
 
 ## Format des fichiers de compétence
@@ -80,6 +78,8 @@ paths:
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
 
 ## Gérer les compétences
+
+Dans Web et Desktop, ouvrez **Paramètres → Modules d’extension → Compétences** pour rechercher des compétences et activer ou désactiver celles de l’utilisateur et du projet.
 
 Exécutez `/skills` dans le REPL interactif pour ouvrir le sélecteur de gestion des compétences. Le sélecteur affiche les compétences intégrées, utilisateur et projet détectées, avec leur source, leur taille et leur état d'activation. Vous pouvez rechercher par nom ou description, trier par nom/source/taille, et activer ou désactiver les compétences utilisateur ou projet.
 

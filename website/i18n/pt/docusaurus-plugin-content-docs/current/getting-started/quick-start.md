@@ -11,8 +11,6 @@ Execute `iac-code` em um terminal para iniciar o aplicativo web local e abrir o 
 iac-code
 ```
 
-A interface de terminal continua disponível com `iac-code tui`, mas não recebe mais atualizações nem manutenção. Para continuar usando o produto, prefira o aplicativo web ou desktop.
-
 Em seguida, solicite infraestrutura:
 
 ```text

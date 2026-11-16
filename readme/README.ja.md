@@ -63,16 +63,10 @@ pip install iac-code
 iac-code
 ```
 
-### ターミナル UI（メンテナンス終了）
-
-ターミナル UI は `iac-code tui` で引き続き利用できますが、更新とメンテナンスは終了しています。今後は Web 版またはデスクトップ版をご利用ください。
-
-```bash
-iac-code tui
-```
+デフォルトではブラウザで `http://127.0.0.1:8766` を開きます（ループバックのみ）。詳しくは [Web アプリガイド](https://aliyun.github.io/iac-code/ja/docs/web-app)をご覧ください。
 
 <p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web アプリ" width="100%">
 </p>
 
 ### ノンインタラクティブモード
@@ -89,19 +83,14 @@ stdin からの読み取りもサポートされています：
 echo "OSS バケットを作成" | iac-code --prompt -
 ```
 
-### Web アプリ
-
-標準インストールには Web アプリと HTTP ランタイムの依存関係が含まれます。`[http]` エクストラは互換性のための別名として残りますが、個別のインストールは不要です。リポジトリから実行する場合は `uv sync` だけで準備できます。
+### [ターミナル UI](../website/i18n/ja/docusaurus-plugin-content-docs/current/cli/interactive-mode.md)
 
 ```bash
-pip install iac-code
-iac-code web
+iac-code tui
 ```
 
-デフォルトではブラウザで `http://127.0.0.1:8766` を開きます（ループバックのみ）。詳しくは [Web アプリガイド](https://aliyun.github.io/iac-code/ja/web-app)をご覧ください。
-
 <p align="center">
-  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="IaC Code Web アプリ" width="100%">
+  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
 </p>
 
 ### Agent Skill

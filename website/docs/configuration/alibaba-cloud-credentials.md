@@ -5,9 +5,7 @@ description: Configure Alibaba Cloud credentials, including ECS RAM Role authent
 
 # Alibaba Cloud Credentials
 
-Run `iac-code` in a terminal to start the local Web app and open your browser. On first use, configure the LLM provider and Alibaba Cloud credentials in Settings.
-
-The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
+In Web or Desktop, open **Settings → Cloud credentials** to configure Alibaba Cloud authentication and the default region.
 
 Alibaba Cloud credentials are required for operations that inspect or manage cloud resources.
 
@@ -19,8 +17,8 @@ Use **ECS RAM Role** when IaC Code runs on an Alibaba Cloud ECS instance that ha
 
 You can configure the mode from every user interface:
 
-- In the REPL, run `/auth`, choose **Configure IaC Cloud Service**, then **Alibaba Cloud** and **ECS RAM Role**.
 - In the Web or Desktop app, open **Settings > Cloud credentials**, choose **Alibaba Cloud**, then select **ECS RAM Role** as the authentication method.
+- In the REPL, run `/auth`, choose **Configure IaC Cloud Service**, then **Alibaba Cloud** and **ECS RAM Role**.
 
 Select the region used for cloud API calls. The ECS RAM role name is optional: leave it blank to discover the role attached to the instance through IMDS. A role name saved in IaC Code takes precedence over `ALIBABA_CLOUD_ECS_METADATA`; if neither is set, IaC Code asks IMDS to discover the role name.
 
@@ -39,17 +37,13 @@ The configuration can be saved on any machine, but cloud API calls succeed only 
 
 ## OAuth Browser Login
 
-The recommended interactive setup path is `/auth`:
-
-```text
-/auth
-```
-
-Choose **Configure IaC Cloud Service**, then **Alibaba Cloud**, then **OAuth Login (Browser)**. IaC Code opens a browser authorization flow, listens for the local callback, exchanges the authorization code with PKCE, and saves OAuth-backed temporary credentials to `.cloud-credentials.yml` under the IaC Code config directory.
+In Web or Desktop, open **Settings → Cloud credentials**, choose Alibaba Cloud and **OAuth browser login**, and start authorization. IaC Code opens the browser flow, exchanges the authorization code with PKCE, and saves the OAuth credentials in `.cloud-credentials.yml`.
 
 During setup you can choose the China or International OAuth site. IaC Code stores the selected site with the refresh token so future refreshes use the same endpoint.
 
-OAuth credentials are refreshed automatically when the access token or STS credentials are near expiration. If the refresh token expires or is revoked, run `/auth` again and choose OAuth Login (Browser).
+OAuth credentials refresh automatically when the access token or STS credentials approach expiration. If the refresh token expires or is revoked, authorize again from **Settings → Cloud credentials**.
+
+For terminal setup, start `iac-code tui` and run `/auth`.
 
 ## Environment Variables
 

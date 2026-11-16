@@ -5,7 +5,7 @@ description: Persistir y reanudar conversaciones entre ejecuciones.
 
 # Sesiones
 
-La interfaz de terminal se conserva como `iac-code tui`, pero ya no recibe actualizaciones ni mantenimiento. Para seguir utilizando el producto, usa la aplicación web o de escritorio.
+En Web y Desktop, seleccione el proyecto y abra una conversación de la barra lateral. Use el menú de la conversación para cambiarle el nombre. Los comandos de terminal siguientes usan el mismo almacén de sesiones.
 
 IaC Code guarda automáticamente cada conversación en disco. Puedes reanudar cualquier sesión anterior para continuar donde la dejaste.
 
@@ -61,8 +61,8 @@ iac-code tui --continue
 También están disponibles las opciones cortas `-r` y `-c`:
 
 ```bash
-iac-code -r <id-o-nombre-de-sesion>
-iac-code -c
+iac-code tui -r <id-o-nombre-de-sesion>
+iac-code tui -c
 ```
 
 ### Sesiones de otros proyectos

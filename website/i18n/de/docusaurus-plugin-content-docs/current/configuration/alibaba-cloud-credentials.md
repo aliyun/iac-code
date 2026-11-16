@@ -5,9 +5,7 @@ description: Alibaba Cloud-Anmeldedaten einschließlich ECS-RAM-Rollen-Authentif
 
 # Alibaba Cloud-Anmeldedaten
 
-Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Konfigurieren Sie bei der ersten Verwendung den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen.
-
-Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
+Öffnen Sie in Web oder Desktop **Einstellungen → Cloud-Anmeldedaten**, um die Alibaba-Cloud-Authentifizierung und die Standardregion festzulegen.
 
 Alibaba Cloud-Anmeldedaten werden fuer Operationen benoetigt, die Cloud-Ressourcen ueberpruefen oder verwalten.
 
@@ -19,8 +17,8 @@ Verwenden Sie **ECS RAM Role**, wenn IaC Code auf einer Alibaba-Cloud-ECS-Instan
 
 Sie können diesen Modus über jede Benutzeroberfläche konfigurieren:
 
-- Führen Sie im REPL `/auth` aus und wählen Sie **IaC-Cloud-Service konfigurieren**, danach **Alibaba Cloud** und **ECS RAM Role**.
 - Öffnen Sie in der Web- oder Desktop-App **Einstellungen > Cloud-Anmeldedaten**, wählen Sie **Alibaba Cloud** und anschließend **ECS RAM Role** als Authentifizierungsmethode.
+- Führen Sie im REPL `/auth` aus und wählen Sie **IaC-Cloud-Service konfigurieren**, danach **Alibaba Cloud** und **ECS RAM Role**.
 
 Wählen Sie die Region für Cloud-API-Aufrufe. Der Name der ECS-RAM-Rolle ist optional: Lassen Sie ihn leer, damit die der Instanz zugewiesene Rolle über IMDS automatisch erkannt wird. Ein in IaC Code gespeicherter Rollenname hat Vorrang vor `ALIBABA_CLOUD_ECS_METADATA`; wenn beide fehlen, lässt IaC Code den Rollennamen von IMDS ermitteln.
 
@@ -39,17 +37,13 @@ Die Konfiguration kann auf jedem Rechner gespeichert werden. Cloud-API-Aufrufe s
 
 ## OAuth-Browser-Anmeldung
 
-Der empfohlene interaktive Einrichtungsweg ist `/auth`:
-
-```text
-/auth
-```
-
-Wählen Sie **IaC-Cloud-Service konfigurieren**, dann **Alibaba Cloud** und anschließend **OAuth Login (Browser)**. IaC Code öffnet einen Browser-Autorisierungsablauf, wartet auf den lokalen Callback, tauscht den Autorisierungscode mit PKCE aus und speichert OAuth-gestützte temporäre Anmeldedaten in `.cloud-credentials.yml` im IaC-Code-Konfigurationsverzeichnis.
+Öffnen Sie in Web oder Desktop **Einstellungen → Cloud-Anmeldedaten**, wählen Sie Alibaba Cloud und **OAuth-Browser-Anmeldung** und starten Sie die Autorisierung. IaC Code öffnet den Browserablauf, tauscht den Code mit PKCE aus und speichert die OAuth-Zugangsdaten in `.cloud-credentials.yml`.
 
 Während der Einrichtung können Sie die China- oder International-OAuth-Site wählen. IaC Code speichert die ausgewählte Site zusammen mit dem Refresh Token, damit spätere Aktualisierungen denselben Endpunkt verwenden.
 
-OAuth-Anmeldedaten werden automatisch aktualisiert, wenn Access Token oder STS-Anmeldedaten bald ablaufen. Wenn der Refresh Token abläuft oder widerrufen wird, führen Sie erneut `/auth` aus und wählen Sie OAuth Login (Browser).
+OAuth-Zugangsdaten werden automatisch erneuert, wenn das Zugriffstoken oder die STS-Zugangsdaten bald ablaufen. Läuft das Aktualisierungstoken ab oder wird es widerrufen, autorisieren Sie den Zugriff erneut unter **Einstellungen → Cloud-Anmeldedaten**.
+
+Für die Einrichtung im Terminal starten Sie `iac-code tui` und führen `/auth` aus.
 
 ## Umgebungsvariablen
 

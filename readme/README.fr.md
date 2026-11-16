@@ -63,16 +63,10 @@ Lancez `iac-code` dans un terminal pour démarrer l’application web locale et 
 iac-code
 ```
 
-### Interface de terminal (sans maintenance)
-
-L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
-
-```bash
-iac-code tui
-```
+Par défaut, elle ouvre `http://127.0.0.1:8766` dans votre navigateur (bouclage uniquement). Consultez le [guide de l'application web](https://aliyun.github.io/iac-code/fr/docs/web-app) pour plus de détails.
 
 <p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
+  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="Application web IaC Code" width="100%">
 </p>
 
 ### Mode Non Interactif
@@ -89,19 +83,14 @@ La lecture depuis stdin est également prise en charge :
 echo "Créer un bucket OSS" | iac-code --prompt -
 ```
 
-### Application web
-
-L’installation par défaut comprend les dépendances de l’application web et de l’environnement HTTP. L’extra `[http]` reste un alias de compatibilité ; il n’est plus nécessaire de l’installer séparément. Depuis le dépôt, `uv sync` suffit.
+### [Interface de terminal](../website/i18n/fr/docusaurus-plugin-content-docs/current/cli/interactive-mode.md)
 
 ```bash
-pip install iac-code
-iac-code web
+iac-code tui
 ```
 
-Par défaut, elle ouvre `http://127.0.0.1:8766` dans votre navigateur (bouclage uniquement). Consultez le [guide de l'application web](https://aliyun.github.io/iac-code/fr/web-app) pour plus de détails.
-
 <p align="center">
-  <img src="../website/static/img/screenshots/iac-code-web-en.jpg" alt="Application web IaC Code" width="100%">
+  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
 </p>
 
 ### Agent Skill

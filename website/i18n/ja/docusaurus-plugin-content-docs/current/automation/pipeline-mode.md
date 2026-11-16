@@ -21,31 +21,20 @@ Pipeline 自体は汎用機能です。IaC Code には、デフォルトの `sel
 
 ## パイプラインモードを開始する
 
-Pipeline モードは Web 版、デスクトップ版、A2A、SDK process モードで利用できます。残されている `iac-code tui` はメンテナンスを終了しています。単発の `--prompt` モードはパイプラインに対応していません。
+Pipeline モードは Web 版、デスクトップ版、A2A、SDK process モードで利用できます。単発の `--prompt` モードはパイプラインに対応していません。
 
-macOS または Linux の場合:
-
-```bash
-IAC_CODE_MODE=pipeline iac-code web
-```
-
-PowerShell の場合:
-
-```powershell
-$env:IAC_CODE_MODE = "pipeline"
-iac-code web
-```
-
-既定のパイプライン名は `selling` です。明示する場合:
+通常どおり Web アプリを起動します（またはデスクトップアプリを開きます）。
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code web
+iac-code
 ```
 
-テンプレートを生成する前にアーキテクチャを選ぶ場合：
+会話を作成するときに、画面で**通常モード**または**パイプラインモード**を選択します。パイプラインモードでは、**販売パイプライン**（`selling`）または**販売パイプライン（ソリューション優先）**（`selling_solution_first`）を選べます。同じアプリ内で会話ごとに異なるモードとパイプラインを使用でき、環境変数の設定やサーバーの再起動は不要です。
+
+SDK のサブプロセスクライアントでは、環境変数で既定のパイプラインモードを指定し、入出力に stream-json を使用します。
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
+IAC_CODE_MODE=pipeline iac-code --input-format stream-json --output-format stream-json
 ```
 
 ## 利用可能な Pipeline
@@ -56,9 +45,11 @@ IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code we
 | `selling` Pipeline | 候補テンプレートを生成・評価した後、ユーザーが 1 つを選んでデプロイします。引き続きデフォルトです。 |
 | `selling_solution_first` Pipeline | 最初にアーキテクチャを選び、そのソリューションだけを生成、プレビュー、価格算出します。 |
 
-`IAC_CODE_PIPELINE_NAME` でどちらかを選択できます。3 ステージの流れ、確認と権限の独立した境界、復旧については[ソリューション優先 Pipeline](./solution-first-pipeline.md)を参照してください。
+Web 版とデスクトップ版では、会話の作成時にパイプラインを選択します。A2A と SDK process モードでは、`IAC_CODE_PIPELINE_NAME` で既定のパイプラインを指定できます。3 ステージの流れ、確認と権限の独立した境界、復旧については[ソリューション優先 Pipeline](./solution-first-pipeline.md)を参照してください。
 
 ## 環境変数
+
+以下の変数は、A2A、SDK process モード、残されている TUI の起動時の既定値を設定します。Web 版とデスクトップ版では会話ごとにモードとパイプラインを選択します。Web API が `IAC_CODE_MODE` と `IAC_CODE_PIPELINE_NAME` を参照するのは、リクエストで対応するフィールドが省略された場合だけです。
 
 | 変数 | 用途 |
 |---|---|
@@ -90,7 +81,7 @@ IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code we
 - ツール実行やデプロイ操作に権限承認が必要である。
 - 実行が中断され、復旧または続行が必要である。
 
-プロセスが終了したりセッションが中断されたりした場合、IaC Code はパイプライン状態を保存します。後で `--resume` を使ってそのセッションに戻ると、以前の進捗を確認し、復旧可能な位置から続行できます。
+プロセスが終了したりセッションが中断されたりすると、IaC Code はパイプラインの状態を保存します。Web 版またはデスクトップ版のサイドバーから会話を開き直すと、進捗を確認して復旧可能な地点から続行できます。
 
 パイプラインが完了、失敗、早期終了、またはキャンセルされた後、IaC Code は通常チャットに戻ります。その後、追加質問、プランの調整、デプロイ後の問題対応を続けられます。
 
@@ -105,9 +96,8 @@ ACP は現在パイプラインモードをサポートしていません。`--p
 ## 現在の制限
 
 - 現在のリリースには `selling` と `selling_solution_first` が含まれ、どちらも主に Alibaba Cloud インフラワークフロー向けです。デフォルトは `selling` です。
-- パイプラインモードには対話型 REPL が必要です。`IAC_CODE_MODE=pipeline` の場合、`--prompt` は拒否されます。
-- パイプラインモードはテキスト入力に対応しています。パイプラインが有効な間、REPL に貼り付けられた画像は無視されます。
-- パイプライン実行中、shell escape、スキルトリガー、大半の slash command は、パイプライン定義で明示的に許可されていない限り制限されます。`/help`、`/status`、`/resume`、`/exit` などの基本コマンドは引き続き利用できます。
+- ターミナルのパイプラインモードでは、REPL に貼り付けた画像は無視されます。
+- `iac-code tui`: パイプライン実行中、shell escape、スキルトリガー、大半の slash command は、パイプライン定義で明示的に許可されていない限り制限されます。`/help`、`/status`、`/resume`、`/exit` などの基本コマンドは引き続き利用できます。
 
 
 ## バックアップチェックポイント

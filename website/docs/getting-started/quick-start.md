@@ -11,8 +11,6 @@ Run `iac-code` in a terminal to start the local Web app and open your browser. O
 iac-code
 ```
 
-The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
-
 Then ask for infrastructure:
 
 ```text

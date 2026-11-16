@@ -5,7 +5,7 @@ description: Persistir e retomar conversas entre execuções.
 
 # Sessões
 
-A interface de terminal continua disponível com `iac-code tui`, mas não recebe mais atualizações nem manutenção. Para continuar usando o produto, prefira o aplicativo web ou desktop.
+Em Web e Desktop, selecione o projeto e abra uma conversa na barra lateral. Use o menu da conversa para renomeá-la. Os comandos de terminal abaixo usam o mesmo armazenamento de sessões.
 
 O IaC Code persiste automaticamente cada conversa em disco. Você pode retomar qualquer sessão anterior para continuar de onde parou.
 
@@ -61,8 +61,8 @@ iac-code tui --continue
 As opções curtas `-r` e `-c` também estão disponíveis:
 
 ```bash
-iac-code -r <id-ou-nome-da-sessao>
-iac-code -c
+iac-code tui -r <id-ou-nome-da-sessao>
+iac-code tui -c
 ```
 
 ### Sessões entre projetos

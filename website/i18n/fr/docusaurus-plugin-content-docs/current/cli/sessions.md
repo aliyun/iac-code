@@ -5,7 +5,7 @@ description: Conserver et reprendre les conversations entre les exécutions.
 
 # Sessions
 
-L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
+Dans Web et Desktop, sélectionnez le projet et ouvrez une conversation dans la barre latérale. Utilisez son menu pour la renommer. Les commandes de terminal ci-dessous utilisent le même stockage de sessions.
 
 IaC Code enregistre automatiquement chaque conversation sur disque. Vous pouvez reprendre n'importe quelle session précédente pour continuer là où vous vous étiez arrêté.
 
@@ -61,8 +61,8 @@ iac-code tui --continue
 Les options courtes `-r` et `-c` sont également disponibles :
 
 ```bash
-iac-code -r <id-ou-nom-de-session>
-iac-code -c
+iac-code tui -r <id-ou-nom-de-session>
+iac-code tui -c
 ```
 
 ### Sessions inter-projets

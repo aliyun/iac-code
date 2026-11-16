@@ -11,8 +11,6 @@ description: 配置 IaC Code 并运行第一个提示词。
 iac-code
 ```
 
-终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
-
 然后提出基础设施需求：
 
 ```text

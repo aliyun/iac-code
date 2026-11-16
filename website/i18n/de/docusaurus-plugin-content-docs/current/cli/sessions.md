@@ -5,7 +5,7 @@ description: Konversationen über Läufe hinweg speichern und fortsetzen.
 
 # Sitzungen
 
-Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
+Wählen Sie in Web oder Desktop das Projekt und öffnen Sie eine Unterhaltung in der Seitenleiste. Über das Unterhaltungsmenü können Sie sie umbenennen. Die folgenden Terminalbefehle verwenden denselben Sitzungsspeicher.
 
 IaC Code speichert jede Konversation automatisch auf der Festplatte. Sie können frühere Sitzungen fortsetzen und dort weiterarbeiten, wo Sie aufgehört haben.
 
@@ -61,8 +61,8 @@ iac-code tui --continue
 Die Kurzoptionen `-r` und `-c` sind ebenfalls verfügbar:
 
 ```bash
-iac-code -r <session-id-oder-name>
-iac-code -c
+iac-code tui -r <session-id-oder-name>
+iac-code tui -c
 ```
 
 ### Projektübergreifende Sitzungen

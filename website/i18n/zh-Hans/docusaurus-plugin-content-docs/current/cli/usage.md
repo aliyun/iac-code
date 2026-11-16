@@ -12,7 +12,7 @@ iac-code
 iac-code web --no-open
 ```
 
-终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
+[交互模式](./interactive-mode.md):
 
 ```bash
 iac-code tui

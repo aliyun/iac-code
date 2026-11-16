@@ -11,8 +11,6 @@ Lancez `iac-code` dans un terminal pour démarrer l’application web locale et 
 iac-code
 ```
 
-L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
-
 Puis demandez votre infrastructure :
 
 ```text
