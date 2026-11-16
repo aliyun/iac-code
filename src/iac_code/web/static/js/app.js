@@ -10,7 +10,7 @@ import {
   renderPipelineWorkspace,
 } from "./components/pipeline.js?v=pipeline-solution-confirm-v17";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v26";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v61";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v62";
 import { createOutputController, highlightTemplate } from "./components/output_panel.js?v=output-panel-v39";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-324";
