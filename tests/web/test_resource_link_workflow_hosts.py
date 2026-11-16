@@ -3,6 +3,7 @@
 import hashlib
 import json
 import subprocess
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -153,6 +154,8 @@ def test_switch_keeps_terminal_thread_history_without_blocking_the_next_host(run
 
 def test_tunnel_uses_dynamic_pinned_ssh_and_only_loopback_forwards(runtime, monkeypatch):
     hosts.select_host(runtime, "macmini")
+    chmod = Mock(wraps=hosts.os.chmod)
+    monkeypatch.setattr(hosts.os, "chmod", chmod)
     calls = []
     monkeypatch.setattr(
         subprocess,
@@ -172,7 +175,13 @@ def test_tunnel_uses_dynamic_pinned_ssh_and_only_loopback_forwards(runtime, monk
     assert "127.0.0.1:9226:127.0.0.1:9225" in argv
     assert all(f"127.0.0.1:{port}:127.0.0.1:{port}" in argv for port in range(16100, 16104))
     assert calls[:3] == [4510, 9226, ["/local/bin/macmini-ip"]]
-    assert (runtime.root / "macmini-link.json").stat().st_mode & 0o777 == 0o600
+    assert any(
+        Path(args[0]).name.startswith(".macmini-link.json.") and args[1] == 0o600
+        for args, _ in chmod.call_args_list
+    )
+    assert (runtime.root / "macmini-link.json").stat().st_mode & 0o777 == (
+        0o666 if hosts.os.name == "nt" else 0o600
+    )
 
 
 @pytest.mark.parametrize("stdout", ["", "host.invalid", "192.0.2.1\n192.0.2.2", "192.0.2.1; bad"])

@@ -5903,6 +5903,7 @@ def test_http_restart_does_not_reset_actions(store):
     import subprocess
     import sys
     import time
+    import urllib.error
 
     from scripts.web.e2e.resource_link_workflow.__main__ import call
 
@@ -5925,21 +5926,25 @@ def test_http_restart_does_not_reset_actions(store):
             cwd=REPO,
             env=dict(os.environ),
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
         )
         deadline = time.monotonic() + 10
+        last_error = ""
         while time.monotonic() < deadline:
             try:
                 descriptor = read_json(store.root / "server.json")
                 if descriptor["pid"] == process.pid:
                     call(store.root, "status")
                     return process
-            except (OSError, ValueError):
-                pass
+            except urllib.error.HTTPError as error:
+                last_error = error.read().decode("utf-8", errors="replace")
+            except (OSError, ValueError) as error:
+                last_error = str(error)
             time.sleep(0.05)
-        process.terminate()
-        process.wait(timeout=3)
-        pytest.fail("test Server did not start")
+        if process.poll() is None:
+            process.terminate()
+        _, error = process.communicate(timeout=3)
+        pytest.fail("test Server did not start: " + last_error + "\n" + error.decode("utf-8", errors="replace"))
 
     first = start()
     try:
