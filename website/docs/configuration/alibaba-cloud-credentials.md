@@ -5,6 +5,10 @@ description: Configure Alibaba Cloud credentials, including ECS RAM Role authent
 
 # Alibaba Cloud Credentials
 
+Run `iac-code` in a terminal to start the local Web app and open your browser. On first use, configure the LLM provider and Alibaba Cloud credentials in Settings.
+
+The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
+
 Alibaba Cloud credentials are required for operations that inspect or manage cloud resources.
 
 The `resolve_cloud_resource_selector` and `select_cloud_resource` tools use the same effective credential decision as `aliyun_api`. In A2A, request/session credentials take priority; when they are absent, the normal local, environment, and Alibaba Cloud CLI credential fallback applies. If no valid effective Alibaba Cloud credential is available, `aliyun_api` and both resource-selector tools are not registered.

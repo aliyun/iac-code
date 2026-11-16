@@ -23,14 +23,9 @@ iac-code --help
 
 ## 可选功能
 
-交互式 CLI 使用基础包即可运行。部分运行模式依赖可选扩展，通过 `iac-code[<extra>]` 语法安装：
+默认安装已包含 Web 和 HTTP 运行时依赖。`[http]` 扩展保留为兼容别名，无需单独安装。在仓库检出环境中运行 `uv sync` 即可。
 
-| 扩展 | 启用 | 命令 |
-|---|---|---|
-| `http` | 本地 [Web 应用](../web-app.md)（`iac-code web`） | `pip install 'iac-code[http]'` |
-| `a2a` | [A2A 服务器](../a2a/getting-started.md)（`iac-code a2a`） | `pip install 'iac-code[a2a]'` |
-
-如果在未安装对应扩展的情况下启动某个运行模式，命令会失败并提示需要安装的扩展。在仓库检出环境中开发时，请改用 `uv sync --extra <extra>`。
+其他传输仍使用可选扩展，例如通过 `pip install 'iac-code[a2a-grpc]'` 安装 gRPC 支持，或通过 `pip install 'iac-code[a2a-redis]'` 安装 Redis 支持。
 
 ## Windows 要求
 

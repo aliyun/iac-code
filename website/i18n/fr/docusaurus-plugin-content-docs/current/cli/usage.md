@@ -5,26 +5,23 @@ description: Démarrer IaC Code depuis le terminal et choisir le bon flux de tra
 
 # Aperçu CLI
 
-Exécutez `iac-code` depuis le terminal :
+Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
 
 ```bash
 iac-code
+iac-code web --no-open
 ```
 
-Le CLI prend en charge deux flux de travail :
-
-| Flux de travail | Quand l'utiliser |
-|---|---|
-| [Mode interactif](./interactive-mode.md) | Vous souhaitez affiner les exigences d'infrastructure sur plusieurs échanges dans un REPL. |
-| [Mode non interactif](../automation/non-interactive-mode.md) | Vous souhaitez exécuter une seule requête et renvoyer la sortie à un appelant. |
-
-Commandes de démarrage courantes :
+L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
 
 ```bash
-iac-code
+iac-code tui
+iac-code tui --help
+```
+
+`iac-code` ouvre l’application web par défaut. Placez les options du terminal après `iac-code tui`, par exemple `iac-code tui --resume <id>`. Les options headless `--prompt` et stream-json restent sur la commande principale. Sans terminal interactif, démarrez explicitement le serveur avec `iac-code web --no-open`.
+
+```bash
 iac-code --prompt "Create an OSS Bucket"
-echo "Create a VPC" | iac-code --prompt -
-iac-code --debug
+iac-code --input-format stream-json --output-format stream-json
 ```
-
-Utilisez les [Options de ligne de commande](./command-line-options.md) pour les indicateurs de démarrage et les [Commandes slash](./commands.md) pour les commandes disponibles dans une session interactive.

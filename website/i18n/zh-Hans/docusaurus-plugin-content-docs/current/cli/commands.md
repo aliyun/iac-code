@@ -5,6 +5,8 @@ description: 内置交互命令完整参考。
 
 # Slash 命令
 
+终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
+
 Slash 命令用于在交互式会话中控制 IaC Code。输入 `/` 可以查看可用命令，并继续输入字符来过滤列表。命令只有出现在消息开头时才会被识别。
 
 `/` 列表同时包含内置命令和已配置的 skill。如果只想筛选 skill，可以改用 `$`：`$<name>` 只列出和调用 skill；在 `$` 后输入内置命令名（例如 `$help`）会输出错误并提示使用对应的 `/` 命令。
@@ -25,7 +27,7 @@ Slash 命令用于在交互式会话中控制 IaC Code。输入 `/` 可以查看
 | `/mcp [enable\|disable\|reconnect ...]` | 在交互式 REPL 中管理 MCP 服务器。不带参数时打开 MCP 管理器，可查看状态、诊断、tools、resources、prompts、OAuth 认证、审批、启用/禁用、重连和删除操作；快捷操作可以启用、禁用或重连已配置的服务器。 |
 | `/model [model_name]` | 查看或切换当前模型。带 `model_name` 时，会直接为当前提供商切换到该模型；不带参数时，如果已配置提供商，会打开交互式模型选择器；在无控制台 UI 的场景中会显示当前模型。 |
 | `/rename <name>` | 为当前会话命名。名称会显示在欢迎横幅、退出提示和 `/resume` 选择器中；当它能唯一标识一个会话时，也可以用于 `/resume` 或 `--resume`。 |
-| `/resume [session id\|unique id prefix\|unique session name]` | 恢复历史会话。带参数时，IaC Code 会把它解析为精确会话 ID、唯一 ID 前缀或唯一会话名称；不带参数时打开交互式会话选择器。跨项目会话不会直接热切换，而是打印 `cd ... && iac-code --resume <id>` 命令。 |
+| `/resume [session id\|unique id prefix\|unique session name]` | 恢复历史会话。带参数时，IaC Code 会把它解析为精确会话 ID、唯一 ID 前缀或唯一会话名称；不带参数时打开交互式会话选择器。跨项目会话不会直接热切换，而是打印 `cd ... && iac-code tui --resume <id>` 命令。 |
 | `/skills` | 打开技能管理选择器。可以按名称或描述搜索技能，按名称/来源/大小排序，并启用或禁用用户技能和项目技能。内置技能始终锁定为启用。 |
 | `/status` | 显示当前会话 ID、提供商、模型、阿里云地域、工作目录、已记录的 API token 用量、轮次数和上下文利用率。debug 模式下还会显示记忆召回 side call 次数和 token 用量。 |
 

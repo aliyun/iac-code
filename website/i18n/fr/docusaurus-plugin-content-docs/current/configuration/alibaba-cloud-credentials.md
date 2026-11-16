@@ -5,6 +5,10 @@ description: Configurer les identifiants Alibaba Cloud, y compris l'authentifica
 
 # Identifiants Alibaba Cloud
 
+Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
+
+L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
+
 Les identifiants Alibaba Cloud sont requis pour les opérations qui inspectent ou gèrent des ressources cloud.
 
 Les outils `resolve_cloud_resource_selector` et `select_cloud_resource` suivent la même décision d'identifiants effectifs que `aliyun_api`. Dans A2A, les identifiants de la requête ou de la session sont prioritaires ; à défaut, la chaîne habituelle utilise la configuration locale, les variables d'environnement puis les identifiants Alibaba Cloud CLI. Sans identifiants effectifs valides, ni `aliyun_api` ni les deux outils de sélection ne sont enregistrés.

@@ -5,19 +5,17 @@ description: 以本地 Web 应用方式运行 IaC Code，使用与 CLI 相同的
 
 # Web 应用
 
-IaC Code 内置了一个本地 Web 应用，它运行与终端完全相同的智能体引擎，只是把界面从 REPL 换成了浏览器。当你更习惯图形化聊天界面、想并排管理多个对话，或希望以更丰富的布局观察流水线进度与工具活动时，它会很有用。
+在终端运行 `iac-code`，即可启动本地 Web 应用并打开浏览器。首次使用时，在设置中配置 LLM 提供商和阿里云凭证。
 
 Web 应用读写与 CLI 相同的会话存储，因此在一端开始的对话可以在另一端恢复。
 
 ## 安装
 
-Web 应用是一项可选功能，依赖 `http` 扩展（Starlette 与 Uvicorn）。请与基础包一并安装：
+默认安装已包含 Web 和 HTTP 运行时依赖。`[http]` 扩展保留为兼容别名，无需单独安装。在仓库检出环境中运行 `uv sync` 即可。
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-如果在未安装该扩展的情况下运行 `iac-code web`，命令会失败并提示你安装 `iac-code[http]`。在仓库检出环境中开发时，`uv sync --extra http` 会安装相同的依赖。
 
 ## 启动 Web 应用
 
@@ -53,7 +51,7 @@ Web 服务仅绑定回环接口（`127.0.0.1`、`localhost` 或 `::1`）。它�
 - **搜索**对话，或打开命令面板运行命令。
 - **置顶**、**重命名**或**归档**对话，并浏览已归档的对话。
 
-由于会话与 CLI 共享，你用 `iac-code --resume` 恢复的对话也会出现在这里。会话存储的工作方式详见[会话管理](./cli/sessions.md)。
+由于会话与 CLI 共享，你用 `iac-code tui --resume` 恢复的对话也会出现在这里。会话存储的工作方式详见[会话管理](./cli/sessions.md)。
 
 ### 输入区（Composer）
 

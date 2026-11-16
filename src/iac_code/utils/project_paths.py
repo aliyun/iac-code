@@ -133,9 +133,9 @@ def format_resume_command(cwd: str, session_id: str, *, platform: str | None = N
         escaped_cwd = _escape_cmd_double_quotes(cwd)
         escaped_session_id = _escape_cmd_double_quotes(session_id)
         if _is_windows_unc_path(cwd):
-            return 'pushd "{}" && iac-code --resume "{}" & popd'.format(escaped_cwd, escaped_session_id)
-        return 'cd /d "{}" && iac-code --resume "{}"'.format(escaped_cwd, escaped_session_id)
-    return "cd {cwd} && iac-code --resume {session_id}".format(
+            return 'pushd "{}" && iac-code tui --resume "{}" & popd'.format(escaped_cwd, escaped_session_id)
+        return 'cd /d "{}" && iac-code tui --resume "{}"'.format(escaped_cwd, escaped_session_id)
+    return "cd {cwd} && iac-code tui --resume {session_id}".format(
         cwd=shlex.quote(cwd),
         session_id=shlex.quote(session_id),
     )

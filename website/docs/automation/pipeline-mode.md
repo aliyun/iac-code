@@ -21,31 +21,31 @@ Design a low-cost Alibaba Cloud web application deployment and generate a templa
 
 ## Start Pipeline Mode
 
-Pipeline mode can run through the interactive REPL or through SDK process mode. It cannot be combined with `--prompt`.
+Pipeline mode is available in Web, Desktop, A2A, and SDK process mode. The retained `iac-code tui` entry is unmaintained. Single-prompt `--prompt` mode does not support pipelines.
 
 On macOS or Linux:
 
 ```bash
-IAC_CODE_MODE=pipeline iac-code
+IAC_CODE_MODE=pipeline iac-code web
 ```
 
 On PowerShell:
 
 ```powershell
 $env:IAC_CODE_MODE = "pipeline"
-iac-code
+iac-code web
 ```
 
 The default pipeline name is `selling`. To be explicit:
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code web
 ```
 
 To choose an architecture before generating its template:
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
 ```
 
 For SDK subprocess clients, start process mode with stream-json input and output:

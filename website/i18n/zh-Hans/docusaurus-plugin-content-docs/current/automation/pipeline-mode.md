@@ -21,31 +21,31 @@ Pipeline 本身是通用能力。IaC Code 内置两条面向阿里云购买场�
 
 ## 启动 Pipeline 模式
 
-Pipeline 模式可以通过交互式 REPL 或 SDK process 模式运行，不能和 `--prompt` 一起使用。
+Pipeline 模式支持 Web、桌面版、A2A 和 SDK process 模式。保留的 `iac-code tui` 入口已停止维护。单次 `--prompt` 模式不支持流水线。
 
 在 macOS 或 Linux 上：
 
 ```bash
-IAC_CODE_MODE=pipeline iac-code
+IAC_CODE_MODE=pipeline iac-code web
 ```
 
 在 PowerShell 上：
 
 ```powershell
 $env:IAC_CODE_MODE = "pipeline"
-iac-code
+iac-code web
 ```
 
 默认 pipeline 名称是 `selling`。如需显式指定：
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code web
 ```
 
 如需先选择架构、再生成对应模板：
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
 ```
 
 对于 SDK 子进程客户端，可以用 stream-json 输入和输出启动 process 模式：

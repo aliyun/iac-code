@@ -5,7 +5,7 @@ description: Référence pour les options de démarrage et les paramètres d'ex�
 
 # Options de ligne de commande
 
-Les options de ligne de commande modifient le démarrage d'IaC Code. Utilisez-les avant d'entrer dans le REPL interactif, ou combinez-les avec `--prompt` pour une automatisation ponctuelle.
+`iac-code` ouvre l’application web par défaut. Placez les options du terminal après `iac-code tui`, par exemple `iac-code tui --resume <id>`. Les options headless `--prompt` et stream-json restent sur la commande principale. Sans terminal interactif, démarrez explicitement le serveur avec `iac-code web --no-open`.
 
 | Option | Objectif |
 |---|---|
@@ -18,7 +18,7 @@ Les options de ligne de commande modifient le démarrage d'IaC Code. Utilisez-le
 | `--thinking-enabled`, `--no-thinking-enabled` | Contrôler si les requêtes non interactives ponctuelles activent explicitement le thinking. La valeur par défaut est `--thinking-enabled` ; utilisez `--no-thinking-enabled` pour envoyer `thinking_enabled=false` pour cette exécution sans réécrire `settings.yml`. |
 | `-d`, `--debug` | Activer la journalisation de débogage pour l'exécution en cours. En mode interactif, utilisez `/debug` pour inspecter ou modifier la journalisation de débogage après le démarrage. |
 | `--verbose` | Afficher la progression du mode headless (non interactif) sur la sortie d'erreur standard. |
-| `-r <id-ou-nom-de-session>`, `--resume <id-ou-nom-de-session>` | Reprendre une session précédente par identifiant exact, préfixe d'identifiant unique ou nom de session unique. Les sessions résolues dans un autre projet affichent une commande `cd ... && iac-code --resume <id>` au lieu de basculer le projet courant à chaud. |
+| `-r <id-ou-nom-de-session>`, `--resume <id-ou-nom-de-session>` | Reprendre une session précédente par identifiant exact, préfixe d'identifiant unique ou nom de session unique. Les sessions résolues dans un autre projet affichent une commande `cd ... && iac-code tui --resume <id>` au lieu de basculer le projet courant à chaud. |
 | `-c`, `--continue` | Reprendre la session la plus récente. Ne peut pas être utilisé avec `--resume`. |
 | `--allowed-tools <patterns>` | Modèles de permissions d'outils séparés par des virgules à autoriser, ex. `'bash(git *),write_file'`. |
 | `--disallowed-tools <patterns>` | Modèles de permissions d'outils séparés par des virgules à refuser, ex. `'bash(rm *)'`. |
@@ -42,13 +42,13 @@ Les appels d'API d'écriture Alibaba Cloud effectués via `aliyun_api` sont prot
 Démarrer le REPL interactif avec le modèle enregistré :
 
 ```bash
-iac-code
+iac-code tui
 ```
 
 Démarrer avec un modèle spécifique pour cette exécution :
 
 ```bash
-iac-code --model qwen3.7-max
+iac-code tui --model qwen3.7-max
 ```
 
 Exécuter un prompt unique :
@@ -72,19 +72,19 @@ echo "Create a VPC and two ECS instances" | iac-code --prompt -
 Reprendre la dernière session :
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 Autoriser uniquement les commandes git et bash en lecture seule :
 
 ```bash
-iac-code --allowed-tools 'bash(git *)'
+iac-code tui --allowed-tools 'bash(git *)'
 ```
 
 Autoriser une API d'écriture Alibaba Cloud précise :
 
 ```bash
-iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
+iac-code tui --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 Exécuter en automatisation sans prompts interactifs :

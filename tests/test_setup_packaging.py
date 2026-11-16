@@ -284,9 +284,13 @@ def test_web_static_assets_are_included_in_legacy_setup_package_data(monkeypatch
         assert "**/*THIRD_PARTY_NOTICES" in package_data
 
 
-def test_http_extra_includes_pipeline_runtime_dependencies(monkeypatch):
+def test_default_install_includes_http_and_pipeline_runtime_dependencies(monkeypatch):
     data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     setup_module = _load_setup_module(monkeypatch)
 
-    for dependencies in (data["project"]["optional-dependencies"]["http"], setup_module.EXTRAS_REQUIRE["http"]):
+    for dependencies in (data["project"]["dependencies"], setup_module.INSTALL_REQUIRES):
         assert any(dependency.startswith("a2a-sdk[") for dependency in dependencies)
+        assert any(dependency.startswith("starlette>=") for dependency in dependencies)
+        assert any(dependency.startswith("uvicorn[standard]>=") for dependency in dependencies)
+    assert data["project"]["optional-dependencies"]["http"] == []
+    assert setup_module.EXTRAS_REQUIRE["http"] == []

@@ -5,7 +5,7 @@ description: IaC Code 启动选项和一次性执行参数参考。
 
 # 命令行选项
 
-命令行选项用于控制 IaC Code 的启动方式。它们可以在进入交互式 REPL 前使用，也可以与 `--prompt` 组合用于一次性自动化任务。
+`iac-code` 默认打开 Web。终端参数放在 `iac-code tui` 后面，例如 `iac-code tui --resume <id>`。headless 的 `--prompt` 和 stream-json 参数仍放在根命令上。没有交互终端时，请显式运行 `iac-code web --no-open`。
 
 | 选项 | 用途 |
 |---|---|
@@ -19,7 +19,7 @@ description: IaC Code 启动选项和一次性执行参数参考。
 | `--thinking-enabled`, `--no-thinking-enabled` | 控制一次性非交互请求是否显式启用 thinking。默认值为 `--thinking-enabled`；使用 `--no-thinking-enabled` 会在本次运行中发送 `thinking_enabled=false`，但不会改写 `settings.yml`。 |
 | `-d`, `--debug` | 为本次运行启用调试日志。交互模式启动后，可以使用 `/debug` 查看或调整调试日志。 |
 | `--verbose` | 在标准错误输出上显示 headless（非交互）模式的进度。 |
-| `-r <session-id-or-name>`, `--resume <session-id-or-name>` | 按精确会话 ID、唯一 ID 前缀或唯一会话名称恢复历史会话。解析到跨项目会话时，会打印 `cd ... && iac-code --resume <id>` 命令，而不是直接热切换当前项目。 |
+| `-r <session-id-or-name>`, `--resume <session-id-or-name>` | 按精确会话 ID、唯一 ID 前缀或唯一会话名称恢复历史会话。解析到跨项目会话时，会打印 `cd ... && iac-code tui --resume <id>` 命令，而不是直接热切换当前项目。 |
 | `-c`, `--continue` | 恢复最近一次会话。不能与 `--resume` 同时使用。 |
 | `--allowed-tools <patterns>` | 逗号分隔的工具权限允许模式，例如 `'bash(git *),write_file'`。 |
 | `--disallowed-tools <patterns>` | 逗号分隔的工具权限拒绝模式，例如 `'bash(rm *)'`。 |
@@ -43,13 +43,13 @@ description: IaC Code 启动选项和一次性执行参数参考。
 使用已保存的模型进入交互式 REPL：
 
 ```bash
-iac-code
+iac-code tui
 ```
 
 为本次运行指定模型：
 
 ```bash
-iac-code --model qwen3.7-max
+iac-code tui --model qwen3.7-max
 ```
 
 执行一次性提示词：
@@ -73,19 +73,19 @@ echo "创建一个 VPC 和两台 ECS 实例" | iac-code --prompt -
 恢复最近一次会话：
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 仅允许 git 和只读 bash 命令：
 
 ```bash
-iac-code --allowed-tools 'bash(git *)'
+iac-code tui --allowed-tools 'bash(git *)'
 ```
 
 仅允许一个具体的阿里云写 API：
 
 ```bash
-iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
+iac-code tui --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 在自动化中运行，无需交互确认：

@@ -21,31 +21,31 @@ Pipeline 自体は汎用機能です。IaC Code には、デフォルトの `sel
 
 ## パイプラインモードを開始する
 
-現在、パイプラインモードには対話型 REPL が必要です。`--prompt` と組み合わせることはできません。
+Pipeline モードは Web 版、デスクトップ版、A2A、SDK process モードで利用できます。残されている `iac-code tui` はメンテナンスを終了しています。単発の `--prompt` モードはパイプラインに対応していません。
 
 macOS または Linux の場合:
 
 ```bash
-IAC_CODE_MODE=pipeline iac-code
+IAC_CODE_MODE=pipeline iac-code web
 ```
 
 PowerShell の場合:
 
 ```powershell
 $env:IAC_CODE_MODE = "pipeline"
-iac-code
+iac-code web
 ```
 
 既定のパイプライン名は `selling` です。明示する場合:
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code web
 ```
 
 テンプレートを生成する前にアーキテクチャを選ぶ場合：
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
 ```
 
 ## 利用可能な Pipeline

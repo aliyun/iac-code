@@ -25,12 +25,12 @@ Verwenden Sie `selling_solution_first`, wenn Sie:
 
 ## Pipeline starten
 
-Im interaktiven Terminal:
+Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
 
 ```bash
 IAC_CODE_MODE=pipeline \
 IAC_CODE_PIPELINE_NAME=selling_solution_first \
-iac-code
+iac-code tui
 ```
 
 Wählen Sie in der lokalen Web-App beim Erstellen einer Unterhaltung den Pipeline-Modus und starten Sie den Server mit dem Pipeline-Namen:

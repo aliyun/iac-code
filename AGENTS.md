@@ -6,7 +6,7 @@ This file applies to the entire repository.
 
 - `iac-code` is a Python 3.10+ Infrastructure as Code assistant focused on Alibaba Cloud ROS / Terraform template generation and management.
 - Source code uses a `src/` layout with the main package at `src/iac_code/` and tests at `tests/`.
-- The CLI entry point is declared in `pyproject.toml` as `iac-code = "iac_code.cli.main:app"`. Beyond the default interactive REPL, the same entry point exposes additional run modes as subcommands: `iac-code web` (local Web app), `iac-code acp` (ACP server), `iac-code a2a` (A2A 1.0 server), `iac-code mcp ...` (MCP management), and `iac-code a2a-client ...` (A2A client).
+- The CLI entry point is declared in `pyproject.toml` as `iac-code = "iac_code.cli.main:app"`. With no arguments in a terminal it opens the local Web app; HTTP support is installed by default. `iac-code tui` retains the terminal REPL with a notice that it is no longer updated or maintained. Headless `--prompt` and stream-json process mode remain supported, alongside `iac-code web`, `iac-code acp`, `iac-code a2a`, `iac-code mcp ...`, and `iac-code a2a-client ...`.
 - The native Desktop application uses Tauri 2 with the Python package bundled as a sidecar. It is a desktop shell for the existing product rather than a separate implementation of the agent or Web application.
 - The repository also ships an external iac-code Skill package (`skills/iac-code/`) and a CPython 3.12 Skill Runtime release pipeline (`skill-runtime/`) so external agents can operate iac-code over A2A.
 
@@ -18,8 +18,9 @@ This file applies to the entire repository.
 - Run lint and type check: `make lint` (runs both `ruff check` and `ty check src/`)
 - Format code: `make format`
 - Extract, update, and compile translations (both `messages` and `webui` domains): `make translate`
-- Start CLI locally: `make run`
-- Start CLI in debug mode: `make dev`
+- Start Web locally: `make run`
+- Start Web in debug mode: `make dev`
+- Start the unmaintained terminal UI: `make tui`
 - Run Desktop Python tests: `uv run pytest -q tests/desktop`
 - Run Desktop host tests: `cargo test --manifest-path desktop/src-tauri/Cargo.toml`
 - Run Desktop updater tests: `cargo test --manifest-path desktop/src-tauri/Cargo.toml --features updater`
@@ -42,8 +43,8 @@ Prefer using `uv` and existing Makefile targets. When adding new dependencies, u
 - Ruff is configured in `pyproject.toml`: line width 120, `target-version = "py310"`, lint rules `E/F/I/N/W` enabled. Type checking uses `ty` (Astral's type checker), not mypy.
 - Keep changes focused; do not refactor, rename, or move files outside the scope of the current task.
 - Follow existing module boundaries. User-facing interfaces:
-  - `cli/` — Typer CLI application and subcommands (default REPL plus the `web`/`acp`/`a2a`/`mcp` run modes).
-  - `ui/` — terminal REPL UI (components, dialogs, keybindings, input suggestions).
+  - `cli/` — Typer CLI application and subcommands (default Web, headless, and explicit `tui`/`web`/`acp`/`a2a`/`mcp` run modes).
+  - `ui/` — frozen terminal REPL UI. New features target Web, Desktop, and headless; shared input suggestions still serve Web.
   - `web/` — local Web app: server, session/runtime management, SSE event bridging, output/diagram derivation, and the `static/` frontend.
   - `desktop/` — Tauri/Rust host, bootstrap and recovery UI, installers, icons, native packaging, and release automation.
   - `src/iac_code/desktop/` — Python Desktop runtime for control IPC, loopback ports, subprocess environment, Git Bash and tool discovery, diagnostics, and installation recovery. `desktop/sidecar/sidecar_entry.py` delegates to `iac_code.desktop.__main__`.

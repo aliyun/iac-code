@@ -5,6 +5,10 @@ description: Alibaba Cloud-Anmeldedaten einschließlich ECS-RAM-Rollen-Authentif
 
 # Alibaba Cloud-Anmeldedaten
 
+Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Konfigurieren Sie bei der ersten Verwendung den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen.
+
+Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
+
 Alibaba Cloud-Anmeldedaten werden fuer Operationen benoetigt, die Cloud-Ressourcen ueberpruefen oder verwalten.
 
 Die Tools `resolve_cloud_resource_selector` und `select_cloud_resource` verwenden dieselbe Entscheidung ueber effektive Anmeldedaten wie `aliyun_api`. In A2A haben Anfrage-/Sitzungsanmeldedaten Vorrang; fehlen sie, greift die normale Kette aus lokaler Konfiguration, Umgebungsvariablen und Alibaba-Cloud-CLI-Anmeldedaten. Ohne gueltige effektive Anmeldedaten werden weder `aliyun_api` noch die beiden Ressourcenselektor-Tools registriert.

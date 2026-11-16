@@ -5,19 +5,17 @@ description: Ejecuta IaC Code como una aplicación web local con el mismo motor 
 
 # Aplicación web
 
-IaC Code incluye una aplicación web local que ejecuta el mismo motor de agente que la terminal, presentado en un navegador en lugar de en un REPL. Resulta útil cuando prefieres una interfaz de chat gráfica, cuando quieres gestionar varias conversaciones en paralelo o cuando necesitas seguir el progreso de una canalización y la actividad de las herramientas en un diseño más completo.
+Ejecuta `iac-code` en una terminal para iniciar la aplicación web local y abrir el navegador. En el primer uso, configura el proveedor LLM y las credenciales de Alibaba Cloud en Ajustes.
 
 La aplicación web lee y escribe en el mismo almacén de sesiones que la CLI, de modo que una conversación iniciada en un lado puede reanudarse en el otro.
 
 ## Instalación
 
-La aplicación web es una función opcional que depende del extra `http` (Starlette y Uvicorn). Instálalo junto con el paquete base:
+La instalación predeterminada incluye las dependencias de la aplicación web y del entorno HTTP. El extra `[http]` se conserva como alias de compatibilidad; ya no hace falta instalarlo por separado. Desde el repositorio basta con ejecutar `uv sync`.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-Si ejecutas `iac-code web` sin el extra, el comando falla con un mensaje que te pide instalar `iac-code[http]`. Cuando trabajas desde un clon del repositorio, `uv sync --extra http` instala las mismas dependencias.
 
 ## Iniciar la aplicación web
 
@@ -53,7 +51,7 @@ La barra lateral enumera las conversaciones del proyecto seleccionado. Desde aqu
 - **Buscar** conversaciones o abrir la paleta de comandos para ejecutar un comando.
 - **Fijar**, **renombrar** o **archivar** una conversación y explorar las conversaciones archivadas.
 
-Como las sesiones se comparten con la CLI, una conversación que reanudes con `iac-code --resume` también aparece aquí. Consulta [Sesiones](./cli/sessions.md) para entender cómo funciona el almacén de sesiones.
+Como las sesiones se comparten con la CLI, una conversación que reanudes con `iac-code tui --resume` también aparece aquí. Consulta [Sesiones](./cli/sessions.md) para entender cómo funciona el almacén de sesiones.
 
 ### Zona de redacción (composer)
 

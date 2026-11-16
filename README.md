@@ -53,14 +53,20 @@ pip install iac-code
 
 ## Usage
 
-On first use, configure the LLM provider and IaC cloud service by entering `/auth` in interactive mode.
+Run `iac-code` in a terminal to start the local Web app and open your browser. On first use, configure the LLM provider and Alibaba Cloud credentials in Settings.
 
-### Interactive Mode
-
-Run directly to enter the interactive REPL:
+### Web App (Default)
 
 ```bash
 iac-code
+```
+
+### Terminal UI (Unmaintained)
+
+The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
+
+```bash
+iac-code tui
 ```
 
 <p align="center">
@@ -83,10 +89,10 @@ echo "Create an OSS Bucket" | iac-code --prompt -
 
 ### Web App
 
-Prefer a graphical interface? Launch the local web app, which runs the same engine as the CLI and shares the same sessions. The web app needs the `http` extra, so install it first:
+Web and HTTP runtime dependencies are included in the default installation. The `[http]` extra remains a compatibility alias; a separate installation is no longer required. From a checkout, `uv sync` is sufficient.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 iac-code web
 ```
 

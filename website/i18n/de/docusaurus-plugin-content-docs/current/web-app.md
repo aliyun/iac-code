@@ -5,19 +5,17 @@ description: IaC Code als lokale Web-App mit derselben Engine wie die CLI ausfü
 
 # Web-App
 
-IaC Code bringt eine lokale Web-App mit, die dieselbe Agenten-Engine wie das Terminal ausführt, jedoch im Browser statt in einer REPL dargestellt wird. Sie ist nützlich, wenn Sie eine grafische Chat-Oberfläche bevorzugen, mehrere Konversationen nebeneinander verwalten möchten oder den Pipeline-Fortschritt und die Werkzeugaktivität in einem übersichtlicheren Layout verfolgen wollen.
+Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Konfigurieren Sie bei der ersten Verwendung den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen.
 
 Die Web-App liest und schreibt denselben Sitzungsspeicher wie die CLI, sodass eine an einer Stelle begonnene Konversation an der anderen fortgesetzt werden kann.
 
 ## Installation
 
-Die Web-App ist eine optionale Funktion, die vom Extra `http` (Starlette und Uvicorn) abhängt. Installieren Sie es zusammen mit dem Basispaket:
+Die Standardinstallation enthält die Abhängigkeiten der Web-App und der HTTP-Laufzeit. Das Extra `[http]` bleibt als Kompatibilitätsalias erhalten und muss nicht mehr separat installiert werden. Im ausgecheckten Repository genügt `uv sync`.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-Wenn Sie `iac-code web` ohne das Extra ausführen, schlägt der Befehl mit einer Meldung fehl, die Sie zur Installation von `iac-code[http]` auffordert. Bei der Arbeit mit einem Checkout des Repositorys installiert `uv sync --extra http` dieselben Abhängigkeiten.
 
 ## Web-App starten
 
@@ -53,7 +51,7 @@ Die Seitenleiste listet die Konversationen des ausgewählten Projekts auf. Von h
 - Konversationen **durchsuchen** oder die Befehlspalette öffnen, um einen Befehl auszuführen.
 - Eine Konversation **anheften**, **umbenennen** oder **archivieren** und archivierte Konversationen durchsehen.
 
-Da Sitzungen mit der CLI geteilt werden, erscheint eine mit `iac-code --resume` fortgesetzte Konversation auch hier. Wie der Sitzungsspeicher funktioniert, erfahren Sie unter [Sitzungen](./cli/sessions.md).
+Da Sitzungen mit der CLI geteilt werden, erscheint eine mit `iac-code tui --resume` fortgesetzte Konversation auch hier. Wie der Sitzungsspeicher funktioniert, erfahren Sie unter [Sitzungen](./cli/sessions.md).
 
 ### Eingabebereich (Composer)
 

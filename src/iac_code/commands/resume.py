@@ -15,7 +15,7 @@ async def resume_command(context=None, args: list[str] | None = None, **_kwargs:
     prefix). Without arguments, opens an interactive picker.
 
     Cross-project sessions never hot-swap — they print the
-    ``cd ... && iac-code --resume <id>`` command and (best-effort) copy
+    ``cd ... && iac-code tui --resume <id>`` command and (best-effort) copy
     it to the clipboard.
     """
     if context is None or not hasattr(context, "repl"):

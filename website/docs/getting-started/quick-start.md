@@ -5,17 +5,13 @@ description: Configure IaC Code and run your first prompt.
 
 # Quick Start
 
-Run the interactive CLI:
+Run `iac-code` in a terminal to start the local Web app and open your browser. On first use, configure the LLM provider and Alibaba Cloud credentials in Settings.
 
 ```bash
 iac-code
 ```
 
-On first use, configure the LLM provider and Alibaba Cloud credentials:
-
-```text
-/auth
-```
+The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
 
 Then ask for infrastructure:
 

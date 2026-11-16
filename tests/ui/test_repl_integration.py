@@ -1806,7 +1806,7 @@ def test_print_exit_text_uses_session_name_and_prints_session_id():
 
     printed = [call.args[0] for call in repl.console.print.call_args_list]
     assert "[dim]Goodbye![/dim]" in printed
-    assert any(isinstance(item, Text) and "iac-code --resume deploy-prod" in item.plain for item in printed)
+    assert any(isinstance(item, Text) and "iac-code tui --resume deploy-prod" in item.plain for item in printed)
     assert any(isinstance(item, Text) and "Session ID: abc123" in item.plain for item in printed)
 
 
@@ -1935,7 +1935,7 @@ def test_cross_project_message_uses_windows_resume_command(monkeypatch):
 
     message = InlineREPL._cross_project_message(r"C:\Users\Me\iac repo & unsafe", "abc & unsafe")
 
-    assert r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code --resume "abc & unsafe"' in message
+    assert r'cd /d "C:\Users\Me\iac repo & unsafe" && iac-code tui --resume "abc & unsafe"' in message
 
 
 @patch("iac_code.ui.repl.AgentLoop")
@@ -2132,7 +2132,7 @@ def test_printed_session_name_resume_command_resolves_to_session_id():
         item.plain
         for call in repl.console.print.call_args_list
         for item in call.args
-        if isinstance(item, Text) and item.plain.startswith("iac-code --resume ")
+        if isinstance(item, Text) and item.plain.startswith("iac-code tui --resume ")
     )
     resume_arg = command.rsplit(" ", 1)[-1]
 

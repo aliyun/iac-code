@@ -5,10 +5,10 @@ description: Use the REPL for iterative infrastructure work.
 
 # Interactive Mode
 
-Run without arguments to enter the interactive REPL:
+The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
 
 ```bash
-iac-code
+iac-code tui
 ```
 
 Interactive mode is useful when you want to refine infrastructure requirements over multiple turns.

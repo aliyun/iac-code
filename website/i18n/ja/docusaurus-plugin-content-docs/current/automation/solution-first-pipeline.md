@@ -25,12 +25,12 @@ description: ROS テンプレートを生成・デプロイする前にアーキ
 
 ## Pipeline の開始
 
-対話型ターミナルの場合：
+ターミナル UI は `iac-code tui` で引き続き利用できますが、更新とメンテナンスは終了しています。今後は Web 版またはデスクトップ版をご利用ください。
 
 ```bash
 IAC_CODE_MODE=pipeline \
 IAC_CODE_PIPELINE_NAME=selling_solution_first \
-iac-code
+iac-code tui
 ```
 
 ローカル Web アプリでは、会話の作成時に Pipeline モードを選択し、Pipeline 名を指定してサーバーを起動します。

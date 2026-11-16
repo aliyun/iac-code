@@ -5,26 +5,23 @@ description: Inicie o IaC Code a partir do terminal e escolha o fluxo de trabalh
 
 # Visao geral do CLI
 
-Execute `iac-code` a partir do terminal:
+Execute `iac-code` em um terminal para iniciar o aplicativo web local e abrir o navegador. No primeiro uso, configure o provedor LLM e as credenciais da Alibaba Cloud nas configurações.
 
 ```bash
 iac-code
+iac-code web --no-open
 ```
 
-O CLI suporta dois fluxos de trabalho:
-
-| Fluxo de trabalho | Quando usar |
-|---|---|
-| [Modo interativo](./interactive-mode.md) | Quando deseja refinar requisitos de infraestrutura ao longo de varias interacoes num REPL. |
-| [Modo nao interativo](../automation/non-interactive-mode.md) | Quando deseja executar um unico prompt e retornar a saida para um chamador. |
-
-Comandos de inicializacao comuns:
+A interface de terminal continua disponível com `iac-code tui`, mas não recebe mais atualizações nem manutenção. Para continuar usando o produto, prefira o aplicativo web ou desktop.
 
 ```bash
-iac-code
+iac-code tui
+iac-code tui --help
+```
+
+`iac-code` abre o aplicativo web por padrão. Coloque as opções de terminal depois de `iac-code tui`, por exemplo `iac-code tui --resume <id>`. As opções headless `--prompt` e stream-json continuam no comando principal. Sem um terminal interativo, inicie a web explicitamente com `iac-code web --no-open`.
+
+```bash
 iac-code --prompt "Create an OSS Bucket"
-echo "Create a VPC" | iac-code --prompt -
-iac-code --debug
+iac-code --input-format stream-json --output-format stream-json
 ```
-
-Use [Opcoes de linha de comando](./command-line-options.md) para flags de inicializacao e [Comandos slash](./commands.md) para comandos disponiveis dentro de uma sessao interativa.

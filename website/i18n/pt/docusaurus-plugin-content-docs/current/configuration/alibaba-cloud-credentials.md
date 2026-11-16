@@ -5,6 +5,10 @@ description: Configure credenciais da Alibaba Cloud, incluindo autenticação po
 
 # Credenciais da Alibaba Cloud
 
+Execute `iac-code` em um terminal para iniciar o aplicativo web local e abrir o navegador. No primeiro uso, configure o provedor LLM e as credenciais da Alibaba Cloud nas configurações.
+
+A interface de terminal continua disponível com `iac-code tui`, mas não recebe mais atualizações nem manutenção. Para continuar usando o produto, prefira o aplicativo web ou desktop.
+
 As credenciais da Alibaba Cloud sao necessarias para operacoes que inspecionam ou gerenciam recursos na nuvem.
 
 As ferramentas `resolve_cloud_resource_selector` e `select_cloud_resource` usam a mesma decisão de credencial efetiva que `aliyun_api`. No A2A, as credenciais da solicitação ou sessão têm prioridade; quando ausentes, aplica-se a cadeia normal de configuração local, variáveis de ambiente e credenciais da Alibaba Cloud CLI. Sem uma credencial efetiva válida, nem `aliyun_api` nem as duas ferramentas de seleção são registradas.

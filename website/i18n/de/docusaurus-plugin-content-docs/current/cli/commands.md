@@ -5,6 +5,8 @@ description: Vollstaendige Referenz fuer eingebaute interaktive Befehle.
 
 # Slash-Befehle
 
+Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
+
 Slash-Befehle steuern IaC Code innerhalb einer interaktiven Sitzung. Tippen Sie `/`, um verfuegbare Befehle anzuzeigen, und tippen Sie weiter, um die Liste zu filtern. Ein Befehl wird nur erkannt, wenn er am Anfang Ihrer Nachricht steht.
 
 Die `/`-Liste enthaelt sowohl integrierte Befehle als auch alle konfigurierten Skills. Um die Vorschlaege nur auf Skills zu beschraenken, verwenden Sie stattdessen `$` — `$<name>` listet und ruft ausschliesslich Skills auf, und wenn Sie `$` gefolgt vom Namen eines integrierten Befehls (zum Beispiel `$help`) eingeben, wird ein Fehler ausgegeben, der auf das `/`-Aequivalent verweist.
@@ -25,7 +27,7 @@ Text nach dem Befehlsnamen wird als Argumente uebergeben. In der folgenden Tabel
 | `/mcp [enable\|disable\|reconnect ...]` | MCP-Server im interaktiven REPL verwalten. Ohne Argumente öffnet es den MCP-Manager für Status, Diagnosen, Tools, Ressourcen, Prompts, OAuth-Authentifizierung, Genehmigung, Aktivieren/Deaktivieren, erneutes Verbinden und Entfernen. Schnellaktionen können konfigurierte Server aktivieren, deaktivieren oder neu verbinden. |
 | `/model [model_name]` | Zeigen oder wechseln Sie das aktive Modell. Mit `model_name` wird direkt zu diesem Modell fuer den aktiven Anbieter gewechselt. Ohne Argument wird eine interaktive Modellauswahl geoeffnet, wenn ein Anbieter konfiguriert ist, oder das aktuelle Modell wird ausgegeben, wenn keine Konsolen-UI verfuegbar ist. |
 | `/rename <name>` | Die aktuelle Sitzung benennen. Namen erscheinen im Willkommensbanner, im Exit-Hinweis und in der `/resume`-Auswahl und können mit `/resume` oder `--resume` verwendet werden, wenn sie eine Sitzung eindeutig identifizieren. |
-| `/resume [sitzungs-id\|eindeutiges-id-präfix\|eindeutiger-sitzungsname]` | Eine frühere Sitzung fortsetzen. Mit einem Argument löst IaC Code es als exakte Sitzungs-ID, eindeutiges ID-Präfix oder eindeutigen Sitzungsnamen auf. Ohne Argument wird die interaktive Sitzungsauswahl geöffnet. Projektübergreifende Sitzungen geben einen `cd ... && iac-code --resume <id>`-Befehl aus, anstatt das aktuelle Projekt direkt zu wechseln. |
+| `/resume [sitzungs-id\|eindeutiges-id-präfix\|eindeutiger-sitzungsname]` | Eine frühere Sitzung fortsetzen. Mit einem Argument löst IaC Code es als exakte Sitzungs-ID, eindeutiges ID-Präfix oder eindeutigen Sitzungsnamen auf. Ohne Argument wird die interaktive Sitzungsauswahl geöffnet. Projektübergreifende Sitzungen geben einen `cd ... && iac-code tui --resume <id>`-Befehl aus, anstatt das aktuelle Projekt direkt zu wechseln. |
 | `/skills` | Die Skill-Verwaltungsauswahl öffnen. Skills nach Name oder Beschreibung suchen, nach Name/Quelle/Größe sortieren und Benutzer- oder Projekt-Skills aktivieren oder deaktivieren. Gebündelte Skills bleiben gesperrt aktiviert. |
 | `/status` | Aktuelle Sitzungs-ID, Anbieter, Modell, Alibaba Cloud-Region, Arbeitsverzeichnis, aufgezeichnete API-Token-Nutzung, Rundenzahl und Kontextauslastung anzeigen. Im Debug-Modus werden außerdem Speicherabruf-Side-Call-Zähler und deren Token-Nutzung angezeigt. |
 

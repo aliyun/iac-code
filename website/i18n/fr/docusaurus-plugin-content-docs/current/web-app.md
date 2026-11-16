@@ -5,19 +5,17 @@ description: Exécuter IaC Code comme une application web locale, avec le même 
 
 # Application Web
 
-IaC Code est fourni avec une application web locale qui exécute le même moteur d'agent que le terminal, présenté dans un navigateur plutôt que dans un REPL. Elle est utile lorsque vous préférez une interface de discussion graphique, que vous souhaitez gérer plusieurs conversations côte à côte, ou que vous avez besoin de suivre la progression d'un pipeline et l'activité des outils dans une mise en page plus riche.
+Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
 
 L'application web lit et écrit le même magasin de sessions que la CLI : une conversation démarrée d'un côté peut donc être reprise de l'autre.
 
 ## Installation
 
-L'application web est une fonctionnalité optionnelle qui dépend de l'extra `http` (Starlette et Uvicorn). Installez-le en même temps que le paquet de base :
+L’installation par défaut comprend les dépendances de l’application web et de l’environnement HTTP. L’extra `[http]` reste un alias de compatibilité ; il n’est plus nécessaire de l’installer séparément. Depuis le dépôt, `uv sync` suffit.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-Si vous exécutez `iac-code web` sans l'extra, la commande échoue avec un message vous invitant à installer `iac-code[http]`. Lorsque vous travaillez à partir d'un clone du dépôt, `uv sync --extra http` installe les mêmes dépendances.
 
 ## Démarrer l'application web
 
@@ -53,7 +51,7 @@ La barre latérale répertorie les conversations du projet sélectionné. Depuis
 - **Rechercher** des conversations, ou ouvrir la palette de commandes pour exécuter une commande.
 - **Épingler**, **renommer** ou **archiver** une conversation, et parcourir les conversations archivées.
 
-Comme les sessions sont partagées avec la CLI, une conversation que vous reprenez avec `iac-code --resume` apparaît aussi ici. Consultez [Sessions](./cli/sessions.md) pour comprendre le fonctionnement du magasin de sessions.
+Comme les sessions sont partagées avec la CLI, une conversation que vous reprenez avec `iac-code tui --resume` apparaît aussi ici. Consultez [Sessions](./cli/sessions.md) pour comprendre le fonctionnement du magasin de sessions.
 
 ### Zone de saisie (composer)
 

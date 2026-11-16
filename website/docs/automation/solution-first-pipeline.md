@@ -25,12 +25,12 @@ Use `selling_solution_first` when you want to:
 
 ## Start the Pipeline
 
-For the interactive terminal:
+The terminal UI is retained as `iac-code tui`, but is no longer updated or maintained. Use the Web app or Desktop app for ongoing use.
 
 ```bash
 IAC_CODE_MODE=pipeline \
 IAC_CODE_PIPELINE_NAME=selling_solution_first \
-iac-code
+iac-code tui
 ```
 
 For the local Web app, select Pipeline mode when creating a conversation and start the server with the pipeline name:

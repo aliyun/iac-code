@@ -55,14 +55,20 @@ pip install iac-code
 
 ## 使用
 
-首次使用需要先配置 LLM 提供商和 IaC 云服务，在交互模式中输入 `/auth` 完成配置。
+在终端运行 `iac-code`，即可启动本地 Web 应用并打开浏览器。首次使用时，在设置中配置 LLM 提供商和阿里云凭证。
 
-### 交互模式
-
-直接运行进入交互式 REPL：
+### Web 应用（默认）
 
 ```bash
 iac-code
+```
+
+### 终端界面（停止维护）
+
+终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
+
+```bash
+iac-code tui
 ```
 
 <p align="center">
@@ -85,10 +91,10 @@ echo "创建一个 OSS Bucket" | iac-code --prompt -
 
 ### Web 应用
 
-更喜欢图形界面？可以启动本地 Web 应用，它运行与 CLI 相同的引擎，并共享同一份会话。Web 应用需要 `http` 扩展，请先安装：
+默认安装已包含 Web 和 HTTP 运行时依赖。`[http]` 扩展保留为兼容别名，无需单独安装。在仓库检出环境中运行 `uv sync` 即可。
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 iac-code web
 ```
 

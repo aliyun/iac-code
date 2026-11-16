@@ -5,6 +5,8 @@ description: Konversationen über Läufe hinweg speichern und fortsetzen.
 
 # Sitzungen
 
+Die Terminaloberfläche bleibt über `iac-code tui` erreichbar, erhält jedoch keine Updates und wird nicht mehr gewartet. Verwenden Sie künftig die Web-App oder die Desktop-App.
+
 IaC Code speichert jede Konversation automatisch auf der Festplatte. Sie können frühere Sitzungen fortsetzen und dort weiterarbeiten, wo Sie aufgehört haben.
 
 ## Sitzungen fortsetzen
@@ -39,7 +41,7 @@ Wenn der Name eine Sitzung eindeutig identifiziert, können Sie damit fortsetzen
 
 ```text
 /resume deploy-prod
-iac-code --resume deploy-prod
+iac-code tui --resume deploy-prod
 ```
 
 ### CLI: `--resume` und `--continue`
@@ -47,13 +49,13 @@ iac-code --resume deploy-prod
 Eine bestimmte Sitzung können Sie über die Befehlszeile per exakter Sitzungs-ID, eindeutigem ID-Präfix oder eindeutigem Sitzungsnamen fortsetzen:
 
 ```bash
-iac-code --resume <session-id-oder-name>
+iac-code tui --resume <session-id-oder-name>
 ```
 
 Die zuletzt verwendete Sitzung fortsetzen:
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 Die Kurzoptionen `-r` und `-c` sind ebenfalls verfügbar:
@@ -68,7 +70,7 @@ iac-code -c
 Wenn eine Sitzung zu einem anderen Projektverzeichnis gehört, wechselt IaC Code das Arbeitsverzeichnis nicht direkt. Stattdessen wird ein Befehl ausgegeben, der die Sitzung im richtigen Kontext fortsetzt:
 
 ```text
-cd /path/to/other/project && iac-code --resume <session-id>
+cd /path/to/other/project && iac-code tui --resume <session-id>
 ```
 
 Dieser Befehl wird nach Möglichkeit auch in die Zwischenablage kopiert.

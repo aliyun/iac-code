@@ -5,19 +5,17 @@ description: Run IaC Code as a local web app with the same engine as the CLI.
 
 # Web App
 
-IaC Code ships with a local web app that runs the same agent engine as the terminal, presented in a browser instead of a REPL. It is useful when you prefer a graphical chat interface, want to manage several conversations side by side, or need to watch pipeline progress and tool activity in a richer layout.
+Run `iac-code` in a terminal to start the local Web app and open your browser. On first use, configure the LLM provider and Alibaba Cloud credentials in Settings.
 
 The web app reads and writes the same session store as the CLI, so conversations started in one place can be resumed in the other.
 
 ## Installation
 
-The web app is an optional feature that depends on the `http` extra (Starlette and Uvicorn). Install it alongside the base package:
+Web and HTTP runtime dependencies are included in the default installation. The `[http]` extra remains a compatibility alias; a separate installation is no longer required. From a checkout, `uv sync` is sufficient.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-If you run `iac-code web` without the extra, the command fails with a message telling you to install `iac-code[http]`. When working from a checkout of the repository, `uv sync --extra http` installs the same dependencies.
 
 ## Starting the Web App
 
@@ -53,7 +51,7 @@ The sidebar lists conversations for the selected project. From here you can:
 - **Search** conversations, or open the command palette to run a command.
 - **Pin**, **rename**, or **archive** a conversation, and browse archived conversations.
 
-Because sessions are shared with the CLI, a conversation you resume with `iac-code --resume` also appears here. See [Sessions](./cli/sessions.md) for how the session store works.
+Because sessions are shared with the CLI, a conversation you resume with `iac-code tui --resume` also appears here. See [Sessions](./cli/sessions.md) for how the session store works.
 
 ### Composer
 

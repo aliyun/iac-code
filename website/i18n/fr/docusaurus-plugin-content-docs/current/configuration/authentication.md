@@ -5,10 +5,14 @@ description: Configurer les identifiants LLM et cloud avec le flux d'authentific
 
 # Authentification
 
+Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
+
+L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
+
 Utilisez `/auth` en mode interactif pour configurer à la fois l'accès au fournisseur de modèles et l'accès à Alibaba Cloud.
 
 ```bash
-iac-code
+iac-code tui
 ```
 
 ```text

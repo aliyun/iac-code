@@ -5,7 +5,7 @@ description: IaC Code の起動オプションとワンショット実行パラ�
 
 # コマンドラインオプション
 
-コマンドラインオプションは IaC Code の起動方法を制御します。対話型 REPL に入る前に使用するか、`--prompt` と組み合わせてワンショット自動化に使用します。
+`iac-code` は既定で Web アプリを開きます。ターミナル用のオプションは `iac-code tui --resume <id>` のように `tui` の後に指定してください。headless の `--prompt` と stream-json のオプションは従来どおりルートコマンドに指定します。対話型ターミナルがない場合は `iac-code web --no-open` で明示的に起動してください。
 
 | オプション | 目的 |
 |---|---|
@@ -18,7 +18,7 @@ description: IaC Code の起動オプションとワンショット実行パラ�
 | `--thinking-enabled`, `--no-thinking-enabled` | ワンショットの非対話リクエストで thinking を明示的に有効化するかどうかを制御します。デフォルトは `--thinking-enabled` です。`--no-thinking-enabled` はこの実行だけ `thinking_enabled=false` を送信し、`settings.yml` は書き換えません。 |
 | `-d`, `--debug` | 今回の実行でデバッグログを有効にします。対話モードでは、起動後に `/debug` を使用してデバッグログを確認または変更できます。 |
 | `--verbose` | ヘッドレス（非対話）実行の進捗を標準エラー出力に表示します。 |
-| `-r <セッションIDまたは名前>`, `--resume <セッションIDまたは名前>` | 正確なセッション ID、一意な ID プレフィックス、または一意なセッション名で以前のセッションを再開します。別プロジェクトとして解決されたセッションは、現在のプロジェクトをその場で切り替えず、`cd ... && iac-code --resume <id>` コマンドを表示します。 |
+| `-r <セッションIDまたは名前>`, `--resume <セッションIDまたは名前>` | 正確なセッション ID、一意な ID プレフィックス、または一意なセッション名で以前のセッションを再開します。別プロジェクトとして解決されたセッションは、現在のプロジェクトをその場で切り替えず、`cd ... && iac-code tui --resume <id>` コマンドを表示します。 |
 | `-c`, `--continue` | 最新のセッションを再開します。`--resume` と同時に使用できません。 |
 | `--allowed-tools <patterns>` | 許可するツール権限パターンをカンマ区切りで指定します。例：`'bash(git *),write_file'`。 |
 | `--disallowed-tools <patterns>` | 拒否するツール権限パターンをカンマ区切りで指定します。例：`'bash(rm *)'`。 |
@@ -42,13 +42,13 @@ description: IaC Code の起動オプションとワンショット実行パラ�
 保存済みモデルで対話型 REPL を起動する：
 
 ```bash
-iac-code
+iac-code tui
 ```
 
 今回の実行で特定のモデルを指定する：
 
 ```bash
-iac-code --model qwen3.7-max
+iac-code tui --model qwen3.7-max
 ```
 
 ワンショットプロンプトを実行する：
@@ -72,19 +72,19 @@ echo "Create a VPC and two ECS instances" | iac-code --prompt -
 最新のセッションを再開する：
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 git と読み取り専用の bash コマンドのみ許可する：
 
 ```bash
-iac-code --allowed-tools 'bash(git *)'
+iac-code tui --allowed-tools 'bash(git *)'
 ```
 
 特定の Alibaba Cloud 書き込み API を 1 つ許可する：
 
 ```bash
-iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
+iac-code tui --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 対話プロンプトなしで自動化実行する：

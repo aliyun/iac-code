@@ -5,6 +5,8 @@ description: Persistir e retomar conversas entre execuções.
 
 # Sessões
 
+A interface de terminal continua disponível com `iac-code tui`, mas não recebe mais atualizações nem manutenção. Para continuar usando o produto, prefira o aplicativo web ou desktop.
+
 O IaC Code persiste automaticamente cada conversa em disco. Você pode retomar qualquer sessão anterior para continuar de onde parou.
 
 ## Retomar sessões
@@ -39,7 +41,7 @@ Você pode retomar pelo nome quando ele identifica uma sessão de forma única:
 
 ```text
 /resume deploy-prod
-iac-code --resume deploy-prod
+iac-code tui --resume deploy-prod
 ```
 
 ### CLI: `--resume` e `--continue`
@@ -47,13 +49,13 @@ iac-code --resume deploy-prod
 Retome uma sessão específica pela linha de comando por ID exato, prefixo único de ID ou nome único de sessão:
 
 ```bash
-iac-code --resume <id-ou-nome-da-sessao>
+iac-code tui --resume <id-ou-nome-da-sessao>
 ```
 
 Retome a sessão mais recente:
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 As opções curtas `-r` e `-c` também estão disponíveis:
@@ -68,7 +70,7 @@ iac-code -c
 Quando uma sessão pertence a outro diretório de projeto, o IaC Code não troca o diretório de trabalho em tempo real. Em vez disso, imprime o comando para retomar no contexto correto:
 
 ```text
-cd /path/to/other/project && iac-code --resume <session-id>
+cd /path/to/other/project && iac-code tui --resume <session-id>
 ```
 
 Esse comando também é copiado para a área de transferência quando possível.

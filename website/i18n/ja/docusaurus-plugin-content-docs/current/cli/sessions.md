@@ -5,6 +5,8 @@ description: 実行をまたいで会話を保存し、再開します。
 
 # セッション
 
+ターミナル UI は `iac-code tui` で引き続き利用できますが、更新とメンテナンスは終了しています。今後は Web 版またはデスクトップ版をご利用ください。
+
 IaC Code はすべての会話を自動的にディスクへ保存します。以前のセッションを再開して、中断したところから作業を続けられます。
 
 ## セッションの再開
@@ -39,7 +41,7 @@ REPL では `/resume` コマンドを使用します：
 
 ```text
 /resume deploy-prod
-iac-code --resume deploy-prod
+iac-code tui --resume deploy-prod
 ```
 
 ### CLI：`--resume` と `--continue`
@@ -47,13 +49,13 @@ iac-code --resume deploy-prod
 コマンドラインから、正確なセッション ID、一意な ID プレフィックス、または一意なセッション名で特定のセッションを再開できます：
 
 ```bash
-iac-code --resume <セッションIDまたは名前>
+iac-code tui --resume <セッションIDまたは名前>
 ```
 
 最新のセッションを再開します：
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 短いオプション `-r` と `-c` も利用できます：
@@ -68,7 +70,7 @@ iac-code -c
 セッションが別のプロジェクトディレクトリに属している場合、IaC Code は作業ディレクトリをその場で切り替えません。代わりに、正しいコンテキストで再開するためのコマンドを表示します：
 
 ```text
-cd /path/to/other/project && iac-code --resume <session-id>
+cd /path/to/other/project && iac-code tui --resume <session-id>
 ```
 
 可能な場合、このコマンドはクリップボードにもコピーされます。

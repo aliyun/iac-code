@@ -25,12 +25,12 @@ Utilisez `selling_solution_first` pour :
 
 ## Démarrer le pipeline
 
-Dans le terminal interactif :
+L’interface de terminal reste accessible avec `iac-code tui`, mais ne reçoit plus de mises à jour ni de maintenance. Pour la suite, utilisez l’application web ou de bureau.
 
 ```bash
 IAC_CODE_MODE=pipeline \
 IAC_CODE_PIPELINE_NAME=selling_solution_first \
-iac-code
+iac-code tui
 ```
 
 Dans l'application Web locale, choisissez le mode Pipeline à la création de la conversation et démarrez le serveur avec le nom du pipeline :

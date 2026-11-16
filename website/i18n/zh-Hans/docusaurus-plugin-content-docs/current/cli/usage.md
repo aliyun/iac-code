@@ -5,26 +5,23 @@ description: 从终端启动 IaC Code，并选择合适的工作方式。
 
 # CLI 概览
 
-从终端运行 `iac-code`：
+在终端运行 `iac-code`，即可启动本地 Web 应用并打开浏览器。首次使用时，在设置中配置 LLM 提供商和阿里云凭证。
 
 ```bash
 iac-code
+iac-code web --no-open
 ```
 
-CLI 支持两种工作方式：
-
-| 工作方式 | 适用场景 |
-|---|---|
-| [交互模式](./interactive-mode.md) | 需要在 REPL 中通过多轮对话细化基础设施需求。 |
-| [非交互模式](../automation/non-interactive-mode.md) | 需要执行单条提示词，并把输出返回给调用方。 |
-
-常用启动命令：
+终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
 
 ```bash
-iac-code
+iac-code tui
+iac-code tui --help
+```
+
+`iac-code` 默认打开 Web。终端参数放在 `iac-code tui` 后面，例如 `iac-code tui --resume <id>`。headless 的 `--prompt` 和 stream-json 参数仍放在根命令上。没有交互终端时，请显式运行 `iac-code web --no-open`。
+
+```bash
 iac-code --prompt "创建一个 OSS Bucket"
-echo "创建一个 VPC" | iac-code --prompt -
-iac-code --debug
+iac-code --input-format stream-json --output-format stream-json
 ```
-
-启动参数请参见[命令行选项](./command-line-options.md)，交互会话内可用命令请参见[Slash 命令](./commands.md)。

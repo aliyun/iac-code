@@ -21,31 +21,31 @@ Projetar uma implantação de baixo custo para uma aplicação web na Alibaba Cl
 
 ## Iniciar o modo pipeline
 
-Atualmente o modo pipeline requer o REPL interativo. Ele não pode ser combinado com `--prompt`.
+O modo de pipeline está disponível nos aplicativos web e desktop, via A2A e no modo de processo SDK. A entrada preservada `iac-code tui` não recebe mais manutenção. O modo de execução única `--prompt` não oferece suporte a pipelines.
 
 No macOS ou Linux:
 
 ```bash
-IAC_CODE_MODE=pipeline iac-code
+IAC_CODE_MODE=pipeline iac-code web
 ```
 
 No PowerShell:
 
 ```powershell
 $env:IAC_CODE_MODE = "pipeline"
-iac-code
+iac-code web
 ```
 
 O nome padrão do pipeline é `selling`. Para deixar explícito:
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code web
 ```
 
 Para escolher uma arquitetura antes de gerar seu modelo:
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
 ```
 
 ## Pipelines disponíveis

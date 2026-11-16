@@ -55,14 +55,20 @@ pip install iac-code
 
 ## Uso
 
-No primeiro uso, configure o provedor de LLM e o serviço de nuvem IaC digitando `/auth` no modo interativo.
+Execute `iac-code` em um terminal para iniciar o aplicativo web local e abrir o navegador. No primeiro uso, configure o provedor LLM e as credenciais da Alibaba Cloud nas configurações.
 
-### Modo Interativo
-
-Execute diretamente para entrar no REPL interativo:
+### Aplicativo web (padrão)
 
 ```bash
 iac-code
+```
+
+### Interface de terminal (sem manutenção)
+
+A interface de terminal continua disponível com `iac-code tui`, mas não recebe mais atualizações nem manutenção. Para continuar usando o produto, prefira o aplicativo web ou desktop.
+
+```bash
+iac-code tui
 ```
 
 <p align="center">
@@ -85,10 +91,10 @@ echo "Criar um bucket OSS" | iac-code --prompt -
 
 ### Aplicativo web
 
-Prefere uma interface gráfica? Inicie o aplicativo web local, que executa o mesmo motor da CLI e compartilha as mesmas sessões. O aplicativo web precisa do extra `http`, então instale-o primeiro:
+A instalação padrão inclui as dependências do aplicativo web e do ambiente HTTP. O extra `[http]` permanece como um alias de compatibilidade; não é mais necessário instalá-lo separadamente. No repositório, basta executar `uv sync`.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 iac-code web
 ```
 

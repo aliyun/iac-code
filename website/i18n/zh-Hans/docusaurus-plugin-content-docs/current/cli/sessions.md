@@ -5,6 +5,8 @@ description: 持久化并恢复跨运行的对话。
 
 # 会话管理
 
+终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
+
 IaC Code 会自动将每次对话持久化到磁盘。你可以恢复任何历史会话，从中断处继续工作。
 
 ## 恢复会话
@@ -39,7 +41,7 @@ IaC Code 会自动将每次对话持久化到磁盘。你可以恢复任何历�
 
 ```text
 /resume deploy-prod
-iac-code --resume deploy-prod
+iac-code tui --resume deploy-prod
 ```
 
 ### 命令行：`--resume` 和 `--continue`
@@ -47,13 +49,13 @@ iac-code --resume deploy-prod
 从命令行按精确会话 ID、唯一 ID 前缀或唯一会话名称恢复特定会话：
 
 ```bash
-iac-code --resume <session-id-or-name>
+iac-code tui --resume <session-id-or-name>
 ```
 
 恢复最近的会话：
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 也可使用短标志 `-r` 和 `-c`：
@@ -68,7 +70,7 @@ iac-code -c
 当会话属于不同的项目目录时，IaC Code 不会直接切换工作目录，而是打印在正确上下文中恢复的命令：
 
 ```text
-cd /path/to/other/project && iac-code --resume <session-id>
+cd /path/to/other/project && iac-code tui --resume <session-id>
 ```
 
 该命令会尽可能复制到剪贴板。

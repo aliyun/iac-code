@@ -5,6 +5,10 @@ description: 配置阿里云凭证，包括 ECS RAM Role 授权。
 
 # 阿里云凭证
 
+在终端运行 `iac-code`，即可启动本地 Web 应用并打开浏览器。首次使用时，在设置中配置 LLM 提供商和阿里云凭证。
+
+终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
+
 需要检查或管理云资源时，必须配置阿里云凭证。
 
 `resolve_cloud_resource_selector` 和 `select_cloud_resource` 与 `aliyun_api` 使用相同的有效凭证判定。A2A 中请求/会话凭证优先；未提供时，按正常顺序回退到本地配置、环境变量和阿里云 CLI 凭证。如果没有有效的阿里云凭证，`aliyun_api` 和两个资源选择器工具都不会注册。

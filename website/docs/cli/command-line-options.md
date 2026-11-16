@@ -5,7 +5,7 @@ description: Reference for IaC Code startup options and one-shot execution flags
 
 # Command Line Options
 
-Command line options change how IaC Code starts. Use them before entering the interactive REPL, or combine them with `--prompt` for one-shot automation.
+`iac-code` opens Web by default. Put terminal options after `iac-code tui` (for example, `iac-code tui --resume <id>`). Headless `--prompt` and stream-json flags stay on the root command. Without a terminal, start Web explicitly with `iac-code web --no-open`.
 
 | Option | Purpose |
 |---|---|
@@ -19,7 +19,7 @@ Command line options change how IaC Code starts. Use them before entering the in
 | `--thinking-enabled`, `--no-thinking-enabled` | Control whether one-shot non-interactive requests explicitly enable thinking. The default is `--thinking-enabled`; use `--no-thinking-enabled` to send `thinking_enabled=false` for this run without rewriting `settings.yml`. |
 | `-d`, `--debug` | Enable debug logging for the current run. In interactive mode, use `/debug` to inspect or change debug logging after startup. |
 | `--verbose` | Show headless (non-interactive) progress on standard error. |
-| `-r <session-id-or-name>`, `--resume <session-id-or-name>` | Resume a previous session by exact session ID, unique ID prefix, or unique session name. Cross-project resolved sessions print a `cd ... && iac-code --resume <id>` command instead of hot-swapping the current project. |
+| `-r <session-id-or-name>`, `--resume <session-id-or-name>` | Resume a previous session by exact session ID, unique ID prefix, or unique session name. Cross-project resolved sessions print a `cd ... && iac-code tui --resume <id>` command instead of hot-swapping the current project. |
 | `-c`, `--continue` | Resume the most recent session. This cannot be used together with `--resume`. |
 | `--allowed-tools <patterns>` | Comma-separated tool permission patterns to allow, e.g. `'bash(git *),write_file'`. |
 | `--disallowed-tools <patterns>` | Comma-separated tool permission patterns to deny, e.g. `'bash(rm *)'`. |
@@ -43,13 +43,13 @@ Alibaba Cloud write API calls made through `aliyun_api` are protected separately
 Start the interactive REPL with the saved model:
 
 ```bash
-iac-code
+iac-code tui
 ```
 
 Start with a specific model for this run:
 
 ```bash
-iac-code --model qwen3.7-max
+iac-code tui --model qwen3.7-max
 ```
 
 Run a one-shot prompt:
@@ -73,19 +73,19 @@ echo "Create a VPC and two ECS instances" | iac-code --prompt -
 Resume the latest session:
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 Allow only git and read-only bash commands:
 
 ```bash
-iac-code --allowed-tools 'bash(git *)'
+iac-code tui --allowed-tools 'bash(git *)'
 ```
 
 Allow one specific Alibaba Cloud write API:
 
 ```bash
-iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
+iac-code tui --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 Run in automation with no interactive prompts:

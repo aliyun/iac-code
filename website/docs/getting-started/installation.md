@@ -23,14 +23,9 @@ iac-code --help
 
 ## Optional Features
 
-The interactive CLI works with the base package. Some run modes depend on optional extras that you install with the `iac-code[<extra>]` syntax:
+Web and HTTP runtime dependencies are included in the default installation. The `[http]` extra remains a compatibility alias; a separate installation is no longer required. From a checkout, `uv sync` is sufficient.
 
-| Extra | Enables | Command |
-|---|---|---|
-| `http` | The local [Web App](../web-app.md) (`iac-code web`) | `pip install 'iac-code[http]'` |
-| `a2a` | The [A2A server](../a2a/getting-started.md) (`iac-code a2a`) | `pip install 'iac-code[a2a]'` |
-
-If you launch a run mode without its extra, the command fails with a message naming the extra to install. When working from a checkout of the repository, use `uv sync --extra <extra>` instead.
+Additional transports still use optional extras, for example `pip install 'iac-code[a2a-grpc]'` for gRPC or `pip install 'iac-code[a2a-redis]'` for Redis.
 
 ## Windows Requirements
 

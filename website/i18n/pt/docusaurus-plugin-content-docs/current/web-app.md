@@ -5,19 +5,17 @@ description: Execute o IaC Code como um aplicativo web local com o mesmo motor d
 
 # Aplicativo web
 
-O IaC Code inclui um aplicativo web local que executa o mesmo motor de agente do terminal, apresentado em um navegador em vez de um REPL. Ele é útil quando você prefere uma interface de chat gráfica, quer gerenciar várias conversas lado a lado ou precisa acompanhar o progresso de um pipeline e a atividade das ferramentas em um layout mais completo.
+Execute `iac-code` em um terminal para iniciar o aplicativo web local e abrir o navegador. No primeiro uso, configure o provedor LLM e as credenciais da Alibaba Cloud nas configurações.
 
 O aplicativo web lê e grava no mesmo armazenamento de sessões da CLI, então uma conversa iniciada de um lado pode ser retomada no outro.
 
 ## Instalação
 
-O aplicativo web é um recurso opcional que depende do extra `http` (Starlette e Uvicorn). Instale-o junto com o pacote base:
+A instalação padrão inclui as dependências do aplicativo web e do ambiente HTTP. O extra `[http]` permanece como um alias de compatibilidade; não é mais necessário instalá-lo separadamente. No repositório, basta executar `uv sync`.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-Se você executar `iac-code web` sem o extra, o comando falha com uma mensagem pedindo para instalar `iac-code[http]`. Ao trabalhar a partir de um clone do repositório, `uv sync --extra http` instala as mesmas dependências.
 
 ## Iniciar o aplicativo web
 
@@ -53,7 +51,7 @@ A barra lateral lista as conversas do projeto selecionado. A partir daqui, você
 - **Pesquisar** conversas ou abrir a paleta de comandos para executar um comando.
 - **Fixar**, **renomear** ou **arquivar** uma conversa e navegar pelas conversas arquivadas.
 
-Como as sessões são compartilhadas com a CLI, uma conversa que você retoma com `iac-code --resume` também aparece aqui. Consulte [Sessões](./cli/sessions.md) para entender como o armazenamento de sessões funciona.
+Como as sessões são compartilhadas com a CLI, uma conversa que você retoma com `iac-code tui --resume` também aparece aqui. Consulte [Sessões](./cli/sessions.md) para entender como o armazenamento de sessões funciona.
 
 ### Área de composição (composer)
 

@@ -21,31 +21,31 @@ Concevoir un déploiement d'application web Alibaba Cloud à faible coût et gé
 
 ## Démarrer le mode pipeline
 
-Le mode pipeline nécessite actuellement le REPL interactif. Il ne peut pas être combiné avec `--prompt`.
+Le mode pipeline est disponible dans les applications web et de bureau, via A2A et en mode processus SDK. L’entrée conservée `iac-code tui` n’est plus maintenue. Le mode ponctuel `--prompt` ne prend pas en charge les pipelines.
 
 Sur macOS ou Linux :
 
 ```bash
-IAC_CODE_MODE=pipeline iac-code
+IAC_CODE_MODE=pipeline iac-code web
 ```
 
 Dans PowerShell :
 
 ```powershell
 $env:IAC_CODE_MODE = "pipeline"
-iac-code
+iac-code web
 ```
 
 Le nom de pipeline par défaut est `selling`. Pour l'indiquer explicitement :
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code web
 ```
 
 Pour choisir une architecture avant de générer son modèle :
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
 ```
 
 ## Pipelines disponibles

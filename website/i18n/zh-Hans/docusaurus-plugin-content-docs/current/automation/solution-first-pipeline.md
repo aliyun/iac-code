@@ -25,12 +25,12 @@ description: 先选择架构方案，再生成并部署对应的 ROS 模板。
 
 ## 启动流水线
 
-在交互式终端中运行：
+终端界面保留为 `iac-code tui`，但已停止更新和维护。后续使用建议选择 Web 版或桌面版。
 
 ```bash
 IAC_CODE_MODE=pipeline \
 IAC_CODE_PIPELINE_NAME=selling_solution_first \
-iac-code
+iac-code tui
 ```
 
 使用本地 Web 应用时，请在创建会话时选择流水线模式，并用指定的流水线名称启动服务：

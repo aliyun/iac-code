@@ -5,7 +5,7 @@ description: Referência para as opções de inicialização e execução única
 
 # Opções de linha de comando
 
-As opções de linha de comando alteram como o IaC Code é iniciado. Use-as antes de entrar no REPL interativo, ou combine-as com `--prompt` para automação única.
+`iac-code` abre o aplicativo web por padrão. Coloque as opções de terminal depois de `iac-code tui`, por exemplo `iac-code tui --resume <id>`. As opções headless `--prompt` e stream-json continuam no comando principal. Sem um terminal interativo, inicie a web explicitamente com `iac-code web --no-open`.
 
 | Opção | Finalidade |
 |---|---|
@@ -18,7 +18,7 @@ As opções de linha de comando alteram como o IaC Code é iniciado. Use-as ante
 | `--thinking-enabled`, `--no-thinking-enabled` | Controla se solicitações nao interativas de execucao unica habilitam thinking explicitamente. O padrão é `--thinking-enabled`; use `--no-thinking-enabled` para enviar `thinking_enabled=false` nesta execução sem reescrever `settings.yml`. |
 | `-d`, `--debug` | Ativar o registro de depuração para a execução atual. No modo interativo, use `/debug` para inspecionar ou alterar o registro de depuração após a inicialização. |
 | `--verbose` | Mostrar o progresso do modo headless (não interativo) na saída de erro padrão. |
-| `-r <id-ou-nome-da-sessao>`, `--resume <id-ou-nome-da-sessao>` | Retomar uma sessão anterior por ID exato, prefixo único de ID ou nome único de sessão. Sessões resolvidas em outro projeto imprimem um comando `cd ... && iac-code --resume <id>` em vez de trocar o projeto atual em tempo real. |
+| `-r <id-ou-nome-da-sessao>`, `--resume <id-ou-nome-da-sessao>` | Retomar uma sessão anterior por ID exato, prefixo único de ID ou nome único de sessão. Sessões resolvidas em outro projeto imprimem um comando `cd ... && iac-code tui --resume <id>` em vez de trocar o projeto atual em tempo real. |
 | `-c`, `--continue` | Retomar a sessão mais recente. Não pode ser usado junto com `--resume`. |
 | `--allowed-tools <patterns>` | Padrões de permissão de ferramentas separados por vírgulas para permitir, ex. `'bash(git *),write_file'`. |
 | `--disallowed-tools <patterns>` | Padrões de permissão de ferramentas separados por vírgulas para negar, ex. `'bash(rm *)'`. |
@@ -42,13 +42,13 @@ Chamadas de API de escrita Alibaba Cloud feitas por `aliyun_api` são protegidas
 Iniciar o REPL interativo com o modelo salvo:
 
 ```bash
-iac-code
+iac-code tui
 ```
 
 Iniciar com um modelo específico para esta execução:
 
 ```bash
-iac-code --model qwen3.7-max
+iac-code tui --model qwen3.7-max
 ```
 
 Executar um prompt único:
@@ -72,19 +72,19 @@ echo "Create a VPC and two ECS instances" | iac-code --prompt -
 Retomar a sessão mais recente:
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
 Permitir apenas comandos git e bash somente leitura:
 
 ```bash
-iac-code --allowed-tools 'bash(git *)'
+iac-code tui --allowed-tools 'bash(git *)'
 ```
 
 Permitir uma API de escrita Alibaba Cloud específica:
 
 ```bash
-iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
+iac-code tui --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 Executar em automação sem prompts interativos:
