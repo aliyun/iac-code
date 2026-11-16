@@ -5898,68 +5898,68 @@ def test_no_sample_classification_needs_bounded_proof(store):
     assert store.status()["can_finalize"]
 
 
-def test_http_restart_does_not_reset_actions(store):
+def _serve_http_restart_fixture(root):
     import os
-    import subprocess
-    import sys
+    from unittest.mock import patch
+
+    from scripts.web.e2e.resource_link_workflow.server import serve
+
+    native = Runtime.process_identity
+
+    def identity(pid):
+        return "offline test controller" if pid == os.getpid() else native(pid)
+
+    with patch.object(Runtime, "process_identity", staticmethod(identity)):
+        serve(Path(root), 0)
+
+
+def test_http_restart_does_not_reset_actions(store):
+    import multiprocessing
     import time
-    import urllib.error
 
     from scripts.web.e2e.resource_link_workflow.__main__ import call
 
     plan(store)
 
     def start():
-        process = subprocess.Popen(
-            [
-                sys.executable,
-                "-c",
-                "import faulthandler, os, sys; from pathlib import Path; "
-                "faulthandler.dump_traceback_later(8); "
-                "from scripts.web.e2e.resource_link_workflow.runtime import Runtime; "
-                "from scripts.web.e2e.resource_link_workflow.server import serve; "
-                "native = Runtime.process_identity; "
-                "Runtime.process_identity = staticmethod(lambda pid: "
-                "'offline test controller' if pid == os.getpid() else native(pid)); "
-                "serve(Path(sys.argv[1]), 0)",
-                str(store.root),
-            ],
-            cwd=REPO,
-            env=dict(os.environ),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
+        # The Windows venv executable is a redirector. Multiprocessing launches
+        # the actual interpreter so Process.pid identifies the serving process.
+        process = multiprocessing.get_context("spawn").Process(
+            target=_serve_http_restart_fixture, args=(str(store.root),),
         )
+        process.start()
         deadline = time.monotonic() + 10
-        last_error = ""
         while time.monotonic() < deadline:
             try:
                 descriptor = read_json(store.root / "server.json")
                 if descriptor["pid"] == process.pid:
                     call(store.root, "status")
                     return process
-            except urllib.error.HTTPError as error:
-                last_error = error.read().decode("utf-8", errors="replace")
-            except (OSError, ValueError) as error:
-                last_error = str(error)
+            except (OSError, ValueError):
+                pass
             time.sleep(0.05)
-        if process.poll() is None:
+        if process.is_alive():
             process.terminate()
-        _, error = process.communicate(timeout=3)
-        pytest.fail("test Server did not start: " + last_error + "\n" + error.decode("utf-8", errors="replace"))
+        process.join(timeout=3)
+        pytest.fail(f"test Server did not start (exit code {process.exitcode})")
 
     first = start()
     try:
         action = call(store.root, "next")["actions"][0]
     finally:
         first.terminate()
-        first.communicate(timeout=3)
+        first.join(timeout=3)
+        assert not first.is_alive()
+        first.close()
     second = start()
     try:
         assert call(store.root, "next")["actions"][0] == action
         assert call(store.root, "status")["completed"] == 0
     finally:
         second.terminate()
-        second.communicate(timeout=3)
+        second.join(timeout=3)
+        assert not second.is_alive()
+        second.close()
 
 
 def test_append_ids_and_import_exact_old_pass(tmp_path):
