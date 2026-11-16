@@ -2666,10 +2666,18 @@ def test_environment_preflight_is_syntax_valid_and_never_closes_attached_chrome(
     assert "readPrivateInput(args.consoleOnly)" in source
 
 
-def test_matrix_lock_recovers_a_dead_owner_but_rejects_a_live_owner(tmp_path: Path) -> None:
+def test_matrix_lock_recovers_a_dead_owner_but_rejects_a_live_owner(tmp_path: Path, monkeypatch) -> None:
     runner = _runner_module()
     runner.MATRIX_PATH = tmp_path / "matrix.json"
     lock_path = runner.MATRIX_PATH.with_suffix(".json.lock")
+    probes = []
+    pid_alive = runner._pid_alive
+
+    def observe_probe(pid):
+        probes.append(pid)
+        return pid_alive(pid)
+
+    monkeypatch.setattr(runner, "_pid_alive", observe_probe)
     lock_path.write_text("99999999\n", encoding="ascii")
     with runner._matrix_lock():
         assert lock_path.is_file()
@@ -2683,6 +2691,7 @@ def test_matrix_lock_recovers_a_dead_owner_but_rejects_a_live_owner(tmp_path: Pa
         assert "another resource-link runner is active" in str(error)
     else:  # pragma: no cover - fail-closed guard
         raise AssertionError("a live runner lock must not be stolen")
+    assert probes == [99999999, runner.os.getpid()]
 
 
 def test_scope_rebind_accepts_web_restart_opaque_scope_rotation() -> None:
