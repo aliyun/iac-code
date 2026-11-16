@@ -2111,7 +2111,7 @@ async def test_reviewed_put_bucket_uses_real_sdk_xml_and_original_headers_only_r
         assert b"<StorageClass>Standard</StorageClass>" in payload
         assert b"<DataRedundancyType>LRS</DataRedundancyType>" in payload
         assert sent["headers"]["Content-Type"] == "application/xml"
-        assert "demo-bucket.oss-cn-hangzhou.aliyuncs.com" in sent["url"]
+        assert urlsplit(sent["url"]).hostname == "demo-bucket.oss-cn-hangzhou.aliyuncs.com"
     finally:
         await adapter.aclose()
 

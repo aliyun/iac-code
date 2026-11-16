@@ -1481,7 +1481,7 @@ class Runtime:
                 ]
                 resource_inputs = contained(self.root / "inputs", context["resource"]["id"])
                 context["preparation_inputs"] = [
-                    str(path.relative_to(self.root / "inputs"))
+                    path.relative_to(self.root / "inputs").as_posix()
                     for path in sorted(resource_inputs.rglob("*"))
                     if path.is_file() and path.suffix in {".json", ".md", ".txt"} and path.stat().st_size <= 2_000_000
                 ]

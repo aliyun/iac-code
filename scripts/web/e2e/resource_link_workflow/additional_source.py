@@ -211,7 +211,7 @@ def _validate_original_operation(
     # Extra dimensions get no new allowance: verify every original proposal, call,
     # authorization and account before retaining its original cumulative authority.
     scope = request.get("prior_scope", "")
-    if not re.fullmatch(r"[a-f0-9]{32}:" + dimension, scope):
+    if not re.fullmatch(r"[a-f0-9]{32}:" + re.escape(dimension), scope):
         raise WorkflowError("additional sample prior scope is invalid")
     initial_query = dimension == "QUERY" and not authorization_path(root, old).exists()
     if initial_query:

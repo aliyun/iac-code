@@ -196,7 +196,7 @@ def _signin_site_for_destination(partition: str, destination: str) -> ResourceSi
     embedded = hostname == "ros4service.console.alibabacloud.com" or (
         partition == "aliyun"
         and (
-            hostname.endswith("4service.console.aliyun.com")
+            (hostname.partition(".")[2] == "console.aliyun.com" and hostname.partition(".")[0].endswith("4service"))
             or (hostname.startswith("elasticsearch4service-") and hostname.endswith(_ALIYUN_CONSOLE_SUFFIX))
         )
     )

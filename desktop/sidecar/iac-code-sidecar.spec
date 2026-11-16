@@ -88,7 +88,9 @@ sidecar = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # iac-code uses Tablestore's Python codec (enable_native=False). The wheel
+    # also ships a Linux ELF extension that cannot be bundled on macOS/Windows.
+    excludes=["tablestore.native", "tablestore.ots_sdk"],
     noarchive=False,
 )
 sidecar_pyz = PYZ(sidecar.pure)

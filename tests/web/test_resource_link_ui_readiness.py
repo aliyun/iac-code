@@ -18,6 +18,10 @@ import pytest
         "closed",
         "invisible",
         "non_domestic",
+        "lookalike_host",
+        "host_in_path",
+        "plain_http",
+        "host_in_userinfo",
         "false_handle",
         "target_gate",
     ],
@@ -30,9 +34,14 @@ def test_ui_readiness(case):
     javascript = r"""
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const kind=process.argv[2];
+const invalidUrl=['non_domestic','lookalike_host','host_in_path','plain_http','host_in_userinfo'].includes(kind);
 const state={key:'ws~own',button:true,stopping:kind==='streaming',closed:kind==='closed',
  visible:kind!=='invisible',target:kind==='missing_target'?'other':'real',
  href:kind==='non_domestic'?'https://example.invalid/':'https://polardb.console.aliyun.com/'};
+if(kind==='lookalike_host')state.href='https://polardb.console.aliyun.com.example.invalid/';
+if(kind==='host_in_path')state.href='https://example.invalid/console.aliyun.com/';
+if(kind==='plain_http')state.href='http://polardb.console.aliyun.com/';
+if(kind==='host_in_userinfo')state.href='https://console.aliyun.com@example.invalid/';
 if(kind==='wrong_session')state.key='ws~other';
 if(kind==='missing_button')state.button=false;
 const document={visibilityState:'visible',
@@ -53,7 +62,7 @@ assert.equal(snapshot.origin,'http://127.0.0.1:8767');
 assert(!('actualUiClick' in snapshot));
 assert(!('href' in snapshot));
 assert.equal(snapshot.targets[0].openVisibleCount,
- ['missing_target','closed','invisible','non_domestic'].includes(kind)?0:1);
+ (['missing_target','closed','invisible'].includes(kind)||invalidUrl)?0:1);
 let disposed=0,calls=0;
 const page={async waitForFunction(predicate,arg,options){
  calls++;assert.equal(predicate.constructor.name,'Function');
@@ -65,11 +74,11 @@ const page={async waitForFunction(predicate,arg,options){
  return {jsonValue:async()=>kind==='false_handle'?false:value,dispose:async()=>disposed++};}};
 (async()=>{
  if(kind==='false_handle')await assert.rejects(()=>waitForOwnTargets(page,'ws~own',['real'],5000),/non-true/);
- else if(['wrong_session','missing_target','non_domestic'].includes(kind))
+ else if(['wrong_session','missing_target'].includes(kind)||invalidUrl)
   await assert.rejects(()=>waitForOwnTargets(page,'ws~own',['real'],5000),/timeout/);
  else await waitForOwnTargets(page,'ws~own',['real'],5000);
- assert.equal(calls,1);assert.equal(disposed,['wrong_session','missing_target','non_domestic'].includes(kind)?0:1);
- const endExpected=!['streaming','wrong_session','missing_button','missing_target','non_domestic'].includes(kind);
+ assert.equal(calls,1);assert.equal(disposed,(['wrong_session','missing_target'].includes(kind)||invalidUrl)?0:1);
+ const endExpected=!['streaming','wrong_session','missing_button','missing_target'].includes(kind)&&!invalidUrl;
  assert.equal(ownReplyEnded(args),endExpected);
  if(kind==='false_handle')await assert.rejects(()=>waitForOwnReplyEnd(page,'ws~own',['real'],5000),/non-true/);
  else if(!endExpected)await assert.rejects(()=>waitForOwnReplyEnd(page,'ws~own',['real'],5000),/timeout/);

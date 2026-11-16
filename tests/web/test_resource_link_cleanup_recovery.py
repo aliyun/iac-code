@@ -4,6 +4,7 @@ import copy
 import json
 import sqlite3
 import time
+from contextlib import closing
 from types import SimpleNamespace
 
 import pytest
@@ -81,7 +82,7 @@ def original(tmp_path, monkeypatch):
     gate.finish(ticket, {"AccountId": "123"}, True)
     ticket = gate.reserve(entries[1]["call"], "ws~original-full", signer, read_only=False)
     gate.finish(ticket, {"VpcId": "vpc-original-response"}, True)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("UPDATE active SET expires=0")
     return (
         path,
@@ -98,7 +99,7 @@ def original(tmp_path, monkeypatch):
 
 
 def rows(path):
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         return {
             table: connection.execute(f"SELECT * FROM {table}").fetchall()
             for table in ("active", "grants", "attempts", "identities", "authority_limits")
@@ -165,7 +166,7 @@ def test_inspection_rejects_changed_original_plan(original, mutation):
 @pytest.mark.parametrize("mutation", ["unknown", "missing_id", "wrong_identity", "counter", "no_create", "session"])
 def test_inspection_fails_closed_on_ambiguous_or_unverified_wire_provenance(original, mutation):
     path, args, _ = original
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         if mutation == "unknown":
             connection.execute("UPDATE attempts SET state='unknown' WHERE grant_id='create'")
         elif mutation == "missing_id":
@@ -186,7 +187,7 @@ def test_inspection_fails_closed_on_ambiguous_or_unverified_wire_provenance(orig
 
 def test_inspection_preserves_exhausted_delete_without_replaying_or_claiming_absence(original):
     path, args, _ = original
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("UPDATE grants SET used=1 WHERE id='delete'")
         connection.execute("UPDATE authority_limits SET used=1 WHERE id='delete'")
     before = rows(path)
@@ -220,7 +221,7 @@ def rejected_oss_detail(original):
         },
     }
     args["grants"].append(entry)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("UPDATE active SET expires=NULL")
         connection.execute(
             "INSERT INTO grants(scope,id,kind,call,quota,used,authority,read_policy) VALUES(?,?,?,?,?,?,?,?)",
@@ -267,7 +268,7 @@ def test_definite_signature_read_rejection_does_not_block_original_cleanup_or_im
     assert rejected["code"] == "SignatureDoesNotMatch" and rejected["absence_verified"] is False
     assert rejected["original_state_preserved"]
     assert "private diagnostic" not in json.dumps(result)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.row_factory = sqlite3.Row
         row = connection.execute(
             "SELECT a.*,g.kind,g.call FROM attempts a JOIN grants g "
@@ -285,7 +286,7 @@ def test_previous_dimension_can_advance_only_after_real_cleanup_despite_old_sign
     path, args, signer = rejected_oss_detail(original)
     entry = next(entry for entry in args["grants"] if entry["id"] == "read-owned")
     policy = {"phase": "cleanup", "required_cleanup": True, "after_delete": "create"}
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("UPDATE grants SET read_policy=? WHERE id='read-owned'", (json.dumps(policy),))
     if damage != "missing_delete":
         gate.cleanup(path, args["slot"], args["scope"], args["session"])
@@ -301,7 +302,7 @@ def test_previous_dimension_can_advance_only_after_real_cleanup_despite_old_sign
                 True,
             )
     if damage == "wrong_error":
-        with sqlite3.connect(path) as connection:
+        with closing(sqlite3.connect(path)) as connection, connection:
             response = json.loads(
                 connection.execute("SELECT response FROM attempts WHERE grant_id='detail'").fetchone()[0]
             )
@@ -348,7 +349,7 @@ def test_previous_dimension_can_advance_only_after_real_cleanup_despite_old_sign
 )
 def test_rejected_detail_inspection_refuses_ambiguous_errors_writes_or_provenance_drift(original, damage):
     path, args, _ = rejected_oss_detail(original)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         response = json.loads(connection.execute("SELECT response FROM attempts WHERE grant_id='detail'").fetchone()[0])
         if damage in {"status", "boolean_status", "code", "ec", "host", "request_id", "header", "missing_response"}:
             if damage == "status":
@@ -415,7 +416,7 @@ def test_signature_rejection_allows_only_cleanup_reads_after_original_successful
 
 def deleted_original(original):
     path, args, signer = original
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         connection.execute("UPDATE active SET expires=NULL")  # Isolated offline fixture only.
     gate.cleanup(path, args["slot"], args["scope"], args["session"])
     call = {**args["grants"][2]["call"], "params": {"VpcId": "vpc-original-response"}}
@@ -479,7 +480,7 @@ def test_readonly_cleanup_fails_closed_without_original_successful_delete_and_re
     path, args, _ = original
     if damage != "unused":
         path, args = deleted_original(original)
-    with sqlite3.connect(path) as connection:
+    with closing(sqlite3.connect(path)) as connection, connection:
         if damage == "unknown":
             connection.execute("UPDATE attempts SET state='unknown' WHERE grant_id='delete'")
         elif damage in {"missing", "counter_only"}:

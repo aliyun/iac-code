@@ -2387,7 +2387,7 @@ class Store:
             self.set_repair_scope(connection, task_id, "input")
             self.event(connection, "ops_input_repair", {
                 "task_id": task_id, "reason": reason, "evidence": str(path.relative_to(self.root)),
-                "input_path": str(path.relative_to(self.root / "inputs")), "sha256": digest(path),
+                "input_path": path.relative_to(self.root / "inputs").as_posix(), "sha256": digest(path),
                 "diagnostic_only": True, "formal_observations_unchanged": True,
                 "diagnostic_image_paths": [item["path"] for item in proof["diagnostic_images"]],
             })
@@ -2440,7 +2440,7 @@ class Store:
             self.set_repair_scope(connection, task_id, "product")
             self.event(connection, "ops_preserved_repair", {
                 "task_id": task_id, "reason": reason, "evidence": str(path.relative_to(self.root)),
-                "input_path": str(path.relative_to(self.root / "inputs")), "sha256": sha,
+                "input_path": path.relative_to(self.root / "inputs").as_posix(), "sha256": sha,
                 "ownership_preserved": True, "execution_recovery_authorized": False,
                 "cloud_calls_authorized": False, "pass_count_unchanged": True,
             })
@@ -2512,7 +2512,7 @@ class Store:
                     "task_id": task_id,
                     "reason": reason,
                     "evidence": str(path.relative_to(self.root)),
-                    "input_path": str(path.relative_to(self.root / "inputs")),
+                    "input_path": path.relative_to(self.root / "inputs").as_posix(),
                     "sha256": digest(path),
                 },
             )

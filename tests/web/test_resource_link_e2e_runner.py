@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -35,6 +36,29 @@ def _runner_module(tmp_path: Path | None = None):
     module.PROVENANCE_RECOVERY_OUTPUT_DIR = directory / "provenance"
     module.SCOPE_REBIND_OUTPUT_DIR = directory / "scope-rebind"
     return module
+
+
+def test_persisted_files_keep_bytes_and_use_a_writable_sync_handle(tmp_path, monkeypatch):
+    runner = _runner_module()
+    fsync = os.fsync
+    descriptors = []
+
+    def sync(descriptor):
+        # Windows FlushFileBuffers requires write access. This also catches
+        # read-only descriptors on POSIX without skipping the durability check.
+        os.write(descriptor, b"")
+        fsync(descriptor)
+        descriptors.append(descriptor)
+
+    monkeypatch.setattr(os, "fsync", sync)
+    source = tmp_path / "source.bin"
+    source.write_bytes(b"original offline bytes")
+    target = tmp_path / "copied.bin"
+    runner._persist_file(source, target)
+    assert source.read_bytes() == target.read_bytes() == b"original offline bytes"
+    runner._atomic_write_json(tmp_path / "proof.json", {"fixture": True})
+    assert json.loads((tmp_path / "proof.json").read_text()) == {"fixture": True}
+    assert len(descriptors) == 2
 
 
 def test_p1_refresh_does_not_rewrite_existing_execution_matrix(tmp_path, monkeypatch):
@@ -1625,15 +1649,22 @@ def test_targeted_batch_plan_does_not_validate_unrelated_source_records(tmp_path
     assert plan["items"][0]["sourceType"] == requested
 
 
-def test_plans_fail_closed_for_sources_without_a_real_web_replay(tmp_path: Path) -> None:
+def test_plans_fail_closed_for_sources_without_a_real_web_replay(tmp_path: Path, monkeypatch) -> None:
     runner = _runner_with_query_sources(tmp_path)
     matrix = runner.build_matrix()
+    from unittest.mock import Mock
+
+    load = Mock(wraps=runner._load_applicability)
+    monkeypatch.setattr(runner, "_load_applicability", load)
     route = runner.build_batch_plan(matrix, source="route_catalog", batch_size=5, resume=True)
     create = runner.build_batch_plan(matrix, source="create_api", batch_size=5, resume=True)
     assert route["skippedUnreplayable"] == 178
     assert all(item["receiptSource"] == "ros_stack" for item in route["items"])
     assert create["batchSize"] == 0
     assert create["skippedUnreplayable"] == 24
+    assert load.call_count == 1, "one validated applicability snapshot per planning call"
+    runner.build_batch_plan(matrix, source="route_catalog", batch_size=5, resume=True)
+    assert load.call_count == 2, "later planning calls must reload and revalidate source evidence"
 
 
 def _route_cloud_fixture(tmp_path, runner):

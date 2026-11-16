@@ -1,4 +1,12 @@
 # Desktop-owned production, build, tests and documentation.
+# Shared integration and offline regression paths reviewed for resource links.
+scripts/web/e2e/resource_link_workflow/catalog.example.json
+src/iac_code/resource_selector/query.py
+tests/agent/test_agent_loop_output_limit.py
+tests/resource_selector/test_query.py
+tests/web/conftest.py
+tests/web/resource_link_data.py
+tests/web/test_resource_link_popover.py
 desktop/**
 src/iac_code/desktop/**
 tests/desktop/**

@@ -53,21 +53,25 @@ def request_for(credential, *, preferred="aliyun", destinations=None):
 
 def test_console_destination_allowlist_comes_from_catalog_and_rejects_url_confusion():
     hosts = resource_console_hosts()
-    assert "ros.console.aliyun.com" in hosts["aliyun"]
-    assert "ros-intl.console.alibabacloud.com" in hosts["alibabacloud"]
-    assert "ros4service.console.aliyun.com" in hosts["aliyun"]
-    assert "ros4service.console.alibabacloud.com" in hosts["alibabacloud"]
-    assert "ecs.console.aliyun.com" in hosts["aliyun"]
-    assert "ecs4service.console.aliyun.com" in hosts["aliyun"]
-    assert "ram4service.console.aliyun.com" in hosts["aliyun"]
-    assert "vpc4service.console.aliyun.com" in hosts["aliyun"]
-    assert "ads4service.console.aliyun.com" in hosts["aliyun"]
-    assert "slb4service.console.aliyun.com" in hosts["aliyun"]
-    assert "cloudmonitor4service.console.aliyun.com" in hosts["aliyun"]
-    assert "dnsnext4service.console.aliyun.com" in hosts["aliyun"]
-    assert "expressconnect.console.aliyun.com" in hosts["aliyun"]
-    assert "expressconnect4service.console.aliyun.com" in hosts["aliyun"]
-    assert "apigateway.console.aliyun.com" in hosts["aliyun"]
+    assert {
+        'ros.console.aliyun.com',
+        'ros4service.console.aliyun.com',
+        'ecs.console.aliyun.com',
+        'ecs4service.console.aliyun.com',
+        'ram4service.console.aliyun.com',
+        'vpc4service.console.aliyun.com',
+        'ads4service.console.aliyun.com',
+        'slb4service.console.aliyun.com',
+        'cloudmonitor4service.console.aliyun.com',
+        'dnsnext4service.console.aliyun.com',
+        'expressconnect.console.aliyun.com',
+        'expressconnect4service.console.aliyun.com',
+        'apigateway.console.aliyun.com',
+    } <= hosts['aliyun']
+    assert {
+        'ros-intl.console.alibabacloud.com',
+        'ros4service.console.alibabacloud.com',
+    } <= hosts['alibabacloud']
     assert "apigateway4service.console.aliyun.com" not in hosts["aliyun"]
     assert validate_console_destination(CN_STACK, "aliyun") == CN_STACK
     assert validate_console_destination(CN_EMBEDDED_STACK, "aliyun") == CN_EMBEDDED_STACK
