@@ -81,16 +81,6 @@ Reading from stdin is also supported:
 echo "Create an OSS Bucket" | iac-code --prompt -
 ```
 
-### [Terminal UI](website/docs/cli/interactive-mode.md)
-
-```bash
-iac-code tui
-```
-
-<p align="center">
-  <img src="website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
-</p>
-
 ### Agent Skill
 
 Add IaC Code to a compatible agent to plan cloud architectures, work with ROS or Terraform templates, estimate costs,

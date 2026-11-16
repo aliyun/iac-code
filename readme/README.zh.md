@@ -83,16 +83,6 @@ iac-code --prompt "创建一个 VPC 和两台 ECS 实例"
 echo "创建一个 OSS Bucket" | iac-code --prompt -
 ```
 
-### [终端界面](../website/i18n/zh-Hans/docusaurus-plugin-content-docs/current/cli/interactive-mode.md)
-
-```bash
-iac-code tui
-```
-
-<p align="center">
-  <img src="../website/static/img/demo_zh.gif" alt="iac-code 演示" width="100%">
-</p>
-
 ### Agent Skill
 
 将 IaC Code 添加到兼容的 Agent，即可在对话中规划云架构、处理 ROS 或 Terraform 模板、估算费用、操作资源栈并部署阿里云资源。下载[最新稳定版 Skill](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)，或通过 [IaC Code 官方 Skills 概览](https://aliyun.github.io/iac-code/zh-Hans/docs/a2a/skill-overview)对比不同发行版。

@@ -83,16 +83,6 @@ A leitura a partir do stdin também é suportada:
 echo "Criar um bucket OSS" | iac-code --prompt -
 ```
 
-### [Interface de terminal](../website/i18n/pt/docusaurus-plugin-content-docs/current/cli/interactive-mode.md)
-
-```bash
-iac-code tui
-```
-
-<p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
-</p>
-
 ### Agent Skill
 
 Adicione o IaC Code a um agente compatível para planejar arquiteturas em nuvem, trabalhar com templates ROS ou Terraform, estimar custos, operar stacks e implantar recursos do Alibaba Cloud a partir da conversa. Baixe o [Skill estável mais recente](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip) ou compare as distribuições na [visão geral dos Skills oficiais](https://aliyun.github.io/iac-code/pt/docs/a2a/skill-overview).

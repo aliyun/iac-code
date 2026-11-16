@@ -83,16 +83,6 @@ stdin からの読み取りもサポートされています：
 echo "OSS バケットを作成" | iac-code --prompt -
 ```
 
-### [ターミナル UI](../website/i18n/ja/docusaurus-plugin-content-docs/current/cli/interactive-mode.md)
-
-```bash
-iac-code tui
-```
-
-<p align="center">
-  <img src="../website/static/img/demo_en.gif" alt="iac-code demo" width="100%">
-</p>
-
 ### Agent Skill
 
 IaC Code を対応エージェントに追加すると、会話からクラウド構成の設計、ROS/Terraform テンプレート、料金見積もり、スタック操作、Alibaba Cloud リソースのデプロイを行えます。[最新の安定版 Skill](https://ros-public-tools.oss-cn-beijing.aliyuncs.com/github-releases/aliyun/iac-code/skill/stable/iac-code-skill.zip)をダウンロードするか、[IaC Code 公式 Skills の概要](https://aliyun.github.io/iac-code/ja/docs/a2a/skill-overview)で配布方法を比較してください。
