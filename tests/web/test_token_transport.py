@@ -4,6 +4,7 @@ import base64
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from cryptography.hazmat.primitives import hashes
@@ -14,7 +15,7 @@ from starlette.responses import JSONResponse, PlainTextResponse, StreamingRespon
 from starlette.routing import Route
 from starlette.testclient import TestClient
 
-from iac_code.web.token_transport import HKDF_INFO, TokenTransport, load_access_token
+from iac_code.web.token_transport import HKDF_INFO, TokenTransport, _inner_scope, load_access_token
 
 
 def _encode(value: bytes) -> str:
@@ -100,6 +101,9 @@ def client(token: str):
     async def static_asset(request):
         return PlainTextResponse(request.path_params["path"])
 
+    async def signin_relay(request):
+        return PlainTextResponse("{}:{}".format(request.path_params["session_id"], request.path_params["relay_id"]))
+
     inner = Starlette(
         routes=[
             Route("/", home),
@@ -108,6 +112,10 @@ def client(token: str):
             Route("/api/items/{name}", echo),
             Route("/api/events", stream),
             Route("/api/cloud/aliyun/oauth-login", echo, methods=["POST"]),
+            Route(
+                "/api/sessions/{session_id}/resource-references/signin-relay/{relay_id}",
+                signin_relay,
+            ),
             Route("/static/{path:path}", static_asset),
         ]
     )
@@ -153,6 +161,25 @@ def test_same_origin_module_and_svg_are_public_in_token_mode(client: TestClient,
     )
 
     assert response.status_code == 200
+
+
+def test_one_use_resource_signin_relay_capability_is_public_in_token_mode(client: TestClient) -> None:
+    relay_id = "a" * 64
+    path = "/api/sessions/session-1/resource-references/signin-relay/{}".format(relay_id)
+    same_origin = {
+        "origin": "http://203.0.113.10:8766",
+        "sec-fetch-site": "same-origin",
+    }
+
+    response = client.get(path, headers=same_origin)
+
+    assert response.status_code == 200
+    assert response.text == "session-1:{}".format(relay_id)
+    assert client.get(path[:-1], headers=same_origin).status_code == 404
+    assert client.get(path + "0", headers=same_origin).status_code == 404
+    assert client.get(path.replace(relay_id, relay_id.upper()), headers=same_origin).status_code == 404
+    assert client.get(path, headers={**same_origin, "sec-fetch-site": "cross-site"}).status_code == 403
+    assert client.get("/api/echo", headers=same_origin).status_code == 404
 
 
 def test_ping_request_replay_and_internal_denials(client: TestClient, token: str) -> None:
@@ -239,3 +266,92 @@ def test_expired_session_requires_a_new_challenge(token: str) -> None:
         now[0] += 301
         response = client.post("/api/token/ping", json=browser.encrypt("ping", 1, b"ping"))
     assert response.status_code == 401
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize(
+    "base_url, expected_server",
+    [
+        ("http://127.0.0.1:16100", ("127.0.0.1", 16100)),
+        ("https://198.51.100.10:16101", ("198.51.100.10", 16101)),
+    ],
+)
+def test_encrypted_requests_preserve_trusted_origin(token, stream, base_url, expected_server):
+    async def origin(request):
+        return JSONResponse(
+            {
+                "url": str(request.url),
+                "server": list(request.scope["server"]),
+                "scheme": request.scope["scheme"],
+                "forwarded": request.headers.get("forwarded"),
+            }
+        )
+
+    app = TokenTransport(Starlette(routes=[Route("/api/origin", origin)]), token)
+    with TestClient(app, base_url=base_url) as client:
+        browser = BrowserProtocol(client, token)
+        message_type = "stream" if stream else "request"
+        plaintext = json.dumps(
+            {
+                "method": "GET",
+                "path": "/api/origin?mode=relay",
+                "headers": {
+                    "host": "attacker.example:9999",
+                    "forwarded": "host=attacker.example;proto=http",
+                    "x-forwarded-host": "attacker.example",
+                    "x-forwarded-proto": "http",
+                    "accept": "application/json",
+                },
+                "body": "",
+                "server": ["attacker.example", 9999],
+                "scheme": "http",
+            }
+        ).encode()
+        response = client.post(
+            "/api/token/" + message_type,
+            json=browser.encrypt(message_type, 1, plaintext),
+            headers={
+                "host": "203.0.113.20:9999",
+                "forwarded": "host=attacker.example;proto=http",
+                "x-forwarded-host": "attacker.example",
+                "x-forwarded-proto": "http",
+            },
+        )
+        assert response.status_code == 200
+        if stream:
+            envelopes = [json.loads(line) for line in response.iter_lines() if line]
+            assert envelopes[-1]["type"] == "stream-end"
+            body = b"".join(
+                _decode(json.loads(browser.decrypt(envelope, "stream-body"))["body"])
+                for envelope in envelopes
+                if envelope["type"] == "stream-body"
+            )
+        else:
+            payload = json.loads(browser.decrypt(response.json(), "response"))
+            assert payload["status"] == 200
+            body = _decode(payload["body"])
+        assert json.loads(body) == {
+            "url": base_url + "/api/origin?mode=relay",
+            "server": list(expected_server),
+            "scheme": urlsplit(base_url).scheme,
+            "forwarded": None,
+        }
+        assert (
+            client.post(
+                "/api/token/" + message_type,
+                json=browser.request_envelope(2, "/api/origin", stream=stream),
+                headers={"host": "attacker.example"},
+            ).status_code
+            == 403
+        )
+
+
+def test_encrypted_inner_scope_preserves_ipv6_server_without_reflecting_host():
+    scope, body = _inner_scope(
+        {"method": "GET", "path": "/api/origin", "headers": {"host": "attacker.example"}, "body": ""},
+        {"server": ("::1", 16102), "scheme": "https"},
+    )
+    assert scope["server"] == ("::1", 16102)
+    assert scope["scheme"] == "https"
+    assert scope["headers"] == [(b"host", b"[::1]:16102")]
+    assert body == b""

@@ -210,6 +210,7 @@ class TransportRouter:
                 "tea": TeaTransportAdapter(),
                 "acs1": Acs1Transport(),
                 "acs3_streaming": Acs3StreamingTransport(),
+                "ots_sdk": _ots_data_adapter(),
             }
         )
 
@@ -258,6 +259,12 @@ class TransportRouter:
             close = getattr(transport, "aclose", None)
             if close is not None:
                 await close()
+
+
+def _ots_data_adapter() -> AliyunTransport:
+    from iac_code.tools.cloud.aliyun.ots_data_adapter import OtsDataAdapter
+
+    return OtsDataAdapter()
 
 
 class Acs1Transport:

@@ -193,3 +193,26 @@ src/iac_code/pipeline/engine/architecture_rules.json.backup-*
 ci-e2e-report/
 .agents/
 spec/
+
+# Local design notes and acceptance evidence are archived under ignored docs/.
+# Keep legacy runtime paths private too: they can contain credentials, browser
+# login state, SQLite journals, screenshots and machine-specific configuration.
+/design/
+/evidence/
+scripts/web/e2e/resource_link_workflow/*.lock
+
+# Machine-local resource-link runs and acceptance results, not offline fixtures.
+/scripts/web/e2e/resource_link_backfill_gate.json
+/scripts/web/e2e/resource_link_e2e_matrix.json
+/scripts/web/e2e/resource_link_e2e_applicability.json
+/scripts/web/e2e/resource_link_e2e_create_fixtures.json
+/scripts/web/e2e/resource_link_e2e_history.json
+/scripts/web/e2e/resource_link_e2e_query_replay.json
+/scripts/web/e2e/resource_link_e2e_route_cloud_sources.json
+/scripts/web/e2e/resource_link_e2e_status.json
+/scripts/web/e2e/resource_link_e2e_targeted_query_sources.json
+/scripts/web/e2e/resource_link_e2e_web_source_registry.json
+/scripts/web/e2e/resource_link_workflow/catalog.json
+/scripts/web/e2e/resource_link_workflow/historical-results.json
+/scripts/web/e2e/resource_link_workflow/resource-link-results.html
+/scripts/web/e2e/resource_link_workflow/resource-link-test-matrix.html

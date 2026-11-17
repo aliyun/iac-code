@@ -950,6 +950,19 @@ class PipelineTranscriptTranslator:
             result_payload["submittedDelta"] = dict(submitted_delta)
         if isinstance(normalized_conclusion, Mapping):
             result_payload["normalizedConclusion"] = dict(normalized_conclusion)
+        from iac_code.tools.cloud.resource_references import (
+            RESOURCE_REFERENCES_METADATA_KEY,
+            resource_references_from_metadata,
+        )
+        from iac_code.web.resource_references import resource_fact_to_web
+
+        references = resource_references_from_metadata(
+            {RESOURCE_REFERENCES_METADATA_KEY: data.get("resourceReferences")}
+        )
+        if references:
+            result_payload["resourceReferences"] = resource_fact_to_web(references)
+        if isinstance(data.get("stackResult"), Mapping):
+            result_payload["stackResult"] = dict(data["stackResult"])
         events.append({"type": "tool.result", "payload": result_payload})
         events.append(
             {
@@ -996,6 +1009,9 @@ class PipelineTranscriptTranslator:
             # dropping the region here would split one stack into a second row.
             payload["regionId"] = data.get("regionId")
             payload["resources"] = data.get("resources")
+            for key in ("accountScope", "consolePartition"):
+                if isinstance(data.get(key), str):
+                    payload[key] = data[key]
         else:
             payload["stackGroupName"] = data.get("stackGroupName")
             payload["operationId"] = data.get("operationId")
@@ -1479,6 +1495,12 @@ def build_pipeline_transcript_rows(envelopes: Iterable[Mapping[str, Any]]) -> li
                     "content": payload.get("content"),
                     "summary": payload.get("summary"),
                     "isError": payload.get("isError"),
+                    **(
+                        {"resourceReferences": payload["resourceReferences"]}
+                        if payload.get("resourceReferences")
+                        else {}
+                    ),
+                    **({"stackResult": payload["stackResult"]} if payload.get("stackResult") else {}),
                 }
             )
             tool["artifacts"] = payload.get("artifacts") or []
@@ -1515,6 +1537,8 @@ def build_pipeline_transcript_rows(envelopes: Iterable[Mapping[str, Any]]) -> li
                 "instances": payload.get("instances"),
                 "elapsedSeconds": payload.get("elapsedSeconds"),
                 "deploymentComplete": payload.get("deploymentComplete") is True,
+                **({"accountScope": payload["accountScope"]} if payload.get("accountScope") else {}),
+                **({"consolePartition": payload["consolePartition"]} if payload.get("consolePartition") else {}),
             }
 
     # Tag each ``input_required`` prompt bubble with how many answers it anchors

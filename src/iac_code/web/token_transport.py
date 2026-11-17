@@ -8,6 +8,7 @@ import binascii
 import ipaddress
 import json
 import os
+import re
 import stat
 import threading
 import time
@@ -37,6 +38,7 @@ TOKEN_ENDPOINTS = {
 DENIED_INTERNAL_PATHS = {"/api/cloud/aliyun/oauth-login"}
 _PUBLIC_GET_PREFIXES = ("/static/",)
 _PUBLIC_GET_PATHS = {"/", "/health"}
+_RESOURCE_SIGNIN_RELAY_PATH = re.compile(r"/api/sessions/[^/]+/resource-references/signin-relay/[a-f0-9]{64}")
 
 
 def _b64url_encode(value: bytes) -> str:
@@ -204,7 +206,15 @@ class TokenTransport:
 
         path = str(scope.get("path") or "")
         method = str(scope.get("method") or "GET").upper()
-        if method == "GET" and (path in _PUBLIC_GET_PATHS or path.startswith(_PUBLIC_GET_PREFIXES)):
+        if method == "GET" and (
+            path in _PUBLIC_GET_PATHS
+            or path.startswith(_PUBLIC_GET_PREFIXES)
+            # The relay ID is a 256-bit, one-use, 60-second capability minted
+            # only through the encrypted API. Iframe and popup navigations
+            # cannot attach the encrypted token envelope, so expose exactly
+            # this capability URL while keeping every other /api path private.
+            or _RESOURCE_SIGNIN_RELAY_PATH.fullmatch(path)
+        ):
             await self.app(scope, receive, send)
             return
         if path not in TOKEN_ENDPOINTS:
@@ -217,10 +227,10 @@ class TokenTransport:
             await self._ping(scope, receive, send)
             return
         if path == "/api/token/request" and method == "POST":
-            await self._request(receive, send)
+            await self._request(scope, receive, send)
             return
         if path == "/api/token/stream" and method == "POST":
-            await self._stream(receive, send)
+            await self._stream(scope, receive, send)
             return
         await self._plain_response(send, 404, b"Not found")
 
@@ -296,12 +306,12 @@ class TokenTransport:
             return
         await self._json_response(send, 200, session.encrypt("pong", b"pong"))
 
-    async def _request(self, receive: Any, send: Any) -> None:
+    async def _request(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         body = await self._read_json(receive)
         try:
             session, sequence, ciphertext = self._encrypted_input(body, "request")
             request_data = _decode_request(session.decrypt("request", sequence, ciphertext))
-            inner_scope, inner_body = _inner_scope(request_data)
+            inner_scope, inner_body = _inner_scope(request_data, scope)
         except (InvalidTag, TypeError, ValueError):
             await self._json_response(send, 401, {"error": "invalid_envelope"})
             return
@@ -338,12 +348,12 @@ class TokenTransport:
         ).encode("utf-8")
         await self._json_response(send, 200, session.encrypt("response", response_plaintext))
 
-    async def _stream(self, receive: Any, send: Any) -> None:
+    async def _stream(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
         body = await self._read_json(receive)
         try:
             session, sequence, ciphertext = self._encrypted_input(body, "stream")
             request_data = _decode_request(session.decrypt("stream", sequence, ciphertext))
-            inner_scope, inner_body = _inner_scope(request_data)
+            inner_scope, inner_body = _inner_scope(request_data, scope)
         except (InvalidTag, TypeError, ValueError):
             await self._json_response(send, 401, {"error": "invalid_envelope"})
             return
@@ -546,7 +556,7 @@ def _decode_request(plaintext: bytes) -> dict[str, Any]:
     return value
 
 
-def _inner_scope(request_data: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
+def _inner_scope(request_data: dict[str, Any], outer_scope: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
     method = request_data.get("method")
     target = request_data.get("path")
     raw_headers = request_data.get("headers", {})
@@ -571,21 +581,28 @@ def _inner_scope(request_data: dict[str, Any]) -> tuple[dict[str, Any], bytes]:
         if normalized not in {"accept", "content-type", "last-event-id"} or not isinstance(value, str):
             continue
         headers.append((normalized.encode("ascii"), value.encode("latin-1")))
-    headers.append((b"host", b"127.0.0.1"))
+    server = outer_scope.get("server")
+    if not server or len(server) != 2:
+        raise ValueError("missing server")
+    hostname, port = server
+    authority = "[{}]".format(hostname) if ":" in hostname else hostname
+    if port is not None:
+        authority = "{}:{}".format(authority, port)
+    headers.append((b"host", authority.encode("ascii")))
     body = _b64url_decode(raw_body) if raw_body else b""
     scope = {
         "type": "http",
         "asgi": {"version": "3.0", "spec_version": "2.3"},
         "http_version": "1.1",
         "method": method.upper(),
-        "scheme": "http",
+        "scheme": outer_scope["scheme"],
         "path": path,
         "raw_path": raw_path,
         "query_string": parsed.query.encode("ascii"),
         "root_path": "",
         "headers": headers,
         "client": ("127.0.0.1", 0),
-        "server": ("127.0.0.1", 8766),
+        "server": server,
     }
     return scope, body
 

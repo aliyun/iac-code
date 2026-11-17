@@ -360,6 +360,8 @@ class StackProgressEvent(ToolEmittedEvent):
     region_id: str = ""
     # 让 web 前端把进度关联到发起该栈操作的工具卡(与 ResourceObservedEvent/MCPProgressEvent 一致)。
     tool_use_id: str | None = None
+    account_scope: str = ""
+    console_partition: str = ""
     type: Literal["stack_progress"] = "stack_progress"
 
 

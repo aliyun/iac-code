@@ -1,4 +1,8 @@
 import { t } from "../i18n.js?v=web-repl-ui-277";
+import { registerResourceText, setResourceTextContext } from "../resource_linkify.js?v=resource-links-v122";
+import { toolResourceSourceValue } from "../resource_sources.js?v=resource-bindings-v52";
+import { resourceToolContext, resourceContextFromObject } from "../resource_occurrences.js?v=resource-links-v114";
+import { resourceSpec } from "../resource_link_rules.js?v=resource-links-v82";
 
 function text(value) {
   if (value === undefined || value === null) {
@@ -413,11 +417,16 @@ function conclusionScalarText(value) {
   return text(value);
 }
 
-function renderConclusionValue(value) {
+function renderConclusionValue(value, context = {}) {
   if (value === null || value === undefined || typeof value !== "object") {
     const span = document.createElement("span");
     span.className = "conclusion-scalar";
     span.textContent = conclusionScalarText(value);
+    // Keep the exact field context on the scalar itself. This is important
+    // for opaque names (including names with spaces) whose parent <dd> may be
+    // traversed as a separate logical segment by the linkifier.
+    setResourceTextContext(span, context);
+    if (value === null || value === undefined || value === "") span.setAttribute("data-resource-ignore", "");
     return span;
   }
   if (Array.isArray(value)) {
@@ -425,14 +434,15 @@ function renderConclusionValue(value) {
       const span = document.createElement("span");
       span.className = "conclusion-scalar";
       span.textContent = "—";
+      span.setAttribute("data-resource-ignore", "");
       return span;
     }
     const list = document.createElement("ul");
     list.className = "conclusion-list";
-    for (const item of value) {
+    for (const [index, item] of value.entries()) {
       const li = document.createElement("li");
       li.className = "conclusion-item";
-      li.append(renderConclusionValue(item));
+      li.append(renderConclusionValue(item, {...context, structuralScope:`${context.structuralScope || "$"}/${index}`}));
       list.append(li);
     }
     return list;
@@ -442,9 +452,11 @@ function renderConclusionValue(value) {
     const span = document.createElement("span");
     span.className = "conclusion-scalar";
     span.textContent = "—";
+    span.setAttribute("data-resource-ignore", "");
     return span;
   }
   const dl = document.createElement("dl");
+  const objectContext = resourceContextFromObject(value, context);
   dl.className = "conclusion-object";
   for (const [key, val] of entries) {
     const row = document.createElement("div");
@@ -454,7 +466,10 @@ function renderConclusionValue(value) {
     dt.textContent = conclusionLabel(key);
     const dd = document.createElement("dd");
     dd.className = "conclusion-value";
-    dd.append(renderConclusionValue(val));
+    const fieldContext = {...objectContext, field:key,
+      structuralScope:`${objectContext.structuralScope || "$"}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`};
+    setResourceTextContext(dd, fieldContext);
+    dd.append(renderConclusionValue(val, fieldContext));
     row.append(dt, dd);
     dl.append(row);
   }
@@ -484,7 +499,8 @@ function renderCompleteStepDetail(tool = {}) {
   const heading = document.createElement("h4");
   heading.className = "conclusion-heading";
   heading.textContent = t("Conclusion");
-  detail.append(heading, renderConclusionValue(conclusion));
+  detail.append(heading, renderConclusionValue(conclusion,
+    {...resourceToolContext(tool), complete: !isToolInProgress(tool)}));
 
   return detail;
 }
@@ -896,7 +912,7 @@ function toolGroupSummaryParts(tools = [], tense = "done") {
   return parts.length > 0 ? parts.join(", ") : otherSummaryPart(tools.length, tense);
 }
 
-function appendValueBlock(parent, className, label, value) {
+function appendValueBlock(parent, className, label, value, context = null) {
   if (value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0)) {
     return;
   }
@@ -908,12 +924,13 @@ function appendValueBlock(parent, className, label, value) {
 
   const block = document.createElement("pre");
   block.textContent = displayValue(value);
+  if (context) setResourceTextContext(block, context);
 
   section.append(title, block);
   parent.append(section);
 }
 
-function appendShellOutput(parent, label, value) {
+function appendShellOutput(parent, label, value, complete = true) {
   const content = text(value).trim();
   if (!content) {
     return;
@@ -925,6 +942,7 @@ function appendShellOutput(parent, label, value) {
   const block = document.createElement("pre");
   block.className = "tool-shell-output";
   block.textContent = content;
+  setResourceTextContext(block, {complete});
 
   parent.append(title, block);
 }
@@ -940,14 +958,15 @@ function renderShellDetail(tool = {}) {
   const command = document.createElement("pre");
   command.className = "tool-shell-command";
   command.textContent = `$ ${text(commandFromTool(tool) || toolName(tool))}`;
+  setResourceTextContext(command, {complete: !isToolInProgress(tool)});
 
   detail.append(label, command);
 
   const stdout = shellStdout(tool);
   const stderr = shellStderr(tool);
   if (stdout || stderr) {
-    appendShellOutput(detail, t("Output"), stdout);
-    appendShellOutput(detail, t("Error output"), stderr);
+    appendShellOutput(detail, t("Output"), stdout, !isToolInProgress(tool));
+    appendShellOutput(detail, t("Error output"), stderr, !isToolInProgress(tool));
   } else {
     const empty = document.createElement("p");
     empty.className = "tool-shell-empty";
@@ -999,7 +1018,8 @@ function renderGenericDetail(tool = {}, options = {}) {
   }
 
   if (options.includeInput !== false) {
-    appendValueBlock(detail, "tool-card-input", t("Input"), tool.input);
+    appendValueBlock(detail, "tool-card-input", t("Input"), tool.input,
+      {...resourceToolContext(tool, {requestValues:true}), complete: !isToolInProgress(tool)});
   }
   if (options.includeResults !== false) {
     const structured = structuredResultValue(tool);
@@ -1008,10 +1028,16 @@ function renderGenericDetail(tool = {}, options = {}) {
       section.className = "tool-card-results";
       const title = document.createElement("h4");
       title.textContent = t("Result");
-      section.append(title, renderConclusionValue(structured));
+      section.append(title, renderConclusionValue(structured, resourceToolContext(tool)));
       detail.append(section);
     } else {
-      appendValueBlock(detail, "tool-card-results", t("Result"), tool.results);
+      const visibleResults = tool.results?.map((result) => {
+        if (!result || typeof result !== "object") return result;
+        const {resourceReferences, ...visible} = result;
+        return visible;
+      });
+      appendValueBlock(detail, "tool-card-results", t("Result"), visibleResults,
+        {...resourceToolContext(tool), complete: !isToolInProgress(tool)});
     }
   }
   appendValueBlock(detail, "tool-card-artifacts", t("Artifacts"), tool.artifacts);
@@ -1074,6 +1100,10 @@ function renderStackProgressDetail(tool = {}) {
   const isInstances = progress.kind === "stack.instances.progress";
   const section = document.createElement("section");
   section.className = "tool-stack-progress";
+  setResourceTextContext(section, {
+    regionId:progress.regionId, accountScope:progress.accountScope,
+    consolePartition:progress.consolePartition, complete:true,
+  });
 
   const name = text(progress.stackName || progress.stackGroupName);
   const id = text(progress.stackId || progress.operationId);
@@ -1089,8 +1119,22 @@ function renderStackProgressDetail(tool = {}) {
   head.className = "tool-stack-progress-head";
   const title = createText(
     "tool-stack-progress-title",
-    name ? (id ? t("Stack: {name} ({id})", { name, id }) : t("Stack: {name}", { name })) : t("Stack"),
+    name ? (id ? t("Stack: {name} ({id})", { name, id }) : t("Stack: {name}", { name })) :
+      id ? t("Stack: {name}", {name:id}) : t("Stack"),
   );
+  if (!isInstances && progress.stackId) {
+    // Only the actual StackId span receives field semantics. Stack display names
+    // and multi-account operation IDs must not be treated as stack locators.
+    const label = title.textContent;
+    const offset = label.lastIndexOf(id);
+    if (offset >= 0) {
+      const identifier = createText("tool-stack-progress-id", id);
+      setResourceTextContext(identifier, {
+        resourceType:"ALIYUN::ROS::Stack", field:"StackId", structuralScope:"/stackProgress/StackId",
+      });
+      title.replaceChildren(label.slice(0,offset), identifier, label.slice(offset+id.length));
+    }
+  }
   if (isToolInProgress(tool)) {
     // 进行中:标题流光,与工具卡标题一致(对齐相位避免重建闪回)。
     applyShimmerPhase(title);
@@ -1133,9 +1177,12 @@ function renderStackProgressDetail(tool = {}) {
     const table = document.createElement("table");
     table.className = "tool-stack-progress-table";
     const hasReason = rows.some((row) => text(row.status_reason));
+    const rowIdentifier = (row) => text(row.attributes?.[resourceSpec(row.resource_type)?.identifierField] || row.physical_resource_id);
+    const hasIdentifiers = !isInstances && rows.some(rowIdentifier);
     const headers = isInstances
       ? [t("Account"), t("Region"), t("Status")]
       : [t("Resource"), t("Type"), t("Status")];
+    if (hasIdentifiers) headers.push(t("Resource identifier"));
     if (hasReason) {
       headers.push(t("Reason"));
     }
@@ -1149,7 +1196,7 @@ function renderStackProgressDetail(tool = {}) {
     thead.append(headRow);
     table.append(thead);
     const tbody = document.createElement("tbody");
-    for (const row of rows) {
+    for (const [rowIndex,row] of rows.entries()) {
       const tr = document.createElement("tr");
       const rowStatus = text(row.status);
       const rowFailed = /FAIL|ROLLBACK|DELETE_FAILED|CREATE_FAILED|UPDATE_FAILED/i.test(rowStatus);
@@ -1157,12 +1204,25 @@ function renderStackProgressDetail(tool = {}) {
       const cells = isInstances
         ? [text(row.account_id), text(row.region_id), conclusionScalarText(row.status)]
         : [text(row.name), text(row.resource_type), conclusionScalarText(row.status)];
+      if (hasIdentifiers) cells.push(rowIdentifier(row));
       if (hasReason) {
         cells.push(text(row.status_reason));
       }
       cells.forEach((value, index) => {
         const td = document.createElement("td");
         td.textContent = value;
+        if (hasIdentifiers && index === 3) {
+          const spec = resourceSpec(row.resource_type);
+          setResourceTextContext(td, {
+            resourceType: row.resource_type,
+            structuralScope:`/stackProgress/resources/${rowIndex}/identifier`,
+            field: row.attributes?.[spec?.identifierField] || String(row.resource_type).startsWith("alicloud_") ? spec?.identifierField : "PhysicalResourceId",
+            attributes: row.attributes || {},
+            regionId: row.attributes?.DestinationRegionId || row.region_id || progress.regionId,
+            accountScope: row.account_scope || progress.accountScope,
+            consolePartition: row.console_partition || progress.consolePartition,
+          });
+        }
         if (index === 2) {
           const statusClass = rowFailed ? " is-error" : rowDone ? " is-done" : "";
           td.className = `tool-stack-progress-cell-status${statusClass}`;
@@ -1258,7 +1318,10 @@ function renderToolCard(tool = {}, options = {}) {
   } else {
     card.append(renderGenericDetail(tool));
   }
-  return card;
+  return registerResourceText(card, {
+    source: {toolUseId: tool.toolUseId, sourcePath:"/tool"}, bindingValue:toolResourceSourceValue(tool),
+    context: resourceToolContext(tool), complete: !isToolInProgress(tool),
+  });
 }
 
 function orderedTools(state = {}) {

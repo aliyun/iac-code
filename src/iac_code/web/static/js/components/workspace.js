@@ -1369,6 +1369,7 @@ function createCloudPanel(api, context) {
       const payload = await api.saveAliyunCloud(payloadToSave);
       if (token !== requestToken) return;
       fillCloudForm(payload);
+      context.onCloudCredentialsChanged?.();
     } catch (error) {
       if (token !== requestToken) return;
       showCloudError(error);
@@ -1391,6 +1392,7 @@ function createCloudPanel(api, context) {
       });
       if (token !== requestToken) return;
       fillCloudForm(payload);
+      context.onCloudCredentialsChanged?.();
       oauthStatus.textContent = t("Login succeeded.");
     } catch (error) {
       if (token !== requestToken) return;
@@ -4241,6 +4243,206 @@ function createOtherPanel(api, context) {
   });
   sessionDefaultsCard.append(makeField(t("Default permission"), permissionSelect, t("The permission mode preset for new sessions.")), modeField);
 
+  // 内嵌控制台专用角色:settings.yml 仅存 ARN;AssumeRole 的 STS 由后端内存缓存并在到期前刷新。
+  const consoleRoleGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
+  consoleRoleGroupHead.append(
+    makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Embedded console sign-in") }),
+    makeElement("p", {
+      className: "workspace-settings-group-desc",
+      textContent: t("Open supported cloud resources here without signing in again."),
+    }),
+  );
+  const consoleRoleInput = makeTextInput(
+    "workspace-console-signin-role-arn",
+    "acs:ram::1234567890123456:role/IacCodeConsoleSigninRole",
+  );
+  const consoleRoleSaveButton = makeButton(t("Save role"), "console-signin-role-save");
+  const consoleRoleCreateButton = makeButton(
+    t("Create read-only role"),
+    "console-signin-role-create",
+    "workspace-action workspace-action-primary",
+  );
+  const consoleRoleRepairButton = makeButton(t("Repair read-only permissions"), "console-signin-role-repair");
+  let consoleRoleSavedArn = "";
+  let consoleRolePolicy = null;
+  const consoleRolePolicyDisclosure = makeElement("details", {
+    className: "workspace-console-role-policy",
+    attributes: { hidden: "hidden" },
+    dataset: { workspaceAction: "console-signin-role-policy" },
+  });
+  const consoleRolePolicySummary = makeElement("summary", {
+    textContent: t("Additional read-only permissions (all resources):"),
+  });
+  const consoleRolePolicyDetails = makeElement("div", {
+    className: "workspace-console-role-policy-content",
+  });
+  const consoleRolePolicyName = makeElement("h5", { className: "workspace-console-role-policy-name" });
+  const consoleRolePolicyActions = makeElement("ul", { className: "workspace-console-role-policy-actions" });
+  consoleRolePolicyDetails.append(consoleRolePolicyName, consoleRolePolicyActions);
+  consoleRolePolicyDisclosure.append(consoleRolePolicySummary, consoleRolePolicyDetails);
+  const consoleRoleStatus = makeElement("p", {
+    className: "workspace-console-role-status",
+    attributes: { "aria-live": "polite", hidden: "hidden" },
+  });
+  const consoleRoleActions = makeElement("div", { className: "workspace-action-row" });
+  consoleRoleActions.append(consoleRoleSaveButton, consoleRoleCreateButton, consoleRoleRepairButton);
+  const consoleRoleCard = makeElement("section", {
+    className: "workspace-settings-group workspace-settings-provider workspace-console-role-card",
+  });
+  consoleRoleCard.append(
+    makeField(
+      t("RAM role ARN"),
+      consoleRoleInput,
+      t("With a role configured, supported resources open here; other resources open in a new tab."),
+    ),
+    consoleRoleActions,
+  );
+  const consoleRoleHelp = makeElement("p", {
+    className: "workspace-settings-group-desc workspace-console-role-help",
+    textContent: t("One-click creation requires RAM write and sts:AssumeRole permissions; root accounts are not supported."),
+  });
+  consoleRoleCard.append(consoleRoleHelp, consoleRolePolicyDisclosure, consoleRoleStatus);
+
+  const loadConsoleRolePolicy = (value) => {
+    consoleRoleSavedArn = value?.roleArn || "";
+    consoleRolePolicy = value?.supplementPolicy || null;
+    consoleRoleRepairButton.disabled = !consoleRoleSavedArn || !consoleRolePolicy;
+    consoleRolePolicyDisclosure.hidden = !consoleRolePolicy;
+    consoleRolePolicyName.textContent = consoleRolePolicy?.name || "";
+    consoleRolePolicyActions.replaceChildren(...(consoleRolePolicy?.actions || []).map((action) => {
+      const item = makeElement("li");
+      item.append(makeElement("code", { textContent: action }));
+      return item;
+    }));
+  };
+  const confirmConsoleRolePolicy = (creating = false) => {
+    const message = t("This creates or updates the supplemental policy and attaches it with ReadOnlyAccess. Existing non-default policy versions may rotate. Continue?");
+    const target = creating ? "IacCodeConsoleSigninRole" : consoleRoleSavedArn;
+    const policyText = consoleRolePolicy
+      ? `${consoleRolePolicySummary.textContent}\n${consoleRolePolicy.name}\n${consoleRolePolicy.actions.map((action) => `  ${action}`).join("\n")}`
+      : "";
+    return typeof window !== "undefined"
+      && typeof window.confirm === "function"
+      && consoleRolePolicy
+      && window.confirm(`${message}\n\n${target}\n${policyText}`);
+  };
+
+  const consoleRoleErrorMessage = (error) => {
+    const payloadError = error?.payload?.error || error?.error || error || {};
+    const code = payloadError?.code || payloadError?.message || "";
+    const messages = {
+      resource_signin_role_arn_invalid: t("The RAM role ARN is invalid."),
+      resource_signin_role_credentials_required: t("Configure Alibaba Cloud credentials first."),
+      resource_signin_role_root_unsupported: t("Alibaba Cloud root accounts cannot assume roles. Use a RAM user or RAM role credential."),
+      resource_signin_role_name_conflict: t("A role named IacCodeConsoleSigninRole already exists and was not modified. Enter its ARN manually."),
+      resource_signin_role_create_denied: t("The current identity cannot create the RAM role."),
+      resource_signin_role_attach_denied: t("The role was created, but ReadOnlyAccess could not be attached."),
+      resource_signin_role_assume_denied: t("The current identity cannot assume the configured role."),
+      resource_signin_role_setup_timeout: t("RAM role setup timed out. Check the role in the Alibaba Cloud console before retrying."),
+      resource_signin_role_policy_conflict: t("The role or supplemental policy was modified outside iac-code. No conflicting permissions were overwritten."),
+      resource_signin_role_repair_target_invalid: t("The role or supplemental policy was modified outside iac-code. No conflicting permissions were overwritten."),
+      resource_signin_role_policy_denied: t("Supplemental policy setup failed. Check RAM policy-management permissions and retry."),
+      resource_signin_role_policy_failed: t("Supplemental policy setup failed. Check RAM policy-management permissions and retry."),
+    };
+    const summary = messages[code] || t("Could not configure the console sign-in role.");
+    const diagnostic = payloadError?.diagnostic;
+    if (!diagnostic || typeof diagnostic !== "object") return summary;
+    const headline = diagnostic.code
+      ? `${diagnostic.code}${diagnostic.message ? `: ${diagnostic.message}` : ""}`
+      : diagnostic.message
+        ? `${diagnostic.type || "Error"}: ${diagnostic.message}`
+        : diagnostic.type || "";
+    const accessDenied = diagnostic.accessDeniedDetail && typeof diagnostic.accessDeniedDetail === "object"
+      ? Object.entries(diagnostic.accessDeniedDetail)
+        .filter(([, value]) => typeof value === "string" && value)
+        .map(([name, value]) => `${name}=${value}`)
+        .join(", ")
+      : "";
+    const requestId = diagnostic.requestId
+      ? `${t("Request ID")}: ${diagnostic.requestId}`
+      : "";
+    const details = [headline, accessDenied, requestId].filter(Boolean).join("\n");
+    return details ? `${summary}\n${details}` : summary;
+  };
+  const showConsoleRoleStatus = (message, isError = false) => {
+    consoleRoleStatus.textContent = message;
+    consoleRoleStatus.hidden = !message;
+    consoleRoleStatus.classList.toggle("is-error", Boolean(isError));
+  };
+  const setConsoleRoleBusy = (busy) => {
+    consoleRoleSaveButton.disabled = busy;
+    consoleRoleCreateButton.disabled = busy;
+    consoleRoleRepairButton.disabled = busy || !consoleRoleSavedArn || !consoleRolePolicy;
+    consoleRoleInput.disabled = busy;
+  };
+
+  consoleRoleSaveButton.addEventListener("click", async () => {
+    setConsoleRoleBusy(true);
+    showConsoleRoleStatus(t("Saving…"));
+    try {
+      const saved = await api.saveConsoleSigninRole(consoleRoleInput.value.trim());
+      consoleRoleInput.value = saved?.roleArn || "";
+      loadConsoleRolePolicy(await api.getConsoleSigninRole());
+      showConsoleRoleStatus(
+        saved?.configured
+          ? t("Role saved. Embedded sign-in will be used when AssumeRole succeeds.")
+          : t("Role configuration cleared. Resource links will use the normal new-tab behavior."),
+      );
+      context.onCloudCredentialsChanged?.();
+    } catch (error) {
+      showConsoleRoleStatus(consoleRoleErrorMessage(error), true);
+    } finally {
+      setConsoleRoleBusy(false);
+    }
+  });
+
+  consoleRoleCreateButton.addEventListener("click", async () => {
+    if (!confirmConsoleRolePolicy(true)) return;
+    setConsoleRoleBusy(true);
+    showConsoleRoleStatus(t("Creating and verifying the read-only RAM role…"));
+    try {
+      const created = await api.createConsoleSigninRole();
+      consoleRoleInput.value = created?.roleArn || "";
+      loadConsoleRolePolicy(await api.getConsoleSigninRole());
+      showConsoleRoleStatus(
+        created?.status === "ready"
+          ? t("Read-only role created and verified.")
+          : consoleRoleErrorMessage({ error: created?.error }),
+        created?.status !== "ready",
+      );
+      context.onCloudCredentialsChanged?.();
+    } catch (error) {
+      showConsoleRoleStatus(consoleRoleErrorMessage(error), true);
+    } finally {
+      setConsoleRoleBusy(false);
+    }
+  });
+
+  consoleRoleRepairButton.addEventListener("click", async () => {
+    if (consoleRoleInput.value.trim() !== consoleRoleSavedArn) {
+      showConsoleRoleStatus(t("Save the role before repairing its permissions."), true);
+      return;
+    }
+    if (!confirmConsoleRolePolicy()) return;
+    setConsoleRoleBusy(true);
+    showConsoleRoleStatus(t("Updating and verifying read-only permissions…"));
+    try {
+      const repaired = await api.repairConsoleSigninRole(consoleRoleSavedArn, consoleRolePolicy.revision);
+      loadConsoleRolePolicy(await api.getConsoleSigninRole());
+      showConsoleRoleStatus(
+        repaired?.status === "ready"
+          ? t("Read-only permissions updated. Reopen the resource preview to use them.")
+          : consoleRoleErrorMessage({ error: repaired?.error }),
+        repaired?.status !== "ready",
+      );
+      context.onCloudCredentialsChanged?.();
+    } catch (error) {
+      showConsoleRoleStatus(consoleRoleErrorMessage(error), true);
+    } finally {
+      setConsoleRoleBusy(false);
+    }
+  });
+
   const themeGroupHead = makeElement("div", { className: "workspace-settings-group-head" });
   themeGroupHead.append(
     makeElement("h4", { className: "workspace-settings-group-title", textContent: t("Color scheme") }),
@@ -4574,7 +4776,7 @@ function createOtherPanel(api, context) {
   }
   devModeToggle.input.addEventListener("change", persistDeveloperMode);
 
-  // 章节顺序:新会话默认 → 配色方案(含界面语言与架构图方案)→ 售卖流水线 → 外来会话可见性 → 帮助改进 iac-code → 开发者模式。
+  // 章节顺序:新会话默认 → 配色方案(含界面语言与架构图方案)→ 内嵌控制台角色 → 售卖流水线 → 外来会话可见性 → 帮助改进 iac-code → 开发者模式。
   // 界面语言与架构图方案紧随配色方案,既保持外观类设置成组,也让所有分区标题的相邻关系
   // (h3→head、settings-group→head、field→head)仍被现有章节间距选择器覆盖,无需改 CSS。
   panel.append(
@@ -4586,6 +4788,8 @@ function createOtherPanel(api, context) {
     languageField,
     architectureRendererField,
     architecturePreviewRow,
+    consoleRoleGroupHead,
+    consoleRoleCard,
     reviewStepGroupHead,
     reviewStepCard,
     groupHead,
@@ -4613,6 +4817,23 @@ function createOtherPanel(api, context) {
           return;
         }
         stamp(t("Load failed: {error}", { error: error instanceof Error ? error.message : String(error) }), true);
+      }
+      try {
+        const consoleRole = await api.getConsoleSigninRole();
+        if (token === requestToken) {
+          consoleRoleInput.value = consoleRole?.roleArn || "";
+          loadConsoleRolePolicy(consoleRole);
+          showConsoleRoleStatus(
+            consoleRole?.supplementPolicy?.needsRepair
+              ? t("Read-only permissions need an update. Use the repair button.")
+              : "",
+            Boolean(consoleRole?.supplementPolicy?.needsRepair),
+          );
+        }
+      } catch (error) {
+        if (token === requestToken) {
+          showConsoleRoleStatus(t("Could not load the console sign-in role."), true);
+        }
       }
       try {
         const reviewStep = await api.getSellingReviewStep();
@@ -4696,6 +4917,9 @@ function createOtherPanel(api, context) {
       devModeToggle.input.checked = false;
       reviewStepToggle.input.checked = false;
       telemetryToggle.input.checked = false;
+      consoleRoleInput.value = "";
+      showConsoleRoleStatus("");
+      setConsoleRoleBusy(false);
       prereqNotice.hidden = true;
       prereqNotice.classList.remove("is-installed", "is-missing");
       prereqInstallButton.hidden = false;
@@ -4992,6 +5216,8 @@ export function createWorkspaceController({ tabs, content }, api, options = {}) 
     // 新会话默认保存成功后回写 app 内存 + 当前草稿(缺此透传则 persistSessionDefaults 的通知静默丢弃,
     // 表现为「改了默认要刷新页面才生效」)。
     onSessionDefaultsSaved: (payload) => options.onSessionDefaultsSaved?.(payload),
+    // 云凭证或专用控制台角色变化后,让 app.js 重新探测默认打开模式。
+    onCloudCredentialsChanged: () => options.onCloudCredentialsChanged?.(),
     confirmSecretReveal: options.confirmSecretReveal,
     restartService:
       typeof options.restartService === "function"

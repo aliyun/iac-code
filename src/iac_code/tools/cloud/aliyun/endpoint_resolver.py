@@ -293,10 +293,16 @@ class EndpointResolver:
         host_values: Mapping[str, Any] | None = None,
         explicit_endpoint: str | None = None,
     ) -> EndpointResolution:
-        if contract.transport not in {"tea", "acs1", "acs3_streaming", "oss_v4_sdk"}:
+        if contract.transport not in {"tea", "acs1", "acs3_streaming", "oss_v4_sdk", "ots_sdk"}:
             raise EndpointResolutionError("unsupported_transport")
         if not isinstance(region_id, str) or _REGION.fullmatch(region_id) is None:
             raise EndpointResolutionError("invalid_region_id")
+        if contract.transport == "ots_sdk":
+            if explicit_endpoint is not None:
+                raise EndpointResolutionError("ots_explicit_endpoint_forbidden")
+            self._host_binding_resolver.validate_values(contract, host_values or {})
+            endpoint = self._validated(f"{region_id}.ots.aliyuncs.com")
+            return EndpointResolution(endpoint, "override_pattern", "{InstanceName}.{endpoint}")
         product, version, catalog_record, override_record = self._select_records(contract.product, contract.version)
         effective = merge_endpoint_record(catalog_record, override_record)
         self._host_binding_resolver.validate_values(contract, host_values or {})

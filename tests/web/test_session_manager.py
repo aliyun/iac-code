@@ -1606,6 +1606,7 @@ def test_persist_pipeline_attachment_only_prompt_survives_visible_reload(tmp_pat
     assert visible == [
         {
             "messageId": "user-turn-attachments",
+            "turnId": "turn-attachments",
             "role": "user",
             "content": "",
             "text": "",

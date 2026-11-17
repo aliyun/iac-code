@@ -61,8 +61,8 @@ _PATH_PLACEHOLDER = re.compile(r"\{([^{}]+)\}")
 _MAX_BODY_BYTES = 32 * 1024 * 1024
 _DEFAULT_RESPONSE_BYTES = 8 * 1024 * 1024
 _MAX_RESPONSE_BYTES = 16 * 1024 * 1024
-_TRANSPORTS = {"tea", "acs1", "acs3_streaming", "oss_v4_sdk"}
-_SIGNATURE_SCHEMES = {"acs1", "acs3", "oss_v4"}
+_TRANSPORTS = {"tea", "acs1", "acs3_streaming", "oss_v4_sdk", "ots_sdk"}
+_SIGNATURE_SCHEMES = {"acs1", "acs3", "oss_v4", "ots_v4"}
 _AUTH_TYPES = {"AK", "Anonymous"}
 _OPENMETA_CACHE_STATUSES = {"memory_fresh", "disk_fresh", "remote", "disk_stale", "negative_hit", "miss"}
 _OSS_OPENMETA_FALLBACK_REASON = "oss_openmeta_required_for_complete_request"
@@ -379,6 +379,39 @@ class ApiContractResolver:
         self._validate_call(call)
         product, candidates, product_resolution = await self._resolve_product_versions(call)
         call = replace(call, action=normalize_action(product, call.action))
+        from iac_code.tools.cloud.aliyun.ots_data_adapter import (
+            OTS_DATA_VERSION,
+            is_ots_list_table,
+            ots_list_table_metadata,
+        )
+
+        if is_ots_list_table(product, call.action, call.version):
+            metadata = ots_list_table_metadata()
+            contract = CanonicalWireContract(
+                metadata_source="explicit_fallback",
+                product=metadata.product,
+                version=OTS_DATA_VERSION,
+                action=metadata.action,
+                style=metadata.style,
+                method=metadata.method,
+                pathname=metadata.pathname,
+                operation_type=None,
+                auth_type="AK",
+                signature_scheme="ots_v4",
+                transport="ots_sdk",
+                executable=True,
+                unsupported_reasons=(),
+                parameters=metadata.parameters,
+                consumes=metadata.consumes,
+                produces=metadata.produces,
+                policy_digest=self._policy_digest,
+                request_body_type="none",
+                response_body_type="json",
+                endpoint_policy_digest=self._endpoint_policy_digest,
+                catalog_schema_version=self._catalog_schema_version,
+                catalog_source_commit=self._catalog_source_commit,
+            )
+            return self._with_product_resolution(contract, product_resolution)
         if not candidates:
             raise ApiContractError("invalid_or_missing_version", product=product)
         version_map = _VERSION_MAP.get(product.casefold()) if call.version is None else None
@@ -661,8 +694,28 @@ class ApiContractResolver:
             or metadata.consumes
         )
         request_body_type = _request_body_type(parameters, consumes)
+        signature_scheme = self._signature_scheme(metadata.product, metadata.version)
+        typed_oss_body = _oss_put_bucket_model_input(
+            product=metadata.product,
+            version=metadata.version,
+            action=metadata.action,
+            signature_scheme=signature_scheme,
+            method=method,
+            body_type=request_body_type,
+            consumes=consumes,
+        )
         for parameter in parameters:
-            if parameter.style not in _SAFE_PARAMETER_STYLES:
+            typed_xml_body = (
+                typed_oss_body
+                and style == "ROA"
+                and pathname == "/"
+                and parameter.name == "body"
+                and parameter.location == "body"
+                and parameter.style == "xml"
+                and parameter.schema is not None
+                and parameter.schema.get("type") == "object"
+            )
+            if parameter.style not in _SAFE_PARAMETER_STYLES and not typed_xml_body:
                 reasons.append("parameter_style_unsupported")
             if parameter.schema is None:
                 reasons.append("parameter_schema_reference_unsupported")
@@ -677,7 +730,6 @@ class ApiContractResolver:
             auth_reason = None
         if auth_reason is not None:
             reasons.append(auth_reason)
-        signature_scheme = self._signature_scheme(metadata.product, metadata.version)
         reasons.extend(self._oss_reasons(signature_scheme, metadata.action, method))
         if signature_scheme == "oss_v4" and auth_type == "Anonymous":
             reasons.append("oss_v4_anonymous_unsupported")
@@ -685,13 +737,22 @@ class ApiContractResolver:
         if metadata.schemes and "HTTPS" not in metadata.schemes:
             reasons.append("https_required")
         response_body_type = metadata.response_body_type_for_method(method)
+        if typed_oss_body and not self._oss_reasons(signature_scheme, metadata.action, method):
+            operation = self._oss_catalog.get(metadata.action)
+            if operation is not None and operation.response_mode == "headers_only":
+                response_body_type = "none"
         if (
             metadata.produces
             and response_body_type != "none"
             and _preferred_accept(metadata.produces, method, response_body_type) is None
         ):
             reasons.append("response_media_type_unsupported")
-        if consumes and request_body_type != "none" and _preferred_media(consumes, request_body_type) is None:
+        if (
+            consumes
+            and request_body_type != "none"
+            and _preferred_media(consumes, request_body_type) is None
+            and not typed_oss_body
+        ):
             reasons.append("request_media_type_unsupported")
         transport = _select_transport(
             signature_scheme,
@@ -1081,6 +1142,19 @@ class RequestBuilder:
             if file_present:
                 raise ApiContractError("body_file_not_supported")
             raise ApiContractError("body_source_mismatch")
+        input_consumes = (
+            ("application/json",)
+            if _oss_put_bucket_model_input(
+                product=contract.product,
+                version=contract.version,
+                action=contract.action,
+                signature_scheme=contract.signature_scheme,
+                method=contract.method,
+                body_type=contract.request_body_type,
+                consumes=contract.consumes,
+            )
+            else contract.consumes
+        )
         content_type = tool_input.get("content_type")
         if sources == 0 and content_type is not None:
             raise ApiContractError("content_type_without_body")
@@ -1103,17 +1177,17 @@ class RequestBuilder:
             _validate_content_type(content_type, "byte", contract.consumes)
             content_type = content_type or _preferred_media(contract.consumes, "byte") or "application/octet-stream"
         elif body_present:
-            _validate_content_type(content_type, "json", contract.consumes)
+            _validate_content_type(content_type, "json", input_consumes)
             declared_body = [parameter for parameter in contract.parameters if parameter.location == "body"]
             if len(declared_body) == 1:
                 _validate_parameter(declared_body[0], tool_input["body"])
             body = _json_bytes(tool_input["body"])
-            content_type = content_type or _preferred_media(contract.consumes, "json") or "application/json"
+            content_type = content_type or _preferred_media(input_consumes, "json") or "application/json"
         elif body_parameters:
-            _validate_content_type(content_type, "json", contract.consumes)
+            _validate_content_type(content_type, "json", input_consumes)
             body_value = body_parameters[0][1] if len(body_parameters) == 1 else dict(body_parameters)
             body = _json_bytes(body_value)
-            content_type = content_type or _preferred_media(contract.consumes, "json") or "application/json"
+            content_type = content_type or _preferred_media(input_consumes, "json") or "application/json"
         elif form:
             _validate_content_type(content_type, "formData", contract.consumes)
             body = urlencode(sorted(form.items())).encode("ascii")
@@ -1208,6 +1282,8 @@ def _select_transport(
         return "acs1"
     if signature_scheme == "oss_v4":
         return "oss_v4_sdk"
+    if signature_scheme == "ots_v4":
+        return "ots_sdk"
     media = tuple(_normalized_media_type(value) for value in (*consumes, *produces))
     non_json = any(value is None or not _is_json_media_type(value) for value in media)
     streaming_body = request_body_type == "byte" or response_body_type in {"binary", "string"}
@@ -1546,6 +1622,28 @@ def _request_body_type(
     if media_types and all(value != "application/x-www-form-urlencoded" for value in media_types if value is not None):
         return "byte"
     return "json"
+
+
+def _oss_put_bucket_model_input(
+    *,
+    product: str,
+    version: str,
+    action: str,
+    signature_scheme: str,
+    method: str,
+    body_type: str,
+    consumes: tuple[str, ...],
+) -> bool:
+    """Only this SDK operation takes a JSON model that the SDK serializes as XML."""
+    return (
+        product.casefold() == "oss"
+        and version == "2019-05-17"
+        and action == "PutBucket"
+        and signature_scheme == "oss_v4"
+        and method == "PUT"
+        and body_type == "json"
+        and consumes == ("application/xml",)
+    )
 
 
 def _preferred_media(media_types: tuple[str, ...], body_type: str) -> str | None:

@@ -1,23 +1,137 @@
-import * as api from "./api.js?v=web-repl-ui-315";
+import * as api from "./api.js?v=web-repl-ui-316";
+import { ResourceIndex, persistResourceChoice, queryResourceAttributes, loadResourceAccountContext } from "./resource_index.js?v=resource-references-v16";
+import { canonicalResourceType } from "./resource_link_rules.js?v=resource-links-v82";
+import { configureResourceLinks, registerResourceText } from "./resource_linkify.js?v=resource-links-v122";
+import { closeResourceLinkPopover, openResourceLinkPopover, setResourceLinkPermissionPending } from "./components/resource_link_popover.js?v=resource-links-v84";
+import {
+  closeResourceLinkPreview,
+  openResourceLinkPreview,
+  openResourceLinkExternal,
+  supportsEmbeddedSignin,
+} from "./components/resource_link_preview.js?v=resource-links-v95";
 import { createComposerController } from "./components/composer.js?v=session-model-v24";
 import {
   destroyResourceSelectionPanels,
   renderBlockingPanels,
-} from "./components/blocking.js?v=blocking-keys-v13";
+} from "./components/blocking.js?v=blocking-keys-v82";
 import {
   deploymentConfirmationKey,
   renderDeploymentConfirmationPanel,
   renderPipelineWorkspace,
 } from "./components/pipeline.js?v=pipeline-solution-confirm-v17";
-import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=live-inline-tools-v26";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v62";
-import { createOutputController, highlightTemplate } from "./components/output_panel.js?v=output-panel-v39";
+import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=resource-links-v112";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v70";
+import { createOutputController, highlightTemplate } from "./components/output_panel.js?v=output-panel-v45";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
-import { reduceEvent } from "./events.js?v=web-repl-ui-324";
+import { reduceEvent } from "./events.js?v=web-repl-ui-325";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 import { renderMermaid } from "./mermaid_render.js?v=cost-period-v6";
 
 const root = document.getElementById("iac-code-web-root");
+const resourceIndex = new ResourceIndex({canonicalType: canonicalResourceType});
+let resourceSigninCapabilitySession = null;
+let resourceSigninCapabilityRequest = 0;
+let resourceSigninEmbedded = false;
+let resourceSigninCapabilityPending = false;
+let resourceSigninCapabilityRetried = false;
+let resourceSigninCapabilityRetryTimer = null;
+
+async function refreshResourceSigninCapability(sessionId, {force = false, retry = false} = {}) {
+  if (!sessionId) {
+    clearTimeout(resourceSigninCapabilityRetryTimer);
+    resourceSigninCapabilityRetryTimer = null;
+    resourceSigninCapabilitySession = null;
+    resourceSigninEmbedded = false;
+    resourceSigninCapabilityPending = false;
+    resourceSigninCapabilityRetried = false;
+    resourceSigninCapabilityRequest += 1;
+    return;
+  }
+  if (!force && resourceSigninCapabilitySession === sessionId &&
+      (resourceSigninEmbedded || resourceSigninCapabilityPending)) return;
+  if ((force && !retry) || resourceSigninCapabilitySession !== sessionId) resourceSigninCapabilityRetried = false;
+  clearTimeout(resourceSigninCapabilityRetryTimer);
+  resourceSigninCapabilityRetryTimer = null;
+  resourceSigninCapabilitySession = sessionId;
+  resourceSigninEmbedded = false;
+  resourceSigninCapabilityPending = true;
+  const request = ++resourceSigninCapabilityRequest;
+  try {
+    const result = await api.getResourceConsoleSigninCapability(sessionId);
+    if (request === resourceSigninCapabilityRequest && resourceIndex.sessionId === sessionId) {
+      resourceSigninEmbedded = result?.openMode === "embedded";
+    }
+  } catch (_error) {
+    // Capability failures intentionally preserve native new-tab navigation.
+  } finally {
+    if (request === resourceSigninCapabilityRequest) resourceSigninCapabilityPending = false;
+  }
+  // Credential refresh and role assumption can briefly fail while a restarted
+  // Web runtime warms up. Retry once so that transient fail-safe navigation
+  // does not disable the configured embedded experience for the whole session.
+  if (request === resourceSigninCapabilityRequest && resourceIndex.sessionId === sessionId &&
+      !resourceSigninEmbedded && !resourceSigninCapabilityRetried) {
+    resourceSigninCapabilityRetried = true;
+    resourceSigninCapabilityRetryTimer = setTimeout(() => {
+      resourceSigninCapabilityRetryTimer = null;
+      void refreshResourceSigninCapability(sessionId, {force: true, retry: true});
+    }, 1200);
+  }
+}
+
+resourceIndex.subscribe((change) => {
+  if (!change.reset) return;
+  const sessionId = resourceIndex.sessionId;
+  void refreshResourceSigninCapability(sessionId);
+});
+
+function retryResourceSigninCapabilityForCurrentSession() {
+  const sessionId = resourceIndex.sessionId;
+  if (!sessionId || resourceSigninEmbedded || resourceSigninCapabilityPending) return;
+  void refreshResourceSigninCapability(sessionId, {force: true});
+}
+
+// A laptop can resume on a different network while the Web page and session
+// remain alive. Re-check a previously degraded capability when the browser
+// comes back online or the user returns to the page, so embedded sign-in can
+// recover without requiring a manual reload.
+globalThis.addEventListener?.("online", retryResourceSigninCapabilityForCurrentSession);
+globalThis.addEventListener?.("focus", retryResourceSigninCapabilityForCurrentSession);
+configureResourceLinks({
+  index: resourceIndex,
+  // External-only consoles still support source-account signin in a new tab.
+  shouldSignExternal: () => resourceSigninEmbedded,
+  shouldPreview: (_occurrence, resolution) => resourceSigninEmbedded && supportsEmbeddedSignin(resolution),
+  onLoadAccountContext: (context) => loadResourceAccountContext(resourceIndex,{
+    ...context,load:api.getResourceAccountContext,
+  }),
+  onActivate: (anchor, occurrence, resolution, context) => {
+    if (resolution.status === "resolved" && context.activationMode !== "context") {
+      closeResourceLinkPopover();
+      if (context.activationMode === "external") {
+        return openResourceLinkExternal(anchor, resolution, {
+          index: resourceIndex,
+          ...context,
+          createSigninUrl: (payload) => api.createResourceConsoleSignin(resourceIndex.sessionId, payload),
+        });
+      }
+      openResourceLinkPreview(anchor, occurrence, resolution, {
+        index: resourceIndex,
+        ...context,
+        createSigninUrl: (payload) => api.createResourceConsoleSignin(resourceIndex.sessionId, payload),
+      });
+    } else {
+      closeResourceLinkPreview();
+      openResourceLinkPopover(anchor, occurrence, resolution, {index: resourceIndex, ...context});
+    }
+  },
+  onPersistChoice: (payload, context) => persistResourceChoice(resourceIndex,payload,{
+    ...context,save:api.resolveResourceReference,fetchPage:(cursor) => api.getResourceReferences(context.sessionId,cursor),
+  }),
+  onQueryAttributes: (payload, context) => queryResourceAttributes(resourceIndex,payload,{
+    ...context,query:api.resolveResourceReference,fetchPage:(cursor) => api.getResourceReferences(context.sessionId,cursor),
+  }),
+});
 const DESKTOP_RUNTIME =
   typeof window !== "undefined" && window.__IAC_DESKTOP__?.runtime === "desktop"
     ? window.__IAC_DESKTOP__
@@ -238,8 +352,16 @@ export function configureMarkdownLinkTargets(renderer) {
   }
   const fallback = rules.link_open;
   rules.link_open = (tokens, index, options, env, self) => {
+    const token = tokens[index];
     tokens[index].attrSet("target", "_blank");
     tokens[index].attrSet("rel", "noopener noreferrer");
+    // markdown-it/linkify turns a bare cloud resource domain into a normal
+    // website link before resource decoration runs. Mark only those generated
+    // fuzzy links so the resource layer can replace an exact observed domain
+    // with its console destination; authored Markdown links stay untouched.
+    if (token.markup === "linkify" || token.info === "auto") {
+      token.attrSet("data-resource-auto-link", "true");
+    }
     if (typeof fallback === "function") {
       return fallback(tokens, index, options, env, self);
     }
@@ -653,6 +775,7 @@ export function messageText(message = {}) {
 }
 
 export function renderMarkdownInto(target, source, options = {}) {
+  const resourceOptions = options?.source ? options : null;
   const content = text(source);
   if (!target) {
     return;
@@ -664,9 +787,11 @@ export function renderMarkdownInto(target, source, options = {}) {
   if (markdownRenderer) {
     target.innerHTML = markdownRenderer.render(content);
     enhanceMarkdownCodeBlocks(target, options);
+    if (resourceOptions) registerResourceText(target, {...resourceOptions,bindingValue:content});
     return;
   }
   target.textContent = content;
+  if (resourceOptions) registerResourceText(target, {...resourceOptions,bindingValue:content});
 }
 
 const CODE_LANGUAGE_LABELS = {
@@ -922,6 +1047,7 @@ function normalizeStoredMessage(message, index) {
   const content = messageText(message);
   return {
     messageId: message.id || message.messageId || `stored-${index}`,
+    turnId: message.turnId || "",
     role,
     text: content,
     content,
@@ -3450,6 +3576,7 @@ function renderCompactionBoundaryMarker(message) {
   const body = document.createElement("div");
   body.className = "context-compaction-boundary-body";
   body.textContent = messageText(message) || "";
+  registerResourceText(body, {source: {messageId: message.messageId, turnId:message.turnId, sourcePath:"/text"}, bindingValue:body.textContent, complete: true});
   details.append(body);
   return details;
 }
@@ -3513,6 +3640,7 @@ function buildThinkingElement(message, state) {
   summary.append(summaryLabel);
   const thinkingBody = document.createElement("pre");
   thinkingBody.textContent = text(message.thinking);
+  registerResourceText(thinkingBody, {source: {messageId: message.messageId, turnId:message.turnId, sourcePath: "/thinking"}, bindingValue:thinkingBody.textContent, complete: !active});
   thinking.append(summary, thinkingBody);
   return thinking;
 }
@@ -3530,6 +3658,8 @@ function buildMessageBodyElement(message) {
     renderMermaid: message.stored === true || message.status !== "streaming",
     codeBlockKeyPrefix: `message:${text(message.messageId || message.id || message.sequence || "")}`,
     codeBlockStreaming: message.stored !== true && message.status === "streaming",
+    source: {messageId: message.messageId, turnId:message.turnId, sourcePath: "/text"},
+    complete: message.status !== "streaming",
   });
   return body;
 }
@@ -4831,7 +4961,9 @@ function renderMessages(state) {
 
     const body = document.createElement("div");
     body.className = "message-body markdown-body";
-    renderMarkdownInto(body, text(state.lastError.message));
+    renderMarkdownInto(body, text(state.lastError.message), {
+      source: state.lastError.resourceSource || {sourceId: "session-error"}, complete: true,
+    });
 
     article.append(label, body);
     stack.append(article);
@@ -5198,10 +5330,15 @@ function renderBlocking(state) {
       { resourceSelectionPanels },
     ),
   );
+  // Child request fields own their bindings. Keep the shell registered so
+  // removing the last request schedules source cleanup even in an empty chat.
+  registerResourceText(stack, {source:{sourceId:"blocking-panel"}, complete:true});
+  setResourceLinkPermissionPending(Object.keys(state.permissions || {}).length > 0);
   // 权限面板首次出现时把焦点从输入框移到面板，让上下键 / 回车立即可用，
   // 无需用户先用鼠标点击面板。
   const pendingFocus = stack.querySelector?.('.blocking-panel-permission[data-autofocus="pending"]');
   if (pendingFocus) {
+    closeResourceLinkPreview();
     delete pendingFocus.dataset.autofocus;
     pendingFocus.focus?.({ preventScroll: false });
   }
@@ -5238,6 +5375,7 @@ function renderPipeline(state) {
       onDeploymentConfirmation: handlePipelineDeploymentConfirmation,
     }),
   );
+  registerResourceText(workspace, {source:{sourceId:"pipeline-workspace"}, complete:true});
 }
 
 // 遗留的 pipeline 工作区模态入口已从产品中移除:主区内联体验已完整覆盖流水线，
@@ -6013,6 +6151,7 @@ function liveStacksFromState() {
       status: sp.status || "",
       isSuccess: sp.deploymentComplete === true,
       regionId: region,
+      consolePartition: sp.consolePartition,
     });
   }
   return [...byKey.values()];
@@ -6466,6 +6605,7 @@ async function handlePipelineDeploymentConfirmation(input = {}) {
 
 async function loadSession(sessionId, options = {}) {
   const generation = Number.isInteger(options.generation) ? options.generation : ++sessionLoadGeneration;
+  resourceIndex.reset(sessionId);
   const previousSessionId = state.currentSessionId || null;
   const session = await api.getSession(sessionId);
   if (generation !== sessionLoadGeneration) {
@@ -6475,6 +6615,18 @@ async function loadSession(sessionId, options = {}) {
   if (generation !== sessionLoadGeneration) {
     return false;
   }
+  await resourceIndex.loadSnapshot(
+    storedMessages.resourceReferences || { schemaVersion: 1, revision: 0, items: [], bindings: [] },
+    (cursor) => api.getResourceReferences(sessionId, cursor),
+    () => generation === sessionLoadGeneration,
+  );
+  if (generation !== sessionLoadGeneration) return false;
+  await loadResourceAccountContext(resourceIndex, {
+    sessionId,
+    isCurrent: () => generation === sessionLoadGeneration,
+    load: api.getResourceAccountContext,
+  });
+  if (generation !== sessionLoadGeneration) return false;
   const hydratedPipelineState = await loadPipelineState(session);
   if (generation !== sessionLoadGeneration) {
     return false;
@@ -6557,6 +6709,19 @@ async function handleStreamEvent(event, generation = sessionLoadGeneration) {
     return;
   }
   if (!isCurrentSessionEvent(event, activeSessionIdentifiers(), generation, sessionLoadGeneration)) {
+    return;
+  }
+  if (event.type === "resource.references") {
+    const result = resourceIndex.applyDelta(event.payload);
+    if (result === "gap" || result === "invalid") {
+      const sessionId = state.currentSessionId;
+      await resourceIndex.refresh(
+        (cursor) => api.getResourceReferences(sessionId, cursor),
+        () => generation === sessionLoadGeneration,
+      );
+    }
+    if (generation !== sessionLoadGeneration) return;
+    state.lastSequence = Math.max(state.lastSequence || 0, event.sequence || 0);
     return;
   }
   if (event.type === "session.resync.required") {
@@ -6806,6 +6971,7 @@ async function switchSession(sessionId) {
     return;
   }
   const generation = ++sessionLoadGeneration;
+  resourceIndex.reset(sessionId);
   streamHandle?.close();
   streamHandle = null;
   // 立即同步清空输入框并复位 dirty 标记，让切换后可以马上输入；随后 loadSession 用非强制方式
@@ -6854,6 +7020,7 @@ function startNewSessionDraft(options = {}) {
   const generation = ++sessionLoadGeneration;
   streamHandle?.close();
   streamHandle = null;
+  resourceIndex.reset(null);
   materializedDraftSession = null;
   closeThreadMenu();
   closeAppModal();
@@ -6894,6 +7061,8 @@ async function createSessionForSubmit() {
     return "";
   }
   materializedDraftSession = session;
+  const sessionId = displaySessionId(session);
+  resourceIndex.reset(sessionId);
   state = {
     ...emptyState(),
     sessions: state.sessions || [],
@@ -6901,7 +7070,7 @@ async function createSessionForSubmit() {
     pinnedSessions: state.pinnedSessions || [],
     pinnedProjects: state.pinnedProjects || [],
     currentSession: session,
-    currentSessionId: displaySessionId(session),
+    currentSessionId: sessionId,
     lastSequence: Number.isFinite(session.replaySequence) ? session.replaySequence : 0,
     newSessionDraft: null,
   };
@@ -7365,6 +7534,7 @@ async function start() {
       pipelineOptions: PIPELINE_OPTIONS,
       // 设置面板保存新会话默认后同步前端内存 + 当前草稿,使返回后新建会话立即生效、无需刷新页面。
       onSessionDefaultsSaved: applySessionDefaults,
+      onCloudCredentialsChanged: () => refreshResourceSigninCapability(resourceIndex.sessionId, {force: true}),
       desktopRuntime: Boolean(DESKTOP_RUNTIME),
       confirmSecretReveal: DESKTOP_RUNTIME
         ? (payload) => invokeDesktop("confirm_secret_reveal", payload)
@@ -7375,6 +7545,9 @@ async function start() {
   outputController = createOutputController({
     getSessionId: () => state.currentSessionId,
     api,
+    onResourceSnapshot: (snapshot, sessionId) => resourceIndex.loadSnapshot(
+      snapshot, (cursor) => api.getResourceReferences(sessionId, cursor), () => state.currentSessionId === sessionId,
+    ),
     openExternal: DESKTOP_RUNTIME ? (url) => invokeDesktop("open_external_url", { url }) : null,
     // 架构图行/预览头的优化三态(待优化/优化中/已完成),按当前会话事件态计算。
     getDiagramState: (item) => diagramOptimizationState(item, state),

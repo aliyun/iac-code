@@ -10,6 +10,10 @@ from typing import Any
 
 from iac_code.agent.message import Message, ToolUseBlock
 from iac_code.tools.cloud.base_stack import stack_result_from_metadata
+from iac_code.tools.cloud.resource_references import (
+    RESOURCE_REFERENCES_METADATA_KEY,
+    resource_references_from_metadata,
+)
 from iac_code.web.session_manager import _tool_results_by_id
 
 TEMPLATE_SUFFIXES = {".json", ".yaml", ".yml", ".tf"}
@@ -124,7 +128,25 @@ def _stack_result_dict(result: Any, metadata: Any = None) -> dict[str, Any] | No
     else:
         return None
     if isinstance(data, dict) and data.get("stack_id"):
-        return data
+        context = {
+            key: metadata[key]
+            for key in ("region_id", "console_partition")
+            if isinstance(metadata, dict) and isinstance(metadata.get(key), str) and metadata[key]
+        }
+        parsed = {**context, **data}
+        if not parsed.get("console_partition"):
+            partitions = {
+                fact["console_partition"]
+                for fact in resource_references_from_metadata(metadata)
+                if fact["resource_type"] == "ALIYUN::ROS::Stack"
+                and fact["identifier"] == parsed["stack_id"]
+                and (not parsed.get("region_id") or fact.get("region_id") == parsed["region_id"])
+                and fact.get("console_partition")
+            }
+            if partitions:
+                # A contradictory site is not permission to assume domestic.
+                parsed["console_partition"] = next(iter(partitions)) if len(partitions) == 1 else "unknown"
+        return parsed
     return None
 
 
@@ -265,7 +287,10 @@ def outputs_payload(
         return region
 
     def add_stack(data: dict[str, Any], raw_region: Any) -> None:
-        region = resolve_region(raw_region)
+        # The terminal result records the effective request region. A tool input
+        # may have omitted it (or preceded normalization); prefer the observation.
+        observed_region = str(data.get("region_id") or raw_region or "")
+        region = resolve_region(observed_region)
         stack_id = str(data.get("stack_id"))
         stack_name = str(data.get("stack_name") or "")
         # 同名栈按「region + 栈名」去重(失败后重试 CreateStack 会生成新 stack_id,
@@ -278,6 +303,10 @@ def outputs_payload(
             "statusReason": data.get("status_reason") or "",
             "isSuccess": bool(data.get("is_success")),
             "regionId": region,
+            # Preserve the legacy regionId/consoleUrl response, but do not let
+            # the new UI mistake today's configured fallback for past evidence.
+            "resourceRegionId": observed_region,
+            **({"consolePartition": data["console_partition"]} if data.get("console_partition") else {}),
             "consoleUrl": build_ros_console_url(region, stack_id),
         }
 
@@ -352,7 +381,10 @@ def outputs_payload(
         tool_name = data.get("toolName")
         tool_input = data.get("input") or {}
         if _is_stack_write_call(tool_name, tool_input.get("action")):
-            parsed = _stack_result_dict(data.get("stackResult") or data.get("result"))
+            parsed = _stack_result_dict(
+                data.get("stackResult") or data.get("result"),
+                {RESOURCE_REFERENCES_METADATA_KEY: data.get("resourceReferences")},
+            )
             if parsed:
                 add_stack(parsed, tool_input.get("region_id"))
         elif tool_name in {"write_file", "edit_file"}:

@@ -1,4 +1,10 @@
 import { t } from "../i18n.js?v=web-repl-ui-277";
+import { registerResourceText } from "../resource_linkify.js?v=resource-links-v122";
+
+function registerRequestText(root, request, kind, sourcePath, fieldName) {
+  registerResourceText(root, {source:{sourceId:`blocking:${kind}:${text(request.requestId)}`,sourcePath},
+    bindingValue:fieldName === undefined ? root.textContent : {fieldName,text:root.textContent},complete:true});
+}
 function text(value) {
   return value === undefined || value === null ? "" : String(value);
 }
@@ -23,6 +29,7 @@ function appendParagraph(parent, className, value) {
   paragraph.className = className;
   paragraph.textContent = content;
   parent.append(paragraph);
+  return paragraph;
 }
 
 function allowsFreeText(payload) {
@@ -131,9 +138,11 @@ export function renderPermissionRequest(request = {}, handlers = {}) {
 
   const heading = document.createElement("h3");
   heading.textContent = text(payload.message || payload.description || payload.title || payload.action || t("Authorization required"));
+  registerRequestText(heading, request, "permission", "/prompt");
   panel.append(heading);
 
-  appendParagraph(panel, "blocking-detail blocking-detail-command", shellCommand(payload));
+  const command = appendParagraph(panel, "blocking-detail blocking-detail-command", shellCommand(payload));
+  if (command) registerRequestText(command, request, "permission", "/command");
 
   const submit = (index) => {
     const choice = choices[index];
@@ -227,6 +236,10 @@ function handlePermissionKeydown(event) {
   if (isEditableTarget(event.target)) {
     return;
   }
+  // Resource controls (including popover buttons/selects) own their keyboard
+  // events. Enter there must never approve the unrelated permission request.
+  if (document.querySelector?.(".resource-link-preview") ||
+      event.target?.closest?.("[data-resource-link], .resource-link-popover, .resource-link-preview")) return;
   const panel = document.querySelector?.(".blocking-panel-permission");
   const control = panel?._permissionKeyControl;
   if (!control || !control.hasChoices) {
@@ -255,6 +268,7 @@ export function renderQuestionRequest(request = {}, handlers = {}) {
 
   const title = document.createElement("h3");
   title.textContent = text(payload.question || payload.title || t("Input required"));
+  registerRequestText(title, request, "question", "/prompt");
   panel.append(title);
 
   let freeTextInput = null;
@@ -411,6 +425,7 @@ export function renderElicitationRequest(request = {}, handlers = {}) {
 
   const title = document.createElement("h3");
   title.textContent = text(payload.message || t("Input required"));
+  registerRequestText(title, request, "elicitation", "/prompt");
   panel.append(title);
 
   const url = text(payload.url);
@@ -429,13 +444,14 @@ export function renderElicitationRequest(request = {}, handlers = {}) {
   if (fields.length > 0) {
     const form = document.createElement("div");
     form.className = "blocking-elicitation-fields";
-    for (const field of fields) {
+    for (const [index, field] of fields.entries()) {
       const wrapper = document.createElement("label");
       wrapper.className = "blocking-elicitation-field";
 
       const label = document.createElement("span");
       label.className = "blocking-elicitation-label";
       label.textContent = field.required ? `${field.label} *` : field.label;
+      registerRequestText(label, request, "elicitation", `/fields/${index}/label`, field.name);
       wrapper.append(label);
 
       const { control, read } = elicitationFieldControl(field);
@@ -446,6 +462,7 @@ export function renderElicitationRequest(request = {}, handlers = {}) {
         const hint = document.createElement("span");
         hint.className = "blocking-elicitation-desc";
         hint.textContent = description;
+        registerRequestText(hint, request, "elicitation", `/fields/${index}/description`, field.name);
         wrapper.append(hint);
       }
 
@@ -514,6 +531,7 @@ export function renderResourceSelectionRequest(request = {}, handlers = {}) {
   controlRow.className = "resource-selector-control-row";
   const mountPoint = document.createElement("div");
   mountPoint.className = "resource-selector-island";
+  mountPoint.setAttribute("data-resource-ignore", "");
   mountPoint.addEventListener("click", (event) => {
     const anchor = event.target?.closest?.("a[href]");
     if (!anchor || !mountPoint.contains(anchor)) {

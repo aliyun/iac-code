@@ -789,6 +789,10 @@ def test_frontend_stack_progress_attaches_to_tool_card(tmp_path) -> None:
               append(...children) {
                 this.children.push(...children);
               }
+              replaceChildren(...children) {
+                this.textContent = "";
+                this.children = children.map(child => typeof child === "string" ? {textContent: child} : child);
+              }
             }
 
             function collect(node, result = { text: [], classNames: [] }) {

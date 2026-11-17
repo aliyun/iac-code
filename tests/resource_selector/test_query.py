@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -15,6 +18,41 @@ from iac_code.resource_selector.query import (
     project_ore_response,
 )
 from iac_code.tools.cloud.aliyun.oss_v4_adapter import OssOperationCatalog
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selector_id", ["oss.bucket", "oss.bucket_object"])
+@pytest.mark.parametrize("wrapped", [False, True])
+async def test_oss_bucket_serializer_reaches_the_selector_through_the_runtime(monkeypatch, selector_id, wrapped):
+    from iac_code.services import cloud_credentials
+    from iac_code.tools.base import ToolResult
+    from iac_code.tools.cloud.aliyun import runtime
+    from iac_code.tools.cloud.aliyun.acs3_transport import NormalizedApiResponse
+    from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
+    from iac_code.tools.cloud.aliyun.result_contract import serialize_oss_bucket_response
+
+    body = {"buckets": [{"name": "offline-bucket", "location": "oss-cn-hangzhou"}], "is_truncated": False}
+    response = NormalizedApiResponse(200, {"x-oss-request-id": "offline"}, body, "application/json", None, 0)
+    content = serialize_oss_bucket_response(response) if wrapped else json.dumps(body)
+    services = SimpleNamespace(aclose=AsyncMock())
+    monkeypatch.setattr(runtime, "create_aliyun_runtime_services", lambda **_: services)
+    monkeypatch.setattr(cloud_credentials, "CloudCredentials", lambda: SimpleNamespace(get_provider=lambda _: None))
+
+    async def execute(_self, tool_input, _context):
+        assert (tool_input["product"], tool_input["action"], tool_input["version"]) == (
+            "oss", "ListBuckets", "2019-05-17"
+        )
+        return ToolResult.success(content)
+
+    monkeypatch.setattr(AliyunApi, "_execute_internal_trusted", execute)
+    result = await ResourceSelectorQueryService().query(
+        pending_payload=pending(selector_id), operation_key="oss.bucket.list", dynamic_parameters={}
+    )
+    assert result["ListAllMyBucketsResult"]["Buckets"]["Bucket"] == [
+        {"Name": "offline-bucket", "Location": "oss-cn-hangzhou"}
+    ]
+    assert result["ListAllMyBucketsResult"]["IsTruncated"] is False
+    services.aclose.assert_awaited_once()
 
 
 def pending(selector_id: str, metadata: dict | None = None, source: dict | None = None) -> dict:

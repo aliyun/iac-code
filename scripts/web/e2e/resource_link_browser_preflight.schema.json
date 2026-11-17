@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://iac-code.local/schemas/resource-link-browser-preflight-v1.json",
+  "title": "iac-code resource-link browser capability preflight",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "capturedAt",
+    "expiresAt",
+    "catalogRevisionDigest",
+    "status",
+    "surface",
+    "browserAccessMode",
+    "sessionIdDigest",
+    "accountScopeDigest",
+    "sample",
+    "normal",
+    "shift"
+  ],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "capturedAt": {"type": "string", "format": "date-time"},
+    "expiresAt": {"type": "string", "format": "date-time"},
+    "catalogRevisionDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"const": "passed"},
+    "surface": {"const": "iac-code-web"},
+    "browserAccessMode": {"enum": ["existing-chrome", "dedicated-chrome-profile"]},
+    "sessionIdDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "accountScopeDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "cdpEndpoint": {"const": "http://127.0.0.1:9225"},
+    "userDataDir": {"type": "string", "minLength": 1},
+    "singleBranchReplayReason": {"enum": ["production_semantic_change_targeted_normal_replay", "targeted_missing_normal_replay"]},
+    "branchSessionIdDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normal", "shift"],
+      "properties": {
+        "normal": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "shift": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceType", "resourceIdentifierDigest", "site", "sampleLevel", "actualApiCalled"],
+      "properties": {
+        "resourceType": {"type": "string", "minLength": 1},
+        "resourceIdentifierDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "site": {"const": "aliyun"},
+        "sampleLevel": {"enum": ["L2", "L3"]},
+        "actualApiCalled": {"const": true}
+      }
+    },
+    "normal": {"$ref": "#/$defs/navigation"},
+    "shift": {
+      "allOf": [
+        {"$ref": "#/$defs/navigation"},
+        {
+          "type": "object",
+          "required": ["newTabObserved"],
+          "properties": {
+            "actualNavigation": {"const": "new_tab"},
+            "newTabObserved": {"const": true}
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "navigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "actualUiClick",
+        "actualNavigation",
+        "routeMatched",
+        "finalUrl",
+        "loginPassed",
+        "resourceMatched",
+        "observedAt",
+        "artifactPath",
+        "artifactDigest"
+      ],
+      "properties": {
+        "actualUiClick": {"const": true},
+        "actualNavigation": {"enum": ["iframe", "new_tab"]},
+        "routeMatched": {"const": true},
+        "newTabObserved": {"type": "boolean"},
+        "finalUrl": {"type": "string", "format": "uri", "pattern": "^https://"},
+        "loginPassed": {"const": true},
+        "resourceMatched": {"const": true},
+        "observedAt": {"type": "string", "format": "date-time"},
+        "artifactPath": {"type": "string", "minLength": 1},
+        "artifactDigest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

@@ -68,6 +68,12 @@ class ToolExecutor:
         if not tool:
             return ToolResult.error(_("Unknown tool: {tool_name}").format(tool_name=call.name))
 
+        from iac_code.services.execution_policy import check
+
+        binding = call.invocation_binding or context.invocation_binding
+        if error := check(call.name, call.input, binding.session_id if binding else "", cwd=context.cwd):
+            return ToolResult.error(error)
+
         # Input validation
         valid, error = tool.validate_input(call.input)
         if not valid:
