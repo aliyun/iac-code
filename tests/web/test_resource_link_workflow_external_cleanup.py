@@ -154,7 +154,7 @@ def external(tmp_path):
             "started": index * 10,
             "version": {"sts": "2015-04-01", "ros": "2019-09-10", "resourcemanager": "2020-03-31"}[product],
             "endpoint": product + ".aliyuncs.com",
-            "profile": "test-guima",
+            "profile": "resource-link-test",
             "max_attempts": 1,
         }
         body = body | {"RequestId": "fake-request-" + str(index)}
@@ -197,7 +197,7 @@ def external(tmp_path):
             "original_scope": scope,
             "account": "fake-account",
             "cloud_writes": 0,
-            "profile": "test-guima",
+            "profile": "resource-link-test",
             "original_delete_evidence": result["path"],
             "original_delete_sha256": result["sha256"],
             "calls": [

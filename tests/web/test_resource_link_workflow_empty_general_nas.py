@@ -88,7 +88,7 @@ output "mount_target_domain" { value = alicloud_nas_mount_target.mount_target.mo
     ]
     packet = {
         "task_id": task["id"],
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "terraform": "ros_managed_terraform",
         "budget_cents": 0,
         "scenes": {"offline": {"account": "1234567890123456"}},

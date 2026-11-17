@@ -43,7 +43,7 @@ def test_parameter_template_route_source_is_bound_to_its_own_api_sample(tmp_path
     event = {
         "product": "rds",
         "action": "DescribeParameterGroups",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "region": "cn-hangzhou",
         "params": {"RegionId": "cn-hangzhou"},
         "status": "ok",
@@ -52,7 +52,7 @@ def test_parameter_template_route_source_is_bound_to_its_own_api_sample(tmp_path
     }
     report = {
         "purpose": "bounded_cloud_source_preparation_only",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "observedAt": "2026-10-04T00:00:00Z",
         "regionsCovered": ["cn-hangzhou"],
         "results": [
@@ -149,7 +149,7 @@ def test_rds_route_source_requires_own_exact_original_response(tmp_path, source_
     event = {
         "product": "rds",
         "action": "DescribeDBInstances",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "region": "cn-hangzhou",
         "params": {"RegionId": "cn-hangzhou"},
         "status": "ok",
@@ -167,7 +167,7 @@ def test_rds_route_source_requires_own_exact_original_response(tmp_path, source_
         event["profile"] = "other-profile"
     report = {
         "purpose": "bounded_cloud_source_preparation_only",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "observedAt": "2026-10-04T00:00:00Z",
         "regionsCovered": ["cn-hangzhou"],
         "results": [{"region": "cn-hangzhou", "events": [event], "samples": {source_type: [sample]}}],

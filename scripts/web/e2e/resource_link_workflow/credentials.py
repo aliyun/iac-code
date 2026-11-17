@@ -128,7 +128,7 @@ def adopt_oauth(store: Store, cli_config: Path, account: str, region: str) -> di
             "sts",
             "GetCallerIdentity",
             "--profile",
-            "test-guima",
+            "resource-link-test",
             "--config-path",
             str(cli_config),
             "--region",
@@ -144,7 +144,7 @@ def adopt_oauth(store: Store, cli_config: Path, account: str, region: str) -> di
             result = subprocess.run(argv, capture_output=True, encoding="utf-8", timeout=25, check=False)
             identity = json.loads(result.stdout) if result.returncode == 0 else {}
             profiles = read_json(cli_config)["profiles"]
-            matches = [p for p in profiles if p.get("name") == "test-guima"]
+            matches = [p for p in profiles if p.get("name") == "resource-link-test"]
             profile = matches[0] if len(matches) == 1 else {}
             if identity.get("AccountId") != account or not identity.get("RequestId"):
                 raise WorkflowError("signed identity did not confirm approved account; no migration")
@@ -184,7 +184,7 @@ def adopt_oauth(store: Store, cli_config: Path, account: str, region: str) -> di
             "schema_version": 1,
             "account": account,
             "region": region,
-            "profile": "test-guima",
+            "profile": "resource-link-test",
             "identity": identity,
             "raw_identity_stdout": result.stdout,
             "backup": backup.relative_to(store.root).as_posix(),
@@ -242,10 +242,10 @@ def cli_snapshot(root: Path) -> Iterator[Path | None]:
         json_write(
             path,
             {
-                "current": "test-guima",
+                "current": "resource-link-test",
                 "profiles": [
                     {
-                        "name": "test-guima",
+                        "name": "resource-link-test",
                         "mode": "StsToken",
                         "region_id": credential.region_id,
                         "access_key_id": credential.access_key_id,

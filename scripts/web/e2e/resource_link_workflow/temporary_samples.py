@@ -149,7 +149,7 @@ def reviewed_native_rocketmq(root: Path, task: Any, run: Any, path: Path, proof:
             or not scenes or not any("-ROS-" in s for s in scenes)
             or any(not ("-ROS-" in s or "-QUERY-" in s) for s in scenes)
             or set(packet.get("scenes", {})) != scenes or set(grants) not in ({"ROS"}, {"ROS", "QUERY"})
-            or packet.get("task_id") != task["id"] or packet.get("profile") != "test-guima"
+            or packet.get("task_id") != task["id"] or packet.get("profile") != "resource-link-test"
             or packet.get("terraform") != "ros_managed_terraform"
             or packet.get("budget_cents") != 0 or type(packet.get("budget_cents")) is not int
             or "hourly_cost" in packet or len(accounts) != 1
@@ -419,7 +419,7 @@ def reviewed_hourly_managed_tf(root: Path, task: Any, run: Any, path: Path, proo
             or spec.get("retest_scope", {}).get("kind") != "failed_navigation_managed"
             or not scenes or any("-TF-" not in scene for scene in scenes)
             or set(packet.get("scenes", {})) != scenes or set(grants) != {"TF"}
-            or packet.get("task_id") != task["id"] or packet.get("profile") != "test-guima"
+            or packet.get("task_id") != task["id"] or packet.get("profile") != "resource-link-test"
             or packet.get("terraform") != "ros_managed_terraform"
             or type(packet.get("budget_cents")) is not int or packet["budget_cents"] != 0
             or len(accounts) != 1 or re.fullmatch(r"[0-9]{16}", str(accounts[0])) is None
@@ -508,7 +508,7 @@ def reviewed_native_nas_query(root: Path, task: Any, run: Any, path: Path, proof
             or spec.get("retest_scope", {}).get("kind") != "failed_navigation_managed"
             or scenes != {task["resource_id"] + "-QUERY-1-iframe"}
             or set(packet.get("scenes", {})) != scenes or set(grants) != {"QUERY"}
-            or packet.get("task_id") != task["id"] or packet.get("profile") != "test-guima"
+            or packet.get("task_id") != task["id"] or packet.get("profile") != "resource-link-test"
             or packet.get("terraform") != "ros_managed_terraform"
             or type(packet.get("budget_cents")) is not int or packet["budget_cents"] != 0
             or len(accounts) != 1 or re.fullmatch(r"[0-9]{16}", accounts[0]) is None
@@ -598,7 +598,7 @@ def reviewed_empty_general_nas(
         any(proof.get(key) != value for key, value in required.items())
         or spec.get("key") != "ALIYUN::NAS::MountTarget"
         or spec.get("retest_scope", {}).get("kind") != "failed_navigation_managed"
-        or packet.get("task_id") != task["id"] or packet.get("profile") != "test-guima"
+        or packet.get("task_id") != task["id"] or packet.get("profile") != "resource-link-test"
         or packet.get("terraform") != "ros_managed_terraform"
         or type(packet.get("budget_cents")) is not int or packet["budget_cents"] != 0
         or not re.fullmatch(r"[0-9]{16}", str(proof.get("account", "")))

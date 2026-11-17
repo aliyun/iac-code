@@ -177,7 +177,7 @@ def reviewed(tmp_path):
     ]
     value = {
         "task_id": task,
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "terraform": "ros_managed_terraform",
         "budget_cents": 0,
         "requests": {"ROS": "Create only approved own empty native sample", "QUERY": "Readonly business metadata"},

@@ -32,7 +32,7 @@ def manual_absence(root, existing, reports):
         if (value.get("kind") != "ops_external_manual_children_cleanup_result" or value.get("stage") != stage
                 or value.get("task_id") != existing["task_id"] or value.get("failure_type") is not None
                 or value.get("account") != binding["account"] or value.get("region") != binding["region"]
-                or value.get("profile") != "test-guima" or value.get("pass_added") is not False
+                or value.get("profile") != "resource-link-test" or value.get("pass_added") is not False
                 or value.get("origin") != "user_manual_console_creation_not_glm_wire"
                 or any(value.get(k) != binding[k] for k in ("file_system_id", "dataflow_id", "fileset_id"))):
             raise WorkflowError("manual cleanup must retain exact external ownership and account")
