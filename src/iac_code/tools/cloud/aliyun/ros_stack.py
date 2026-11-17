@@ -403,7 +403,7 @@ class RosStack(BaseCloudStack):
             )
             # Rollback can clear resource status/reason. Match the current failure,
             # rather than attributing an older failed operation to this request.
-            for event in response.body.to_map().get("StackEvents", []):
+            for event in response.body.to_map().get("Events", []):
                 reason = event.get("StatusReason", "")
                 if (
                     not reason

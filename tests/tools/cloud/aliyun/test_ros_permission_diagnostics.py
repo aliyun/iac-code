@@ -7,6 +7,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from alibabacloud_ros20190910 import models as ros_models
 from Tea.exceptions import TeaException
 
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
@@ -37,8 +38,8 @@ def permission_failure_client() -> MagicMock:
     client.list_stack_resources.return_value.body.to_map.return_value = {
         "Resources": [{"LogicalResourceId": "Vpc", "ResourceType": "ALIYUN::ECS::VPC", "Status": "INIT_COMPLETE"}]
     }
-    client.list_stack_events_with_options.return_value.body.to_map.return_value = {
-        "StackEvents": [
+    events_body = {
+        "Events": [
             {
                 "LogicalResourceId": "test-vpc",
                 "ResourceType": "ALIYUN::ROS::Stack",
@@ -59,6 +60,9 @@ def permission_failure_client() -> MagicMock:
             },
         ]
     }
+    client.list_stack_events_with_options.return_value.body = ros_models.ListStackEventsResponseBody().from_map(
+        events_body
+    )
     client.generate_template_policy_with_options.return_value.body.to_map.return_value = {
         "RequestId": "test-policy-request-id",
         "Policy": {"Version": "1", "Statement": [{"Effect": "Allow", "Action": REQUIRED_ACTIONS, "Resource": "*"}]},

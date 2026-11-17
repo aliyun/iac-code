@@ -1,4 +1,4 @@
-.PHONY: help install desktop-install desktop-sync-version bump-version test desktop-test desktop-build coverage lint format translate run dev web pipeline clean publish
+.PHONY: help install desktop-install desktop-sync-version bump-version test desktop-test desktop-build coverage lint format translate run dev web clean publish
 
 .DEFAULT_GOAL := help
 
@@ -128,11 +128,6 @@ web: ## Run iac-code as a local Web app
 
 tui: ## Run the unmaintained terminal UI
 	IAC_CODE_INSTRUCTION_MEMORY_FILE=IAC-CODE.md uv run iac-code tui
-
-PIPELINE_NAME ?= selling
-
-pipeline: ## Run iac-code in pipeline mode (PIPELINE_NAME=selling by default)
-	IAC_CODE_INSTRUCTION_MEMORY_FILE=IAC-CODE.md IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=$(PIPELINE_NAME) uv run iac-code web
 
 clean: ## Clean build artifacts
 	rm -rf .ruff_cache .pytest_cache dist build htmlcov .coverage coverage.xml
