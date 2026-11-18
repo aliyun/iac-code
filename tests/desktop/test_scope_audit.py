@@ -181,3 +181,32 @@ def test_resource_link_shared_paths_are_explicit_and_do_not_admit_neighbor_files
         "tests/web/test_unreviewed.py",
     ):
         assert not module._allowed(path, entries)
+
+
+def test_wiki_shared_paths_are_explicit_and_do_not_admit_neighbor_files():
+    module = _scope_module()
+    entries = [
+        line.strip()
+        for line in module.ALLOWLIST.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    for path in (
+        "src/iac_code/knowledge/clouds/aliyun/products/ecs/ecs.md",
+        "src/iac_code/services/wiki_auto_search.py",
+        "src/iac_code/tools/read_file.py",
+        "src/iac_code/pipeline/engine/resume_recovery.py",
+        "scripts/ci/run_knowledge_wiki_a2a.py",
+        "tests/knowledge/test_auto_search.py",
+        "setup.py",
+    ):
+        assert path in entries
+        assert module._allowed(path, entries)
+    for path in (
+        "src/iac_code/knowledge/clouds/aliyun/products/ecs/unreviewed.md",
+        "src/iac_code/services/unreviewed_feature.py",
+        "src/iac_code/tools/unreviewed_tool.py",
+        "src/iac_code/pipeline/engine/unreviewed_feature.py",
+        "scripts/ci/run_unreviewed.py",
+        "tests/knowledge/test_unreviewed.py",
+    ):
+        assert not module._allowed(path, entries)
