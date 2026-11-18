@@ -1686,7 +1686,7 @@ def _route_cloud_fixture(tmp_path, runner):
     (tmp_path / "raw.json").write_text(json.dumps(raw), encoding="utf-8")
     report = {
         "purpose": "bounded_cloud_source_preparation_only",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "observedAt": "2026-10-03T10:00:00Z",
         "regionsCovered": ["cn-shenzhen"],
         "results": [
@@ -1697,7 +1697,7 @@ def _route_cloud_fixture(tmp_path, runner):
                         "product": "dds",
                         "action": "DescribeDBInstances",
                         "region": "cn-shenzhen",
-                        "profile": "test-guima",
+                        "profile": "resource-link-test",
                         "status": "ok",
                         "exitCode": 0,
                         "rawFile": "raw.json",
@@ -1792,7 +1792,7 @@ def test_nas_route_source_requires_exact_group_and_filesystem_parents(tmp_path, 
     parents = {"AccessGroupName": "group-one", "FileSystemType": "standard"}
     report = {
         "purpose": "bounded_cloud_source_preparation_only",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "observedAt": "2026-10-03T10:00:00Z",
         "regionsCovered": ["cn-hangzhou"],
         "results": [
@@ -1803,7 +1803,7 @@ def test_nas_route_source_requires_exact_group_and_filesystem_parents(tmp_path, 
                         "product": "nas",
                         "action": "DescribeAccessRules",
                         "region": "cn-hangzhou",
-                        "profile": "test-guima",
+                        "profile": "resource-link-test",
                         "status": "ok",
                         "exitCode": 0,
                         "rawFile": "nas.json",

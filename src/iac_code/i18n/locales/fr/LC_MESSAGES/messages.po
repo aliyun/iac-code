@@ -15134,3 +15134,37 @@ msgid ""
 "Changed candidates require a new show_architecture_plan batch before "
 "completion"
 msgstr "Pour modifier les propositions, créez un nouveau lot avec show_architecture_plan avant de terminer cette étape."
+
+#: src/iac_code/cli/main.py
+msgid "Place terminal options after the subcommand: iac-code tui [OPTIONS]."
+msgstr "Placez les options du terminal après la sous-commande : iac-code tui [OPTIONS]."
+
+#: src/iac_code/cli/main.py
+msgid "Use iac-code tui [OPTIONS] for terminal options, or add --prompt for headless execution."
+msgstr "Utilisez iac-code tui [OPTIONS] pour les options du terminal, ou ajoutez --prompt pour une exécution headless."
+
+#: src/iac_code/cli/main.py
+msgid "Use iac-code web --no-open to start Web without a terminal, or --prompt - to read stdin."
+msgstr "Utilisez iac-code web --no-open pour démarrer le serveur sans terminal, ou --prompt - pour lire l’entrée standard."
+
+#: src/iac_code/cli/main.py
+msgid "Single-prompt headless mode does not support pipelines. Use iac-code web or set IAC_CODE_MODE=normal."
+msgstr ""
+"Le mode headless ponctuel ne prend pas en charge les pipelines. Utilisez iac-code web ou définissez "
+"IAC_CODE_MODE=normal."
+
+#: src/iac_code/cli/main.py
+msgid "Run the unmaintained terminal UI. Prefer the Web or Desktop app."
+msgstr "Lancer l’interface de terminal non maintenue. Préférez l’application web ou de bureau."
+
+#: src/iac_code/ui/banner.py
+msgid "TUI is no longer updated or maintained. Use the Web app (iac-code web) or the Desktop app instead."
+msgstr "La TUI ne reçoit plus de mises à jour ni de maintenance. Utilisez l’application web (iac-code web) ou de bureau."
+
+#: src/iac_code/ui/repl.py
+msgid "Update completed. Restart iac-code tui to continue."
+msgstr "Mise à jour terminée. Relancez iac-code tui pour continuer."
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "※ Run iac-code tui --debug to see error logs"
+msgstr "※ Exécutez iac-code tui --debug pour consulter les journaux d’erreurs"

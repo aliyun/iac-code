@@ -531,6 +531,7 @@ class ReplPty:
             *_split_python_command(self.args.python),
             "-m",
             "iac_code.cli.main",
+            "tui",
             "--permission-mode",
             "bypass_permissions",
             *(extra_args or []),

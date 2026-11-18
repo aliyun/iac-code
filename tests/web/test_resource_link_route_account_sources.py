@@ -72,7 +72,7 @@ def write_fixture(tmp_path, case, mutation):
         "product": product,
         "action": action,
         "region": "cn-hangzhou",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "status": "ok",
         "exitCode": 0,
         "rawFile": "raw.json",
@@ -86,7 +86,7 @@ def write_fixture(tmp_path, case, mutation):
         event["profile"] = "wrong-profile"
     report = {
         "purpose": "bounded_cloud_source_preparation_only",
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "observedAt": "2026-10-04T00:00:00Z",
         "regionsCovered": ["cn-hangzhou"],
         "results": [{"region": "cn-hangzhou", "events": [event], "samples": {source_type: [sample]}}],

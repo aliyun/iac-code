@@ -20,7 +20,7 @@ import {
   renderPipelineWorkspace,
 } from "./components/pipeline.js?v=pipeline-solution-confirm-v17";
 import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components/tool_cards.js?v=resource-links-v112";
-import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v69";
+import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v70";
 import { createOutputController, highlightTemplate } from "./components/output_panel.js?v=output-panel-v45";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
 import { reduceEvent } from "./events.js?v=web-repl-ui-325";

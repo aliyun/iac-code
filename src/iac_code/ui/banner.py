@@ -198,6 +198,11 @@ def render_welcome_banner(
         Text(f"  {model_display}", style="dim") if model_display else Text(),
         Text(f"  {cwd_display}", style="dim"),
         session_display,
+        Text(),
+        Text(
+            _("TUI is no longer updated or maintained. Use the Web app (iac-code web) or the Desktop app instead."),
+            style="bold yellow",
+        ),
     ]
 
     from iac_code.utils.log import is_debug_enabled

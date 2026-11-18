@@ -19,10 +19,12 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route
 
 from iac_code import __version__
+from iac_code.a2a.request_timing import FirstTokenTimingMiddleware, observe_request_data
 from iac_code.agui.adapter import AguiA2AAdapter, RunTicket
 from iac_code.agui.errors import AdmissionError, normalize_agui_language, translate_agui_error
 from iac_code.agui.inputs import MAX_REQUEST_BYTES, canonical_digest, parse_run_input
 from iac_code.i18n import resolve_ui_language, translate_message
+from iac_code.services.first_token_timing import mark_timing
 
 _HEARTBEAT_SECONDS = 15.0
 
@@ -64,6 +66,7 @@ def create_app(
         auth_error = _authorize(request, expected_token, language=language)
         if auth_error is not None:
             return auth_error
+        mark_timing("request_admitted", once=True)
         if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/json":
             return _json_error(
                 415,
@@ -93,6 +96,7 @@ def create_app(
                 translate_message("RunAgentInput must be a JSON object.", language=language),
             )
         language = _payload_language(payload, fallback=language)
+        observe_request_data(payload)
         try:
             run_input = parse_run_input(payload)
         except ValueError:
@@ -215,6 +219,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.run_adapter = run_adapter
+    app.add_middleware(FirstTokenTimingMiddleware, protocol="agui")
     return app
 
 

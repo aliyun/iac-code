@@ -5,6 +5,8 @@ description: ECS RAM ロール認証を含む Alibaba Cloud 認証情報の設�
 
 # Alibaba Cloud 認証情報
 
+Web 版またはデスクトップ版の**設定 → クラウド認証情報**で、Alibaba Cloud の認証方式と既定のリージョンを設定します。
+
 Alibaba Cloud の認証情報は、クラウドリソースの検査や管理を行う操作に必要です。
 
 `resolve_cloud_resource_selector` と `select_cloud_resource` は、`aliyun_api` と同じ有効認証情報の判定を使用します。A2A ではリクエストまたはセッションの認証情報が優先され、ない場合は通常どおりローカル設定、環境変数、Alibaba Cloud CLI 認証情報へフォールバックします。有効な認証情報がない場合、`aliyun_api` と 2 つのリソースセレクターツールはいずれも登録されません。
@@ -15,8 +17,8 @@ IaC Code を RAM ロールが割り当てられた Alibaba Cloud ECS インス�
 
 このモードはすべてのユーザーインターフェースから設定できます。
 
-- REPL で `/auth` を実行し、**IaC クラウドサービスを設定**、**Alibaba Cloud**、**ECS RAM Role** の順に選択します。
 - Web または Desktop アプリで **設定 > クラウド認証情報** を開き、**Alibaba Cloud** を選択して、認証方式に **ECS RAM Role** を指定します。
+- REPL で `/auth` を実行し、**IaC クラウドサービスを設定**、**Alibaba Cloud**、**ECS RAM Role** の順に選択します。
 
 クラウド API 呼び出しに使用するリージョンを選択します。ECS RAM ロール名は任意です。空欄にすると、インスタンスに割り当てられたロールを IMDS から自動検出します。IaC Code に保存されたロール名は `ALIBABA_CLOUD_ECS_METADATA` より優先され、どちらも設定されていない場合は IMDS にロール名の検出を要求します。
 
@@ -35,17 +37,13 @@ aliyun:
 
 ## OAuth ブラウザログイン
 
-推奨される対話型セットアップ手順は `/auth` です。
-
-```text
-/auth
-```
-
-**IaC クラウドサービスを設定**、**Alibaba Cloud**、**OAuth Login (Browser)** の順に選択します。IaC Code はブラウザの認可フローを開き、ローカル callback を待ち受け、PKCE で認可コードを交換して、OAuth に基づく一時認証情報を IaC Code 設定ディレクトリ内の `.cloud-credentials.yml` に保存します。
+Web 版またはデスクトップ版の**設定 → クラウド認証情報**で Alibaba Cloud と **OAuth ブラウザーログイン** を選び、認可を開始します。IaC Code はブラウザーの認可フローを開き、PKCE で認可コードを交換し、OAuth 認証情報を `.cloud-credentials.yml` に保存します。
 
 セットアップ中に、中国または国際版の OAuth サイトを選択できます。IaC Code は選択したサイトを refresh token と一緒に保存し、以降の更新で同じ endpoint を使用します。
 
-access token または STS 認証情報の有効期限が近づくと、OAuth 認証情報は自動的に更新されます。refresh token の有効期限が切れた場合、または取り消された場合は、もう一度 `/auth` を実行して OAuth Login (Browser) を選択してください。
+アクセストークンまたは STS 認証情報の有効期限が近づくと、OAuth 認証情報は自動更新されます。リフレッシュトークンが失効または取り消された場合は、**設定 → クラウド認証情報**から再認可してください。
+
+ターミナルで設定する場合は、`iac-code tui` を起動して `/auth` を実行します。
 
 ## 環境変数
 

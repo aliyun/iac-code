@@ -253,13 +253,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: Run resource-link recovery lifecycle tests serially
-        run: >-
-          uv run pytest
-          tests/web/test_resource_link_workflow.py::test_http_restart_does_not_reset_actions
-          tests/web/test_resource_link_execution_gate.py::test_native_handoff_renewal_chain_preserves_raw_owners_and_finishes_graph_and_cleanup
-          -v --no-header
-
       - name: Run A2A lifecycle and execution-control tests serially
         # These async lifecycle tests can terminate an xdist worker without a
         # Python traceback on Windows. Execution-control tests also gate real
@@ -290,9 +283,9 @@ jobs:
           -v --no-header
 
       - name: Run remaining tests
-        # A complete signer-renewal graph and the real HTTP restart fixture
-        # must keep their existing deadlines without competing for runner I/O.
-        # These exact nodes run in the serial step above.
+        # The resource-link acceptance controller is an unpublished development
+        # tool, covered by the full Linux Python matrix. Windows still runs the
+        # product's resource-link, execution-policy, Web and Desktop regressions.
         run: >-
           uv run pytest tests/ -v --no-header -n auto
           --ignore=tests/a2a/test_app.py
@@ -306,5 +299,10 @@ jobs:
           --ignore=tests/skill_bridge/test_alicloud_ros_agent_bridge.py
           --ignore=tests/skill_bridge/test_ros_remote_cli_diagnostics.py
           --ignore=tests/services/test_permission_wait.py
-          --deselect=tests/web/test_resource_link_workflow.py::test_http_restart_does_not_reset_actions
-          --deselect=tests/web/test_resource_link_execution_gate.py::test_native_handoff_renewal_chain_preserves_raw_owners_and_finishes_graph_and_cleanup
+          --ignore-glob=tests/web/test_resource_link_workflow*.py
+          --ignore=tests/web/test_resource_link_execution_gate.py
+          --ignore=tests/web/test_resource_link_agent_client.py
+          --ignore=tests/web/test_resource_link_cleanup_identity.py
+          --ignore=tests/web/test_resource_link_cleanup_recovery.py
+          --ignore=tests/web/test_resource_link_mse_cleanup_inspection.py
+          --ignore=tests/web/test_resource_link_native_identity_recovery.py

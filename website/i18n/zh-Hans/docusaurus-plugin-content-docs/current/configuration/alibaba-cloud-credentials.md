@@ -5,6 +5,8 @@ description: 配置阿里云凭证，包括 ECS RAM Role 授权。
 
 # 阿里云凭证
 
+在 Web 或桌面版打开**设置 → 云凭证**，配置阿里云认证方式和默认地域。
+
 需要检查或管理云资源时，必须配置阿里云凭证。
 
 `resolve_cloud_resource_selector` 和 `select_cloud_resource` 与 `aliyun_api` 使用相同的有效凭证判定。A2A 中请求/会话凭证优先；未提供时，按正常顺序回退到本地配置、环境变量和阿里云 CLI 凭证。如果没有有效的阿里云凭证，`aliyun_api` 和两个资源选择器工具都不会注册。
@@ -15,8 +17,8 @@ description: 配置阿里云凭证，包括 ECS RAM Role 授权。
 
 所有用户界面都可以配置该模式：
 
-- 在 REPL 中运行 `/auth`，依次选择 **配置 IaC 云服务**、**Alibaba Cloud** 和 **ECS RAM Role**。
 - 在 Web 或 Desktop 应用中打开 **设置 > 云凭证**，选择 **Alibaba Cloud**，再将认证方式设为 **ECS RAM Role**。
+- 在 REPL 中运行 `/auth`，依次选择 **配置 IaC 云服务**、**Alibaba Cloud** 和 **ECS RAM Role**。
 
 请选择云 API 调用使用的地域。ECS RAM 角色名称是可选的：留空时会通过 IMDS 自动发现实例绑定的角色。IaC Code 中保存的角色名称优先于 `ALIBABA_CLOUD_ECS_METADATA`；两者均未设置时，IaC Code 会请求 IMDS 自动发现角色名称。
 
@@ -35,17 +37,13 @@ aliyun:
 
 ## OAuth 浏览器登录
 
-推荐的交互式配置入口是 `/auth`：
-
-```text
-/auth
-```
-
-选择 **配置 IaC 云服务**，然后选择 **Alibaba Cloud**，再选择 **OAuth Login (Browser)**。IaC Code 会打开浏览器授权流程，等待本地回调，使用 PKCE 交换授权码，并将基于 OAuth 的临时凭证保存到 IaC Code 配置目录下的 `.cloud-credentials.yml`。
+在 Web 或桌面版打开**设置 → 云凭证**，选择 Alibaba Cloud 和 **OAuth 浏览器登录**，然后发起授权。IaC Code 会打开浏览器授权流程，使用 PKCE 交换授权码，并将 OAuth 凭证保存到 `.cloud-credentials.yml`。
 
 配置过程中可以选择中国站或国际站 OAuth。IaC Code 会把所选站点与 refresh token 一起保存，后续刷新会继续使用同一 endpoint。
 
-当 access token 或 STS 凭证即将过期时，OAuth 凭证会自动刷新。如果 refresh token 过期或被撤销，请重新运行 `/auth` 并选择 OAuth Login (Browser)。
+当 access token 或 STS 凭证即将过期时，OAuth 凭证会自动刷新。如果 refresh token 过期或被撤销，请在**设置 → 云凭证**中重新授权。
+
+使用终端配置时，启动 `iac-code tui` 后运行 `/auth`。
 
 ## 环境变量
 

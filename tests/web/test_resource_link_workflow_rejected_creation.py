@@ -112,7 +112,7 @@ def rejection(tmp_path):
         value = {
             "product": product,
             "action": action,
-            "profile": "test-guima",
+            "profile": "resource-link-test",
             "region": region,
             "parameters": params,
             "response": response,
@@ -406,7 +406,7 @@ def role_rejection(rejection):
                 "product": "ram",
                 "action": "GetRole",
                 "parameters": {"RoleName": role_name},
-                "profile": "test-guima",
+                "profile": "resource-link-test",
                 "region": region,
                 "cloud_write_performed": False,
                 "error_data": negative,

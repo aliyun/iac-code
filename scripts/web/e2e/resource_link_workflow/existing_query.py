@@ -121,7 +121,7 @@ def propose(runtime: Any, task_id: str, handoff: str) -> dict[str, Any]:
                  "render_text": [binding["dataflow_id"], binding["file_system_path"], binding["source_storage"]],
                  "source_evidence": sources[2]["path"], "source_sha256": sources[2]["sha256"],
                  "source_binding": {"origin": seed["origin"], "formal_signed_query_required": True}}
-        packet = {"task_id": task_id, "profile": "test-guima", "terraform": "ros_managed_terraform",
+        packet = {"task_id": task_id, "profile": "resource-link-test", "terraform": "ros_managed_terraform",
                   "budget_cents": 0, "inputs": sources[:6], "ui": old["ui"], "scenes": {scene_id: scene},
                   "preserve_pass": True,
                   "requests": {"QUERY": "先单独确认当前云账号，再按系统已审精确只读计划查询已有数据流，"

@@ -79,6 +79,8 @@ paths:
 
 ## Skills verwalten
 
+Öffnen Sie in Web oder Desktop **Einstellungen → Plugins → Skills**, um Skills zu suchen und Benutzer- oder Projekt-Skills zu aktivieren oder zu deaktivieren.
+
 Führen Sie `/skills` im interaktiven REPL aus, um die Skill-Verwaltungsauswahl zu öffnen. Die Auswahl zeigt gefundene gebündelte, Benutzer- und Projekt-Skills mit Quelle, Größe und Aktivierungsstatus. Sie können nach Name oder Beschreibung suchen, nach Name/Quelle/Größe sortieren und Benutzer- oder Projekt-Skills ein- und ausschalten.
 
 Deaktivierte Skills werden in `settings.yml` unter `disabled_skills` gespeichert. Gebündelte Skills sind fest aktiviert und werden nicht in die Deaktivierungsliste geschrieben.

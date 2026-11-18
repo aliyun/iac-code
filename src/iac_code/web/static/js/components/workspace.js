@@ -202,9 +202,19 @@ function makeNumberInput(marker, placeholder = "") {
 }
 
 function makePasswordInput(marker, placeholder = "") {
+  // These are API credentials, not login passwords. There is no dedicated
+  // autocomplete token for them: use one-time-code as a best-effort no-store
+  // hint. Browsers can ignore off, while new-password invites generation/saving.
+  // Keep the native password type for masking and accessible secret entry.
   return makeElement("input", {
     className: "workspace-input",
-    attributes: { type: "password", autocomplete: "new-password", placeholder },
+    attributes: {
+      type: "password",
+      autocomplete: "one-time-code",
+      autocapitalize: "off",
+      spellcheck: "false",
+      placeholder,
+    },
     dataset: { workspaceAction: marker },
   });
 }

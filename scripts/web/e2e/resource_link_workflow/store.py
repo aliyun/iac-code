@@ -1639,7 +1639,7 @@ class Store:
             request, _ = self.repair_context(connection, task["id"]) if job["purpose"] == "repair" else (None, None)
             if request and request.get("ownership_preserved"):
                 raise WorkflowError("preserved repair cannot approve/reinstall execution; hand off to OPS with block")
-            if packet.get("task_id") != task["id"] or packet.get("profile") != "test-guima":
+            if packet.get("task_id") != task["id"] or packet.get("profile") != "resource-link-test":
                 raise WorkflowError("packet task/profile mismatch")
             requests = packet.get("requests", {})
             spec = json.loads(task["spec"])
@@ -2783,7 +2783,7 @@ class Store:
                 raise WorkflowError("independent raw cloud evidence changed")
             value = item["value"]
             if (value.get("exit_code") != 0 or value.get("cloud_write_performed") is not False
-                    or value.get("profile") != "test-guima" or value.get("region") != region
+                    or value.get("profile") != "resource-link-test" or value.get("region") != region
                     or not value.get("response", {}).get("RequestId")):
                 raise WorkflowError("independent absence read failed or account/region source missing")
         fresh_identity = [item["value"] for item in calls if item["value"].get("product") == "sts"
@@ -2872,7 +2872,7 @@ class Store:
                 value = item["value"]
                 if (digest(path) != item["sha256"] or read_json(path) != value
                         or value.get("cloud_write_performed") is not False
-                        or value.get("profile") != "test-guima" or value.get("region") != region):
+                        or value.get("profile") != "resource-link-test" or value.get("region") != region):
                     raise WorkflowError("independent raw cloud evidence changed or source differs")
                 values.append(value)
             fresh_identity, fresh_stack, fresh_role = values

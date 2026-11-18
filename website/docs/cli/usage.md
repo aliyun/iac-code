@@ -5,26 +5,23 @@ description: Start IaC Code from the terminal and choose the right workflow.
 
 # CLI Overview
 
-Run `iac-code` from the terminal:
+Run `iac-code` in a terminal to start the local Web app and open your browser. On first use, configure the LLM provider and Alibaba Cloud credentials in Settings.
 
 ```bash
 iac-code
+iac-code web --no-open
 ```
 
-The CLI supports two workflows:
-
-| Workflow | Use it when |
-|---|---|
-| [Interactive Mode](./interactive-mode.md) | You want to refine infrastructure requirements over multiple turns in a REPL. |
-| [Non-interactive Mode](../automation/non-interactive-mode.md) | You want to run a single prompt and return output to a caller. |
-
-Common startup commands:
+[Interactive Mode](./interactive-mode.md):
 
 ```bash
-iac-code
+iac-code tui
+iac-code tui --help
+```
+
+`iac-code` opens Web by default. Put terminal options after `iac-code tui` (for example, `iac-code tui --resume <id>`). Headless `--prompt` and stream-json flags stay on the root command. Without a terminal, start Web explicitly with `iac-code web --no-open`.
+
+```bash
 iac-code --prompt "Create an OSS Bucket"
-echo "Create a VPC" | iac-code --prompt -
-iac-code --debug
+iac-code --input-format stream-json --output-format stream-json
 ```
-
-Use [Command Line Options](./command-line-options.md) for startup flags and [Slash Commands](./commands.md) for commands available inside an interactive session.

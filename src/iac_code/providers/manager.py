@@ -32,6 +32,7 @@ from iac_code.providers.request_policy import ProviderRequestPolicy, bool_or_non
 from iac_code.providers.retry import RetryableError, RetryConfig, with_retry
 from iac_code.providers.stream_watchdog import StreamWatchdog
 from iac_code.providers.streaming import UnsafeStreamProtocolError
+from iac_code.services.first_token_timing import mark_timing, time_model_complete, time_model_stream, timing_phase
 from iac_code.services.session_logging import is_custom_endpoint, sanitize_endpoint_origin
 from iac_code.services.telemetry import (
     add_metric,
@@ -1331,6 +1332,15 @@ class ProviderManager:
                         event = await anext(request_stream)
                     except StopAsyncIteration:
                         break
+                    if isinstance(event, (TextDeltaEvent, ThinkingDeltaEvent)) and event.text:
+                        if not getattr(event, "is_metadata_only", False):
+                            mark_timing(
+                                "llm_first_text_forwarded"
+                                if isinstance(event, TextDeltaEvent)
+                                else "llm_first_thinking_forwarded",
+                                once=True,
+                                llm_call_id=active_lease.request_id,
+                            )
                     yield event
             finally:
                 await request_stream.aclose()
@@ -1518,7 +1528,13 @@ class ProviderManager:
                 )
             watchdog = StreamWatchdog(idle_timeout=self._stream_idle_timeout)
             watchdog.start()
-            stream_iter = provider.stream(messages, system, tools)
+            stream_iter = time_model_stream(
+                provider.stream(messages, system, tools),
+                llm_call_id=lease.request_id,
+                model=sanitized_model,
+                provider=provider_name,
+                attempt=lease._lease_token.inference_requests,
+            )
             while True:
                 try:
                     with activate_span():
@@ -1782,7 +1798,8 @@ class ProviderManager:
                     **provider_identity_attrs,
                 },
             )
-            await asyncio.sleep(delay)
+            with timing_phase("llm_retry_wait", llm_call_id=lease.request_id, attempt=attempt + 1):
+                await asyncio.sleep(delay)
 
         stream_failure_exception = outcome.stream_failure_exception
         if outcome.streaming_failed:
@@ -1881,7 +1898,13 @@ class ProviderManager:
                     replay_first_token_received = False
                     try:
                         lease._lease_token.inference_requests += 1
-                        replay_iter = provider.stream(messages, system, tools)
+                        replay_iter = time_model_stream(
+                            provider.stream(messages, system, tools),
+                            llm_call_id=lease.request_id,
+                            model=sanitized_model,
+                            provider=provider_name,
+                            attempt=lease._lease_token.inference_requests,
+                        )
                         async for replay_event in replay_iter:
                             if isinstance(replay_event, MessageStartEvent):
                                 replay_message_ids.append(replay_event.message_id)
@@ -2293,7 +2316,12 @@ class ProviderManager:
                 },
             )
 
+        timing_call_id = "complete-" + uuid.uuid4().hex
+        timing_attempt = 0
+
         async def operation():
+            nonlocal timing_attempt
+            timing_attempt += 1
             if refusal_detected:
                 raise _ModelRefusalError(model)
 
@@ -2326,7 +2354,13 @@ class ProviderManager:
                             },
                         )
                         request_started = time.monotonic()
-                        response = await provider.complete(messages, system, tools, **kwargs)
+                        response = await time_model_complete(
+                            provider.complete(messages, system, tools, **kwargs),
+                            llm_call_id=timing_call_id,
+                            model=sanitized_model,
+                            provider=provider_name,
+                            attempt=timing_attempt,
+                        )
                     except asyncio.CancelledError as exc:
                         self._emit_failure_telemetry(
                             provider_name,

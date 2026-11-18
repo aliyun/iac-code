@@ -31,7 +31,7 @@ def initial_query(tmp_path):
     old = {
         "task_id": "plan:R0019",
         "budget_cents": 0,
-        "profile": "test-guima",
+        "profile": "resource-link-test",
         "requests": {"QUERY": "Read the first page of snapshots"},
         "scenes": {"R0019-QUERY-1-iframe": {"account": "fake"}},
         "execution_grants": {

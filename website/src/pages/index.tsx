@@ -3,8 +3,6 @@ import clsx from 'clsx';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import styles from './index.module.css';
-import demoEnVideo from '@site/static/img/demo_en.mp4';
-import demoZhVideo from '@site/static/img/demo_zh.mp4';
 import desktopCnScreenshot from '@site/static/img/screenshots/iac-code-desktop-cn.jpg';
 import desktopEnScreenshot from '@site/static/img/screenshots/iac-code-desktop-en.jpg';
 import webCnScreenshot from '@site/static/img/screenshots/iac-code-web-cn.jpg';
@@ -66,7 +64,6 @@ type VisualKey =
   | 'iacEngines'
   | 'aiProviders'
   | 'agentWorkflow'
-  | 'interactiveMode'
   | 'headlessMode';
 
 type TerminalScene = {
@@ -94,7 +91,7 @@ type HomepageDraft = {
   pipHint: string;
   surfacesToggleLabel: string;
   shotTabDesktop: string;
-  shotTabTerminal: string;
+  shotTabWeb: string;
 };
 
 type TerminalTerms = {
@@ -138,7 +135,7 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     whyItems: [
       {
         title: 'Manage cloud infrastructure with natural language',
-        body: 'Bring resource planning, template generation, change review, and deployment operations into one terminal conversation.',
+        body: 'Bring resource planning, template generation, change review, and deployment operations into one conversational workspace.',
       },
       {
         title: 'Support multiple IaC engines',
@@ -156,29 +153,23 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     howTitle: 'Start using IaC Code',
     downloadLabel: 'Download for {os}',
     otherPlatformsLabel: 'Other platforms: ',
-    pipHint: 'All three run from the command line — install first:',
+    pipHint: 'For Web and headless mode, install the Python package first:',
     surfacesToggleLabel: 'Other usage modes: ',
     shotTabDesktop: 'Desktop',
-    shotTabTerminal: 'Terminal',
+    shotTabWeb: 'Web',
     howItems: [
       {
-        visual: 'interactiveMode',
-        title: 'Interactive mode',
-        body: 'Start a terminal session, refine requirements, review templates, run tools, and complete infrastructure tasks across turns.',
+        screenshot: 'web',
+        title: 'Web app',
+        body: 'Run iac-code to open the local Web app by default and work in a browser with the full conversational IaC workspace.',
         command: 'iac-code',
+        alt: 'IaC Code Web app',
       },
       {
         visual: 'headlessMode',
         title: 'Headless mode',
         body: 'Pass a single prompt to IaC Code for scripts, pipelines, and automation systems.',
         command: 'iac-code --prompt "Create a VPC" --output-format stream-json',
-      },
-      {
-        screenshot: 'web',
-        title: 'Web app',
-        body: 'Launch the local Web app from the CLI and work in a browser with the full conversational IaC workspace.',
-        command: 'iac-code web',
-        alt: 'IaC Code Web app',
       },
       {
         screenshot: 'desktop',
@@ -193,7 +184,7 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     whyItems: [
       {
         title: '使用自然语言管理基础设施',
-        body: '把资源规划、模板生成、变更审阅和部署操作放进同一个终端对话流。',
+        body: '在同一个对话式工作空间中完成资源规划、模板生成、变更审阅和部署操作。',
       },
       {
         title: '支持多种 IaC 引擎',
@@ -211,29 +202,23 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     howTitle: '开始使用 IaC Code',
     downloadLabel: '下载 {os} 版',
     otherPlatformsLabel: '其他平台：',
-    pipHint: '以上三种方式通过命令行运行，先安装：',
+    pipHint: '使用 Web 或无头模式，先安装 Python 包：',
     surfacesToggleLabel: '其他使用方式：',
     shotTabDesktop: '桌面版',
-    shotTabTerminal: '终端版',
+    shotTabWeb: 'Web 版',
     howItems: [
       {
-        visual: 'interactiveMode',
-        title: '交互模式',
-        body: '启动终端会话，持续补充需求、审阅模板、执行工具，并在多轮对话中完成基础设施任务。',
+        screenshot: 'web',
+        title: 'Web 应用',
+        body: '运行 iac-code 默认打开本地 Web 应用，在浏览器中使用完整的对话式 IaC 工作空间。',
         command: 'iac-code',
+        alt: 'IaC Code Web 应用',
       },
       {
         visual: 'headlessMode',
         title: '无头模式',
         body: '把单次提示词交给 IaC Code，适合脚本、流水线和自动化系统调用。',
         command: 'iac-code --prompt "创建一个 VPC" --output-format stream-json',
-      },
-      {
-        screenshot: 'web',
-        title: 'Web 应用',
-        body: '通过 CLI 启动本地 Web 应用，在浏览器中使用完整的对话式 IaC 工作空间。',
-        command: 'iac-code web',
-        alt: 'IaC Code Web 应用',
       },
       {
         screenshot: 'desktop',
@@ -248,7 +233,7 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     whyItems: [
       {
         title: '自然言語でクラウドインフラを管理',
-        body: 'リソース設計、テンプレート生成、変更レビュー、デプロイ操作を 1 つのターミナル対話にまとめます。',
+        body: 'リソース設計、テンプレート生成、変更レビュー、デプロイ操作を 1 つの対話型ワークスペースにまとめます。',
       },
       {
         title: '複数の IaC エンジンに対応',
@@ -266,29 +251,23 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     howTitle: 'IaC Code を使い始める',
     downloadLabel: '{os} 版をダウンロード',
     otherPlatformsLabel: 'その他のプラットフォーム：',
-    pipHint: '上記の3つの方法はいずれもコマンドラインで実行します。先にインストール：',
+    pipHint: 'Web アプリやヘッドレスモードを使うには、まず Python パッケージをインストール：',
     surfacesToggleLabel: 'その他の利用方法：',
     shotTabDesktop: 'デスクトップ版',
-    shotTabTerminal: 'ターミナル版',
+    shotTabWeb: 'Web 版',
     howItems: [
       {
-        visual: 'interactiveMode',
-        title: 'インタラクティブモード',
-        body: 'ターミナルセッションを開始し、要件を追加しながらテンプレートをレビューし、ツールを実行してインフラタスクを進めます。',
+        screenshot: 'web',
+        title: 'Web アプリ',
+        body: 'iac-code を実行するとローカル Web アプリが開き、ブラウザーで対話型 IaC ワークスペースの全機能を利用できます。',
         command: 'iac-code',
+        alt: 'IaC Code Web アプリ',
       },
       {
         visual: 'headlessMode',
         title: 'ヘッドレスモード',
         body: '単発プロンプトを IaC Code に渡し、スクリプト、パイプライン、自動化システムから実行できます。',
         command: 'iac-code --prompt "VPCを作成" --output-format stream-json',
-      },
-      {
-        screenshot: 'web',
-        title: 'Web アプリ',
-        body: 'CLI からローカル Web アプリを起動し、ブラウザーで対話型 IaC ワークスペースの全機能を利用できます。',
-        command: 'iac-code web',
-        alt: 'IaC Code Web アプリ',
       },
       {
         screenshot: 'desktop',
@@ -303,7 +282,7 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     whyItems: [
       {
         title: 'Gérer l’infrastructure cloud en langage naturel',
-        body: 'Regroupez planification des ressources, génération de templates, revue des changements et opérations de déploiement dans une conversation terminal.',
+        body: 'Regroupez planification des ressources, génération de templates, revue des changements et opérations de déploiement dans un même espace de travail conversationnel.',
       },
       {
         title: 'Prendre en charge plusieurs moteurs IaC',
@@ -321,29 +300,23 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     howTitle: 'Commencer avec IaC Code',
     downloadLabel: 'Télécharger pour {os}',
     otherPlatformsLabel: 'Autres plateformes : ',
-    pipHint: 'Ces trois modes s’exécutent en ligne de commande — installez d’abord :',
+    pipHint: 'Pour le web et le mode headless, installez d’abord le paquet Python :',
     surfacesToggleLabel: 'Autres modes d’utilisation : ',
     shotTabDesktop: 'Bureau',
-    shotTabTerminal: 'Terminal',
+    shotTabWeb: 'Web',
     howItems: [
       {
-        visual: 'interactiveMode',
-        title: 'Mode interactif',
-        body: 'Démarrez une session terminal, affinez les exigences, révisez les templates, exécutez les outils et terminez les tâches d’infrastructure en plusieurs tours.',
+        screenshot: 'web',
+        title: 'Application web',
+        body: 'Exécutez iac-code pour ouvrir par défaut l’application web locale et retrouver dans le navigateur tout l’espace de travail IaC conversationnel.',
         command: 'iac-code',
+        alt: 'Application web IaC Code',
       },
       {
         visual: 'headlessMode',
         title: 'Mode headless',
         body: 'Transmettez un prompt unique à IaC Code pour les scripts, les pipelines et les systèmes d’automatisation.',
         command: 'iac-code --prompt "Créer un VPC" --output-format stream-json',
-      },
-      {
-        screenshot: 'web',
-        title: 'Application web',
-        body: 'Lancez l’application web locale depuis la CLI et retrouvez dans le navigateur tout l’espace de travail IaC conversationnel.',
-        command: 'iac-code web',
-        alt: 'Application web IaC Code',
       },
       {
         screenshot: 'desktop',
@@ -358,7 +331,7 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     whyItems: [
       {
         title: 'Cloud-Infrastruktur mit natürlicher Sprache verwalten',
-        body: 'Bringen Sie Ressourcenplanung, Template-Generierung, Änderungsreview und Deployment-Vorgänge in eine Terminal-Konversation.',
+        body: 'Bündeln Sie Ressourcenplanung, Template-Generierung, Änderungsreview und Deployment-Vorgänge in einem dialogorientierten Arbeitsbereich.',
       },
       {
         title: 'Mehrere IaC-Engines unterstützen',
@@ -376,29 +349,23 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     howTitle: 'Mit IaC Code starten',
     downloadLabel: 'Für {os} herunterladen',
     otherPlatformsLabel: 'Andere Plattformen: ',
-    pipHint: 'Alle drei Varianten laufen über die Kommandozeile – zuerst installieren:',
+    pipHint: 'Für Web und Headless-Modus zuerst das Python-Paket installieren:',
     surfacesToggleLabel: 'Weitere Nutzungsarten: ',
     shotTabDesktop: 'Desktop',
-    shotTabTerminal: 'Terminal',
+    shotTabWeb: 'Web',
     howItems: [
       {
-        visual: 'interactiveMode',
-        title: 'Interaktiver Modus',
-        body: 'Starten Sie eine Terminal-Sitzung, verfeinern Sie Anforderungen, prüfen Sie Templates, führen Sie Tools aus und erledigen Sie Infrastrukturaufgaben über mehrere Runden.',
+        screenshot: 'web',
+        title: 'Web-App',
+        body: 'Mit iac-code öffnen Sie standardmäßig die lokale Web-App und nutzen den vollständigen dialogorientierten IaC-Arbeitsbereich im Browser.',
         command: 'iac-code',
+        alt: 'IaC Code Web-App',
       },
       {
         visual: 'headlessMode',
         title: 'Headless-Modus',
         body: 'Übergeben Sie IaC Code einen einzelnen Prompt für Skripte, Pipelines und Automatisierungssysteme.',
         command: 'iac-code --prompt "VPC erstellen" --output-format stream-json',
-      },
-      {
-        screenshot: 'web',
-        title: 'Web-App',
-        body: 'Starten Sie die lokale Web-App über die CLI und nutzen Sie den vollständigen dialogorientierten IaC-Arbeitsbereich im Browser.',
-        command: 'iac-code web',
-        alt: 'IaC Code Web-App',
       },
       {
         screenshot: 'desktop',
@@ -413,7 +380,7 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     whyItems: [
       {
         title: 'Gestiona infraestructura cloud con lenguaje natural',
-        body: 'Lleva planificación de recursos, generación de plantillas, revisión de cambios y operaciones de despliegue a una conversación de terminal.',
+        body: 'Reúne la planificación de recursos, la generación de plantillas, la revisión de cambios y las operaciones de despliegue en un mismo espacio de trabajo conversacional.',
       },
       {
         title: 'Compatible con múltiples motores IaC',
@@ -431,29 +398,23 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     howTitle: 'Empieza a usar IaC Code',
     downloadLabel: 'Descargar para {os}',
     otherPlatformsLabel: 'Otras plataformas: ',
-    pipHint: 'Las tres formas se ejecutan desde la línea de comandos; instala primero:',
+    pipHint: 'Para la web y el modo headless, instala primero el paquete de Python:',
     surfacesToggleLabel: 'Otros modos de uso: ',
     shotTabDesktop: 'Escritorio',
-    shotTabTerminal: 'Terminal',
+    shotTabWeb: 'Web',
     howItems: [
       {
-        visual: 'interactiveMode',
-        title: 'Modo interactivo',
-        body: 'Inicia una sesión de terminal, refina requisitos, revisa plantillas, ejecuta herramientas y completa tareas de infraestructura en varias rondas.',
+        screenshot: 'web',
+        title: 'Aplicación web',
+        body: 'Ejecuta iac-code para abrir por defecto la aplicación web local y utilizar en el navegador todo el espacio de trabajo conversacional de IaC.',
         command: 'iac-code',
+        alt: 'Aplicación web de IaC Code',
       },
       {
         visual: 'headlessMode',
         title: 'Modo headless',
         body: 'Envía un único prompt a IaC Code para scripts, pipelines y sistemas de automatización.',
         command: 'iac-code --prompt "Crear una VPC" --output-format stream-json',
-      },
-      {
-        screenshot: 'web',
-        title: 'Aplicación web',
-        body: 'Inicia la aplicación web local desde la CLI y utiliza en el navegador todo el espacio de trabajo conversacional de IaC.',
-        command: 'iac-code web',
-        alt: 'Aplicación web de IaC Code',
       },
       {
         screenshot: 'desktop',
@@ -468,7 +429,7 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     whyItems: [
       {
         title: 'Gerencie infraestrutura em nuvem com linguagem natural',
-        body: 'Leve planejamento de recursos, geração de templates, revisão de mudanças e operações de implantação para uma conversa no terminal.',
+        body: 'Reúna planejamento de recursos, geração de templates, revisão de mudanças e operações de implantação no mesmo espaço de trabalho conversacional.',
       },
       {
         title: 'Suporte a múltiplos motores IaC',
@@ -486,29 +447,23 @@ const homepageDrafts: Record<Locale, HomepageDraft> = {
     howTitle: 'Comece a usar IaC Code',
     downloadLabel: 'Baixar para {os}',
     otherPlatformsLabel: 'Outras plataformas: ',
-    pipHint: 'As três formas rodam pela linha de comando — instale primeiro:',
+    pipHint: 'Para a web e o modo headless, instale primeiro o pacote Python:',
     surfacesToggleLabel: 'Outras formas de uso: ',
     shotTabDesktop: 'Desktop',
-    shotTabTerminal: 'Terminal',
+    shotTabWeb: 'Web',
     howItems: [
       {
-        visual: 'interactiveMode',
-        title: 'Modo interativo',
-        body: 'Inicie uma sessão no terminal, refine requisitos, revise templates, execute ferramentas e conclua tarefas de infraestrutura em várias rodadas.',
+        screenshot: 'web',
+        title: 'Aplicativo web',
+        body: 'Execute iac-code para abrir por padrão o aplicativo web local e usar no navegador todo o espaço de trabalho conversacional de IaC.',
         command: 'iac-code',
+        alt: 'Aplicativo web do IaC Code',
       },
       {
         visual: 'headlessMode',
         title: 'Modo headless',
         body: 'Envie um único prompt ao IaC Code para scripts, pipelines e sistemas de automação.',
         command: 'iac-code --prompt "Criar uma VPC" --output-format stream-json',
-      },
-      {
-        screenshot: 'web',
-        title: 'Aplicativo web',
-        body: 'Inicie o aplicativo web local pela CLI e use no navegador todo o espaço de trabalho conversacional de IaC.',
-        command: 'iac-code web',
-        alt: 'Aplicativo web do IaC Code',
       },
       {
         screenshot: 'desktop',
@@ -820,7 +775,7 @@ function getTerminalScenes(locale: Locale): Record<VisualKey, TerminalScene> {
       es: 'Crear una VPC con Terraform',
       pt: 'Criar uma VPC com Terraform',
     }[locale],
-    headless: homepageDrafts[locale].howItems[1].command ?? homepageDrafts.en.howItems[1].command ?? '',
+    headless: homepageDrafts[locale].howItems.find((item) => item.visual === 'headlessMode')?.command ?? '',
   };
   const headlessFirst = prompts.headless.replace(/ --output-format stream-json$/, '');
   const firstOutput = isZh
@@ -870,53 +825,6 @@ function getTerminalScenes(locale: Locale): Record<VisualKey, TerminalScene> {
     queryOutput: {en: 'Query output:', 'zh-Hans': '查询输出信息：', ja: '出力情報を照会：', fr: 'Informations de sortie :', de: 'Ausgabeinformationen:', es: 'Información de salida:', pt: 'Informações de saída:'}[locale],
     ecsCreated: {en: 'ECS instance created successfully. Details:', 'zh-Hans': 'ECS 实例已创建成功，详情如下：', ja: 'ECS インスタンスの作成に成功しました。詳細：', fr: 'Instance ECS créée avec succès. Détails :', de: 'ECS-Instanz erfolgreich erstellt. Details:', es: 'Instancia ECS creada correctamente. Detalles:', pt: 'Instância ECS criada com sucesso. Detalhes:'}[locale],
     item: {en: 'Item', 'zh-Hans': '项目', ja: '項目', fr: 'Élément', de: 'Element', es: 'Elemento', pt: 'Item'}[locale],
-  };
-  const surfaceCopy = {
-    sessionStarted: {
-      en: 'IaC Code interactive session started',
-      'zh-Hans': 'IaC Code 交互会话已启动',
-      ja: 'IaC Code の対話セッションを開始しました',
-      fr: 'Session interactive IaC Code démarrée',
-      de: 'Interaktive IaC-Code-Sitzung gestartet',
-      es: 'Sesión interactiva de IaC Code iniciada',
-      pt: 'Sessão interativa do IaC Code iniciada',
-    }[locale],
-    createVpcEcs: {
-      en: 'Create a VPC + 2 ECS instances',
-      'zh-Hans': '创建一个 VPC + 2 台 ECS',
-      ja: 'VPC 1 個 + ECS 2 台を作成',
-      fr: 'Créer un VPC + 2 instances ECS',
-      de: 'Eine VPC + 2 ECS-Instanzen erstellen',
-      es: 'Crear una VPC + 2 instancias ECS',
-      pt: 'Criar uma VPC + 2 instâncias ECS',
-    }[locale],
-    generatedTemplate: {
-      en: 'Generated template',
-      'zh-Hans': '生成模板',
-      ja: 'テンプレート生成',
-      fr: 'Modèle généré',
-      de: 'Vorlage generiert',
-      es: 'Plantilla generada',
-      pt: 'Modelo gerado',
-    }[locale],
-    validationPassed: {
-      en: 'Validation passed',
-      'zh-Hans': '校验通过',
-      ja: '検証に成功',
-      fr: 'Validation réussie',
-      de: 'Validierung bestanden',
-      es: 'Validación correcta',
-      pt: 'Validação aprovada',
-    }[locale],
-    waitingConfirm: {
-      en: ', waiting for deploy confirmation…',
-      'zh-Hans': '，等待确认部署…',
-      ja: '、デプロイ確認を待機中…',
-      fr: ', en attente de confirmation du déploiement…',
-      de: ', warte auf Bestätigung der Bereitstellung…',
-      es: ', esperando confirmación del despliegue…',
-      pt: ', aguardando confirmação da implantação…',
-    }[locale],
   };
 
   return {
@@ -1004,37 +912,6 @@ function getTerminalScenes(locale: Locale): Record<VisualKey, TerminalScene> {
         row('plain', outputTable([firstOutput.disk, 'cloud_essd 40GB'])),
       ],
     },
-    interactiveMode: {
-      title: 'Interactive REPL',
-      events: [
-        row(
-          'plain',
-          <>
-            <span className={styles.termPromptGlyph}>›</span> iac-code
-          </>,
-        ),
-        row('plain', <span className={styles.termDim}>{surfaceCopy.sessionStarted}</span>),
-        row(
-          'plain',
-          <>
-            <span className={styles.termPromptGlyph}>›</span> {surfaceCopy.createVpcEcs}
-          </>,
-        ),
-        row(
-          'plain',
-          <>
-            <span className={styles.termHl}>✎ {surfaceCopy.generatedTemplate}</span> vpc-ecs-stack.yml
-          </>,
-        ),
-        row(
-          'plain',
-          <>
-            <span className={styles.termOk}>✓ {surfaceCopy.validationPassed}</span>
-            {surfaceCopy.waitingConfirm}
-          </>,
-        ),
-      ],
-    },
     headlessMode: {
       title: 'Headless command',
       variant: 'shell',
@@ -1070,7 +947,7 @@ const copy = {
         command: 'pip install iac-code',
       },
     },
-    demoAlt: 'iac-code terminal demo',
+    demoAlt: 'IaC Code workspace',
     sections: [
       {
         title: 'Generate templates',
@@ -1078,7 +955,7 @@ const copy = {
       },
       {
         title: 'Review before deploy',
-        body: 'Keep generated infrastructure visible in the terminal so teams can inspect, refine, and version the result.',
+        body: 'Review generated infrastructure in the workspace so teams can inspect, refine, and version the result.',
       },
       {
         title: 'Use cloud context',
@@ -1098,7 +975,7 @@ const copy = {
       },
       {
         title: 'Operate',
-        body: 'Iterate in the REPL, run checks, and move the final IaC into your delivery workflow.',
+        body: 'Iterate in the Web or Desktop app, run checks, and move the final IaC into your delivery workflow.',
       },
     ],
   },
@@ -1118,7 +995,7 @@ const copy = {
         command: 'pip install iac-code',
       },
     },
-    demoAlt: 'iac-code 终端演示',
+    demoAlt: 'IaC Code 工作空间',
     sections: [
       {
         title: '生成模板',
@@ -1126,7 +1003,7 @@ const copy = {
       },
       {
         title: '部署前审阅',
-        body: '让生成的基础设施变更留在终端中，方便团队检查、调整并纳入版本管理。',
+        body: '在工作空间中审阅生成的基础设施变更，方便团队检查、调整并纳入版本管理。',
       },
       {
         title: '理解云上下文',
@@ -1146,7 +1023,7 @@ const copy = {
       },
       {
         title: '操作',
-        body: '在 REPL 中迭代、执行检查，并把最终 IaC 纳入交付流程。',
+        body: '在 Web 或桌面版中迭代、执行检查，并把最终 IaC 纳入交付流程。',
       },
     ],
   },
@@ -1166,7 +1043,7 @@ const copy = {
         command: 'pip install iac-code',
       },
     },
-    demoAlt: 'iac-code terminal demo',
+    demoAlt: 'IaC Code ワークスペース',
     sections: [
       {
         title: 'テンプレート生成',
@@ -1174,7 +1051,7 @@ const copy = {
       },
       {
         title: 'デプロイ前レビュー',
-        body: '生成されたインフラをターミナルで確認し、チームで精査、調整、バージョン管理できます。',
+        body: '生成されたインフラをワークスペースで確認し、チームで精査、調整、バージョン管理できます。',
       },
       {
         title: 'クラウド文脈を活用',
@@ -1194,7 +1071,7 @@ const copy = {
       },
       {
         title: '運用',
-        body: 'REPL で反復し、チェックを実行して、最終 IaC をデリバリーに組み込みます。',
+        body: 'Web アプリやデスクトップアプリで反復し、チェックを実行して、最終 IaC をデリバリーに組み込みます。',
       },
     ],
   },
@@ -1214,7 +1091,7 @@ const copy = {
         command: 'pip install iac-code',
       },
     },
-    demoAlt: 'Démonstration terminal iac-code',
+    demoAlt: 'Espace de travail IaC Code',
     sections: [
       {
         title: 'Générez des templates',
@@ -1222,7 +1099,7 @@ const copy = {
       },
       {
         title: 'Révisez avant déploiement',
-        body: 'Gardez l’infrastructure générée visible dans le terminal pour l’inspecter, l’ajuster et la versionner en équipe.',
+        body: 'Examinez l’infrastructure générée dans l’espace de travail pour l’inspecter, l’ajuster et la versionner en équipe.',
       },
       {
         title: 'Utilisez le contexte cloud',
@@ -1242,7 +1119,7 @@ const copy = {
       },
       {
         title: 'Opérer',
-        body: 'Itérez dans le REPL, lancez les vérifications et intégrez l’IaC final à votre livraison.',
+        body: 'Itérez dans l’application web ou de bureau, lancez les vérifications et intégrez l’IaC final à votre livraison.',
       },
     ],
   },
@@ -1262,7 +1139,7 @@ const copy = {
         command: 'pip install iac-code',
       },
     },
-    demoAlt: 'iac-code Terminal-Demo',
+    demoAlt: 'IaC Code Arbeitsbereich',
     sections: [
       {
         title: 'Templates generieren',
@@ -1270,7 +1147,7 @@ const copy = {
       },
       {
         title: 'Vor dem Deployment prüfen',
-        body: 'Halten Sie generierte Infrastruktur im Terminal sichtbar, damit Teams sie prüfen, verfeinern und versionieren können.',
+        body: 'Prüfen Sie generierte Infrastruktur im Arbeitsbereich, damit Teams sie verfeinern und versionieren können.',
       },
       {
         title: 'Cloud-Kontext nutzen',
@@ -1290,7 +1167,7 @@ const copy = {
       },
       {
         title: 'Betreiben',
-        body: 'Iterieren Sie im REPL, führen Sie Checks aus und übernehmen Sie die finale IaC in den Lieferprozess.',
+        body: 'Iterieren Sie in der Web- oder Desktop-App, führen Sie Checks aus und übernehmen Sie die finale IaC in den Lieferprozess.',
       },
     ],
   },
@@ -1310,7 +1187,7 @@ const copy = {
         command: 'pip install iac-code',
       },
     },
-    demoAlt: 'Demo de terminal de iac-code',
+    demoAlt: 'Espacio de trabajo de IaC Code',
     sections: [
       {
         title: 'Genera plantillas',
@@ -1318,7 +1195,7 @@ const copy = {
       },
       {
         title: 'Revisa antes de desplegar',
-        body: 'Mantén la infraestructura generada visible en la terminal para inspeccionarla, refinarla y versionarla con el equipo.',
+        body: 'Revisa la infraestructura generada en el espacio de trabajo para inspeccionarla, refinarla y versionarla con el equipo.',
       },
       {
         title: 'Usa contexto cloud',
@@ -1338,7 +1215,7 @@ const copy = {
       },
       {
         title: 'Opera',
-        body: 'Itera en el REPL, ejecuta comprobaciones e incorpora la IaC final al flujo de entrega.',
+        body: 'Itera en la aplicación web o de escritorio, ejecuta comprobaciones e incorpora la IaC final al flujo de entrega.',
       },
     ],
   },
@@ -1358,7 +1235,7 @@ const copy = {
         command: 'pip install iac-code',
       },
     },
-    demoAlt: 'Demonstração do terminal iac-code',
+    demoAlt: 'Espaço de trabalho do IaC Code',
     sections: [
       {
         title: 'Gere templates',
@@ -1366,7 +1243,7 @@ const copy = {
       },
       {
         title: 'Revise antes de implantar',
-        body: 'Mantenha a infraestrutura gerada visível no terminal para a equipe inspecionar, refinar e versionar.',
+        body: 'Revise a infraestrutura gerada no espaço de trabalho para a equipe inspecionar, refinar e versionar.',
       },
       {
         title: 'Use contexto cloud',
@@ -1386,7 +1263,7 @@ const copy = {
       },
       {
         title: 'Opere',
-        body: 'Itere no REPL, rode verificações e leve o IaC final para o seu fluxo de entrega.',
+        body: 'Itere no aplicativo web ou para desktop, rode verificações e leve o IaC final para o seu fluxo de entrega.',
       },
     ],
   },
@@ -1559,9 +1436,10 @@ function HomepageHeader() {
   const t = useHomeCopy();
   const draft = useHomepageDraft();
   const {i18n} = useDocusaurusContext();
-  const [shot, setShot] = useState<'desktop' | 'terminal'>('desktop');
+  const [shot, setShot] = useState<'desktop' | 'web'>('desktop');
   const isZh = i18n.currentLocale === 'zh-Hans';
   const desktopAlt = draft.howItems.find((item) => item.screenshot === 'desktop')?.alt ?? t.demoAlt;
+  const webAlt = draft.howItems.find((item) => item.screenshot === 'web')?.alt ?? t.demoAlt;
 
   return (
     <header className={styles.hero}>
@@ -1583,10 +1461,10 @@ function HomepageHeader() {
           <button
             type="button"
             role="tab"
-            aria-selected={shot === 'terminal'}
-            className={clsx(styles.shotTab, shot === 'terminal' && styles.shotTabActive)}
-            onClick={() => setShot('terminal')}>
-            {draft.shotTabTerminal}
+            aria-selected={shot === 'web'}
+            className={clsx(styles.shotTab, shot === 'web' && styles.shotTabActive)}
+            onClick={() => setShot('web')}>
+            {draft.shotTabWeb}
           </button>
         </div>
 
@@ -1594,7 +1472,7 @@ function HomepageHeader() {
           {shot === 'desktop' ? (
             <img src={isZh ? desktopCnScreenshot : desktopEnScreenshot} alt={desktopAlt} decoding="async" />
           ) : (
-            <video src={isZh ? demoZhVideo : demoEnVideo} autoPlay muted loop playsInline aria-label={t.demoAlt} />
+            <img src={isZh ? webCnScreenshot : webEnScreenshot} alt={webAlt} decoding="async" />
           )}
         </div>
       </div>

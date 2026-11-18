@@ -15184,3 +15184,39 @@ msgid ""
 "Changed candidates require a new show_architecture_plan batch before "
 "completion"
 msgstr "Für geänderte Vorschläge muss vor dem Abschluss mit show_architecture_plan ein neuer Satz erstellt werden."
+
+#: src/iac_code/cli/main.py
+msgid "Place terminal options after the subcommand: iac-code tui [OPTIONS]."
+msgstr "Setzen Sie Terminaloptionen hinter den Unterbefehl: iac-code tui [OPTIONS]."
+
+#: src/iac_code/cli/main.py
+msgid "Use iac-code tui [OPTIONS] for terminal options, or add --prompt for headless execution."
+msgstr "Verwenden Sie iac-code tui [OPTIONS] für Terminaloptionen oder ergänzen Sie --prompt für die Headless-Ausführung."
+
+#: src/iac_code/cli/main.py
+msgid "Use iac-code web --no-open to start Web without a terminal, or --prompt - to read stdin."
+msgstr "Starten Sie Web ohne Terminal mit iac-code web --no-open oder lesen Sie die Standardeingabe mit --prompt -."
+
+#: src/iac_code/cli/main.py
+msgid "Single-prompt headless mode does not support pipelines. Use iac-code web or set IAC_CODE_MODE=normal."
+msgstr ""
+"Der Headless-Einzelaufruf unterstützt keine Pipelines. Verwenden Sie iac-code web oder setzen Sie "
+"IAC_CODE_MODE=normal."
+
+#: src/iac_code/cli/main.py
+msgid "Run the unmaintained terminal UI. Prefer the Web or Desktop app."
+msgstr "Die nicht mehr gewartete Terminaloberfläche starten. Verwenden Sie vorzugsweise die Web- oder Desktop-App."
+
+#: src/iac_code/ui/banner.py
+msgid "TUI is no longer updated or maintained. Use the Web app (iac-code web) or the Desktop app instead."
+msgstr ""
+"Die TUI erhält keine Updates mehr und wird nicht mehr gewartet. Verwenden Sie die Web-App (iac-code web) oder die "
+"Desktop-App."
+
+#: src/iac_code/ui/repl.py
+msgid "Update completed. Restart iac-code tui to continue."
+msgstr "Update abgeschlossen. Starten Sie iac-code tui neu, um fortzufahren."
+
+#: src/iac_code/ui/dialogs/mcp_manager.py
+msgid "※ Run iac-code tui --debug to see error logs"
+msgstr "※ Führen Sie iac-code tui --debug aus, um Fehlerprotokolle anzuzeigen"

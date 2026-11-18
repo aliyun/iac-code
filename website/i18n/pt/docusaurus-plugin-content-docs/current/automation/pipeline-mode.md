@@ -21,31 +21,20 @@ Projetar uma implantação de baixo custo para uma aplicação web na Alibaba Cl
 
 ## Iniciar o modo pipeline
 
-Atualmente o modo pipeline requer o REPL interativo. Ele não pode ser combinado com `--prompt`.
+O modo de pipeline está disponível nos aplicativos web e desktop, via A2A e no modo de processo SDK. O modo de execução única `--prompt` não oferece suporte a pipelines.
 
-No macOS ou Linux:
+Inicie o aplicativo web normalmente (ou abra o aplicativo desktop):
 
 ```bash
-IAC_CODE_MODE=pipeline iac-code
-```
-
-No PowerShell:
-
-```powershell
-$env:IAC_CODE_MODE = "pipeline"
 iac-code
 ```
 
-O nome padrão do pipeline é `selling`. Para deixar explícito:
+Ao criar uma conversa, escolha **Modo normal** ou **Modo pipeline**. No modo pipeline, selecione **Pipeline de vendas** (`selling`) ou **Pipeline de vendas (solução primeiro)** (`selling_solution_first`). Cada conversa no mesmo aplicativo pode usar um modo e um pipeline diferentes, sem variáveis de ambiente nem reinicialização do servidor.
+
+Para clientes SDK que usam um subprocesso, selecione o modo pipeline padrão com entrada e saída stream-json:
 
 ```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling iac-code
-```
-
-Para escolher uma arquitetura antes de gerar seu modelo:
-
-```bash
-IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
+IAC_CODE_MODE=pipeline iac-code --input-format stream-json --output-format stream-json
 ```
 
 ## Pipelines disponíveis
@@ -56,9 +45,11 @@ IAC_CODE_MODE=pipeline IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code
 | Pipeline `selling` | Gera e avalia modelos candidatos antes de o usuário escolher um para implantar. Continua sendo o padrão. |
 | Pipeline `selling_solution_first` | Permite escolher primeiro uma arquitetura e depois gera, visualiza e calcula o preço somente dessa solução. |
 
-Selecione qualquer um deles com `IAC_CODE_PIPELINE_NAME`. Consulte [Pipeline com solução primeiro](./solution-first-pipeline.md) para conhecer o fluxo em três etapas, os limites separados de confirmação e permissão e a recuperação.
+Nos aplicativos web e desktop, selecione o pipeline ao criar a conversa. Para A2A e o modo de processo SDK, `IAC_CODE_PIPELINE_NAME` define o pipeline padrão. Consulte [Pipeline com solução primeiro](./solution-first-pipeline.md) para conhecer o fluxo em três etapas, os limites separados de confirmação e permissão e a recuperação.
 
 ## Variáveis de ambiente
+
+Estas variáveis configuram os padrões de inicialização de A2A, do modo de processo SDK e da TUI preservada. Os aplicativos web e desktop selecionam o modo e o pipeline por conversa; a API web só usa `IAC_CODE_MODE` e `IAC_CODE_PIPELINE_NAME` quando os campos correspondentes são omitidos na solicitação.
 
 | Variável | Finalidade |
 |---|---|
@@ -90,7 +81,7 @@ O modo pipeline pode pausar e aguardar entrada do usuário, por exemplo:
 - Uma ferramenta ou ação de implantação exige aprovação de permissões.
 - A execução foi interrompida e precisa ser recuperada ou continuada.
 
-Se o processo terminar ou a sessão for interrompida, o IaC Code salva o estado do pipeline. Quando você voltar mais tarde para essa sessão com `--resume`, poderá verificar o progresso anterior e continuar a partir de um ponto recuperável.
+Se o processo terminar ou a sessão for interrompida, o IaC Code salva o estado do pipeline. Reabra a conversa na barra lateral de Web ou Desktop para consultar o progresso e continuar a partir de um ponto recuperável.
 
 Depois que o pipeline é concluído, falha, sai antecipadamente ou é cancelado, o IaC Code volta para o chat normal. Então você pode fazer perguntas de acompanhamento, ajustar o plano ou lidar com problemas pós-implantação.
 
@@ -105,9 +96,8 @@ ACP atualmente não oferece suporte ao modo pipeline. `--prompt` / o [modo não 
 ## Limitações atuais
 
 - A versão atual inclui `selling` e `selling_solution_first`, ambos voltados principalmente a fluxos de infraestrutura da Alibaba Cloud. `selling` continua sendo o padrão.
-- O modo pipeline requer o REPL interativo. `--prompt` é rejeitado quando `IAC_CODE_MODE=pipeline`.
-- O modo pipeline aceita entrada de texto. Imagens coladas no REPL são ignoradas enquanto o pipeline está ativo.
-- Durante o pipeline, shell escapes, gatilhos de skills e a maioria dos slash commands são restritos, a menos que a definição do pipeline os permita explicitamente. Comandos básicos como `/help`, `/status`, `/resume` e `/exit` continuam disponíveis.
+- No modo pipeline da interface de terminal, as imagens coladas no REPL são ignoradas.
+- `iac-code tui`: Durante o pipeline, shell escapes, gatilhos de skills e a maioria dos slash commands são restritos, a menos que a definição do pipeline os permita explicitamente. Comandos básicos como `/help`, `/status`, `/resume` e `/exit` continuam disponíveis.
 
 
 ## Checkpoints de backup

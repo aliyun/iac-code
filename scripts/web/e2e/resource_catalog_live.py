@@ -63,7 +63,7 @@ _UNSUPPORTED_REGION = (
 # This acceptance suite must never inherit the Alibaba Cloud CLI `current`
 # profile.  The domestic-site test account is intentionally isolated in this
 # named profile so every live read is attributable to the same identity.
-ACCEPTANCE_CLI_PROFILE = "test-guima"
+ACCEPTANCE_CLI_PROFILE = "resource-link-test"
 
 
 class LiveCatalogError(RuntimeError):

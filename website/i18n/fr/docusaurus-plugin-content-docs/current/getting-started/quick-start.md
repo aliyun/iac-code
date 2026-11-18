@@ -5,16 +5,10 @@ description: Configurer IaC Code et exécuter votre première requête.
 
 # Démarrage rapide
 
-Lancez le CLI interactif :
+Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
 
 ```bash
 iac-code
-```
-
-Lors de la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud :
-
-```text
-/auth
 ```
 
 Puis demandez votre infrastructure :

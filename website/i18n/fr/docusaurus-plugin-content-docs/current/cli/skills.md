@@ -79,6 +79,8 @@ paths:
 
 ## Gérer les compétences
 
+Dans Web et Desktop, ouvrez **Paramètres → Modules d’extension → Compétences** pour rechercher des compétences et activer ou désactiver celles de l’utilisateur et du projet.
+
 Exécutez `/skills` dans le REPL interactif pour ouvrir le sélecteur de gestion des compétences. Le sélecteur affiche les compétences intégrées, utilisateur et projet détectées, avec leur source, leur taille et leur état d'activation. Vous pouvez rechercher par nom ou description, trier par nom/source/taille, et activer ou désactiver les compétences utilisateur ou projet.
 
 Les compétences désactivées sont enregistrées dans `settings.yml` sous `disabled_skills`. Les compétences intégrées restent verrouillées comme activées et ne sont pas écrites dans la liste des désactivations.

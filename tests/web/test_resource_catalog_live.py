@@ -201,7 +201,7 @@ def test_local_cli_always_uses_acceptance_profile(monkeypatch):
     assert calls[0][0] == [
         "/usr/local/bin/aliyun",
         "--profile",
-        "test-guima",
+        "resource-link-test",
         "ecs",
         "DescribeInstances",
     ]
@@ -218,7 +218,7 @@ def test_remote_cli_uses_bounded_ssh_command_and_quotes_arguments(monkeypatch):
     monkeypatch.setattr(module["subprocess"], "run", fake_run)
     client = module["AliyunCli"](
         "/tmp/iac-code-resource-e2e/aliyun",
-        profile="test-guima",
+        profile="resource-link-test",
         ssh_host="root@trusted-host",
         ssh_executable="/usr/bin/ssh",
     )
@@ -232,7 +232,7 @@ def test_remote_cli_uses_bounded_ssh_command_and_quotes_arguments(monkeypatch):
         "ConnectTimeout=10",
         "root@trusted-host",
         "env ALIBABA_CLOUD_CLI_NO_COLOR=true "
-        "/tmp/iac-code-resource-e2e/aliyun --profile test-guima ecs DescribeInstances "
+        "/tmp/iac-code-resource-e2e/aliyun --profile resource-link-test ecs DescribeInstances "
         "--InstanceName 'name with spaces'",
     ]
     assert options["timeout"] == 45
@@ -241,7 +241,7 @@ def test_remote_cli_uses_bounded_ssh_command_and_quotes_arguments(monkeypatch):
 def test_cli_rejects_non_acceptance_profile():
     module = load_live_catalog_script()
 
-    with pytest.raises(module["LiveCatalogError"], match="test-guima"):
+    with pytest.raises(module["LiveCatalogError"], match="resource-link-test"):
         module["AliyunCli"]("/usr/local/bin/aliyun", profile="current")
 
 

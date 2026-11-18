@@ -5,19 +5,17 @@ description: Exécuter IaC Code comme une application web locale, avec le même 
 
 # Application Web
 
-IaC Code est fourni avec une application web locale qui exécute le même moteur d'agent que le terminal, présenté dans un navigateur plutôt que dans un REPL. Elle est utile lorsque vous préférez une interface de discussion graphique, que vous souhaitez gérer plusieurs conversations côte à côte, ou que vous avez besoin de suivre la progression d'un pipeline et l'activité des outils dans une mise en page plus riche.
+Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
 
 L'application web lit et écrit le même magasin de sessions que la CLI : une conversation démarrée d'un côté peut donc être reprise de l'autre.
 
 ## Installation
 
-L'application web est une fonctionnalité optionnelle qui dépend de l'extra `http` (Starlette et Uvicorn). Installez-le en même temps que le paquet de base :
+L’installation par défaut comprend les dépendances de l’application web et de l’environnement HTTP. L’extra `[http]` reste un alias de compatibilité ; il n’est plus nécessaire de l’installer séparément. Depuis le dépôt, `uv sync` suffit.
 
 ```bash
-pip install 'iac-code[http]'
+pip install iac-code
 ```
-
-Si vous exécutez `iac-code web` sans l'extra, la commande échoue avec un message vous invitant à installer `iac-code[http]`. Lorsque vous travaillez à partir d'un clone du dépôt, `uv sync --extra http` installe les mêmes dépendances.
 
 ## Démarrer l'application web
 
@@ -31,9 +29,11 @@ Par défaut, il écoute sur `127.0.0.1:8766` et ouvre votre navigateur par défa
 
 | Option | Défaut | Description |
 |---|---|---|
-| `--host` | `127.0.0.1` | Hôte du serveur HTTP. Seules les adresses de bouclage sont acceptées. |
+| `--host` | `127.0.0.1` | Hôte du serveur HTTP. Le mode local accepte les adresses de boucle locale ; les autres IP nécessitent `--access-token-file`. |
 | `--port` | `8766` | Port du serveur HTTP. |
 | `--open` / `--no-open` | `--open` | Ouvre le navigateur au démarrage. Utilisez `--no-open` pour désactiver. |
+| `--debug`, `-d` | `false` | Activer les journaux de débogage du serveur pour cette exécution. |
+| `--access-token-file <path>` | — | Fichier de jeton pour un accès distant explicite avec transport d’API chiffré. |
 
 ```bash
 iac-code web --port 9000 --no-open
@@ -41,7 +41,7 @@ iac-code web --port 9000 --no-open
 
 ### Sécurité
 
-Le serveur web n'écoute que sur les interfaces de bouclage (`127.0.0.1`, `localhost` ou `::1`). Il est prévu pour un usage sur votre propre machine et rejette les adresses d'écoute publiques. Ne l'exposez pas directement sur un réseau ; placez-le derrière votre propre proxy authentifié si un accès distant est nécessaire.
+Sans `--access-token-file`, le serveur n’accepte que les hôtes de boucle locale (`127.0.0.1`, `localhost` ou `::1`) et vérifie les requêtes locales. Le mode explicite avec jeton accepte aussi d’autres IP et protège les requêtes d’API par le transport chiffré avec jeton.
 
 ## Vue d'ensemble de l'interface
 
@@ -53,7 +53,7 @@ La barre latérale répertorie les conversations du projet sélectionné. Depuis
 - **Rechercher** des conversations, ou ouvrir la palette de commandes pour exécuter une commande.
 - **Épingler**, **renommer** ou **archiver** une conversation, et parcourir les conversations archivées.
 
-Comme les sessions sont partagées avec la CLI, une conversation que vous reprenez avec `iac-code --resume` apparaît aussi ici. Consultez [Sessions](./cli/sessions.md) pour comprendre le fonctionnement du magasin de sessions.
+Comme les sessions sont partagées avec la CLI, une conversation que vous reprenez avec `iac-code tui --resume` apparaît aussi ici. Consultez [Sessions](./cli/sessions.md) pour comprendre le fonctionnement du magasin de sessions.
 
 ### Zone de saisie (composer)
 
@@ -66,6 +66,8 @@ La zone de saisie est l'endroit où vous rédigez vos requêtes. Elle expose les
 - Les **commandes slash** (saisies avec `/`) et les **références de fichiers `@`** pour désigner des fichiers de votre espace de travail.
 
 ### Discussion normale et mode pipeline
+
+Choisissez le mode à la création d’une conversation, puis le pipeline si vous optez pour le mode pipeline. Les conversations d’une même application peuvent utiliser des modes différents sans redémarrage du serveur.
 
 Une session s'exécute soit en discussion normale, soit en mode **pipeline**. La discussion normale diffuse en ligne les réponses de l'assistant, les appels d'outils et les résultats. Le mode pipeline ajoute un espace de travail qui affiche les chronologies des étapes, les diagnostics, les diagrammes, la progression du déploiement, le nettoyage et les détails de transfert au fur et à mesure de l'exécution du pipeline. Consultez [Mode pipeline](./automation/pipeline-mode.md) pour savoir ce que font les pipelines.
 
@@ -90,4 +92,4 @@ L'application web est disponible en sept langues — English, 简体中文, 日�
 
 ## Relation avec la CLI
 
-L'application web est une interface alternative, et non un produit distinct. Elle utilise les mêmes fournisseurs, identifiants, compétences, outils et stockage de sessions que le terminal. Configurez les fournisseurs et les identifiants une seule fois avec `/auth` dans la CLI, ou via les paramètres de l'application web, et les deux interfaces les partageront.
+Web, Desktop et headless partagent fournisseurs, identifiants, compétences, outils et sessions. Configurez une fois le modèle et l’accès cloud dans les paramètres pour les réutiliser entre ces entrées.

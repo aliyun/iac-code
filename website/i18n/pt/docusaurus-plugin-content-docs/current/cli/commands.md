@@ -5,6 +5,8 @@ description: Referencia completa dos comandos interativos integrados.
 
 # Comandos slash
 
+Esta página descreve os comandos da [interface de terminal](./interactive-mode.md), iniciada com `iac-code tui`. Web e Desktop oferecem seus próprios menus de comandos e configurações.
+
 Os comandos slash controlam o IaC Code de dentro de uma sessao interativa. Digite `/` para ver os comandos disponiveis e continue digitando para filtrar a lista. Um comando so e reconhecido quando aparece no inicio da sua mensagem.
 
 A listagem de `/` inclui tanto comandos integrados quanto skills que voce configurou. Para restringir as sugestoes apenas a skills, use `$` em vez disso — `$<nome>` lista e invoca skills exclusivamente, e digitar `$` seguido do nome de um comando integrado (por exemplo `$help`) imprime um erro apontando para o equivalente `/`.
@@ -25,7 +27,7 @@ O texto apos o nome do comando e passado como argumentos. Na tabela abaixo, `<ar
 | `/mcp [enable\|disable\|reconnect ...]` | Gerencia servidores MCP no REPL interativo. Sem argumentos, abre o gerenciador MCP para status, diagnósticos, tools, resources, prompts, autenticação OAuth, aprovação, ativar/desativar, reconectar e remover. Ações rápidas podem ativar, desativar ou reconectar servidores configurados. |
 | `/model [model_name]` | Mostra ou troca o modelo ativo. Com `model_name`, troca diretamente para esse modelo no provedor ativo. Sem argumento, abre um seletor interativo de modelos quando um provedor esta configurado, ou imprime o modelo atual quando nao ha UI de console disponivel. |
 | `/rename <nome>` | Nomear a sessão atual. Os nomes aparecem no banner de boas-vindas, na dica de saída e no seletor de `/resume`, e podem ser usados com `/resume` ou `--resume` quando identificam uma sessão de forma única. |
-| `/resume [id-da-sessao\|prefixo-unico-de-id\|nome-unico-da-sessao]` | Retomar uma sessão anterior. Com um argumento, o IaC Code resolve-o como ID exato, prefixo único de ID ou nome único de sessão. Sem argumento, abre o seletor interativo de sessões. Sessões de outros projetos imprimem um comando `cd ... && iac-code --resume <id>` em vez de trocar o projeto atual em tempo real. |
+| `/resume [id-da-sessao\|prefixo-unico-de-id\|nome-unico-da-sessao]` | Retomar uma sessão anterior. Com um argumento, o IaC Code resolve-o como ID exato, prefixo único de ID ou nome único de sessão. Sem argumento, abre o seletor interativo de sessões. Sessões de outros projetos imprimem um comando `cd ... && iac-code tui --resume <id>` em vez de trocar o projeto atual em tempo real. |
 | `/skills` | Abrir o seletor de gerenciamento de habilidades. Pesquise por nome ou descrição, ordene por nome/origem/tamanho e ative ou desative habilidades de usuário ou de projeto. Habilidades integradas permanecem bloqueadas e ativadas. |
 | `/status` | Mostrar o ID da sessão atual, provedor, modelo, região da Alibaba Cloud, diretório de trabalho, uso registrado de tokens de API, contagem de turnos e utilização do contexto. No modo debug, também mostra contagens de side calls de memória e uso de tokens. |
 

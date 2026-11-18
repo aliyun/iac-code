@@ -25,19 +25,13 @@ description: 先选择架构方案，再生成并部署对应的 ROS 模板。
 
 ## 启动流水线
 
-在交互式终端中运行：
+正常启动 Web 应用（或直接打开桌面版）：
 
 ```bash
-IAC_CODE_MODE=pipeline \
-IAC_CODE_PIPELINE_NAME=selling_solution_first \
 iac-code
 ```
 
-使用本地 Web 应用时，请在创建会话时选择流水线模式，并用指定的流水线名称启动服务：
-
-```bash
-IAC_CODE_PIPELINE_NAME=selling_solution_first iac-code web
-```
+在 Web 或桌面版新建会话时，选择**流水线模式 → 售卖流水线（先选方案）**（`selling_solution_first`）即可。模式和流水线在界面中按会话选择，无需设置环境变量或重启服务。
 
 通过 A2A 调用时，可以在每条消息中选择模式和流水线，而不必修改服务器默认值：
 

@@ -97,6 +97,7 @@ from iac_code.pipeline.engine.user_input import (
 )
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
+from iac_code.services.first_token_timing import bind_timing
 from iac_code.services.permission_wait import RecoveredPermissionAuditBoundary, canonical_digest
 from iac_code.services.pipeline_handoff_context import include_original_user_request, pipeline_handoff_message
 from iac_code.services.providers.aliyun import AliyunCredential
@@ -706,6 +707,7 @@ class IacCodeA2APipelineExecutor:
         session_storage = SessionStorage()
 
         def runtime_factory(session_id: str) -> Any:
+            bind_timing(context_id=context_id, task_id=task_id, iac_code_session_id=session_id)
             restore_session = getattr(self._backup_service, "restore_session", None)
             if restore_session is None:
                 SessionBackupService(session_storage=session_storage).restore_session(cwd, session_id)

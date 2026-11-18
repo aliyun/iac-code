@@ -79,6 +79,8 @@ paths:
 
 ## Managing Skills
 
+In Web and Desktop, open **Settings → Plugins → Skills** to search skills and enable or disable user and project skills.
+
 Run `/skills` in the interactive REPL to open the skill management picker. The picker lists discovered bundled, user, and project skills with their source, size, and enabled state. You can search by name or description, sort by name/source/size, and toggle user or project skills on and off.
 
 Disabled skills are saved in `settings.yml` under `disabled_skills`. Bundled skills are locked enabled and are not written to the disabled list.

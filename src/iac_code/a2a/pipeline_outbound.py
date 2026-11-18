@@ -5,6 +5,7 @@ import logging
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable, Hashable
+from contextlib import nullcontext
 from dataclasses import dataclass, fields, is_dataclass
 from typing import Any
 
@@ -13,6 +14,13 @@ from iac_code.a2a.pipeline_flow_monitor import PipelineA2AFlowItem
 from iac_code.a2a.pipeline_transport_delivery import (
     PipelineTransportDeliveryClosedError,
     pipeline_transport_delivery_required,
+)
+from iac_code.services.first_token_timing import (
+    RequestTiming,
+    current_timing,
+    mark_timing,
+    timing_phase,
+    use_request_timing,
 )
 from iac_code.types.stream_events import (
     PermissionRequestEvent,
@@ -41,6 +49,7 @@ class _OutboundItem:
     estimated_bytes: int
     event: Any
     after_delivery: Callable[[], None] | None = None
+    timing: RequestTiming | None = None
 
 
 @dataclass
@@ -149,6 +158,7 @@ class PipelineA2AOutboundQueue:
                 estimated_bytes=estimated_bytes,
                 event=event,
                 after_delivery=after_delivery,
+                timing=current_timing(),
             )
             if _permission_request_from(event) is not None:
                 self._enqueue_permission_locked(
@@ -163,6 +173,8 @@ class PipelineA2AOutboundQueue:
                 self._flow_monitor.event_enqueued(_flow_item(item))
             self._wakeup.set()
 
+        if _text_delta_value(event):
+            mark_timing("first_text_outbound_enqueued", once=True)
         return _text_delta_value(event)
 
     async def run_serialized(self, callback: Callable[[], Awaitable[Any]]) -> Any:
@@ -396,24 +408,42 @@ class PipelineA2AOutboundQueue:
             operation.completion.set_result(None)
 
     async def _publish_batch(self, batch: _ReadyBatch) -> None:
+        text_items = [item for item in batch.items if _text_delta_value(item.event)]
+        timing = (text_items[0] if text_items else batch.items[0]).timing
+        with use_request_timing(timing) if timing is not None else nullcontext():
+            text_batch = bool(text_items)
+            if text_batch:
+                mark_timing(
+                    "first_text_outbound_dequeued",
+                    once=True,
+                    duration_ms=max(0, time.monotonic_ns() - text_items[0].enqueued_at_ns) / 1_000_000,
+                )
+            await self._publish_timed_batch(batch, text_batch=text_batch)
+
+    async def _publish_timed_batch(self, batch: _ReadyBatch, *, text_batch: bool) -> None:
         loop = asyncio.get_running_loop()
         started_at = loop.time()
         monitor = self._flow_monitor
         if monitor is not None:
             monitor.batch_started([_flow_item(item) for item in batch.items], trigger_reason=batch.trigger_reason)
         try:
-            persisted = await self._publisher.persist_batch_events([item.event for item in batch.items])
+            with timing_phase("outbound_persist", first_only=True) if text_batch else nullcontext():
+                persisted = await self._publisher.persist_batch_events([item.event for item in batch.items])
             if monitor is not None:
                 monitor.phase_started("coalesce")
-            network_envelopes = coalesce_pipeline_delta_envelopes_by_source(persisted)
+            with timing_phase("outbound_coalesce", first_only=True) if text_batch else nullcontext():
+                network_envelopes = coalesce_pipeline_delta_envelopes_by_source(persisted)
             if monitor is not None:
                 monitor.phase_started("a2a_internal_queue")
             try:
-                frame_count_result = await self._publisher.enqueue_persisted_batch(
-                    network_envelopes,
-                    wait_for_transport=True,
-                    local_envelopes=persisted,
-                )
+                with timing_phase("outbound_enqueue", first_only=True) if text_batch else nullcontext():
+                    frame_count_result = await self._publisher.enqueue_persisted_batch(
+                        network_envelopes,
+                        wait_for_transport=True,
+                        local_envelopes=persisted,
+                    )
+                if text_batch:
+                    mark_timing("first_text_a2a_enqueued", once=True)
             except PipelineTransportDeliveryClosedError:
                 frame_count_result = 0
             network_frames = (

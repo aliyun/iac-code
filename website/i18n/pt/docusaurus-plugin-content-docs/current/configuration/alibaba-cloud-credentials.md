@@ -5,6 +5,8 @@ description: Configure credenciais da Alibaba Cloud, incluindo autenticação po
 
 # Credenciais da Alibaba Cloud
 
+Em Web ou Desktop, abra **Configurações → Credenciais de nuvem** para configurar a autenticação do Alibaba Cloud e a região padrão.
+
 As credenciais da Alibaba Cloud sao necessarias para operacoes que inspecionam ou gerenciam recursos na nuvem.
 
 As ferramentas `resolve_cloud_resource_selector` e `select_cloud_resource` usam a mesma decisão de credencial efetiva que `aliyun_api`. No A2A, as credenciais da solicitação ou sessão têm prioridade; quando ausentes, aplica-se a cadeia normal de configuração local, variáveis de ambiente e credenciais da Alibaba Cloud CLI. Sem uma credencial efetiva válida, nem `aliyun_api` nem as duas ferramentas de seleção são registradas.
@@ -15,8 +17,8 @@ Use **ECS RAM Role** quando o IaC Code for executado em uma instância ECS da Al
 
 Você pode configurar esse modo em todas as interfaces de usuário:
 
-- No REPL, execute `/auth`, escolha **Configurar serviço de nuvem IaC**, depois **Alibaba Cloud** e **ECS RAM Role**.
 - No aplicativo Web ou Desktop, abra **Configurações > Credenciais de nuvem**, escolha **Alibaba Cloud** e selecione **ECS RAM Role** como método de autenticação.
+- No REPL, execute `/auth`, escolha **Configurar serviço de nuvem IaC**, depois **Alibaba Cloud** e **ECS RAM Role**.
 
 Selecione a região usada nas chamadas de API de nuvem. O nome da função RAM do ECS é opcional: deixe-o em branco para detectar, por meio do IMDS, a função associada à instância. O nome salvo no IaC Code tem prioridade sobre `ALIBABA_CLOUD_ECS_METADATA`; se nenhum dos dois estiver definido, o IaC Code solicita ao IMDS que detecte o nome da função.
 
@@ -35,17 +37,13 @@ A configuração pode ser salva em qualquer máquina, mas as chamadas de API de 
 
 ## Login OAuth no navegador
 
-O caminho de configuração interativa recomendado é `/auth`:
-
-```text
-/auth
-```
-
-Escolha **Configurar serviço de nuvem IaC**, depois **Alibaba Cloud** e então **OAuth Login (Browser)**. O IaC Code abre um fluxo de autorização no navegador, aguarda o callback local, troca o código de autorização com PKCE e salva credenciais temporárias baseadas em OAuth em `.cloud-credentials.yml`, no diretório de configuração do IaC Code.
+Em Web ou Desktop, abra **Configurações → Credenciais de nuvem**, selecione Alibaba Cloud e **Login OAuth pelo navegador** e inicie a autorização. O IaC Code abre o fluxo no navegador, troca o código com PKCE e salva as credenciais OAuth em `.cloud-credentials.yml`.
 
 Durante a configuração, você pode escolher o site OAuth da China ou o internacional. O IaC Code salva o site escolhido junto com o refresh token para que atualizações futuras usem o mesmo endpoint.
 
-As credenciais OAuth são atualizadas automaticamente quando o access token ou as credenciais STS estão perto de expirar. Se o refresh token expirar ou for revogado, execute `/auth` novamente e escolha OAuth Login (Browser).
+As credenciais OAuth são renovadas automaticamente quando o token de acesso ou as credenciais STS estão próximos de expirar. Se o token de renovação expirar ou for revogado, autorize novamente em **Configurações → Credenciais de nuvem**.
+
+Para configurar pelo terminal, inicie `iac-code tui` e execute `/auth`.
 
 ## Variáveis de ambiente
 

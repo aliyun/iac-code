@@ -5,24 +5,26 @@ description: Referência para as opções de inicialização e execução única
 
 # Opções de linha de comando
 
-As opções de linha de comando alteram como o IaC Code é iniciado. Use-as antes de entrar no REPL interativo, ou combine-as com `--prompt` para automação única.
+`iac-code` abre o aplicativo web por padrão. Coloque as opções de terminal depois de `iac-code tui`, por exemplo `iac-code tui --resume <id>`. As opções headless `--prompt` e stream-json continuam no comando principal. Sem um terminal interativo, inicie a web explicitamente com `iac-code web --no-open`.
 
-| Opção | Finalidade |
-|---|---|
-| `-h`, `--help` | Mostrar a ajuda do CLI e sair. Use para verificar as opções suportadas pela versão instalada. |
-| `-v`, `-V`, `--version` | Exibir a versão instalada do IaC Code e sair. |
-| `-m <model>`, `--model <model>` | Iniciar com um modelo LLM específico. Substitui o modelo salvo para a execução atual. |
-| `-p <prompt>`, `--prompt <prompt>` | Executar um único prompt e sair. Ativa o modo não interativo. Use `--prompt -` para ler o prompt da entrada padrão. |
-| `--output-format <format>` | Definir o formato de saída para o modo não interativo. Os valores suportados são `text`, `json` e `stream-json`. O padrão é `text`. |
-| `--max-turns <number>` | Limitar o número máximo de turnos do agente no modo não interativo. O padrão é `100`. |
-| `--thinking-enabled`, `--no-thinking-enabled` | Controla se solicitações nao interativas de execucao unica habilitam thinking explicitamente. O padrão é `--thinking-enabled`; use `--no-thinking-enabled` para enviar `thinking_enabled=false` nesta execução sem reescrever `settings.yml`. |
-| `-d`, `--debug` | Ativar o registro de depuração para a execução atual. No modo interativo, use `/debug` para inspecionar ou alterar o registro de depuração após a inicialização. |
-| `--verbose` | Mostrar o progresso do modo headless (não interativo) na saída de erro padrão. |
-| `-r <id-ou-nome-da-sessao>`, `--resume <id-ou-nome-da-sessao>` | Retomar uma sessão anterior por ID exato, prefixo único de ID ou nome único de sessão. Sessões resolvidas em outro projeto imprimem um comando `cd ... && iac-code --resume <id>` em vez de trocar o projeto atual em tempo real. |
-| `-c`, `--continue` | Retomar a sessão mais recente. Não pode ser usado junto com `--resume`. |
-| `--allowed-tools <patterns>` | Padrões de permissão de ferramentas separados por vírgulas para permitir, ex. `'bash(git *),write_file'`. |
-| `--disallowed-tools <patterns>` | Padrões de permissão de ferramentas separados por vírgulas para negar, ex. `'bash(rm *)'`. |
-| `--permission-mode <mode>` | Modo de permissão: `default`, `accept_edits`, `bypass_permissions`, `dont_ask`. |
+A coluna de entrada mostra onde cada opção é aceita. `headless` significa `iac-code --prompt ...`; `process` indica o modo de subprocesso stream-json. O modelo e as permissões de Web são configurados na interface.
+
+| Opção | Finalidade | Entrada |
+|---|---|---|
+| `-h`, `--help` | Mostrar a ajuda do CLI e sair. Use para verificar as opções suportadas pela versão instalada. | `iac-code`, `web`, `tui` |
+| `-v`, `-V`, `--version` | Exibir a versão instalada do IaC Code e sair. | `iac-code` |
+| `-m <model>`, `--model <model>` | Iniciar com um modelo LLM específico. Substitui o modelo salvo para a execução atual. | `headless`, `process`, `tui` |
+| `-p <prompt>`, `--prompt <prompt>` | Executar um único prompt e sair. Ativa o modo não interativo. Use `--prompt -` para ler o prompt da entrada padrão. | `iac-code` |
+| `--output-format <format>` | Definir o formato de saída para o modo não interativo. Os valores suportados são `text`, `json` e `stream-json`. O padrão é `text`. | `headless`, `process` |
+| `--max-turns <number>` | Limitar o número máximo de turnos do agente no modo não interativo. O padrão é `100`. | `headless`, `process` |
+| `--thinking-enabled`, `--no-thinking-enabled` | Controla se solicitações nao interativas de execucao unica habilitam thinking explicitamente. O padrão é `--thinking-enabled`; use `--no-thinking-enabled` para enviar `thinking_enabled=false` nesta execução sem reescrever `settings.yml`. | `headless` |
+| `-d`, `--debug` | Ativar o registro de depuração para a execução atual. No modo interativo, use `/debug` para inspecionar ou alterar o registro de depuração após a inicialização. | `headless`, `process`, `tui`, `web` |
+| `--verbose` | Mostrar o progresso do modo headless (não interativo) na saída de erro padrão. | `headless` |
+| `-r <id-ou-nome-da-sessao>`, `--resume <id-ou-nome-da-sessao>` | Retomar por ID exato, prefixo único ou nome único. Em `tui`, sessões de outros projetos mostram um comando para o diretório correto; execuções headless exigem o diretório do projeto da sessão. | `headless`, `tui` |
+| `-c`, `--continue` | Retomar a sessão mais recente. Não pode ser usado junto com `--resume`. | `headless`, `tui` |
+| `--allowed-tools <patterns>` | Padrões de permissão de ferramentas separados por vírgulas para permitir, ex. `'bash(git *),write_file'`. | `headless`, `process`, `tui` |
+| `--disallowed-tools <patterns>` | Padrões de permissão de ferramentas separados por vírgulas para negar, ex. `'bash(rm *)'`. | `headless`, `process`, `tui` |
+| `--permission-mode <mode>` | Modo de permissão: `default`, `accept_edits`, `bypass_permissions`, `dont_ask`. | `headless`, `process`, `tui` |
 
 ## Modos de permissão
 
@@ -33,13 +35,13 @@ O parâmetro `--permission-mode` controla como o agente lida com as verificaçõ
 | `default` | O agente solicita confirmação quando uma ação de ferramenta requer aprovação. |
 | `accept_edits` | Aprovar automaticamente comandos do sistema de arquivos considerados como edições (ex. `mkdir`, `cp`). Outras ações ainda solicitam confirmação. |
 | `bypass_permissions` | Aprovar automaticamente ações de ferramentas exceto verificações de segurança. Toda decisão allow que exige um registro de auditoria falha de forma fechada se a persistência de auditoria falhar. Destinado para automação confiável. |
-| `dont_ask` | Negar silenciosamente qualquer ação que normalmente solicitaria confirmação. Útil para execuções estritamente somente leitura. |
+| `dont_ask` | Negar ações que exigem aprovação, salvo quando se aplicar uma regra de permissão explícita. |
 
 Chamadas de API de escrita Alibaba Cloud feitas por `aliyun_api` são protegidas separadamente: uma regra allow simples `aliyun_api` não as aprova globalmente, e fora de `bypass_permissions` as regras allow de escrita devem corresponder exatamente ao par canônico `product:action`. `bypass_permissions` as aprova automaticamente, mas, como outras decisões allow auditadas, a ação é negada se o registro de auditoria de permissões não puder ser persistido. Use regras exatas como `aliyun_api(ros:CreateStack)` quando a automação confiável deve permitir apenas uma API de escrita específica.
 
 ## Comandos de inicialização comuns
 
-Iniciar o REPL interativo com o modelo salvo:
+Iniciar o aplicativo web local:
 
 ```bash
 iac-code
@@ -48,7 +50,7 @@ iac-code
 Iniciar com um modelo específico para esta execução:
 
 ```bash
-iac-code --model qwen3.7-max
+iac-code --prompt "Criar uma VPC" --model qwen3.7-max
 ```
 
 Executar um prompt único:
@@ -69,22 +71,22 @@ Ler o prompt da entrada padrão:
 echo "Create a VPC and two ECS instances" | iac-code --prompt -
 ```
 
-Retomar a sessão mais recente:
+Retomar a sessão mais recente na interface de terminal:
 
 ```bash
-iac-code --continue
+iac-code tui --continue
 ```
 
-Permitir apenas comandos git e bash somente leitura:
+Pré-aprovar comandos bash que correspondam a `git *`:
 
 ```bash
-iac-code --allowed-tools 'bash(git *)'
+iac-code --prompt "Mostrar o estado do git" --allowed-tools 'bash(git *)'
 ```
 
-Permitir uma API de escrita Alibaba Cloud específica:
+Pré-aprovar uma API de escrita específica do Alibaba Cloud:
 
 ```bash
-iac-code --allowed-tools 'aliyun_api(ros:CreateStack)'
+iac-code --prompt "Implantar a pilha" --allowed-tools 'aliyun_api(ros:CreateStack)'
 ```
 
 Executar em automação sem prompts interativos:

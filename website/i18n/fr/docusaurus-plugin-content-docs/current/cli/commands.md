@@ -5,6 +5,8 @@ description: Référence complète des commandes interactives intégrées.
 
 # Commandes slash
 
+Cette page décrit les commandes de l’[interface de terminal](./interactive-mode.md), lancée avec `iac-code tui`. Web et Desktop disposent de leurs propres menus de commandes et paramètres.
+
 Les commandes slash contrôlent IaC Code depuis l'intérieur d'une session interactive. Tapez `/` pour voir les commandes disponibles, puis continuez à taper pour filtrer la liste. Une commande n'est reconnue que lorsqu'elle apparaît au début de votre message.
 
 La liste `/` inclut à la fois les commandes intégrées et toutes les skills que vous avez configurées. Pour restreindre les suggestions aux skills uniquement, utilisez `$` à la place — `$<nom>` liste et invoque exclusivement des skills, et taper `$` suivi du nom d'une commande intégrée (par exemple `$help`) affiche une erreur pointant vers l'équivalent `/`.
@@ -25,7 +27,7 @@ Le texte après le nom de la commande est transmis comme arguments. Dans le tabl
 | `/mcp [enable\|disable\|reconnect ...]` | Gérer les serveurs MCP depuis le REPL interactif. Sans argument, ouvre le gestionnaire MCP pour l'état, les diagnostics, les tools, resources, prompts, l'authentification OAuth, l'approbation, l'activation/désactivation, la reconnexion et la suppression. Les actions rapides peuvent activer, désactiver ou reconnecter les serveurs configurés. |
 | `/model [model_name]` | Afficher ou changer le modèle actif. Avec `model_name`, il bascule directement vers ce modèle pour le fournisseur actif. Sans argument, il ouvre un sélecteur de modèle interactif lorsqu'un fournisseur est configuré, ou affiche le modèle actuel lorsqu'aucune interface console n'est disponible. |
 | `/rename <nom>` | Nommer la session actuelle. Les noms apparaissent dans la bannière d'accueil, l'indication de sortie et le sélecteur `/resume`, et peuvent être utilisés avec `/resume` ou `--resume` lorsqu'ils identifient une session de façon unique. |
-| `/resume [id-de-session\|préfixe-id-unique\|nom-de-session-unique]` | Reprendre une session précédente. Avec un argument, IaC Code le résout comme identifiant exact, préfixe d'identifiant unique ou nom de session unique. Sans argument, il ouvre le sélecteur de session interactif. Les sessions inter-projets affichent une commande `cd ... && iac-code --resume <id>` au lieu de basculer le projet courant à chaud. |
+| `/resume [id-de-session\|préfixe-id-unique\|nom-de-session-unique]` | Reprendre une session précédente. Avec un argument, IaC Code le résout comme identifiant exact, préfixe d'identifiant unique ou nom de session unique. Sans argument, il ouvre le sélecteur de session interactif. Les sessions inter-projets affichent une commande `cd ... && iac-code tui --resume <id>` au lieu de basculer le projet courant à chaud. |
 | `/skills` | Ouvrir le sélecteur de gestion des compétences. Recherchez par nom ou description, triez par nom/source/taille et activez ou désactivez les compétences utilisateur ou projet. Les compétences intégrées restent verrouillées et activées. |
 | `/status` | Afficher l'ID de session actuel, le fournisseur, le modèle, la région Alibaba Cloud, le répertoire de travail, l'utilisation enregistrée des tokens d'API, le nombre de tours et l'utilisation du contexte. En mode debug, affiche également les compteurs de side calls de mémoire et leur consommation de tokens. |
 

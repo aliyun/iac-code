@@ -25,6 +25,7 @@ from iac_code.a2a.exposure import A2AExposureType, normalize_a2a_exposure_types
 from iac_code.a2a.runtime_overrides import get_a2a_preferred_language
 from iac_code.i18n import _, translate_message
 from iac_code.mcp.progress import mcp_progress_metadata, mcp_progress_public_name
+from iac_code.services.first_token_timing import mark_timing, timing_phase
 from iac_code.services.permissions.audit import (
     build_input_summary,
     build_redacted_tool_input,
@@ -321,14 +322,17 @@ async def publish_stream_event(
     if isinstance(event, TextDeltaEvent):
         if not event.text:
             return None
-        await _enqueue_status(
-            event_queue,
-            task_id=task_id,
-            context_id=context_id,
-            state=TaskState.TASK_STATE_WORKING,
-            message=_agent_text_message(task_id=task_id, context_id=context_id, text=event.text),
-            iac_code_session_id=iac_code_session_id,
-        )
+        mark_timing("first_text_outbound_enqueued", once=True)
+        with timing_phase("outbound_enqueue", first_only=True):
+            await _enqueue_status(
+                event_queue,
+                task_id=task_id,
+                context_id=context_id,
+                state=TaskState.TASK_STATE_WORKING,
+                message=_agent_text_message(task_id=task_id, context_id=context_id, text=event.text),
+                iac_code_session_id=iac_code_session_id,
+            )
+        mark_timing("first_text_a2a_enqueued", once=True)
         return event.text
 
     if isinstance(event, ThinkingDeltaEvent):
