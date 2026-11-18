@@ -618,6 +618,12 @@ class ContextManager:
             return (original_tokens, original_tokens)  # 无可压缩，空操作
 
         marker = create_compaction_summary_message(summary)
+        # Preserve only the current navigation snapshot, without adding it to summary prose.
+        for original in reversed(old + recent):
+            wiki = original.metadata.get("wiki_auto_search")
+            if isinstance(wiki, dict):
+                marker.metadata["wiki_auto_search"] = dict(wiki)
+                break
         marker.token_count = self._token_counter.count_message(marker.to_api_format())
 
         preserved_hidden = [m for m in old if is_cleanup_prompt_message(m)]

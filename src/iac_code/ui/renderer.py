@@ -74,6 +74,7 @@ from iac_code.types.stream_events import (
     ToolUseEndEvent,
     ToolUseStartEvent,
     Usage,
+    WikiSearchEvent,
 )
 from iac_code.ui.components.select import OptionType, Select, SelectLayout, TextOption
 from iac_code.ui.core.key_event import KeyEvent
@@ -650,6 +651,9 @@ class Renderer:
                     self.console.print(part)
                 text_flushed = True
                 has_content = True
+            elif seg.kind in {"wiki", "wiki_pending"}:
+                self.console.print(Text("▌ " + seg.text, style="dim"))
+                has_content = True
             elif seg.kind == "thinking_summary":
                 if has_content:
                     self.console.print()
@@ -996,6 +1000,9 @@ class Renderer:
                     parts.append(Text())  # blank line between segments
                 parts.extend(self._render_text_block(seg.text))
                 has_content = True
+            elif seg.kind in {"wiki", "wiki_pending"}:
+                parts.append(Text("▌ " + seg.text, style="dim"))
+                has_content = True
             elif seg.kind == "thinking_summary":
                 if has_content:
                     parts.append(Text())
@@ -1218,6 +1225,7 @@ class Renderer:
 
         # Map tool_use_id → _ToolCallRecord for partial-input accumulation
         tool_records: dict[str, _ToolCallRecord] = {}
+        wiki_records: dict[str, _Segment] = {}
 
         # Turn-level token usage accumulator (summed across MessageEndEvents)
         turn_usage = Usage()
@@ -1239,6 +1247,19 @@ class Renderer:
 
         try:
             async for event in events:
+                if isinstance(event, WikiSearchEvent):
+                    from iac_code.ui.wiki_search import wiki_summary
+
+                    segment = wiki_records.get(event.query_id)
+                    if segment is None:
+                        segment = _Segment(kind="wiki")
+                        wiki_records[event.query_id] = segment
+                        segments.append(segment)
+                    segment.kind = "wiki_pending" if event.phase in {"pending", "extracting", "searching"} else "wiki"
+                    segment.text = wiki_summary(event.snapshot, event.phase)
+                    _ensure_live()
+                    _update_live()
+                    continue
                 # After a mid-stream transcript view, tear down the stale
                 # Live and its background tasks before handling the next
                 # event — the alt-screen sequence left them pointing at a
@@ -2065,6 +2086,7 @@ class Renderer:
 
     def _print_segments_to_scrollback(self, segments: list[_Segment], trailing_text: str) -> None:
         """Print finalized segments to terminal scrollback."""
+        segments = [segment for segment in segments if segment.kind != "wiki_pending"]
         archived = _archive_segments_for_scrollback(segments)
         if trailing_text:
             archived.append(_Segment(kind="text", text=trailing_text))
@@ -2084,6 +2106,9 @@ class Renderer:
                 for part in self._render_text_block(seg.text, continuation=self._text_flushed):
                     self.console.print(part)
                 self._text_flushed = True
+                has_content = True
+            elif seg.kind == "wiki":
+                self.console.print(Text("▌ " + seg.text, style="dim"))
                 has_content = True
             elif seg.kind == "thinking_summary":
                 if has_content:
@@ -2182,6 +2207,11 @@ class Renderer:
                 )
                 if rendered.plain.strip():
                     self.console.print(rendered)
+                wiki = msg.metadata.get("wiki_auto_search")
+                if isinstance(wiki, dict):
+                    from iac_code.ui.wiki_search import wiki_summary
+
+                    self.console.print(Text("▌ " + wiki_summary(wiki), style="dim"))
                 self.console.print()  # blank line between user input and agent response
             elif msg.role == "assistant":
                 segments: list[_Segment] = []

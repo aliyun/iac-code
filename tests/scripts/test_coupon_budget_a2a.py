@@ -2,7 +2,7 @@
 
 import pytest
 
-from scripts.ci.run_coupon_budget_a2a import hourly_costs_match
+from scripts.ci.run_coupon_budget_a2a import accepted_price_calls, hourly_costs_match
 
 
 @pytest.mark.parametrize(("outlines", "details", "expected"), [
@@ -28,6 +28,35 @@ from scripts.ci.run_coupon_budget_a2a import hourly_costs_match
     (["¥2.60/8h"], ["免费额度用尽，保有费 ¥5/月"], False),
     (["¥2.60/8h"], ["未包含在实例单价中，待询价"], False),
     (["¥2.60/8h"], ["包含在实例月价中"], False),
+    (["¥2.60/8h"], ["¥0.325/h", "另计（公网流量费不含）"], True),
+    (["¥2.60/8h"], ["假定出流量10GB，单独计费，不含在总价中"], True),
+    (["¥2.60/8h"], ["Outbound traffic billed separately"], True),
+    (["¥2.60/8h"], ["流量费用待确认"], False),
+    (["¥2.60/8h"], ["ECS ¥300/月，流量另计"], False),
+    (["¥2.60/8h"], ["ECS 300/月，公网流量另计"], False),
+    (["¥2.60/8h"], ["ECS $300/month, traffic billed separately"], False),
+    (["¥300/月"], ["流量另计"], False),
 ])
 def test_hourly_estimate_acceptance(outlines, details, expected):
     assert hourly_costs_match(outlines, details) is expected
+
+
+def test_price_collection_uses_successful_presentations_instead_of_rejected_arguments():
+    calls = [
+        {"id": "plan", "name": "show_architecture_plan", "input": {"candidates": []}},
+        {"id": "bad-json", "name": "show_candidate_detail", "input": {}},
+        {"id": "detail", "name": "show_candidate_detail", "input": {"total_cost": "¥300/月"}},
+        {"id": "pending", "name": "show_candidate_detail", "input": {}},
+        {"id": "api", "name": "aliyun_api", "input": {}},
+    ]
+    outcomes = {name: {"is_error": False} for name in ("plan", "detail", "api")}
+    outcomes["bad-json"] = {"is_error": True}
+    assert [call["id"] for call in accepted_price_calls(calls, outcomes)] == ["plan", "detail"]
+    # A successful but still-monthly detail remains visible to period validation.
+    assert not hourly_costs_match(["¥3/8h"], [accepted_price_calls(calls, outcomes)[1]["input"]["total_cost"]])
+
+
+def test_failed_presentations_cannot_supply_a_passing_hourly_estimate():
+    calls = [{"id": "bad", "name": "show_candidate_detail", "input": {"total_cost": "¥3/8h"}}]
+    assert accepted_price_calls(calls, {"bad": {"is_error": True}}) == []
+    assert not hourly_costs_match([], [])

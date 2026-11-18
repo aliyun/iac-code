@@ -7,6 +7,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, urlsplit
 
 from iac_code.i18n import _
 from iac_code.pipeline.engine.complete_step_tool import CompletionEnrichmentError
@@ -19,14 +20,13 @@ from iac_code.pipeline.selling_solution_first.tools.candidate_planning_records i
     normalize_inventory_costs,
 )
 
-__all__ = ["build_prompt_context", "enrich_completion_input"]
+__all__ = ["build_prompt_context", "build_completion_reply", "enrich_completion_input"]
 
 
-def build_prompt_context() -> dict[str, Any]:
-    """Inject the short skill supplement only when ROS awareness is enabled."""
+def _assistant_destination() -> str | None:
     enabled = os.environ.get("IAC_CODE_ROS_AGENT_AWARENESS", "").strip().casefold() in {"1", "true", "yes", "on"}
     if not enabled:
-        return {"ros_agent_awareness": ""}
+        return None
 
     from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredentials
 
@@ -35,12 +35,43 @@ def build_prompt_context() -> dict[str, Any]:
     region = (credential.region_id if credential is not None else "").strip()
     if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,62}", region):
         region = DEFAULT_REGION
-    destination = f"[AI Assistant](https://ros.console.aliyun.com/{region}/chat)"
+    return f"https://ros.console.aliyun.com/{region}/chat"
+
+
+def build_prompt_context() -> dict[str, Any]:
+    """Inject the short skill supplement only when ROS awareness is enabled."""
+    destination = _assistant_destination()
+    if destination is None:
+        return {"ros_agent_awareness": ""}
     supplement = (
         Path(__file__).resolve().parents[1]
         / "skills/iac-aliyun-solution-first/ros-agent-awareness.md"
     ).read_text(encoding="utf-8").strip()
-    return {"ros_agent_awareness": "\n\n" + supplement.replace("{ai_assistant_destination}", destination)}
+    return {
+        "ros_agent_awareness": "\n\n" + supplement.replace("{ai_assistant_destination}", f"[AI 助手]({destination})")
+    }
+
+
+def _has_assistant_link(text: str, destination: str) -> bool:
+    for link in re.findall(re.escape(destination) + r"\?[^\s<>\])]+", text):
+        parsed = urlsplit(link)
+        query = parse_qs(parsed.query, keep_blank_values=True)
+        prompts = query.get("prompt", [])
+        if not parsed.fragment and set(query) == {"prompt"} and len(prompts) == 1 and prompts[0].strip():
+            return True
+    return False
+
+
+def build_completion_reply(*, conclusion: dict[str, Any], visible_text: str) -> str | None:
+    """Show the saved assistant handoff only if this turn has not already shown its link."""
+    if conclusion.get("status") != "rejected":
+        return None
+    destination = _assistant_destination()
+    reason = conclusion.get("rejection_reason")
+    if destination and isinstance(reason, str) and _has_assistant_link(reason, destination):
+        if not _has_assistant_link(visible_text, destination):
+            return reason.strip()
+    return None
 
 
 # 说服力字段与各自的最少条目数。缺失或空数组时方案卡只剩一句概述，用户无从判断为什么该选它，

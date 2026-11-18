@@ -734,6 +734,13 @@ class SessionStorage:
             ensure_private_file(path)
             self._ensure_new_session_metadata(cwd, session_id, git_branch=git_branch, was_new=was_new)
 
+    def update_message_metadata(
+        self, cwd: str, session_id: str, key: str, identity: str, value: dict[str, Any]
+    ) -> None:
+        """Best-effort auxiliary metadata replacement, preserving all current history rows."""
+        with self._session_write_guard(cwd, session_id):
+            replace_message_metadata(self._session_path(cwd, session_id), key, identity, value)
+
     def append_user_input_once(
         self, cwd: str, session_id: str, record: PipelineUserHistoryRecord
     ) -> UserInputHistoryWriteResult:
@@ -1235,3 +1242,30 @@ class SessionStorage:
         repaired = list(messages)
         repaired.append(Message(role="user", content=repair_results))
         return repaired
+
+
+def replace_message_metadata(path: Path, key: str, identity: str, value: dict[str, Any]) -> None:
+    """Replace one auxiliary record under the caller's existing session write guard.
+
+    This is not a state merge: a later ordinary full save may discard this data.
+    Never save a background task's stale copy of the whole conversation.
+    """
+    from iac_code.utils.state_io import open_text_no_follow
+
+    if not path.is_file():
+        return
+    with open_text_no_follow(path, "r", encoding="utf-8") as stream:
+        lines = stream.readlines()
+    for index, line in enumerate(lines):
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        metadata = row.get("metadata") if isinstance(row, dict) else None
+        record = metadata.get(key) if isinstance(metadata, dict) else None
+        if isinstance(metadata, dict) and isinstance(record, dict) and record.get("query_id") == identity:
+            metadata[key] = value
+            lines[index] = json.dumps(row, ensure_ascii=False) + "\n"
+            atomic_write_text(path, "".join(lines), durable=True)
+            ensure_private_file(path)
+            return

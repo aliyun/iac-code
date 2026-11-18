@@ -86,6 +86,12 @@ def _copy_materialized(source: Path, target: Path, ancestors: tuple[Path, ...] =
             resolved = _read_symlink_target(source) or _placeholder_target(source) or source
     else:
         resolved = _placeholder_target(source) or source
+    seen = set()
+    while (next_target := _placeholder_target(resolved)) is not None:
+        if next_target in seen:
+            raise RuntimeError("cyclic Desktop staging reference: {}".format(source))
+        seen.add(resolved)
+        resolved = next_target
     resolved_identity = _resolve_identity(resolved)
     if resolved_identity in ancestors:
         raise RuntimeError("cyclic Desktop staging reference: {}".format(source))
@@ -115,7 +121,8 @@ def _compile_translations(package: Path) -> None:
 def _rewrite_tf2ros_instructions(package: Path) -> None:
     for markdown in sorted(package.rglob("*.md")):
         content = markdown.read_text(encoding="utf-8")
-        rewritten = content.replace("python ../scripts/tf2ros.py", "iac-code-tf2ros")
+        rewritten = content.replace("python <Skill目录>/scripts/tf2ros.py", "iac-code-tf2ros")
+        rewritten = rewritten.replace("python ../scripts/tf2ros.py", "iac-code-tf2ros")
         rewritten = rewritten.replace("tf2ros.py", "iac-code-tf2ros")
         if rewritten != content:
             markdown.write_text(rewritten, encoding="utf-8")
@@ -131,9 +138,9 @@ def _tree_manifest(root: Path) -> dict[str, bytes]:
 def _verify_and_remove_canonical_selling_references(package: Path) -> None:
     canonical = package / "pipeline/selling/references"
     expected = _tree_manifest(canonical)
-    cloud_products = {"ecs.md", "rds.md", "redis.md", "slb.md", "vpc.md", "oss.md"}
-    if not cloud_products.issubset({path.name for path in (canonical / "cloud-products").glob("*.md")}):
-        raise RuntimeError("Desktop selling references are missing cloud-product files")
+    cloud_products = {"ecs/ecs.md", "rds/rds.md", "redis/redis.md", "slb/slb.md", "vpc/vpc.md", "oss/oss.md"}
+    if not all((package / "knowledge/clouds/aliyun/products" / page).is_file() for page in cloud_products):
+        raise RuntimeError("Desktop shared Wiki is missing cloud-product files")
     for skill in SELLING_REFERENCE_SKILLS:
         reference_root = package / "pipeline/selling/skills" / skill / "references"
         if _tree_manifest(reference_root) != expected:

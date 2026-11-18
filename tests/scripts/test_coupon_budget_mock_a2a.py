@@ -59,7 +59,7 @@ def test_coupon_run_requires_the_original_answer_without_a_followup(
     monkeypatch.setattr(runner, "stream_message", stream)
     monkeypatch.setattr(runner, "recorded_calls", lambda _path: ledger.copy())
     monkeypatch.setattr(runner, "tool_inputs", lambda _path: [
-        {"id": "guide-read", "name": "read_file", "input": {"path": "references/coupons.md"}},
+        {"id": "guide-read", "name": "read_file", "input": {"path": "knowledge://clouds/aliyun/products/bss/coupons.md"}},
     ])
     monkeypatch.setattr(runner, "visible_pipeline_text", lambda _path: text)
     monkeypatch.setattr(runner, "pipeline_facts", lambda _path: ({"status": "awaiting_selection"}, []))

@@ -33,6 +33,8 @@ function parseArgs(argv) {
     audit: "",
     requireQuote: "false",
     expandPipelineHistory: "false",
+    requireWiki: "false",
+    wikiCount: "1",
   };
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index]?.replace(/^--/, "");
@@ -62,7 +64,7 @@ async function main() {
     await row.waitFor({ state: "visible", timeout: 20000 });
     await row.click();
     await page.waitForFunction(
-      (expected) => document.body.innerText.includes(expected),
+      (expected) => document.querySelector('[data-app-shell="message-stack"]')?.innerText.includes(expected),
       args.expectedText,
       { timeout: 20000 },
     );
@@ -93,6 +95,27 @@ async function main() {
       );
     }
     const bodyText = await page.locator("body").innerText();
+    const wikiCards = page.locator(".wiki-search-summary");
+    if (args.requireWiki === "true") {
+      const count = await wikiCards.count();
+      if (count !== Number(args.wikiCount)) {
+        await page.screenshot({ path: args.screenshot, fullPage: true });
+        if (args.audit) {
+          fs.writeFileSync(args.audit, JSON.stringify({passed: false, wikiSummaries: count, bodyText}, null, 2), "utf8");
+        }
+        throw new Error(`Wiki summary count differs from the query count: ${count}`);
+      }
+      if (!(await wikiCards.first().locator("summary").innerText()).includes("Wiki")) {
+        throw new Error("Wiki summary was not rendered");
+      }
+      await page.waitForFunction(() => [...document.querySelectorAll('.wiki-search-summary p')]
+        .some((row) => row.textContent.includes('.md')), undefined, { timeout: 20000 });
+      if (!(await wikiCards.first().evaluate((card) => card.open))) {
+        await wikiCards.first().locator("summary").click();
+      }
+      await page.waitForFunction(() => document.querySelector('.wiki-search-summary')?.innerText.includes('.md'),
+        undefined, { timeout: 20000 });
+    }
     if (bodyText.includes("aliyun_http") || bodyText.includes("e2e-internal-header-value")) {
       throw new Error("browser DOM leaked internal Aliyun metadata");
     }
@@ -104,7 +127,7 @@ async function main() {
     const audit = {
       passed: true,
       screenshot: args.screenshot,
-      expectedTextVisible: bodyText.includes(args.expectedText),
+      expectedTextVisible: (await page.locator('[data-app-shell="message-stack"]').innerText()).includes(args.expectedText),
       solutionVisible: bodyText.includes("方案") || bodyText.toLowerCase().includes("solution"),
       quoteVisible:
         bodyText.includes("询价") ||
@@ -113,6 +136,7 @@ async function main() {
         bodyText.includes("¥") ||
         bodyText.toLowerCase().includes("price"),
       historyExpanded,
+      wikiSummaries: await wikiCards.count(),
       // W02 deliberately expands completed steps to prove that refresh preserved
       // their solution/quote history. Privacy checks remain scoped to the default
       // collapsed view that users see immediately after opening the session.

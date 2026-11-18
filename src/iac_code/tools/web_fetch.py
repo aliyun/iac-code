@@ -4,16 +4,134 @@ from __future__ import annotations
 
 import html as html_lib
 import re
+from copy import deepcopy
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
+from bs4 import BeautifulSoup, Tag
+from markdownify import MarkdownConverter
 
+from iac_code.a2a.backup import run_sync_fenced
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 
 MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
+MAX_TABLE_CELLS = 10_000
 TRUNCATION_MARKER = "\n\n[truncated]"
+
+
+def _table_span(cell: Tag, attribute: str) -> int:
+    value = str(cell.get(attribute, "1")).strip()
+    if not value.isascii() or not value.isdigit():
+        raise ValueError("Invalid table span")
+    value = value.lstrip("0") or "0"
+    if len(value) > 4 or int(value) > 1000:
+        raise ValueError("Table span exceeds extraction limits")
+    return int(value)
+
+
+class _WebMarkdownConverter(MarkdownConverter):
+    def __init__(self, **options: Any) -> None:
+        super().__init__(**options)
+        self._remaining_table_cells = MAX_TABLE_CELLS
+
+    def convert_td(self, el: Tag, text: str, parent_tags: set[str]) -> str:
+        # markdownify expands colspan even in tables that need no rowspan repair.
+        width = max(1, _table_span(el, "colspan"))
+        self._remaining_table_cells -= width
+        if self._remaining_table_cells < 0:
+            raise ValueError("Expanded table exceeds extraction limits")
+        el["colspan"] = str(width)
+        # A literal pipe must not create an extra Markdown table column.
+        return getattr(super(), "convert_td")(el, text.replace("|", r"\|"), parent_tags)
+
+    convert_th = convert_td
+
+
+def _expand_table_rowspans(root: Tag, soup: BeautifulSoup) -> None:
+    """Repeat merged row labels so Markdown cannot attach values to the wrong column."""
+    remaining_cells = MAX_TABLE_CELLS
+    remaining_chars = MAX_DOWNLOAD_BYTES
+    tables = ([root] if root.name == "table" else []) + list(root.find_all("table"))
+    for table in tables:
+        rows = [row for row in table.find_all("tr") if row.find_parent("table") is table]
+        if all(
+            cell.get("rowspan") in (None, "1") for row in rows for cell in row.find_all(["td", "th"], recursive=False)
+        ):
+            continue
+        group_ends = [len(rows)] * len(rows)
+        for index in range(len(rows) - 2, -1, -1):
+            group_ends[index] = group_ends[index + 1] if rows[index].parent is rows[index + 1].parent else index + 1
+        grid: dict[tuple[int, int], Tag | None] = {}
+        for row_index, row in enumerate(rows):
+            column = 0
+            for cell in row.find_all(["td", "th"], recursive=False):
+                while (row_index, column) in grid:
+                    column += 1
+                available_rows = group_ends[row_index] - row_index
+                height = min(_table_span(cell, "rowspan") or available_rows, available_rows)
+                width = max(1, _table_span(cell, "colspan"))
+                if height > 1 and cell.find("table") is not None:
+                    raise ValueError("Nested merged table cannot be expanded safely")
+                remaining_cells -= height * width
+                remaining_chars -= height * len(str(cell))
+                if remaining_cells < 0 or remaining_chars < 0:
+                    raise ValueError("Expanded table exceeds extraction limits")
+                for y in range(height):
+                    for x in range(width):
+                        grid[row_index + y, column + x] = cell if x == 0 else None
+                column += width
+        columns = max((column + 1 for _, column in grid), default=0)
+        # Rectangular padding creates cells outside the occupied span grid too.
+        remaining_cells -= len(rows) * columns - len(grid)
+        if remaining_cells < 0:
+            raise ValueError("Expanded table exceeds extraction limits")
+        for row_index, row in enumerate(rows):
+            row.clear()
+            for column in range(columns):
+                original = grid.get((row_index, column))
+                cell = deepcopy(original) if original is not None else soup.new_tag("td")
+                cell.attrs.pop("rowspan", None)
+                cell.attrs.pop("colspan", None)
+                row.append(cell)
+
+
+def _extract_markdown_from_html(html: str, url: str) -> str:
+    """Convert locally; prefer the article body on Alibaba Cloud's documentation host."""
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        for element in soup.find_all(["script", "style", "noscript", "template"]):
+            element.decompose()
+        root = soup.body or soup
+        if urlparse(url).hostname == "help.aliyun.com":
+            body = next(
+                (
+                    node
+                    for selector in (".icms-help-docs-content", ".markdown-body", "#pc-markdown-container")
+                    if (node := soup.select_one(selector)) is not None and node.get_text(strip=True)
+                ),
+                None,
+            )
+            if body is not None and body.get_text(strip=True):
+                root = body
+                title = soup.find("h1")
+                if title is not None and root.find("h1") is None:
+                    root.insert(0, deepcopy(title))
+        for element in root.find_all(["a", "img"]):
+            attribute = "href" if element.name == "a" else "src"
+            value = element.get(attribute)
+            if isinstance(value, str):
+                target = urljoin(url, value.strip())
+                if urlparse(target).scheme.lower() in {"http", "https", "mailto"}:
+                    element[attribute] = target
+                else:
+                    element.attrs.pop(attribute, None)
+        _expand_table_rowspans(root, soup)
+        return _WebMarkdownConverter(heading_style="ATX", bullets="-", autolinks=False).convert_soup(root).strip()
+    except Exception:
+        # Keep existing read behavior if a malformed page cannot be converted.
+        return _extract_text_from_html(html)
 
 
 def _extract_text_from_html(html: str) -> str:
@@ -76,7 +194,8 @@ class WebFetchTool(Tool):
     def description(self) -> str:
         return (
             "Fetch the content of a web page. Supports HTTP and HTTPS URLs. "
-            "For HTML pages, the content is extracted as plain text (scripts and styles removed). "
+            "HTML is converted to Markdown, preserving headings, tables, links and code blocks; "
+            "Alibaba Cloud documentation returns the article body without site navigation. "
             "Returns the page content truncated to max_length characters."
         )
 
@@ -161,11 +280,11 @@ class WebFetchTool(Tool):
                 text = bytes(downloaded).decode(response.encoding or "utf-8", errors="replace")
 
                 if "text/html" in content_type.lower():
-                    text = _extract_text_from_html(text)
+                    text = await run_sync_fenced(_extract_markdown_from_html, text, str(getattr(response, "url", url)))
 
                 if max_length <= 0:
                     text = ""
-                elif download_truncated and max_length >= len(TRUNCATION_MARKER):
+                elif (download_truncated or len(text) > max_length) and max_length >= len(TRUNCATION_MARKER):
                     available_length = max_length - len(TRUNCATION_MARKER)
                     text = text[:available_length] + TRUNCATION_MARKER
                 elif len(text) > max_length:

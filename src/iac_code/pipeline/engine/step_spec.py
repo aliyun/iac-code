@@ -77,6 +77,8 @@ class StepSpec:
     on_enter: Callable[[PipelineContext], None] | None = None
     on_exit: Callable[[PipelineContext, dict], None] | None = None
     completion_enricher: Callable[..., dict[str, Any]] | None = None
+    #: Optional visible reply after successful completion; the step decides whether a reply is missing.
+    completion_reply_builder: Callable[..., str | None] | None = None
     #: Per-step skill/prompt replacements; never added to base prompt sections.
     prompt_context_builder: Callable[[], dict[str, Any]] | None = None
     on_resource_observed: Callable[..., object] | None = None

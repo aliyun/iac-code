@@ -248,6 +248,10 @@ REDACTION_PLACEHOLDERS = frozenset({"***", "[REDACTED]", "<redacted>"})
 REDACTION_STEP4_SCENARIO = "redaction-step4"
 IAC_CODE_WEB_2C4G_STEP4_SCENARIO = "iac-code-web-2c4g-step4"
 IAC_CODE_WEB_2C4G_PROMPT = "我要部署一台2核4G的ECS同时部署 iac-code Agent"
+IAC_CODE_WEB_GOLDEN_PATHS = (
+    "clouds/aliyun/solutions/iac-code-web.ros.yml",
+    "references/solutions/iac-code-web.ros.yml",
+)
 
 
 @dataclass
@@ -1729,11 +1733,10 @@ def _ordered_tool_results(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 
 def _golden_solution_evidenced(snapshot: dict[str, Any]) -> bool:
     tool_results = _ordered_tool_results(snapshot)
-    golden_path = "references/solutions/iac-code-web.ros.yml"
     read_golden = any(
         item.get("toolName") == "read_file"
         and item.get("isError") is False
-        and str((item.get("input") or {}).get("path") or "").replace("\\", "/").endswith(golden_path)
+        and str((item.get("input") or {}).get("path") or "").replace("\\", "/").endswith(IAC_CODE_WEB_GOLDEN_PATHS)
         for item in tool_results
         if isinstance(item.get("input"), dict)
     )
@@ -1751,22 +1754,23 @@ def _golden_solution_diagnostics(snapshot: dict[str, Any]) -> dict[str, bool]:
     """Retain which native evidence is missing without exporting file contents or paths."""
     tools = _ordered_tool_results(snapshot)
     successful = [item for item in tools if item.get("isError") is False and isinstance(item.get("input"), dict)]
-    golden_path = "references/solutions/iac-code-web.ros.yml"
     tag = "acs:solution:iac-code:iac-code-web"
     def has_tag(item: dict[str, Any]) -> bool:
         return tag in json.dumps(item["input"], ensure_ascii=False, default=str)
     return {
         "golden_read_path_seen": any(item.get("toolName") == "read_file" and
-            str(item["input"].get("path") or "").replace("\\", "/").endswith(golden_path) for item in successful),
+            str(item["input"].get("path") or "").replace("\\", "/").endswith(IAC_CODE_WEB_GOLDEN_PATHS)
+            for item in successful),
         "golden_read_alias_seen": any(item.get("toolName") == "read_file" and
-            str(item["input"].get("file_path") or "").replace("\\", "/").endswith(golden_path)
+            str(item["input"].get("file_path") or "").replace("\\", "/").endswith(IAC_CODE_WEB_GOLDEN_PATHS)
             for item in successful),
         "golden_tagged_write_seen": any(item.get("toolName") == "write_file" and has_tag(item)
             for item in successful),
         "golden_tagged_completion_seen": any(item.get("toolName") == "complete_step" and has_tag(item)
             for item in successful),
-        "golden_bash_path_seen": any(item.get("toolName") == "bash" and golden_path in
-            json.dumps(item["input"], ensure_ascii=False, default=str) for item in successful),
+        "golden_bash_path_seen": any(item.get("toolName") == "bash" and
+            any(path in json.dumps(item["input"], ensure_ascii=False, default=str) for path in IAC_CODE_WEB_GOLDEN_PATHS)
+            for item in successful),
     }
 
 
@@ -1821,7 +1825,7 @@ def _golden_template_structure_diagnostics(snapshot: dict[str, Any]) -> dict[str
         "golden_generated_outputs_match": False,
     }
     baseline_path = E2E_SCRIPTS_DIR.parents[2] / (
-        "src/iac_code/skills/bundled/iac_aliyun/references/solutions/iac-code-web.ros.yml"
+        "src/iac_code/knowledge/clouds/aliyun/solutions/iac-code-web.ros.yml"
     )
     baseline = yaml.safe_load(baseline_path.read_text(encoding="utf-8"))
     # Compare the latest native template body; a stale initial write must not mask

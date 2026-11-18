@@ -12,6 +12,8 @@ from pathlib import Path
 import pytest
 import setuptools
 
+from iac_code.tools.path_safety import resolve_read_path
+
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
@@ -31,7 +33,7 @@ SKILLS_WITH_REFERENCES = (
 CANONICAL_ROOTS = {
     "template-parameter-recommendation.md": SELLING_REFERENCES,
 }
-REFERENCE_LINK_PATTERN = re.compile(r"\((references/[^)\s]*)\)")
+REFERENCE_LINK_PATTERN = re.compile(r"\(((?:references/|knowledge://)[^)\s]*)\)")
 
 
 def _reference_target(path: Path) -> Path | None:
@@ -140,16 +142,19 @@ class TestSkillReferences:
         references = _reference_target(PIPELINE_DIR / "skills" / skill_name / "references")
         assert references is not None
 
-        relative_files = sorted(
-            path.relative_to(BUNDLED_REFERENCES) for path in BUNDLED_REFERENCES.rglob("*") if path.is_file()
-        )
+        relative_files = sorted({
+            path.relative_to(BUNDLED_REFERENCES)
+            for path in BUNDLED_REFERENCES.rglob("*") if path.is_file()
+        })
         for relative in relative_files:
             path = references / relative
             canonical = _canonical_for(relative)
             assert path.is_file(), path
             assert canonical.is_file(), canonical
             assert path.read_bytes() == canonical.read_bytes(), path
-        assert len(relative_files) >= 11
+        assert {path.as_posix() for path in relative_files} == {
+            "template-parameter-recommendation.md",
+        }
 
     def test_all_skills_resolve_the_same_reference_tree(self):
         for name in SKILLS_WITH_REFERENCES:
@@ -165,8 +170,9 @@ class TestSkillReferences:
         links = {match.group(1) for match in REFERENCE_LINK_PATTERN.finditer(text)}
         assert links
         for link in links:
-            relative = Path(link).relative_to("references")
-            assert (references / relative).exists(), f"{skill_name}: {link}"
+            target = (Path(resolve_read_path(link, str(PROJECT_ROOT))) if link.startswith("knowledge://")
+                      else references / Path(link).relative_to("references"))
+            assert target.exists(), f"{skill_name}: {link}"
 
     def test_step_one_links_product_guides_without_template_references(self):
         skill_dir = PIPELINE_DIR / "skills" / "iac-aliyun-solution-first"
@@ -174,7 +180,11 @@ class TestSkillReferences:
         links = set(REFERENCE_LINK_PATTERN.findall(text))
 
         # Product knowledge is read on demand; template/pricing workflows stay in Step 2.
-        assert links == {"references/cloud-products/", "references/coupons.md"}
+        assert links == {
+            "knowledge://clouds/aliyun/products/bss/coupons.md",
+            "knowledge://clouds/aliyun/products/index.md",
+        }
+        assert "knowledge://clouds/aliyun/products/<产品>/<产品>.md" in text
         assert "OriginPrice" not in text
 
 

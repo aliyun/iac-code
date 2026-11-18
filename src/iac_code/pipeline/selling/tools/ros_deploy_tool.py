@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import fnmatch
 import json
 import re
@@ -14,6 +15,7 @@ from iac_code.pipeline.selling.hooks.deploying import contains_redaction_placeho
 from iac_code.services.permissions.rule_scope import scope_for_rule_source
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.ros_stack import RosStack
+from iac_code.tools.cloud.aliyun.ros_template_tools import normalize_ros_template_parameter_alias
 from iac_code.tools.cloud.aliyun.template_source import is_remote_template_url
 from iac_code.tools.cloud.base_stack import stack_result_from_metadata
 from iac_code.tools.path_safety import check_read_path, resolve_read_path
@@ -250,6 +252,14 @@ class RosDeployTool(Tool):
 
     def _new_stack_tool(self) -> RosStack:
         return RosStack(allow_pipeline_deployment_actions=True)
+
+    def normalize_input(self, tool_input: dict[str, Any]) -> None:
+        normalize_ros_template_parameter_alias(tool_input)
+
+    def prepare_invocation_input(self, tool_input: dict[str, Any]) -> dict[str, Any]:
+        prepared = copy.deepcopy(tool_input)
+        self.normalize_input(prepared)
+        return prepared
 
     def validate_input(self, tool_input: dict[str, Any]) -> tuple[bool, str]:
         valid, error = super().validate_input(tool_input)

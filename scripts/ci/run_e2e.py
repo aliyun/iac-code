@@ -26,7 +26,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CLOUD_REFRESH_SECONDS = 600
-LLM_ONLY_RUNNERS = frozenset({"smoke", "ros_awareness", "promotional_offer_followup", "plan_cost_refresh"})
+LLM_ONLY_RUNNERS = frozenset({
+    "smoke", "ros_awareness", "promotional_offer_followup", "plan_cost_refresh", "knowledge_wiki_normal",
+})
 SAFE_LIVE_AUDIT_NOTE = re.compile(
     r"credential audit: source=(?:llm|cloud); "
     r"location=(?:logs|artifacts|workspace|templates|other); "
@@ -91,6 +93,7 @@ from scripts.a2a.e2e.run_recovery_scenarios import _SCENARIOS as A2A_RECOVERY_SC
 from scripts.a2a.e2e.run_recovery_scenarios import MULTIMODAL_SCENARIOS as A2A_MULTIMODAL_SCENARIOS  # noqa: E402
 from scripts.ci.live_diagnostics import collect_live_diagnostics  # noqa: E402
 from scripts.ci.model_pool import MULTIMODAL_MODELS, TEXT_MODELS, ModelAssignment, scheduled_cases  # noqa: E402
+from scripts.ci.run_ecs_retention_a2a import SCENARIOS as RETENTION_SCENARIOS  # noqa: E402
 from scripts.ci.run_output_limit_a2a import SCENARIOS as OUTPUT_LIMIT_SCENARIOS  # noqa: E402
 from scripts.ci.run_ros_agent_awareness import SCENARIOS as ROS_AWARENESS_SCENARIOS  # noqa: E402
 from scripts.pipeline.e2e.selling_solution_first.run_scenarios import SCENARIOS as SELLING_SCENARIOS  # noqa: E402
@@ -236,10 +239,20 @@ STEP_FOLLOWUP_CASES = tuple(
         ("--scenario", scenario), 90, "full",
     )
     for scenario in ("step1", "step2")
+) + (
+    Case("ros-agent-handoff-reply-contract", "scripts/ci/run_step_followup_contract.py",
+         ("--scenario", "handoff-reply"), 120, "full"),
+)
+WIKI_AUTO_CONTRACT_CASES = tuple(
+    Case(f"wiki-auto-{scenario}-contract", "scripts/ci/run_wiki_auto_search_contract.py",
+         ("--scenario", scenario), 180, "fast" if scenario in {"off", "normal-order", "empty", "request"} else "full")
+    for scenario in (
+        "off", "normal-order", "empty", "pipeline-order", "late-isolation", "recovery", "cancel-error", "request",
+    )
 )
 CASES = (
     FAST_CASES + OUTPUT_LIMIT_CASES + EXECUTION_CASES + PERMISSION_CASES
-    + CANDIDATE_BATCH_CASES + STEP_FOLLOWUP_CASES
+    + CANDIDATE_BATCH_CASES + STEP_FOLLOWUP_CASES + WIKI_AUTO_CONTRACT_CASES
 )
 LIVE_SCRIPT = "scripts/pipeline/e2e/selling_solution_first/run_scenarios.py"
 SELLING_CIDR_POOLS = tuple(str(pool) for pool in ipaddress.IPv4Network("10.250.0.0/16").subnets(new_prefix=22))
@@ -261,6 +274,10 @@ LIVE_CASES = tuple(
         live_runner="step_followup", group="readonly",
     )
     for scenario in ("step1", "step2")
+) + tuple(
+    Case(f"ecs-retention-{scenario}", "scripts/ci/run_ecs_context_a2a.py",
+         ("--scenario", scenario), 5400, "live", live_runner="step_followup", group="readonly")
+    for scenario in ("selection-recovery", "context-boundaries")
 ) + tuple(
     Case(
         "ssf-" + spec.name, LIVE_SCRIPT,
@@ -341,6 +358,34 @@ LIVE_CASES = tuple(
         live_runner="plan_cost_refresh", group="readonly",
     ),
     Case(
+        "knowledge-wiki-normal-a2a", "scripts/ci/run_knowledge_wiki_a2a.py",
+        ("--scenario", "normal", "--repeat", "1"), 1800, "live",
+        live_runner="knowledge_wiki_normal", group="readonly",
+    ),
+    Case(
+        "knowledge-wiki-boundaries-a2a", "scripts/ci/run_knowledge_wiki_a2a.py",
+        ("--scenario", "boundaries"), 1800, "live", live_runner="knowledge_wiki_normal", group="readonly",
+    ),
+    Case(
+        "knowledge-wiki-handoff-a2a", "scripts/ci/run_knowledge_wiki_a2a.py",
+        ("--scenario", "handoff", "--repeat", "1"), 5400, "live",
+        live_runner="knowledge_wiki", group="readonly",
+    ),
+    Case(
+        "knowledge-wiki-p19-a2a", "scripts/ci/run_knowledge_wiki_a2a.py",
+        ("--scenario", "p19"), 3000, "live", live_runner="knowledge_wiki", group="readonly",
+    ),
+    Case(
+        "knowledge-wiki-step2-a2a", "scripts/ci/run_knowledge_wiki_a2a.py",
+        ("--scenario", "step2"), 5400, "live", live_runner="knowledge_wiki", group="readonly",
+    ),
+    *tuple(
+        Case(f"wiki-auto-{name}-a2a", "scripts/ci/run_knowledge_wiki_a2a.py",
+             ("--scenario", scenario, "--wiki-auto-search"), 5400, "live",
+             live_runner="knowledge_wiki_normal" if name == "normal" else "knowledge_wiki", group="readonly")
+        for name, scenario in (("normal", "normal"), ("pipeline", "step2"), ("p19", "p19"), ("handoff", "handoff"))
+    ),
+    Case(
         "coupon-budget-a2a", "scripts/ci/run_coupon_budget_a2a.py", (), 1800, "live",
         live_runner="coupon_budget", group="readonly",
     ),
@@ -355,6 +400,12 @@ LIVE_CASES = tuple(
         (), 1050, "live", live_runner="smoke", group="smoke",
     ),
 )
+RETENTION_CASES = tuple(
+    Case(f"ecs-retention-{name}", "scripts/ci/run_ecs_retention_a2a.py", ("--scenario", name),
+         2700, "live", live_runner="ecs_retention", group="retention")
+    for name in RETENTION_SCENARIOS
+)
+LIVE_CASES += RETENTION_CASES
 CASES += LIVE_CASES
 EXCLUDED = (
     (
@@ -384,7 +435,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--suite",
         choices=(
             "fast", "full", "live", "live-core", "live-recovery", "live-multimodal",
-            "live-readonly", "live-legacy", "live-safety", "live-repl", "live-smoke", "live-agui", "all",
+            "live-readonly", "live-legacy", "live-safety", "live-repl", "live-smoke", "live-agui",
+            "live-retention", "all",
         ),
         default="fast",
     )
@@ -454,11 +506,12 @@ def select_cases(args: argparse.Namespace) -> list[Case]:
         chosen = set(args.case)
         return [case for case in CASES if case.name in chosen]
     if args.suite == "fast":
-        return list(FAST_CASES) + [case for case in OUTPUT_LIMIT_CASES if case.suite == "fast"]
+        return list(FAST_CASES) + [case for case in OUTPUT_LIMIT_CASES + WIKI_AUTO_CONTRACT_CASES
+                                 if case.suite == "fast"]
     if args.suite == "full":
         return list(
             FAST_CASES + OUTPUT_LIMIT_CASES + EXECUTION_CASES + PERMISSION_CASES
-            + CANDIDATE_BATCH_CASES + STEP_FOLLOWUP_CASES
+            + CANDIDATE_BATCH_CASES + STEP_FOLLOWUP_CASES + WIKI_AUTO_CONTRACT_CASES
         )
     if args.suite == "live":
         return list(LIVE_CASES)
@@ -558,7 +611,7 @@ def _read_summary(case_dir: Path, source: str) -> dict[str, Any] | None:
 def _live_cleanup_status(case: Case, summary: dict[str, Any] | None) -> str:
     readonly_runners = {
         "selector", "agui_selector", "canary", "legacy_a2a_readonly", "coupon_budget", "coupon_budget_mock",
-        "step_followup",
+        "step_followup", "knowledge_wiki",
     }
     if case.live_runner in readonly_runners | LLM_ONLY_RUNNERS:
         return "not-needed"
@@ -654,6 +707,16 @@ def _public_live_summary(summary: dict[str, Any] | None, cleanup_status: str | N
         if isinstance(checks, dict)
         else {},
     }
+    if summary.get("scenario") == "promotional-offer-followup-a2a":
+        quality = summary.get("model_quality")
+        metric = quality.get("minimum_memory_extraction") if isinstance(quality, dict) else None
+        if isinstance(metric, dict) and metric.get("blocking") is False and metric.get("status") in (
+            "passed", "failed", "not_exercised",
+        ):
+            public["model_quality"] = {"minimum_memory_extraction": {
+                "status": metric["status"], "blocking": False,
+            }}
+            public["notes"] = ["模型质量观察（非阻塞）：最低值／推荐值提取 " + metric["status"]]
     restart_stage = summary.get("selector_restart_failure_stage")
     if isinstance(restart_stage, str) and restart_stage in FAILURE_STAGES:
         public["selector_restart_failure_stage"] = restart_stage
@@ -1564,7 +1627,9 @@ def run_case(
                     command.extend(("--provider", "dashscope"))
         if case.live_runner not in LLM_ONLY_RUNNERS and cloud_credential_helper is not None:
             _prepare_cloud_credentials(cloud_credential_helper, source_config_dir, cloud_credential_python)
-        if case.live_runner in {"ros_awareness", "promotional_offer_followup", "plan_cost_refresh"}:
+        if case.live_runner in {
+            "ros_awareness", "promotional_offer_followup", "plan_cost_refresh", "knowledge_wiki_normal",
+        }:
             command.append("--allow-real-llm")
         elif case.live_runner not in LLM_ONLY_RUNNERS:
             command.append("--allow-real-cloud")
@@ -1990,6 +2055,11 @@ def _write_reports(run_dir: Path, results: list[dict[str, Any]], elapsed: float)
                 result["durationSeconds"], _report_label(result.get("cleanupStatus"), CLEANUP_LABELS), reason,
             )
         )
+    quality_notes = [(result["name"], note) for result in results for note in result.get("notes", [])
+                     if isinstance(note, str) and note.startswith("模型质量观察（非阻塞）：")]
+    if quality_notes:
+        lines.extend(["", "## 非阻塞模型质量观察", ""])
+        lines.extend("- **{}**：{}".format(name, note) for name, note in quality_notes)
     lines.extend(["", "## 失败用例复盘入口", ""])
     if failed:
         lines.append(
@@ -2020,6 +2090,9 @@ def _write_reports(run_dir: Path, results: list[dict[str, Any]], elapsed: float)
     cards = []
     for result in results:
         detail = html.escape(_reason(result) if result["status"] != "passed" else "通过")
+        for note in result.get("notes", []):
+            if isinstance(note, str) and note.startswith("模型质量观察（非阻塞）："):
+                detail += "；" + html.escape(note)
         log = html.escape((result["stderrTail"] or result["stdoutTail"])[-2000:])
         artifact = html.escape(result["artifacts"], quote=True)
         history = html.escape(_attempt_details(result))

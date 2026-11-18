@@ -13990,3 +13990,36 @@ msgstr "更新が完了しました。続行するには iac-code tui を再起�
 #: src/iac_code/ui/dialogs/mcp_manager.py
 msgid "※ Run iac-code tui --debug to see error logs"
 msgstr "※ エラーログを確認するには iac-code tui --debug を実行してください"
+
+#: src/iac_code/ui/wiki_search.py
+#, python-brace-format
+msgid "Matched {count} files"
+msgstr "{count} 個のファイルに一致"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Extracting keywords"
+msgstr "キーワードを抽出中"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Searching"
+msgstr "検索中"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "No search needed"
+msgstr "検索は不要です"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "No matches"
+msgstr "一致なし"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Cancelled"
+msgstr "キャンセル済み"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Background Wiki search"
+msgstr "バックグラウンド Wiki 検索"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Wiki search"
+msgstr "Wiki 検索"

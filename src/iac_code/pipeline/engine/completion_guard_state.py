@@ -7,6 +7,7 @@ import logging
 import os
 from typing import Any
 
+from iac_code.tools.cloud.aliyun.ros_template_tools import normalize_ros_template_parameter_alias
 from iac_code.tools.cloud.base_stack import stack_result_from_metadata
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,9 @@ def record_completion_guard_tool_result(
 
     try:
         ensure_completion_guard_state(state)
+        if tool_name in _SOLUTION_FIRST_ROS_RESULT_TOOLS or tool_name == "ros_deploy":
+            tool_input = dict(tool_input)
+            normalize_ros_template_parameter_alias(tool_input)
         if cwd:
             state["cwd"] = cwd
         if tool_name == "ask_user_question":

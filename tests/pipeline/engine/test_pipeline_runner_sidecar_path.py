@@ -1763,6 +1763,42 @@ async def test_resume_ask_user_question_injects_tool_result_and_guard_state(tmp_
 
 
 @pytest.mark.asyncio
+async def test_restored_question_answer_does_not_reappend_accounted_purchase_after_cancellation(tmp_path):
+    runner = _build_runner(tmp_path)
+    runner._step_attempts = {"s1": 1}
+    purchase = "我要购买按量付费的tdx，可信计算服务器"
+    cancel = "取消这次购买，结束当前方案流程，接下来只进行普通聊天。"
+    history = [
+        Message(role="user", content=purchase, token_count=20),
+        Message(role="assistant", content=[{
+            "type": "tool_use", "id": "ask-1", "name": "ask_user_question",
+            "input": {"question": "请选择部署地域"},
+        }]),
+    ]
+    runner._session_storage.load.return_value = history
+    runner._restore_current_step_user_input_from_snapshot({"current_step_user_input": purchase})
+    captured = {}
+
+    async def execute(step, context, session_id, user_message=None, resume_messages=None, **kwargs):
+        captured.update(user_message=user_message, resume_messages=resume_messages)
+        context.set_conclusion(step.conclusion_field, {"cancelled": True})
+        yield StepResult(step_id=step.step_id, status=StepStatus.COMPLETED, conclusion={"cancelled": True})
+
+    runner._step_executor.execute = execute
+    async for _event in runner.resume_ask_user_question(
+        {"selected_id": "", "selected_label": "", "free_text": cancel}, tool_use_id="ask-1",
+    ):
+        pass
+
+    assert captured["user_message"] is None
+    resumed = captured["resume_messages"]
+    assert sum(message.content == purchase for message in resumed) == 1
+    assert resumed[0].token_count == 20
+    assert isinstance(resumed[-1].content[0], ToolResultBlock)
+    assert json.loads(resumed[-1].content[0].content)["free_text"] == cancel
+
+
+@pytest.mark.asyncio
 async def test_resume_ask_user_question_rejects_pending_input_tool_use_id_mismatch(tmp_path):
     runner = _build_runner(tmp_path)
     runner._session_storage.load.return_value = []

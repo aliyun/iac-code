@@ -38,7 +38,11 @@ from iac_code.pipeline.engine.interrupt import InterruptController, InterruptVer
 from iac_code.pipeline.engine.loader import load_pipeline_dir
 from iac_code.pipeline.engine.observability import PipelineObservability
 from iac_code.pipeline.engine.public_errors import public_error, public_error_from_exception
-from iac_code.pipeline.engine.resume_recovery import reconcile_resume_messages, user_message_already_in_resume
+from iac_code.pipeline.engine.resume_recovery import (
+    last_resume_tool_id,
+    reconcile_resume_messages,
+    user_message_already_in_resume,
+)
 from iac_code.pipeline.engine.session import PipelineIdentity, PipelineSession, RestoreResult
 from iac_code.pipeline.engine.state_machine import StateMachine
 from iac_code.pipeline.engine.step_executor import StepExecutor
@@ -3463,6 +3467,15 @@ class PipelineRunner:
             ),
         )
 
+        if step.config.get("allow_empty_conclusion_on_resume") is True and resolved_step_result is None:
+            # Consultation continues the latest dialogue, not the older transcript
+            # prefix retained separately as authoritative plan/quote evidence.
+            attempt = self._current_parent_attempt(step.step_id)
+            if attempt is not None:
+                history = self._load_repaired_resume_messages(attempt.get("transcript_id"))
+                if history:
+                    confirmation_resume_messages = history
+
         if confirmation_resume_messages is not None:
             continued = self._continue_from_current(
                 **self._continue_input_kwargs(pipeline_input),
@@ -4760,11 +4773,28 @@ class PipelineRunner:
             step_index = self.state_machine.current_step_index + 1
             existing_attempt = self._current_parent_attempt(step.step_id)
             attempt = self._ensure_parent_attempt(step.step_id)
+            if is_first_step and user_input is not None:
+                # Retained dialogue predates this input, even if it contains
+                # exactly the same wording. Persist the boundary before execution.
+                attempt["user_input_resume_offset"] = len(first_step_resume_messages or [])
+                attempt["user_input_resume_tool_id"] = last_resume_tool_id(first_step_resume_messages)
             if model_resume_seed is not None and is_first_step:
                 assert self._transcript_storage is not None
                 self._transcript_storage.save(
                     self._cwd, attempt["transcript_id"], model_resume_seed.transcript.messages()
                 )
+            elif (
+                is_first_step
+                and resume_waiting_step
+                and step.config.get("allow_empty_conclusion_on_resume") is True
+                and first_step_resume_messages
+                and self._transcript_storage is not None
+                and existing_attempt is not None
+                and attempt["attempt_id"] != existing_attempt["attempt_id"]
+            ):
+                # A new consultation attempt must durably inherit the dialogue;
+                # AgentLoop only appends the messages generated in its own turn.
+                self._transcript_storage.save(self._cwd, attempt["transcript_id"], first_step_resume_messages)
             resume_current_step = (
                 resume_waiting_step
                 or (
@@ -5008,7 +5038,17 @@ class PipelineRunner:
                     first_step
                     and first_step_user_input_is_restored
                     and step_resume_messages
-                    and user_message_already_in_resume(step_user_message, step_resume_messages)
+                    and user_message_already_in_resume(
+                        step_user_message,
+                        step_resume_messages,
+                        start_index=(
+                            attempt["user_input_resume_offset"]
+                            if type(attempt.get("user_input_resume_offset")) is int
+                            and attempt["user_input_resume_offset"] >= 0
+                            else 0
+                        ),
+                        start_after_tool_id=attempt.get("user_input_resume_tool_id"),
+                    )
                 ):
                     step_user_message = None
                 execute_kwargs: dict[str, Any] = {
@@ -5043,10 +5083,16 @@ class PipelineRunner:
                     resolved_step_result = None
                 if (
                     first_step
-                    and step.config.get("deterministic_structured_confirmation") is True
+                    and (
+                        step.config.get("deterministic_structured_confirmation") is True
+                        or (resume_waiting_step or resume_running_step)
+                        and step.config.get("allow_empty_conclusion_on_resume") is True
+                    )
                     and step_resume_messages
                     and step_user_message is not None
                 ):
+                    # A historical complete_step closed an earlier user turn.
+                    # The new turn must reach the model even when history is kept.
                     execute_kwargs["skip_completed_step_restore"] = True
 
                 try:

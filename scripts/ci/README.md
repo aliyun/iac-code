@@ -1,5 +1,10 @@
 # E2E：本地与 CI 共用入口
 
+ECS 控制台引流专项的 30 组验收及四模型执行方式见
+[ecs_retention_regression.md](ecs_retention_regression.md)。新增 17 条 `ecs-retention-*`
+通过 `--suite live-retention` 选择，使用真实 HTTP/SSE A2A、真实模型和只读云 API。
+专项不会部署资源；正常路径断言之外，还须复核私有询价证据及独立浏览器验收。
+
 `scripts/ci/run_e2e.py` 是用例选择、并发调度、超时控制和报告生成的唯一入口。它启动 `scripts/a2a/e2e/`、`scripts/repl/e2e/`、`scripts/web/e2e/`、`scripts/pipeline/e2e/` 中已有的验收脚本；已有脚本继续负责场景断言和资源清理。CI 只需检出代码、安装依赖、注入凭证、上传报告。
 
 ## 本地执行
@@ -13,7 +18,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite full --jobs 3
 uv run --no-sync python scripts/ci/run_e2e.py --list --suite all
 ```
 
-`fast` 包含 13 个 A2A、REPL、Web API 确定性契约用例；`full` 共 75 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
+`fast` 包含 17 个 A2A、REPL、Web API 确定性契约用例；`full` 共 85 个，另含 A2A 执行控制与权限等待/恢复矩阵。`e3a-recovery` 保留运行中快照保存后的崩溃故障点，并验证用户手动继续后恢复同一任务；另设 `e3a-handoff-recovery` 验证已完成回合后的安全交接点重启，两者独立验收。Web API 用例明确使用 `--skip-browser`，不启动浏览器。只跑一个用例可用 `--case a2a-recovery-contract` 或 `--case a2a-handoff-recovery-contract`。`--jobs` 限定为 1–16，确定性套件默认 3，真实套件默认 12。每个用例用独立子进程、配置目录和日志目录；确定性用例不会继承常见 LLM 与阿里云凭证环境变量。
 
 `output-limit-text-{chat,responses,anthropic}` 验证三种生产 Provider 经本地 SSE 模型端点收到输出截断后，在同一 A2A 任务内保留正文并续写；`output-limit-tool-*` 验证截断的工具调用不执行、不进入下一次模型请求或会话记录。六条纳入 `fast`。`output-limit-{exhausted,empty,pipeline}` 纳入 `full`，分别验证连续截断的请求上限、无可见正文时的明确失败，以及真实 Pipeline 步骤不产生虚假结论。模型和工具均为离线替身，A2A 服务、Provider、AgentLoop 和 Pipeline 引擎使用生产实现。可用 `--case output-limit-tool-responses` 定向复现。
 
@@ -37,7 +42,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --suite live --jobs 4 \
   --allow-cloud-write
 ```
 
-默认三文件模式下，凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 共 130 个：42 个 selling flow A2A/REPL 场景、20 个 A2A 只读资源选择（含 12 个重启恢复矩阵）、6 个 AGUI HTTP/SSE 资源选择、16 个 REPL 旧场景、33 个 A2A 恢复场景、3 个 VPC 模板 smoke、1 个只读云 API canary、8 个 ROS 助手引导真实模型场景、1 个活动商品追问 A2A 场景。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety`、`live-repl`、`live-smoke` 或 `live-agui`，也可用 `--case` 指定单个用例。AGUI 的 6 条覆盖普通聊天与 Pipeline 的选择、取消和直接输入，通过 HTTP/SSE 运行，不需要浏览器；使用文本模型池，查询已有 VPC，不创建资源，清理状态为“无需清理”。可单独运行 `--suite live-agui`，或指定 `--case agui-selector-normal-selected`。三个 VPC smoke 只接收 LLM 与 settings 配置，使用隔离的 HOME，不接收云凭证；它们验证生成模板，不创建 VPC。并行 selling 场景各用独立的 `10.250.0.0/16` 子网池，避免独立进程重复预留同一 VSwitch CIDR；原 runner 单独运行仍沿用原池。旧 A2A、REPL 和 selling 场景不强制测试 StackName；清理读取隔离会话中真实 CreateStack 接受回执，按实际 ID、名称和地域校验后删除。仅查询、等待或模型提及的资源不能授权删除；硬超时后由独立清理进程再次尝试。selling、REPL 旧用例和 A2A 恢复用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组。硬超时不代表清理成功，需检查报告和测试账号残留资源。
+默认三文件模式下，凭证目录须含 `.credentials.yml`、`.cloud-credentials.yml`、`settings.yml`。建议使用专用测试账号、受限权限和资源配额。`live` 当前共 162 个，包含 42 个 selling flow A2A/REPL 场景、20 个 A2A 只读资源选择（含 12 个重启恢复矩阵）、6 个 AGUI HTTP/SSE 资源选择、16 个 REPL 旧场景、33 个 A2A 恢复场景、3 个 VPC 模板 smoke、1 个只读云 API canary、8 个 ROS 助手引导真实模型场景、1 个活动商品追问 A2A 场景。其中包含真实 ROS 资源创建用例。需要缩小范围时可选 `live-core`、`live-recovery`、`live-multimodal`、`live-readonly`、`live-legacy`、`live-safety`、`live-repl`、`live-smoke` 或 `live-agui`，也可用 `--case` 指定单个用例。AGUI 的 6 条覆盖普通聊天与 Pipeline 的选择、取消和直接输入，通过 HTTP/SSE 运行，不需要浏览器；使用文本模型池，查询已有 VPC，不创建资源，清理状态为“无需清理”。可单独运行 `--suite live-agui`，或指定 `--case agui-selector-normal-selected`。三个 VPC smoke 只接收 LLM 与 settings 配置，使用隔离的 HOME，不接收云凭证；它们验证生成模板，不创建 VPC。并行 selling 场景各用独立的 `10.250.0.0/16` 子网池，避免独立进程重复预留同一 VSwitch CIDR；原 runner 单独运行仍沿用原池。旧 A2A、REPL 和 selling 场景不强制测试 StackName；清理读取隔离会话中真实 CreateStack 接受回执，按实际 ID、名称和地域校验后删除。仅查询、等待或模型提及的资源不能授权删除；硬超时后由独立清理进程再次尝试。selling、REPL 旧用例和 A2A 恢复用例的硬超时为 45 分钟，之后最多留 15 分钟清理，再强制结束进程组。硬超时不代表清理成功，需检查报告和测试账号残留资源。
 
 CI 可改用 `--cloud-credential-helper /path/to/helper.py`，此时源目录只需 LLM 凭证和 `settings.yml`。Helper 接口为 `cloud --output <目标 .cloud-credentials.yml 路径>`；它在每个真实云用例开始前调用，长用例每 10 分钟调用一次，异常清理前也会再次调用。若 helper 需要独立 Python 环境，传 `--cloud-credential-python /path/to/python`。Helper 必须原子地写入私有权限文件，且不得在标准输出或错误输出打印凭证。模板 smoke 不调用 helper。本地原有的三文件运行方式继续支持。
 
@@ -74,13 +79,20 @@ uv run --no-sync python scripts/ci/run_e2e.py \
   --credential-source-dir /path/to/test-config --jobs 2 --retries 0
 ```
 
-`promotional-offer-followup-a2a` 通过生产 HTTP/SSE A2A Server 验证真实模型：先为“最低 2G、推荐 4G”的旅游 Agent 规划服务器，再保留会话追问活动商品，最后明确咨询活动购买资格。检查内存下限、部署上下文中的同地域助手引导，以及独立活动咨询的可见链接和持久化结束原因。测试不替换模型或工具结果、不选择部署方案，仅复制 LLM 凭证与 settings，不接收云凭证、不查询实际活动资格；首轮历史附图中的规格以文本复现。四模型覆盖需分别指定每个 `--text-model` 运行，不把单次调度当成四模型全覆盖。
+`promotional-offer-followup-a2a` 通过生产 HTTP/SSE A2A Server 验证真实模型：先为“最低 2G、推荐 4G”的旅游 Agent 规划服务器，再保留会话追问活动商品，最后明确咨询活动购买资格。流程验收检查方案展示、续聊不误推进；第三轮明确暂不部署、仅咨询活动时，须展示同地域助手链接；允许保留原方案与候选批次、停留在 Step1，也允许 `rejected` 分流并在结束原因中保存链接，两者均不得误推进部署。最低值／推荐值提取单列为 `model_quality.minimum_memory_extraction` 非阻塞观察，保留 `failed` 与原始约束；无方案时记为 `not_exercised`，不再影响 E2E 退出码。公开 JSON、Markdown 和 HTML 报告保留观察状态，完整输入、输出和约束证据仍在私有用例目录。测试不替换模型或工具结果、不选择部署方案，仅复制 LLM 凭证与 settings，不接收云凭证、不查询实际活动资格；首轮历史附图中的规格以文本复现。四模型覆盖需分别指定每个 `--text-model` 运行，不把单次调度当成四模型全覆盖。
 
 ```bash
 uv run --no-sync python scripts/ci/run_e2e.py --case promotional-offer-followup-a2a \
   --text-model deepseek-v4.1-flash --credential-source-dir /path/to/test-config \
   --jobs 1 --retries 0
 ```
+
+`ros-agent-handoff-reply-contract` 属于 `full`，使用本地 HTTP 模型和真实 A2A 进程，
+覆盖仅提交工具结论、正文漏链接、正文已有链接三种情况，检查链接只展示一次、会话持久化和重启后不重新生成。
+可通过 `--case ros-agent-handoff-reply-contract --jobs 1 --retries 0` 单独运行，无需云或模型凭据。
+
+助手跳转 prompt 允许合理概括；实例名逐字保留仅记入 `observations`，不决定用例通过与否。
+有效跳转、地域、非空 prompt、可见链接及持久化检查继续保留。
 
 ## 真实用例的模型池与思考强度
 
@@ -151,7 +163,7 @@ REPL 旧场景的 PTY 等待每 10 秒检查一次，每 60 秒在单用例的 s
 
 先按 `report.md` 找到失败用例与首次失败检查，再看对应的 `ci-result.json`、场景 `summary.json`、日志和源码。Agent 应做有界复现，明确归类为产品缺陷、用例/断言缺陷、环境/凭证故障、云资源清理故障或超时，并写出证据、受影响场景和建议修复。配置的一次自动重跑之外，真实云用例再次复现前先核对残留资源与清理结果。报告里的“初步线索”只是索引，不能替代复盘结论。
 
-总入口目前登记 208 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
+总入口目前登记 230 个场景。暂未纳入的场景和原因在 `--list --suite all` 及每次报告中列出：Selling Web/Desktop、StartChat 权限等待、Qoder MCP 重连和浏览器 DOM 场景。Aone CI 没有浏览器；若未来提供浏览器运行机，再单独验证浏览器场景。真实用例在测试专用 Secret 配置后才能完成 CI 实跑验收。
 
 ### 验收边界
 
@@ -207,7 +219,18 @@ ROS 可能返回成功的资源 `Order`（非零 CNY 金额），却缺少 `Orde
 
 `ssf-step1-followup-contract`、`ssf-step2-followup-contract` 加入 `full`，运行生产引擎、工具、hook 和磁盘持久化的多轮测试，仅模型及云响应使用替身。覆盖连续空提交、新批次改案、比较报价证据隔离、调参、选择、确认、取消、重选及非法空提交。
 
-`ssf-step1-followup-a2a`、`ssf-step2-followup-a2a` 加入 `live-readonly`，使用真实 LLM、HTTP/SSE A2A 和只读云 API。自然咨询逐轮核对成功空提交、完整结论及无变化标记；实际调整必须改变候选或模板/有效参数。最终取消，不确认部署。
+同 Step 续聊及冷恢复保留此前用户消息、工具结果和知识正文；新消息只出现一次，旧 `complete_step` 不会结束本轮。Step1→Step2 和回滚重入 Step1 重建消息历史，仍通过当前方案与回滚原因传递业务状态。
+
+`ecs-retention-selection-recovery`、`ecs-retention-context-boundaries` 是对应的真实 HTTP/SSE A2A 入口，
+仅使用真实模型与只读云 API。前者在等待选案时重启实际服务进程，再咨询并选择原候选；后者覆盖
+Step1 咨询→选择→Step2 咨询→重新规划回滚→新 Step1 咨询，并在旧候选身份可区分时验证旧选择被拒绝。
+两者检查实际 provider chat 请求中的用户消息和工具结果 ID；keyword side call 与 agent 包装 span 不作历史证据。
+文件结果的遥测正文可能为 `[PATH]`，与会话原始结果及离线正文检查分开报告。
+
+ECS 引流完整回归使用 `run_ecs_retention_matrix.py`，13 组／26 个去重入口，四模型共 144 次；
+P19、两种续聊和两种上下文切换入口各三轮，其他入口各一轮。此入口不启动浏览器、不运行 mock 云用例或部署。
+
+`ssf-step1-followup-a2a`、`ssf-step2-followup-a2a` 加入 `live-readonly`，使用真实 LLM、HTTP/SSE A2A 和只读云 API。自然咨询逐轮核对本轮成功收尾、完整结论及无变化标记，接受业务兼容的状态增量；实际调整必须改变候选或模板/有效参数。最终取消，不确认部署。
 
 ```bash
 uv run python scripts/ci/run_e2e.py --case ssf-step1-followup-contract --case ssf-step2-followup-contract --retries 0
@@ -215,3 +238,54 @@ uv run python scripts/ci/run_e2e.py --case ssf-step1-followup-a2a --case ssf-ste
 ```
 
 四模型验收须分别指定四个文本模型运行以上两个真实 Case，共八次，不能把模型池的一次分配当作全覆盖。沿用 effort=low、fallback=false、隔离配置和报告；首次失败证据保留，私有原始日志不用于公共报告。
+
+## 共享技术知识库（LLM Wiki）
+
+知识页使用纯 Markdown，标题直接读取一级标题；原有来源修订与核验记录保存在知识目录外的 `tests/knowledge/legacy_migration.json`。正文保留官方引用和适用条件，grep 和自动召回不再检索 YAML 行政字段。
+
+产品知识、ROS／Terraform 模板及参数规范统一使用 `knowledge://` 地址，Wiki 与 Skill 均直接引用。优惠券指南位于 `knowledge://clouds/aliyun/products/bss/coupons.md`，预定义方案说明与 YAML 位于 `knowledge://clouds/aliyun/solutions/`，各保留一份。参数推荐流程与执行脚本按原目录维护，Desktop 使用已有的 `iac-code-tf2ros` helper。
+
+新增自动搜索的用例设计见 [Wiki 自动搜索 E2E 用例设计](wiki_auto_search_e2e_plan.md)：8 个确定性进程用例、4 组四文本模型真实验收，以及现有 CLI／Web 的展示恢复检查。覆盖首轮串行、后续异步、空关键词、晚到结果与恢复去重；允许辅助快照丢失，不增加补备份或补偿机制。自动搜索已接入 AgentLoop、步骤配置、CLI／Web 进度和历史。8 个 `wiki-auto-*-contract` 已注册，共 31 个子样本覆盖恢复、异步错误和澄清回复提词，均已实际通过。4 个 `wiki-auto-*-a2a` 已注册到 live-readonly，使用 `--wiki-auto-search` 在隔离服务端显式开启；四模型首轮 16 个组合已执行，仍有模型漏读／事实依据不足等未通过项，详见用例设计的验收记录；既有五个 case 默认行为不变。
+
+五个 `knowledge-wiki-*-a2a` 用例归入 `live-readonly`，通过真实 HTTP/SSE A2A 与真实模型执行，不创建云资源：
+
+- `normal`：一个独立 normal 会话，没有云凭据或 IaC Skill 前置条件。
+- `boundaries`：独立的 RVV/AVX-512 知识未命中与生日祝福翻译；验证官方来源回退或未确认范围，以及无关请求不强制搜索 Wiki。
+- `p19`：不改原文的四轮购买 TDX / SGX 质疑 / B70 问答。
+- `handoff`：一次完整的方案 → 取消并交接 → normal 咨询；查阅证据不能从旧 pipeline 冒充继承。
+- `step2`：复用 Step1/Step2 续聊验收，真实模板、预览和询价后取消；Wiki 读取仅统计 materialize 步骤。
+
+normal 只复制 LLM 配置；其余使用测试账号只读云凭据。所有场景禁止自动批准未知权限请求，保留本地模板读写，禁止 Bash 与云部署工具。首次失败保留；修正 runner 后的复测须使用新的运行目录，不能覆盖旧记录。
+
+每轮分别保留搜索、实际注入的原文片段、成功 read_file 阅读、事实使用与流程检查。自动版允许片段已提供充分证据时直接作答；必须在实际主模型请求中核对编号原文，仅有 metadata／路径不算已消费。P19 在实际展示候选方案时，用成功的 DescribeInstanceTypes 和展示清单核对已声明的规格；Step1 的具体 SKU、核数、内存和可用区可留到 Step2 确认，缺少 API 依据单列 missing_api_evidence，已核验但数值不符列 mismatch。TDX 声明的规格族／地域／可用区按已核验支持表独立检查，读取同一候选的清单、拓扑和 cost_assumptions；资源行明确写错位置仍失败，不因未查规格 API 重复判为范围错误。未生成候选等未触发分支单列 not-exercised。CPU 代际解释、全球可售断言仍需人工复核 answers.json，自动检查通过不能宣称所有解释正确。
+
+CI 中每个 case 分配一个模型、执行一轮，默认不重跑失败用例；一个用例内部的多轮用户对话仍完整保留。
+模型池按 case 分配，单次同时选择四个 case 不代表四场景均覆盖四模型。完整矩阵应逐模型运行：
+
+```bash
+for model in deepseek-v4-flash-0731 glm-5.2-fast-preview glm-5.3-prime deepseek-v4.1-flash; do
+  uv run --no-sync python scripts/ci/run_e2e.py \
+    --case knowledge-wiki-normal-a2a --case knowledge-wiki-p19-a2a \
+    --case knowledge-wiki-boundaries-a2a \
+    --case knowledge-wiki-handoff-a2a --case knowledge-wiki-step2-a2a \
+    --text-model "$model" --credential-source-dir /path/to/test-config \
+    --run-dir "/tmp/wiki-e2e-$model" --jobs 2 --retries 0
+done
+```
+
+原始事件、会话与 answers.json 留在私有运行目录；公开报告只导出允许的检查项与计数。不得把账户资源清单、凭据或完整工具结果复制到知识库。
+
+Wiki 自动搜索实际 UI 验收复用本机 CLI／Web 驱动，不需要云凭据：
+
+```bash
+uv run --no-sync python scripts/ci/run_wiki_auto_search_ui.py --surface cli --run-dir /tmp/wiki-ui-cli
+uv run --no-sync python scripts/ci/run_wiki_auto_search_ui.py --surface web --run-dir /tmp/wiki-ui-web
+```
+
+Web 验收使用现有 Chrome／Playwright DOM 驱动；它与 `--skip-browser` API 契约分开报告。四模型自动搜索矩阵应逐模型选择 `wiki-auto-normal-a2a`、`wiki-auto-pipeline-a2a`、`wiki-auto-p19-a2a`、`wiki-auto-handoff-a2a`，沿用测试配置和只读云凭据（或既有 credential helper），`--jobs 1 --retries 0`。`run_knowledge_wiki_a2a.py --scenario sizing --repeat 5` 另用于历史经济型／突发型原输入复测，不改变既有 normal case 的输入。
+
+Wiki 真实 runner 按实际节点验收：购买首轮可以进入候选选择或 ask_user_question 澄清；P19 保留原四轮语义，B70 按支持的 `B70 intel` 分写输入，规格在实际发布方案时核验，候选保留只在已有候选时检查。handoff 的明确取消若未交接，仍失败并停止后续 normal 用例，未执行部分记 not_exercised，不算通过。auto-normal 前两轮保留无 Skill 要求，第三轮云询价可加载 Skill；sizing 接受相关 ECS Wiki 正文，指定 sizing.md 是否读取另记观察项，CPU 积分解释仍需人工复核。
+
+自动召回使用带关联性系数的关键词，完整厂商泛词在检索前过滤；大小写及中英文边界空格变体共享一次计分。全局最多 10 行匹配原文置于既有 XML 块内，按文件显示 `knowledge://` 路径、行号、高亮和截断标记，其余只列行号；不命中不注入。仍受 1200 token／6144 字节预算控制，不注入整页。CLI／Web 的关键词列表保持字符串格式。恢复只复用已完成快照，不因文档或提词版本变化重查、不回写历史；未完成查询可丢弃。新输入仍采用首轮串行、后续异步及迟到隔离规则。
+
+共享 Wiki 使用 `knowledge://` 逻辑路径，可直接传给 `read_file`、`grep`、`glob`；普通物理路径保持兼容。逻辑路径只读，并受知识根目录和现有权限约束。安装位置变化不改变逻辑地址，旧快照继续使用相对文件路径恢复。

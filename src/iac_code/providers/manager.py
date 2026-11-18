@@ -1137,6 +1137,20 @@ class ProviderManager:
             kwargs["effort_override"] = self._effort_override
         return kwargs
 
+    def for_side_call(self, policy: ProviderRequestPolicy) -> ProviderManager:
+        """Use an independent request policy without mutating the active main provider."""
+        return ProviderManager(
+            model=self._model,
+            credentials=dict(self._credentials),
+            retry_config=self._retry_config,
+            stream_idle_timeout=self._stream_idle_timeout,
+            provider_key_override=self._provider_key_override,
+            base_url_override=self._base_url_override,
+            request_policy_override=policy,
+            ignore_llm_source=self._ignore_llm_source,
+            provider_config_override=self._provider_config_override,
+        )
+
     def reconfigure(
         self,
         model: str,

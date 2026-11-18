@@ -41,7 +41,7 @@ auto_trigger:
 ### 已有模板参数推荐
 - 用户提供已有 ROS 原生模板或 ROS Terraform 类型模板，并要求推荐、补全、预览创建或部署前选择参数时，按 [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) 执行。
 - 首版仅覆盖 `CreateStack` 前的新建栈参数推荐；`UpdateStack`、`ContinueCreateStack`、资源栈组和资源栈实例不走该流程。
-- 纯 Terraform 工作目录不直接走该流程；必须先按 [references/terraform-template.md](references/terraform-template.md) 打包为 ROS Terraform 类型模板。
+- 纯 Terraform 工作目录不直接走该流程；必须先按 [terraform-template.md](knowledge://clouds/aliyun/products/ros/terraform-template.md) 打包为 ROS Terraform 类型模板。
 - 推荐结果必须先通过 `PreviewStack`，形成 Preview-Validated Parameter Set 后才能展示为推荐参数；这不等于保证 `CreateStack` 一定成功。
 - 密码类测试输入可在用户要求代理准备参数时生成合规随机值并脱敏；LicenseKey、Token、证书、真实域名等外部输入不得编造；已有云资源 ID 应通过参数约束或只读查询解析，必要时让用户按可读信息选择，不要求其手工输入 ID。
 - `PreviewStack` 和后续 `CreateStack` 对共同支持的输入必须保持一致，包括模板来源、地域、最终 `StackName`、`DisableRollback` 和模板参数。
@@ -84,11 +84,11 @@ auto_trigger:
 ## 模板生成流程
 
 1. 分析需求，确定资源列表
-2. 查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件，了解选型策略和库存相关属性
-3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践（RunCommand、嵌套栈、条件部署、常用函数等），未阅读不得生成模板
+2. 读取 `knowledge://clouds/aliyun/products/<产品>/<产品>.md` 及相关专题（产品归属不明时查 [产品导航](knowledge://clouds/aliyun/products/index.md)），了解选型策略和库存相关属性
+3. **必须**阅读 [ros-template.md](knowledge://clouds/aliyun/products/ros/ros-template.md)，了解 ROS 模板最佳实践（RunCommand、嵌套栈、条件部署、常用函数等），未阅读不得生成模板
 4. 生成模板（库存相关属性按「参数化规则」定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
    - 生成的模板默认放在当前工作目录；仅当用户指定其他路径时才写入该路径，不要默认使用 `/tmp` 等工作目录外路径
-   - **Terraform**：生成 `.tf` 等文件后，必须先用 `tf2ros.py` 打包为 ROS Terraform 类型模板（用法见 [references/terraform-template.md](references/terraform-template.md) 的「与 ROS 集成」节），后续步骤校验/部署的都是这份打包后的 `.yml`
+   - **Terraform**：生成 `.tf` 等文件后，必须先用 `tf2ros.py` 打包为 ROS Terraform 类型模板（用法见 [terraform-template.md](knowledge://clouds/aliyun/products/ros/terraform-template.md) 的「与 ROS 集成」节），后续步骤校验/部署的都是这份打包后的 `.yml`
 5. 调用 aliyun_api(product="ros", action="ValidateTemplate", params={"TemplateURL": <模板文件路径>}) 校验
 6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
 7. 校验通过 → 展示模板 → 询问是否部署（**ROS 与 Terraform 一致**，禁止用 `terraform init/apply` 等本地 CLI 步骤替代部署确认）
@@ -111,9 +111,9 @@ auto_trigger:
 
 查询步骤：
 1. 解析模板 Parameters，识别库存相关参数及对应产品
-2. 调用各产品可用性 API（具体 API 见 [references/cloud-products/](references/cloud-products/) 各产品文件的「可用性查询」节）
+2. 调用各产品可用性 API（具体 API 见 [产品知识](knowledge://clouds/aliyun/products/index.md) 及产品关联 API 页）
 3. 找出公共可用区（所有资源都有库存的可用区）
-4. 按 cloud-products 中的推荐规格优先匹配，不可用时选最接近的替代
+4. 按共享知识库产品页中的推荐规格优先匹配，不可用时选最接近的替代
 5. 得到选定参数。**若操作为 CreateStack 或 UpdateStack，接「部署前询价」；其他操作（ContinueCreateStack 等）直接展示选定结果并请求用户确认。**
 
 ### 有模板的询价
@@ -171,11 +171,11 @@ auto_trigger:
 
 | 文件 | 内容 |
 |------|------|
-| [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组（ROS/Terraform 共用） |
+| [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组（ROS/Terraform 共用） |
 | [references/template-parameter-recommendation.md](references/template-parameter-recommendation.md) | 已有 ROS 可部署模板的部署前参数推荐流程 |
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、swas.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） |
-| [references/ros-template.md](references/ros-template.md) | ROS 原生模板最佳实践：RunCommand、嵌套栈、条件部署 |
-| [references/terraform-template.md](references/terraform-template.md) | Terraform 最佳实践：文件组织、变量、Data Source、ROS 集成 |
+| [knowledge://clouds/aliyun/products/index.md](knowledge://clouds/aliyun/products/index.md) | 产品知识与专题导航（共享 Wiki） |
+| [ros-template.md](knowledge://clouds/aliyun/products/ros/ros-template.md) | ROS 原生模板最佳实践：RunCommand、嵌套栈、条件部署 |
+| [terraform-template.md](knowledge://clouds/aliyun/products/ros/terraform-template.md) | Terraform 最佳实践：文件组织、变量、Data Source、ROS 集成 |
 
 ## 资源和文档搜索
 

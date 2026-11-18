@@ -15,7 +15,7 @@ from iac_code.agent.message import Message
 from iac_code.services.session_layout import ensure_session_owned_parent, require_supported_session_layout
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, session_metadata_entry_exists
 from iac_code.services.session_mutation_guard import session_mutation_guard
-from iac_code.services.session_storage import SessionStorage, merge_preserved_cleanup_prompts
+from iac_code.services.session_storage import SessionStorage, merge_preserved_cleanup_prompts, replace_message_metadata
 from iac_code.utils.file_security import ensure_private_dir, ensure_private_file
 from iac_code.utils.state_io import append_jsonl_locked, open_text_no_follow, write_text_no_follow
 
@@ -78,6 +78,12 @@ class PipelineTranscriptStorage:
             data = self._stamp(message.to_dict(), cwd, session_id, git_branch)
             append_jsonl_locked(path, [data])
             ensure_private_file(path)
+
+    def update_message_metadata(
+        self, cwd: str, session_id: str, key: str, identity: str, value: dict[str, Any]
+    ) -> None:
+        with session_mutation_guard(self._session_root or self._sidecar_dir):
+            replace_message_metadata(self.session_path(cwd, session_id), key, identity, value)
 
     def append_meta(self, cwd: str, session_id: str, meta_entry: dict[str, Any]) -> None:
         if "type" not in meta_entry:

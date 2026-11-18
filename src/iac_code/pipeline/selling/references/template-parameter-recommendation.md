@@ -5,7 +5,7 @@
 ## 适用范围
 
 - 支持：ROS 原生模板；ROS Terraform 类型模板（`Transform: Aliyun::Terraform-*` / `Aliyun::OpenTofu-*`）。
-- 不支持：纯 Terraform 工作目录（先按 [terraform-template.md](terraform-template.md) 用 `tf2ros.py` 打包）；`UpdateStack`、`ContinueCreateStack`、栈组、栈实例。
+- 不支持：纯 Terraform 工作目录（先按 [terraform-template.md](knowledge://clouds/aliyun/products/ros/terraform-template.md) 用 `tf2ros.py` 打包）；`UpdateStack`、`ContinueCreateStack`、栈组、栈实例。
 
 ## 核心原则
 
@@ -73,7 +73,7 @@ ROS Terraform 类型模板若返回 `TerraformStackNotSupported` / `QueryErrors`
 
 ### 6. 对 AllowedValues 做偏好预筛选
 
-- 先按 `hard_constraints` 的 `operator/value/unit` 筛选。模板参数值不能直接证明实际产品属性时，按对应 [cloud-products/](cloud-products/) reference 调用产品 API 获取实际值，不得根据资源规格名或经验猜测。
+- 先按 `hard_constraints` 的 `operator/value/unit` 筛选。模板参数值不能直接证明实际产品属性时，从 [产品导航](knowledge://clouds/aliyun/products/index.md) 查对应产品的 API 并获取实际值，不得根据资源规格名或经验猜测。
 - 只能删除或排序 API 返回的值，不能创造新值。
 - 保留足够候选用于回溯；记录每个被删值的原因。
 - 仅软偏好预筛为空时才可恢复原始候选并标记偏好冲突；用户硬约束筛选为空时不得恢复不匹配候选，必须报告参数冲突。

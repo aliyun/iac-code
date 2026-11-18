@@ -1,0 +1,513 @@
+{
+  "source_revision": "64431f053afe41ba04116fd0e4ae84b2965bb266",
+  "sections": [
+    {
+      "product": "ecs",
+      "heading": "实例规格推荐策略",
+      "sha256": "c5ce96ccf674f680c6860108b7524627ce389b1ba3fb0118c1fdb80cb72bbe14",
+      "target": "clouds/aliyun/products/ecs/sizing.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "存储配置推荐",
+      "sha256": "d6d267cb98a9ea818cb76e0011fbf2d44e651a4d0a93675229bfafbc68c56a29",
+      "target": "clouds/aliyun/products/ecs/sizing.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "镜像选择",
+      "sha256": "e5e140ce4043280506e757888878b1a51fd6619a349a05bea661b5cdd44f9bda",
+      "target": "clouds/aliyun/products/ecs/ecs.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "网络带宽",
+      "sha256": "b8d80e1f4d80f79e9369cc6c5d38df5d6aeb0923e563bbbb9fe3d654855c778e",
+      "target": "clouds/aliyun/products/ecs/ecs.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "费用估算",
+      "sha256": "3b770b318d68726898539bac4646bcb6e9c7d20e28fbd951e46044525516bc67",
+      "target": "clouds/aliyun/products/ecs/describe-price.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "安全组最佳实践",
+      "sha256": "e3b34a3e53170c313f69465cdf1b003f494005d47dfd620e349b062c3457ff0f",
+      "target": "clouds/aliyun/products/ecs/ecs.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "登录凭证",
+      "sha256": "6235fa682e233853d924e294e39d9dcf09d8b0bd3f0e846009eade67b6c504e3",
+      "target": "clouds/aliyun/products/ecs/ecs.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "在实例中执行 Shell 命令",
+      "sha256": "bc49678997f48b7b760d334f87e6d7b7755bd15802fbef1c80b787e1b7307cdd",
+      "target": "clouds/aliyun/products/ecs/ecs.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "高可用架构建议",
+      "sha256": "40b53bd0534942e33abfd339dac15de8a620319aaf1f235df98e72fe71ad3265",
+      "target": "clouds/aliyun/products/ecs/ecs.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "库存相关属性（模板中须参数化为 Parameters）",
+      "sha256": "3cdd20d67c64884ec3747a3d0e5c5416750637751cf7e19743931f3357df14cc",
+      "target": "clouds/aliyun/products/ecs/ecs.md"
+    },
+    {
+      "product": "ecs",
+      "heading": "可用性查询",
+      "sha256": "ac19ac775ed79b3712c33610a69c56f0beda2477d50e5a61027b134531c10ba4",
+      "target": "clouds/aliyun/products/ecs/availability.md"
+    },
+    {
+      "product": "swas",
+      "heading": "适用场景",
+      "sha256": "570ed28bbd38fda3b2f100798fa987f4912db884a0e8741d215841b2d80b2479",
+      "target": "clouds/aliyun/products/swas/swas.md"
+    },
+    {
+      "product": "swas",
+      "heading": "套餐选择",
+      "sha256": "7d816c1dfdc6af259a67dea926bd7ae95fa66021dca0e98e16769297a3bad645",
+      "target": "clouds/aliyun/products/swas/swas.md"
+    },
+    {
+      "product": "swas",
+      "heading": "镜像选择",
+      "sha256": "4e8b40e5cabc91750d16a9e8adaa6885be7bb1c22a781130f9cf169386c44a2c",
+      "target": "clouds/aliyun/products/swas/swas.md"
+    },
+    {
+      "product": "swas",
+      "heading": "存储与网络配置",
+      "sha256": "870f0dd854cb9435052f01666f81de95b05e34b5c48f43e796ba69b2dd3deec4",
+      "target": "clouds/aliyun/products/swas/swas.md"
+    },
+    {
+      "product": "swas",
+      "heading": "计费与价格",
+      "sha256": "207f9e4f871c83ffd5dba2ad970d38ae3d7c025dc365f21384042cf7d6fab819",
+      "target": "clouds/aliyun/products/swas/swas.md"
+    },
+    {
+      "product": "swas",
+      "heading": "套餐与镜像查询",
+      "sha256": "689821229bb9168ecb3aaded362e7ba210aedb05146b010ddcec799af656aaf4",
+      "target": "clouds/aliyun/products/swas/availability.md"
+    },
+    {
+      "product": "swas",
+      "heading": "最佳实践",
+      "sha256": "7324b9bbcfc40520b9b0d6892a5a030da875a03551df8354e9091f679efd99df",
+      "target": "clouds/aliyun/products/swas/swas.md"
+    },
+    {
+      "product": "swas",
+      "heading": "官方参考",
+      "sha256": "1410804208cb5338921b07662af7be0ea0376017bea91ffb0c6e503226767304",
+      "target": "clouds/aliyun/products/swas/swas.md"
+    },
+    {
+      "product": "rds",
+      "heading": "引擎选择",
+      "sha256": "42644c4b536828edeb87cad41169e5f30c5b6ba86e4662ab45d137f80b34827d",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "版本推荐",
+      "sha256": "0be33bd71074a58d44b8012df0e14d23e708270c10f144bcd596337abc320ea6",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "系列（Edition）",
+      "sha256": "2746c53d73861c42b9e259afe20c39b0dff10e4958422cf94161031caef927e9",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "规格推荐",
+      "sha256": "a6a06f02429353a26b59994c3c45e3f2c97f33b91f3a525b11f50b1b8472c74a",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "存储类型",
+      "sha256": "7eb3107ee7d4294e3be2ebf716c55caa327ae536e26d6b2c31381ba4bfdeea8b",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "网络配置",
+      "sha256": "ab0f04845b34cb94fef8c3f0a1bb4c85d51291aaf2c8900875a8d106ddd08c8d",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "备份策略",
+      "sha256": "d98407306a073e3d09d2a32ccc53b1eaeb85e8098ea82e3bbb844b3e2289e8e6",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "账户类型与权限",
+      "sha256": "44715c44d00975deeff7f8983dc11ec7df7a71f7a489bef5a3aaecc23870e37e",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "最佳实践",
+      "sha256": "8ebcc61a78f4505291ff9c8c5ed349e0948bcb4eeebd52e5de7d0b0ffc5907c6",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "库存相关属性（模板中须参数化为 Parameters）",
+      "sha256": "8268c65d86a3e6cc7837cd3a53b5622949e7ed48a0025e1e40716d282a862cda",
+      "target": "clouds/aliyun/products/rds/rds.md"
+    },
+    {
+      "product": "rds",
+      "heading": "可用性查询",
+      "sha256": "cf6c7b04b81b4a18bda738a185f156d7e008ba8fd666f9e637e686c22176f5e6",
+      "target": "clouds/aliyun/products/rds/availability.md"
+    },
+    {
+      "product": "redis",
+      "heading": "版本选择",
+      "sha256": "620d61bae0eb7d6bebb30b8c202bacf8eff9a06cfac0433c6bc0537ba074c22a",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "产品系列",
+      "sha256": "a033dd64f5d1d36672effebf83d7a22840c5d072ebd9d57b93109505b20f2a64",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "规格推荐",
+      "sha256": "a79b8a2f8d923ef27475ce23d02214fb0bb64af56537961e517e9f10a83410a4",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "网络配置",
+      "sha256": "987c1225920d4ef86911550f29f0e1ac6a245589698b8f915ac34c22aae91140",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "持久化配置",
+      "sha256": "ae03abc8fe6618ab7d5a4071f03483a078d5c3ed235addb4fcf2770ca33580cf",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "集群版选型",
+      "sha256": "d650fb4c0394b2c91012f2ae277f17355369404f224afaf0725afd0daa7b31a6",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "读写分离版",
+      "sha256": "9dea1614f4dc9f93905149047211348f12a10a5a1500d2d5c5ab0b2a3ef384a2",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "最佳实践",
+      "sha256": "bf5c5451ad3639c715cbb99cf72d10601992c2d6ec2e8e12a9f7a57afc390bc6",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "库存相关属性（模板中须参数化为 Parameters）",
+      "sha256": "e9f88471a9efb9f65201ea6bc79a28a46357be5dc106dbb737c057a7e09c9ecd",
+      "target": "clouds/aliyun/products/redis/redis.md"
+    },
+    {
+      "product": "redis",
+      "heading": "可用性查询",
+      "sha256": "b56d2317bc8eaa7f7325e3641dfac1726aed5aacd2152c890ceeebfce0d4e9f8",
+      "target": "clouds/aliyun/products/redis/availability.md"
+    },
+    {
+      "product": "slb",
+      "heading": "产品对比",
+      "sha256": "b2e78526a2c7afc2473e6a49c56b834e497c7a8c02f5bce8516a4950cbb80aeb",
+      "target": "clouds/aliyun/products/slb/slb.md"
+    },
+    {
+      "product": "slb",
+      "heading": "CLB 配置要点",
+      "sha256": "cd436d5f7708b887b77f0ef5dbd10ab7f2a99a080c5e3a67711cd3c5f981d856",
+      "target": "clouds/aliyun/products/slb/slb.md"
+    },
+    {
+      "product": "slb",
+      "heading": "ALB 配置要点",
+      "sha256": "2c5930b90efa4e772a5f02d0d28f28b1a0415aae907fb68afa17800a5df194e4",
+      "target": "clouds/aliyun/products/slb/slb.md"
+    },
+    {
+      "product": "slb",
+      "heading": "HTTPS 配置建议",
+      "sha256": "dab73ba09a16a075710bec6bf3080bfa6644dceddd9857da30964b637ff79c14",
+      "target": "clouds/aliyun/products/slb/slb.md"
+    },
+    {
+      "product": "slb",
+      "heading": "健康检查最佳实践",
+      "sha256": "a0c25943abd68a93992a17db2bded12bb2b2a97ab4cac092f9be93f31935d018",
+      "target": "clouds/aliyun/products/slb/slb.md"
+    },
+    {
+      "product": "slb",
+      "heading": "会话保持",
+      "sha256": "2284f913b45a83755690e2d41ba61eaeedb302646d3279a090a8d35e1f8558f6",
+      "target": "clouds/aliyun/products/slb/slb.md"
+    },
+    {
+      "product": "vpc",
+      "heading": "CIDR 规划原则",
+      "sha256": "c3ead2ab40eb38e6a55a41f36f361025af8cbed495cb8efcc58aefb756421fd8",
+      "target": "clouds/aliyun/products/vpc/vpc.md"
+    },
+    {
+      "product": "vpc",
+      "heading": "VSwitch 规划",
+      "sha256": "47eb8131e357add59149eb0305c68bb89f5687277745c703f721ed0f213fc4e3",
+      "target": "clouds/aliyun/products/vpc/vpc.md"
+    },
+    {
+      "product": "vpc",
+      "heading": "安全组设计",
+      "sha256": "ee1430022500ed7aeade7801440e71dc36f12fd26b6f5d1903dbbd57981b9003",
+      "target": "clouds/aliyun/products/vpc/vpc.md"
+    },
+    {
+      "product": "vpc",
+      "heading": "NAT 网关",
+      "sha256": "d111d414cd7cf3e4a73bf73f140cae63282db1c02d0362c000d586b6d1446a5b",
+      "target": "clouds/aliyun/products/vpc/vpc.md"
+    },
+    {
+      "product": "vpc",
+      "heading": "EIP 费用估算",
+      "sha256": "fe6ef4f32dbf2318655399bcabe7ccdf1bdb1637fe6b49d4adeae9719f614a06",
+      "target": "clouds/aliyun/products/vpc/public-network-billing.md"
+    },
+    {
+      "product": "vpc",
+      "heading": "网络访问控制建议",
+      "sha256": "3b6f642894be348d018e9dc9dff6c5ab50ca0dcfc260e3e5bb7d7402def67033",
+      "target": "clouds/aliyun/products/vpc/vpc.md"
+    },
+    {
+      "product": "vpc",
+      "heading": "配额受限与复用已有网络",
+      "sha256": "92aaa7e9757b7273e7a62db20bff76e58eed3cb6612f56096fb7d5a04097cc37",
+      "target": "clouds/aliyun/products/vpc/vpc.md"
+    },
+    {
+      "product": "oss",
+      "heading": "存储类型",
+      "sha256": "6b4837dddcece93d9d05bbbad516f0a8d020f4d4f24b3cbc58fd9f7a9e452216",
+      "target": "clouds/aliyun/products/oss/oss.md"
+    },
+    {
+      "product": "oss",
+      "heading": "Bucket 配置要点",
+      "sha256": "e43a1c9ca505fba9e227512385a176f9b4243836eb24340d0bb93c449773c6de",
+      "target": "clouds/aliyun/products/oss/oss.md"
+    },
+    {
+      "product": "oss",
+      "heading": "访问控制",
+      "sha256": "79e5286d137f840290b904ca934350415354ae4b991188db05d1d96a8f4bb6e9",
+      "target": "clouds/aliyun/products/oss/oss.md"
+    },
+    {
+      "product": "oss",
+      "heading": "生命周期规则",
+      "sha256": "d369dce92d9845d2ff7753046a0d7d012ae5f57a937a9ed23c7fa7438c41957d",
+      "target": "clouds/aliyun/products/oss/oss.md"
+    },
+    {
+      "product": "oss",
+      "heading": "静态网站托管",
+      "sha256": "24adef86ee18ad0b075310091d1a3c5928be3f0c9b0308934c4041389acd8f0b",
+      "target": "clouds/aliyun/products/oss/oss.md"
+    },
+    {
+      "product": "oss",
+      "heading": "CDN 加速",
+      "sha256": "4e4213b9b6ae54d115279f692eff4688fd05270c0958e4c3ff7205153f925408",
+      "target": "clouds/aliyun/products/oss/oss.md"
+    },
+    {
+      "product": "oss",
+      "heading": "跨区域复制（CRR）",
+      "sha256": "cc66ef778563bbd5211c209bb42fa1fcf3dd73168e56af162056bac455a7169e",
+      "target": "clouds/aliyun/products/oss/oss.md"
+    },
+    {
+      "product": "oss",
+      "heading": "最佳实践",
+      "sha256": "7ffcaa189079309306a90de652e749942c1acb6a3a7b190634ed71ef0934c2c9",
+      "target": "clouds/aliyun/products/oss/oss.md"
+    },
+    {
+      "product": "ga",
+      "heading": "全局规则",
+      "sha256": "e588b34c46edd1979d1971dd2fea6fba167965e80cf27454d7324d2cf8081a06",
+      "target": "clouds/aliyun/products/ga/ga.md"
+    },
+    {
+      "product": "ga",
+      "heading": "默认选型顺序",
+      "sha256": "ee06d585fb331947ca921d165bb78aa4df7c9557706e9b609b1fab1bbc950185",
+      "target": "clouds/aliyun/products/ga/ga.md"
+    },
+    {
+      "product": "ga",
+      "heading": "付费模式映射",
+      "sha256": "b39c6adab2a3431d21f7c98dc573de48ea14990640147d7b93d72aea9682f1b0",
+      "target": "clouds/aliyun/products/ga/ga.md"
+    },
+    {
+      "product": "ga",
+      "heading": "接入与路由决策",
+      "sha256": "5e7dddc27b3d451f26d9724a4c43c9f3db7441580bf079afc58f19e266bb963c",
+      "target": "clouds/aliyun/products/ga/ga.md"
+    },
+    {
+      "product": "ga",
+      "heading": "高频场景",
+      "sha256": "eef3dee2253b95c8a33d827e57199736d51d845d1712ade7c24b700715c389fe",
+      "target": "clouds/aliyun/products/ga/ga.md"
+    },
+    {
+      "product": "ga",
+      "heading": "客户端源 IP、安全与高可用",
+      "sha256": "292c62c3f035b5b6c86ef7d4b63ca498934c3f2308873d6113ca11f93f081e27",
+      "target": "clouds/aliyun/products/ga/ga.md"
+    },
+    {
+      "product": "ga",
+      "heading": "IaC 资源定位",
+      "sha256": "89d38a200ba876f7ae2cc5e6dcd665e37c7654c8d6d4227e6e98db2fec7da6ac",
+      "target": "clouds/aliyun/products/ga/resource-schema.md"
+    },
+    {
+      "product": "ga",
+      "heading": "模板参数",
+      "sha256": "1b4ead8924d2613a00bc2cd73c11da8d5f63fd172a3590c0a73a3094df35128e",
+      "target": "clouds/aliyun/products/ga/ga.md"
+    },
+    {
+      "product": "ga",
+      "heading": "运行时查询与筛选",
+      "sha256": "78b09f23646b987c921f77e61053497e8a5bbf03393d3331f1b427d5678fc6eb",
+      "target": "clouds/aliyun/products/ga/availability.md"
+    }
+  ],
+  "verified_sources": {
+    "clouds/aliyun/products/ecs/hardware.md": [
+      {
+        "url": "https://help.aliyun.com/zh/ecs/intel-instance-specifications-and-operating-system-compatibility",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/user-guide/memory-optimized-instance-families-1",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/developer-reference/api-ecs-2014-05-26-describeinstancetypes",
+        "verified_at": "2026-11-02"
+      }
+    ],
+    "clouds/aliyun/products/ecs/gpu-availability.md": [
+      {
+        "url": "https://www.intel.com/content/www/us/en/products/sku/245797/intel-arc-pro-b70-graphics/specifications.html",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/intel-instance-specifications-and-operating-system-compatibility",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/user-guide/memory-optimized-instance-families-1",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/developer-reference/api-ecs-2014-05-26-describeinstancetypes",
+        "verified_at": "2026-11-02"
+      }
+    ],
+    "clouds/aliyun/products/ecs/confidential-computing.md": [
+      {
+        "url": "https://help.aliyun.com/zh/ecs/user-guide/build-a-tdx-confidential-computing-environment",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/user-guide/enhanced-instance-families/",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/user-guide/build-an-sgx-encrypted-computing-environment/",
+        "verified_at": "2026-11-02"
+      }
+    ],
+    "common/hardware/intel-arc-pro-b70.md": [
+      {
+        "url": "https://www.intel.com/content/www/us/en/products/sku/245797/intel-arc-pro-b70-graphics/specifications.html",
+        "verified_at": "2026-11-02"
+      }
+    ],
+    "common/hardware/confidential-computing.md": [
+      {
+        "url": "https://help.aliyun.com/zh/ecs/user-guide/build-a-tdx-confidential-computing-environment",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/user-guide/enhanced-instance-families/",
+        "verified_at": "2026-11-02"
+      },
+      {
+        "url": "https://help.aliyun.com/zh/ecs/user-guide/build-an-sgx-encrypted-computing-environment/",
+        "verified_at": "2026-11-02"
+      }
+    ]
+  },
+  "template_documents": [
+    {
+      "source": "src/iac_code/skills/bundled/iac_aliyun/references/ros-template.md",
+      "revision": "eb2daf34e75508ab19678fe4daced603b995ce91",
+      "sha256": "c65fe8d04da9ce7c5ac286138e9bd21357caf88db737de9fa50c4860d6488a27",
+      "target": "clouds/aliyun/products/ros/ros-template.md"
+    },
+    {
+      "source": "src/iac_code/skills/bundled/iac_aliyun/references/terraform-template.md",
+      "revision": "eb2daf34e75508ab19678fe4daced603b995ce91",
+      "sha256": "e82edc4288a9e732fafb3a4939d5b6ecfe60dc99179d6675e718e44f7ab204a4",
+      "target": "clouds/aliyun/products/ros/terraform-template.md"
+    },
+    {
+      "source": "src/iac_code/skills/bundled/iac_aliyun/references/template-parameters.md",
+      "revision": "eb2daf34e75508ab19678fe4daced603b995ce91",
+      "sha256": "43dc1496590ceda3aa1542c5d3368ec51f401d3a7c7ce5215d1301af34fe8f86",
+      "target": "clouds/aliyun/products/ros/template-parameters.md"
+    }
+  ]
+}

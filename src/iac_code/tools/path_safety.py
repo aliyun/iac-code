@@ -74,6 +74,7 @@ class _SensitivePaths(Sequence[str]):
 
 
 SENSITIVE_PATHS: Sequence[str] = _SensitivePaths()
+KNOWLEDGE_PREFIX = "knowledge://"
 
 
 def _normalize_for_platform(path: str, *, case_insensitive: bool | None = None) -> str:
@@ -172,6 +173,47 @@ def _resolve_normalized_candidate(normalized_path: str, cwd: str) -> str:
     return os.path.realpath(os.path.join(cwd, normalized_path))
 
 
+def is_knowledge_path(path: str) -> bool:
+    return path.lower().startswith(KNOWLEDGE_PREFIX)
+
+
+def get_knowledge_root() -> Path:
+    return (get_iac_code_application_root() / "knowledge").resolve()
+
+
+def knowledge_uri(path: str | Path) -> str:
+    """Use a stable logical address for real files within the installed Wiki."""
+    try:
+        relative = Path(path).resolve().relative_to(get_knowledge_root())
+    except (OSError, ValueError, RuntimeError):
+        return str(path)
+    return KNOWLEDGE_PREFIX + (relative.as_posix() if relative.parts else "")
+
+
+def knowledge_allowed_roots(path: str, roots: list[str]) -> list[str]:
+    """Intersect existing read permissions with the logical namespace boundary."""
+    if not is_knowledge_path(path):
+        return roots
+    wiki = str(get_knowledge_root())
+    return [
+        wiki if _path_is_under(wiki, root) else root for root in roots
+        if _path_is_under(wiki, root) or _path_is_under(root, wiki)
+    ]
+
+
+def _resolve_knowledge_path(path: str) -> str:
+    relative = path[len(KNOWLEDGE_PREFIX):].replace("\\", "/")
+    parts = relative.split("/")
+    if (relative.startswith("/") or ".." in parts or any(c in relative for c in ":%?#")
+        or any(ord(c) < 32 for c in relative)):
+        raise ValueError("Knowledge path must stay inside knowledge://")
+    root = get_knowledge_root()
+    resolved = root.joinpath(*parts).resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError("Knowledge path must stay inside knowledge://")
+    return str(resolved)
+
+
 def resolve_read_path_with_source(
     path: str,
     cwd: str,
@@ -185,6 +227,8 @@ def resolve_read_path_with_source(
     Symlinks are followed by ``resolve_candidate``; permission checks must
     validate the final real path before execution.
     """
+    if is_knowledge_path(path):
+        return ReadPathResolution(path=_resolve_knowledge_path(path))
     normalized_path = os.path.expanduser(normalize_user_path(path))
     primary = _resolve_normalized_candidate(normalized_path, cwd)
     if os.path.isabs(normalized_path) or os.path.exists(primary):
@@ -301,11 +345,16 @@ def check_read_path_with_resolution(
     read_path_violation_behavior: Literal["ask", "deny"] = "ask",
 ) -> tuple[ReadPathDecision, ReadPathResolution]:
     """Resolve a read path once and return both its decision and physical path."""
-    resolution = resolve_read_path_with_source(
-        path,
-        cwd,
-        relative_read_directories=relative_read_directories,
-    )
+    try:
+        resolution = resolve_read_path_with_source(
+            path, cwd, relative_read_directories=relative_read_directories,
+        )
+    except (ValueError, OSError, RuntimeError):
+        if not is_knowledge_path(path):
+            raise
+        return ReadPathDecision(
+            "deny", reason_type="path_constraint", detail=_("path outside allowed read directories"),
+        ), ReadPathResolution(path=path)
     resolved = resolution.path
 
     if strict_read_directories:
@@ -350,6 +399,8 @@ def check_write_path(
     additional_directories: list[str],
 ) -> ReadPathDecision:
     """Decide whether a write path is safe or should ask for confirmation."""
+    if is_knowledge_path(path):
+        return ReadPathDecision("deny", reason_type="path_constraint", detail=_("path outside allowed directories"))
     resolved = resolve_candidate(path, cwd)
 
     if _path_hits_sensitive(resolved):

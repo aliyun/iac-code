@@ -11,6 +11,7 @@ export const WEB_EVENT_TYPES = [
   "session.updated",
   "session.resync.required",
   "user.message",
+  "context.wiki_search",
   "assistant.message.start",
   "assistant.text.delta",
   "assistant.thinking.delta",

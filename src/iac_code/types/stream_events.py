@@ -73,6 +73,16 @@ class Usage:
         return min(1.0, self.cache_read_input_tokens / total_input_tokens)
 
 
+@dataclass
+class WikiSearchEvent:
+    """Runtime preparation progress; never assistant text or a synthetic tool call."""
+
+    query_id: str
+    phase: str
+    snapshot: dict[str, Any] = field(default_factory=dict)
+    type: Literal["wiki_search"] = "wiki_search"
+
+
 # -- Provider-originated events ------------------------------------------------
 
 
@@ -485,6 +495,7 @@ class CloudResourceSelectionEvent(ToolEmittedEvent):
 
 
 StreamEvent = Union[
+    WikiSearchEvent,
     MessageStartEvent,
     TextDeltaEvent,
     ThinkingDeltaEvent,

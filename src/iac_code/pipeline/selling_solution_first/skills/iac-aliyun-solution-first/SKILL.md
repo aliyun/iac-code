@@ -163,11 +163,11 @@ CPU、内存、磁盘、带宽等规格直接影响费用，必须准确区分�
 
 ## 第二部分：详细架构规划
 
-规划、粗估或调用某个阿里云产品的 API 前，必须先用 `read_file` 读取 [references/cloud-products/](references/cloud-products/) 下该产品的对应文档，了解选型策略、配置限制和计费方式。同一上下文已完整读取时直接复用；只加载本次涉及产品的文档。
+规划、粗估或调用某个阿里云产品的 API 前，必须先用 `read_file` 读取 `knowledge://clouds/aliyun/products/<产品>/<产品>.md` 及相关专题，了解选型策略、配置限制和计费方式。同一上下文已完整读取时直接复用；只加载本次涉及产品的文档。
 
 规划中新增或替换资源类型时，必须先读取所属云产品的对应文档，再确定其配置和费用；同一上下文已完整读取的直接复用。
 
-产品与文件映射：云服务器 ECS → `ecs.md`；轻量应用服务器 SWAS → `swas.md`；云数据库 RDS → `rds.md`；云数据库 Redis → `redis.md`；负载均衡 SLB/CLB/ALB/NLB → `slb.md`；专有网络 VPC、弹性公网 IP EIP → `vpc.md`；对象存储 OSS → `oss.md`；全球加速 GA → `ga.md`。
+产品已明确时直接读取对应产品页；不确定归属时查 [产品导航](knowledge://clouds/aliyun/products/index.md)（EIP → VPC）。
 
 ### 核心原则：按需设计，不过度发挥
 
@@ -323,7 +323,8 @@ CPU、内存、磁盘、带宽等规格直接影响费用，必须准确区分�
 - 有用户预算硬约束时，候选区间上限原则上不得超过预算；确实无法满足时先澄清或明确标记冲突，不得静默放宽预算。
 - 本阶段**不调用** `ros_estimate_template_cost`，也**不输出** `OriginalAmount`/`TradeAmount`。精确询价由实现步骤完成。
 
-部署需求涉及优惠券、代金券或用券预算时，先用 `read_file` 按需读取 [优惠券指南](references/coupons.md)，再识别与查询券的适用条件；同一上下文已读取时直接复用。此类问题留在部署流程内，不因提到优惠券而分流或拒绝部署。
+部署需求涉及优惠券、代金券或用券预算时，先用 `read_file` 按需读取 [优惠券指南](knowledge://clouds/aliyun/products/bss/coupons.md)，再识别与查询券的适用条件；同一上下文已读取时直接复用。无需为普通部署查询优惠券。
+保持部署目标、规格和候选；券查询成功、失败、不适用或待确认均不代表取消部署。回答后以 `status: awaiting_selection` 保留候选等待选择，不提交 `rejected`，不引导跳转。
 
 ### 方案说服力
 

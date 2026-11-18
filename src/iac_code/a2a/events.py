@@ -46,6 +46,7 @@ from iac_code.types.stream_events import (
     ToolResultEvent,
     ToolUseEndEvent,
     ToolUseStartEvent,
+    WikiSearchEvent,
 )
 
 _METADATA_MAX_CHARS = 4000
@@ -318,6 +319,19 @@ async def publish_stream_event(
     permission_wait_metrics: Any | None = None,
 ) -> str | None:
     enabled_exposure_types = normalize_a2a_exposure_types(exposure_types)
+
+    if isinstance(event, WikiSearchEvent):
+        from iac_code.ui.wiki_search import wiki_projection
+
+        await _enqueue_status(
+            event_queue,
+            task_id=task_id,
+            context_id=context_id,
+            state=TaskState.TASK_STATE_WORKING,
+            metadata={"iac_code": {"wikiSearch": wiki_projection(event.snapshot, event.phase)}},
+            iac_code_session_id=iac_code_session_id,
+        )
+        return None
 
     if isinstance(event, TextDeltaEvent):
         if not event.text:

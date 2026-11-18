@@ -15220,3 +15220,36 @@ msgstr "Update abgeschlossen. Starten Sie iac-code tui neu, um fortzufahren."
 #: src/iac_code/ui/dialogs/mcp_manager.py
 msgid "※ Run iac-code tui --debug to see error logs"
 msgstr "※ Führen Sie iac-code tui --debug aus, um Fehlerprotokolle anzuzeigen"
+
+#: src/iac_code/ui/wiki_search.py
+#, python-brace-format
+msgid "Matched {count} files"
+msgstr "Gefundene Dateien: {count}"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Extracting keywords"
+msgstr "Schlüsselwörter ermitteln"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Searching"
+msgstr "Suche läuft"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "No search needed"
+msgstr "Keine Suche nötig"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "No matches"
+msgstr "Keine Treffer"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Cancelled"
+msgstr "Abgebrochen"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Background Wiki search"
+msgstr "Wiki-Suche im Hintergrund"
+
+#: src/iac_code/ui/wiki_search.py
+msgid "Wiki search"
+msgstr "Wiki-Suche"

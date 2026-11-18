@@ -90,16 +90,17 @@ class TestLoadPipelineDir:
         _write_pipeline(tmp_path, MINIMAL_YAML, {"step_a.md": "Do A", "step_b.md": "Do B with {intent}"})
         skill_dir = tmp_path / "skills" / "iac-aliyun-cost"
         skill_dir.mkdir(parents=True)
-        (skill_dir / "SKILL.md").write_text("Read references/ros-template.md", encoding="utf-8")
+        (skill_dir / "SKILL.md").write_text(
+            "Read references/template-parameter-recommendation.md", encoding="utf-8",
+        )
         (skill_dir / "references").write_text("../broken-on-windows-checkout", encoding="utf-8")
 
         loaded = load_pipeline_dir(tmp_path)
 
         skill_root = Path(loaded.skill_roots["iac-aliyun-cost"])
         assert skill_root != skill_dir.resolve()
-        assert (skill_root / "references" / "ros-template.md").is_file()
-        assert (skill_root / "references" / "cloud-products" / "ecs.md").is_file()
-        assert (skill_root / "references" / "cloud-products" / "ga.md").is_file()
+        assert (skill_root / "references" / "template-parameter-recommendation.md").is_file()
+        assert not (skill_root / "references" / "solutions").exists()
 
     def test_rejects_context_dependency_cycle(self, tmp_path):
         yaml_content = dedent("""\

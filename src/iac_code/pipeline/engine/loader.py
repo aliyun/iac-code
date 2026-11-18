@@ -509,6 +509,8 @@ def _bind_hooks(steps: list[StepSpec], pipeline_dir: Path) -> None:
             step.on_exit = module.on_exit
         if hasattr(module, "enrich_completion_input"):
             step.completion_enricher = module.enrich_completion_input
+        if hasattr(module, "build_completion_reply"):
+            step.completion_reply_builder = module.build_completion_reply
         if hasattr(module, "on_resource_observed"):
             step.on_resource_observed = module.on_resource_observed
         if hasattr(module, "on_rollback_cleanup_required"):

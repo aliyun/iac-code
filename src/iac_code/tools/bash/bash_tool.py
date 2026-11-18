@@ -31,8 +31,9 @@ class BashTool(Tool):
     def description(self) -> str:
         return (
             "Execute a shell command in the system's default shell. "
-            "Use this for running programs, installing packages, searching code, "
-            "running tests, git operations, and other system tasks. "
+            "Use this for running programs, installing packages, running tests, git operations, "
+            "and other tasks requiring shell execution. Prefer the `grep`, `glob`, and `read_file` tools "
+            "for content searches, file discovery, and file reads when available. "
             "Commands are executed with a timeout of 120 seconds by default."
         )
 
