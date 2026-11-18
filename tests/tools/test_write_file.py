@@ -1,5 +1,7 @@
 """Tests for the WriteFile tool."""
 
+import io
+
 import pytest
 
 from iac_code.tools.base import ToolContext
@@ -14,6 +16,20 @@ def write_file_tool():
 
 class TestWriteFileTool:
     """Tests for WriteFileTool."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("content", ["line 1\nline 2\n", "line 1\r\nline 2\r\n", "line 1\r\nline 2\nline 3\r"])
+    async def test_write_preserves_line_endings_with_windows_text_defaults(self, tmp_path, monkeypatch, content):
+        def windows_open(*args, **kwargs):
+            kwargs.setdefault("newline", "\r\n")
+            return io.open(*args, **kwargs)
+
+        monkeypatch.setattr("iac_code.tools.write_file.open", windows_open, raising=False)
+        result = await WriteFileTool().execute(
+            tool_input={"path": "literal.txt", "content": content}, context=ToolContext(cwd=str(tmp_path)),
+        )
+        assert not result.is_error
+        assert (tmp_path / "literal.txt").read_bytes() == content.encode("utf-8")
 
     def test_tool_properties(self, write_file_tool):
         """Test tool name, description, and schema."""

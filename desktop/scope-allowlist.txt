@@ -661,5 +661,6 @@ tests/tools/cloud/aliyun/test_ros_template_tools.py
 tests/tools/test_glob.py
 tests/tools/test_grep.py
 tests/tools/test_knowledge_paths.py
+tests/tools/test_write_file.py
 tests/ui/test_wiki_search_display.py
 tests/web/test_wiki_search_frontend.py

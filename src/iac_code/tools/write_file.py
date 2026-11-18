@@ -83,7 +83,7 @@ class WriteFileTool(Tool):
 
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
+            with open(path, "w", encoding="utf-8", newline="") as f:
                 f.write(content)
         except PermissionError:
             return ToolResult.error(f"Permission denied: {path}")
