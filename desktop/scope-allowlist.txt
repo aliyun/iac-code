@@ -524,6 +524,7 @@ scripts/ci/a2a_context_evidence.py
 scripts/ci/cloud_test_credentials.py
 scripts/ci/ecs_dryrun_guard.py
 scripts/ci/ecs_retention_regression.md
+scripts/ci/model_pool.py
 scripts/ci/prepare_retention_browser.mjs
 scripts/ci/prepare_retention_wiki_web.py
 scripts/ci/run_coupon_budget_a2a.py

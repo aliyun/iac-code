@@ -195,6 +195,7 @@ def test_wiki_shared_paths_are_explicit_and_do_not_admit_neighbor_files():
         "src/iac_code/services/wiki_auto_search.py",
         "src/iac_code/tools/read_file.py",
         "src/iac_code/pipeline/engine/resume_recovery.py",
+        "scripts/ci/model_pool.py",
         "scripts/ci/run_knowledge_wiki_a2a.py",
         "tests/knowledge/test_auto_search.py",
         "setup.py",
@@ -207,6 +208,7 @@ def test_wiki_shared_paths_are_explicit_and_do_not_admit_neighbor_files():
         "src/iac_code/tools/unreviewed_tool.py",
         "src/iac_code/pipeline/engine/unreviewed_feature.py",
         "scripts/ci/run_unreviewed.py",
+        "scripts/ci/model_pool_unreviewed.py",
         "tests/knowledge/test_unreviewed.py",
     ):
         assert not module._allowed(path, entries)
