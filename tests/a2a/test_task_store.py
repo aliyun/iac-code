@@ -463,18 +463,28 @@ async def test_context_cleanup_removes_llm_header_binding(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_task_store_strips_llm_headers_from_followup_history() -> None:
+async def test_task_store_strips_runtime_secrets_from_followup_history() -> None:
     store = A2ATaskStore(metrics=NoOpA2AMetrics())
     first = Message(
         message_id="message-1",
         role=Role.ROLE_USER,
         parts=[Part(text="first")],
-        metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer first"}, "keep": "yes"}},
+        metadata={
+            "iac_code": {
+                "llm_headers": {"Authorization": "Bearer first"},
+                "iac_code_api_key": "fake-first-provider-key",
+                "alibaba_cloud_access_key_id": "fake-first-id",
+                "alibaba_cloud_access_key_secret": "fake-first-secret",
+                "alibaba_cloud_security_token": "fake-first-token",
+                "keep": "yes",
+            }
+        },
     )
     task = Task(
         id="task-headers",
         context_id="ctx-headers",
-        status=TaskStatus(state=TaskState.TASK_STATE_WORKING),
+        status=TaskStatus(state=TaskState.TASK_STATE_WORKING, message=first),
+        metadata=MessageToDict(first.metadata),
         history=[first],
     )
     await store.save(task)
@@ -483,7 +493,16 @@ async def test_task_store_strips_llm_headers_from_followup_history() -> None:
         message_id="message-2",
         role=Role.ROLE_USER,
         parts=[Part(text="second")],
-        metadata={"iac_code": {"llm_headers": {"Authorization": "Bearer second"}, "keep": "yes"}},
+        metadata={
+            "iac_code": {
+                "llm_headers": {"Authorization": "Bearer second"},
+                "iac_code_api_key": "fake-second-provider-key",
+                "alibaba_cloud_access_key_id": "fake-second-id",
+                "alibaba_cloud_access_key_secret": "fake-second-secret",
+                "alibaba_cloud_security_token": "fake-second-token",
+                "keep": "yes",
+            }
+        },
     )
     task.history.append(followup)
     await store.save(task)
@@ -495,6 +514,8 @@ async def test_task_store_strips_llm_headers_from_followup_history() -> None:
         {"keep": "yes"},
         {"keep": "yes"},
     ]
+    assert rendered["metadata"] == {"iac_code": {"keep": "yes"}}
+    assert rendered["status"]["message"]["metadata"] == {"iac_code": {"keep": "yes"}}
     assert "llm_headers" not in str(rendered)
     assert "Bearer first" not in str(rendered)
     assert "Bearer second" not in str(rendered)

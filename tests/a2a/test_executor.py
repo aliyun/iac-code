@@ -2381,8 +2381,9 @@ async def test_executor_canceled_terminal_backup_blocked_records_cancel_intent(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("safe_mode", ["0", "1"])
 async def test_executor_keeps_initial_task_echo_canonical_without_changing_runtime_prompt(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, safe_mode: str
 ) -> None:
     from a2a.types import Message, Part, Role
 
@@ -2391,6 +2392,7 @@ async def test_executor_keeps_initial_task_echo_canonical_without_changing_runti
     config_dir.mkdir()
     cwd.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config_dir))
+    monkeypatch.setenv("IAC_CODE_A2A_SAFE_MODE", safe_mode)
     loop = FakeAgentLoop([TextDeltaEvent(text="ok")])
     runtime = FakeRuntime(agent_loop=loop, session_id="session-1")
     monkeypatch.setattr("iac_code.a2a.executor.create_agent_runtime", lambda options: runtime)
@@ -2400,6 +2402,10 @@ async def test_executor_keeps_initial_task_echo_canonical_without_changing_runti
         "iac_code": {
             "cwd": str(cwd),
             "llm_headers": {"Authorization": "Bearer top-secret"},
+            "iac_code_api_key": "fake-provider-api-key",
+            "alibaba_cloud_access_key_id": "fake-access-key-id",
+            "alibaba_cloud_access_key_secret": "fake-access-key-secret",
+            "alibaba_cloud_security_token": "fake-security-token",
         }
     }
     context = FakeRequestContext(text=prompt, metadata=metadata)
@@ -2419,8 +2425,8 @@ async def test_executor_keeps_initial_task_echo_canonical_without_changing_runti
     rendered = dump(initial_task)
     history = rendered["history"][0]
     assert history["parts"][0]["text"] == prompt
-    assert history["metadata"]["iac_code"]["cwd"] == str(cwd)
-    assert "llm_headers" not in history["metadata"]["iac_code"]
+    assert history["metadata"] == {"iac_code": {"cwd": str(cwd)}}
+    assert dump(context.message)["metadata"] == metadata
     assert "top-secret" not in str(rendered)
     assert str(cwd) in history["parts"][0]["text"]
     assert str(config_dir) in history["parts"][0]["text"]

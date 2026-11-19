@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import copy
+
+import pytest
 from a2a.types import Message, Part, Role
 from google.protobuf.json_format import MessageToDict
 
@@ -22,7 +25,29 @@ def test_redact_keeps_everything_raw_under_suppress_all() -> None:
         assert redactor.redact(payload) == payload
 
 
-def test_redact_message_echo_removes_llm_headers_but_preserves_other_metadata() -> None:
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_redact_removes_runtime_secrets_without_changing_input(wrapped: bool) -> None:
+    metadata = {
+        "iac_code": {
+            "llm_headers": {"Authorization": "Bearer top-secret"},
+            "iac_code_api_key": "fake-provider-api-key",
+            "alibaba_cloud_access_key_id": "fake-access-key-id",
+            "alibaba_cloud_access_key_secret": "fake-access-key-secret",
+            "alibaba_cloud_security_token": "fake-security-token",
+            "alibaba_cloud_region_id": "cn-hangzhou",
+        }
+    }
+    payload = {"metadata": metadata} if wrapped else metadata
+    original = copy.deepcopy(payload)
+
+    result = A2AMetadataEchoRedactor().redact(payload)
+
+    expected = {"iac_code": {"alibaba_cloud_region_id": "cn-hangzhou"}}
+    assert result == ({"metadata": expected} if wrapped else expected)
+    assert payload == original
+
+
+def test_redact_message_echo_removes_runtime_secrets_but_preserves_other_metadata() -> None:
     redactor = A2AMetadataEchoRedactor()
     message = Message(
         role=Role.ROLE_USER,
@@ -31,11 +56,16 @@ def test_redact_message_echo_removes_llm_headers_but_preserves_other_metadata() 
         metadata={
             "iac_code": {
                 "llm_headers": {"Authorization": "Bearer top-secret"},
+                "iac_code_api_key": "fake-provider-api-key",
+                "alibaba_cloud_access_key_id": "fake-access-key-id",
+                "alibaba_cloud_access_key_secret": "fake-access-key-secret",
+                "alibaba_cloud_security_token": "fake-security-token",
                 "preferredLanguage": "zh-CN",
             },
             "caller": "test-client",
         },
     )
+    original = MessageToDict(message)
 
     echoed = MessageToDict(redactor.redact_message_echo(message), preserving_proto_field_name=False)
 
@@ -44,3 +74,4 @@ def test_redact_message_echo_removes_llm_headers_but_preserves_other_metadata() 
         "caller": "test-client",
     }
     assert "top-secret" not in str(echoed)
+    assert MessageToDict(message) == original
