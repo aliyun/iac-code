@@ -18,10 +18,12 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, TypeVar, cast
 
+from iac_code.services.request_progress import notify_progress
+
 logger = logging.getLogger(__name__)
 _SAFE_VALUE = re.compile(r"^[A-Za-z0-9_.:/+-]{1,256}$")
 _MAX_TIMELINE_EVENTS = 512
-# One restore + chat chain emits nine lines, or ten when thinking is returned.
+# Emit each milestone once; new sessions also snapshot model content and its delivery.
 # Repeated phases, LLM attempts, and pipeline steps remain in the summary only.
 _CHAT_LOG_STAGES = frozenset(
     {
@@ -29,6 +31,8 @@ _CHAT_LOG_STAGES = frozenset(
         "llm_request_started",
         "llm_first_thinking_received",
         "llm_first_text_received",
+        "first_event_send_completed",
+        "first_content_send_completed",
         "first_text_send_completed",
     }
 )
@@ -45,6 +49,7 @@ _FIELDS = frozenset(
         "model",
         "provider",
         "llm_call_id",
+        "llm_call_purpose",
         "llm_response_id",
         "attempt",
         "streaming",
@@ -70,10 +75,17 @@ _FIELDS = frozenset(
         "pipeline_name",
         "parent_call_id",
         "wire_observation_incomplete",
+        "is_new_session",
+        "first_event_type",
+        "first_content_type",
+        "first_model_content_type",
     }
 )
 _current: contextvars.ContextVar[RequestTiming | None] = contextvars.ContextVar("iac_first_token_timing", default=None)
 _phase_stack: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar("iac_timing_phases", default=())
+_auxiliary_model_purpose: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "iac_auxiliary_model_timing_purpose", default=None
+)
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
@@ -116,26 +128,38 @@ class RequestTiming:
         self._emitted: set[str] = set()
         self._lock = threading.RLock()
         self._summarized = False
+        self._first_event_summarized = False
+        self._first_model_content_summarized = False
+        self._first_content_summarized = False
         self.closed = False
 
     @property
     def active(self) -> bool:
         return not self.closed and not self._summarized and self._cutoff_ns is None
 
+    @property
+    def _new_a2a_session(self) -> bool:
+        return self.identity.get("is_new_session") is True and self.identity.get("protocol") == "a2a"
+
     def bind(self, **fields: Any) -> None:
         with self._lock:
             for key, value in _fields(fields).items():
                 self.identity.setdefault(key, value)
 
-    def record(self, stage: str, *, once: bool = False, force: bool = False, **fields: Any) -> None:
+    def record(
+        self, stage: str, *, once: bool = False, force: bool = False, _at_ns: int | None = None, **fields: Any
+    ) -> None:
         with self._lock:
             if self.closed or self._summarized or (not self.active and not force) or (once and stage in self._once):
                 return
             self._once.add(stage)
-            now = self.clock_ns()
+            now = self.clock_ns() if _at_ns is None else _at_ns
             elapsed = round(max(0, now - self.started_ns) / 1_000_000, 3)
             self.milestones.setdefault(stage, elapsed)
-            if stage in {"first_text_send_completed", "request_completed"} and self._cutoff_ns is None:
+            if self._cutoff_ns is None and (
+                stage == "request_completed"
+                or (stage == "first_text_send_completed" and self.identity.get("protocol") != "a2a")
+            ):
                 self._cutoff_ns = now
                 self._cutoff_phases = dict(self._open_phases)
             event = {"stage": stage, "elapsed_ms": elapsed, **_fields(fields)}
@@ -149,6 +173,20 @@ class RequestTiming:
             if stage in log_stages and stage not in self._emitted:
                 self._emitted.add(stage)
                 self._write(event)
+            content_type = {
+                "llm_first_text_received": "text",
+                "llm_first_thinking_received": "thinking",
+            }.get(stage)
+            if stage == "llm_response_received":
+                content_type = fields.get("first_model_content_type")
+            if self._new_a2a_session and content_type is not None and not self._first_model_content_summarized:
+                self.bind(first_model_content_type=content_type)
+                self.record("first_model_content_received", once=True, _at_ns=now)
+                self._first_model_content_summarized = True
+                self._write_summary(
+                    "first_model_content_summary", "first_model_content_received", elapsed, now, self._open_phases
+                )
+                self._finish_new_session_observation()
 
     def _write(self, fields: dict[str, Any]) -> None:
         try:
@@ -157,7 +195,7 @@ class RequestTiming:
                     {
                         "log_type": "first_token_timing",
                         "service": "iac-code",
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "timestamp": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
                         "request_id": self.request_id,
                         "call_id": self.call_id,
@@ -180,34 +218,125 @@ class RequestTiming:
                 return
             self._summarized = True
             elapsed = self.milestones.get(
-                "first_text_send_completed",
+                "first_content_send_completed",
                 self.milestones.get(
-                    "request_completed", round(max(0, self.clock_ns() - self.started_ns) / 1_000_000, 3)
+                    "first_text_send_completed",
+                    self.milestones.get(
+                        "request_completed", round(max(0, self.clock_ns() - self.started_ns) / 1_000_000, 3)
+                    ),
                 ),
             )
             cutoff_ns = self._cutoff_ns if self._cutoff_ns is not None else self.clock_ns()
             open_phases = self._cutoff_phases if self._cutoff_ns is not None else self._open_phases
-            self._write(
-                {
-                    "stage": "first_token_summary",
-                    "result": result,
-                    "elapsed_ms": elapsed,
-                    "first_text_sent": "first_text_send_completed" in self.milestones,
-                    "first_text_observation_complete": not self.identity.get("wire_observation_incomplete", False),
-                    "milestones_ms": dict(self.milestones),
-                    "phase_totals_ms": dict(self.phase_totals_ms),
-                    "timeline": list(self.timeline),
-                    "timeline_events_dropped": self.timeline_events_dropped,
-                    "in_progress_phases": [
-                        {
-                            "phase_id": phase_id,
-                            "stage": stage,
-                            "elapsed_ms": round(max(0, cutoff_ns - started) / 1_000_000, 3),
-                        }
-                        for phase_id, (stage, started) in open_phases.items()
-                    ],
-                }
-            )
+            if self.identity.get("protocol") == "a2a":
+                elapsed = self.milestones.get("request_completed", round((cutoff_ns - self.started_ns) / 1_000_000, 3))
+            if not self._first_event_summarized:
+                self._write_summary("first_token_summary", result, elapsed, cutoff_ns, open_phases)
+            if self._new_a2a_session:
+                if not self._first_model_content_summarized:
+                    self._write_summary("first_model_content_summary", result, elapsed, cutoff_ns, open_phases)
+                if not self._first_content_summarized:
+                    self._write_summary("first_content_summary", result, elapsed, cutoff_ns, open_phases)
+
+    def record_send_completed(
+        self,
+        *,
+        event_type: str | None = None,
+        content_type: str | None = None,
+        text: bool = False,
+        result: str | None = None,
+    ) -> None:
+        """Snapshot successful wire delivery; all milestones in one send share its timestamp."""
+        with self._lock:
+            if not self.active:
+                return
+            now = self.clock_ns()
+            if event_type is not None:
+                self.bind(first_event_type=event_type)
+                self.record("first_event_send_completed", once=True, _at_ns=now)
+            if text:
+                self.record("first_text_send_completed", once=True, force=True, _at_ns=now)
+            new_content = content_type is not None and self._new_a2a_session
+            if new_content:
+                self.bind(first_content_type=content_type)
+                self.record("first_content_send_completed", once=True, force=True, _at_ns=now)
+            if event_type is not None and not self._first_event_summarized:
+                self._first_event_summarized = True
+                self._write_summary(
+                    "first_token_summary",
+                    result or "first_event_sent",
+                    self.milestones["first_event_send_completed"],
+                    now,
+                    self._cutoff_phases if self._cutoff_ns is not None else self._open_phases,
+                )
+            if new_content and not self._first_content_summarized:
+                self._first_content_summarized = True
+                self._write_summary(
+                    "first_content_summary",
+                    "first_content_sent",
+                    self.milestones["first_content_send_completed"],
+                    now,
+                    self._open_phases,
+                )
+            if self._new_a2a_session:
+                self._finish_new_session_observation()
+            elif "first_text_send_completed" in self.milestones and (
+                self._first_event_summarized or self.identity.get("protocol") != "a2a"
+            ):
+                self._cutoff_ns = now
+                self._cutoff_phases = dict(self._open_phases)
+                self.summary("first_text_sent")
+
+    def _finish_new_session_observation(self) -> None:
+        if self._first_event_summarized and self._first_model_content_summarized and self._first_content_summarized:
+            self._summarized = True
+
+    def _write_summary(
+        self,
+        stage: str,
+        result: str,
+        elapsed: float,
+        cutoff_ns: int,
+        open_phases: dict[str, tuple[str, int]],
+    ) -> None:
+        observation_complete = not self.identity.get("wire_observation_incomplete", False)
+        model_received = self.milestones.get("first_model_content_received")
+        content_sent = self.milestones.get("first_content_send_completed")
+        self._write(
+            {
+                "stage": stage,
+                "result": result,
+                "elapsed_ms": elapsed,
+                "first_event_sent": "first_event_send_completed" in self.milestones,
+                "first_progress_sent": "first_progress_send_completed" in self.milestones,
+                **(
+                    {"first_event_definition": "effective_display"}
+                    if self.identity.get("request_kind") == "a2a"
+                    else {}
+                ),
+                "first_event_observation_complete": observation_complete,
+                "first_model_content_received": model_received is not None,
+                "model_content_to_send_ms": round(content_sent - model_received, 3)
+                if model_received is not None and content_sent is not None and content_sent >= model_received
+                else None,
+                "first_content_sent": "first_content_send_completed" in self.milestones,
+                "first_content_observation_complete": observation_complete,
+                "first_text_sent": "first_text_send_completed" in self.milestones,
+                "first_text_observation_complete": observation_complete,
+                "milestones_ms": dict(self.milestones),
+                "phase_totals_ms": dict(self.phase_totals_ms),
+                "timeline": list(self.timeline),
+                "timeline_events_dropped": self.timeline_events_dropped,
+                "in_progress_phases": [
+                    {
+                        "phase_id": phase_id,
+                        "stage": phase_stage,
+                        "elapsed_ms": round(max(0, cutoff_ns - started) / 1_000_000, 3),
+                    }
+                    for phase_id, (phase_stage, started) in open_phases.items()
+                ],
+            }
+        )
 
 
 @contextmanager
@@ -231,12 +360,24 @@ def bind_timing(**fields: Any) -> None:
 
 
 def mark_timing(stage: str, *, once: bool = False, **fields: Any) -> None:
+    notify_progress(stage)
     if timing := current_timing():
         timing.record(stage, once=once, **fields)
 
 
 @contextmanager
+def auxiliary_model_timing(purpose: str) -> Iterator[None]:
+    """Keep auxiliary inference in the timeline without claiming response-content milestones."""
+    token = _auxiliary_model_purpose.set(purpose)
+    try:
+        yield
+    finally:
+        _auxiliary_model_purpose.reset(token)
+
+
+@contextmanager
 def timing_phase(stage: str, *, first_only: bool = False, **fields: Any) -> Iterator[dict[str, Any]]:
+    notify_progress(stage + "_started")
     timing = current_timing()
     details = dict(fields)
     if timing is None or not timing.active or stage in _phase_stack.get():
@@ -325,6 +466,10 @@ class _TimedModelStream:
         except Exception:
             scope = {}
         self.fields = {**_fields(scope), "mode": scope.get("iac_code.mode"), **fields}
+        purpose = _auxiliary_model_purpose.get()
+        self.stage_prefix = f"{purpose}_" if purpose else "llm_"
+        if purpose:
+            self.fields["llm_call_purpose"] = purpose
         self.timing = current_timing()
         self.started: int | None = None
         self.seen: set[str] = set()
@@ -336,22 +481,28 @@ class _TimedModelStream:
         assert self.timing is not None
         if self.started is None:
             self.started = self.timing.clock_ns()
-            self.timing.record("llm_request_started", streaming=True, **self.fields)
+            self.timing.record(self.stage_prefix + "request_started", streaming=True, **self.fields)
         try:
             event = await anext(self.stream)
         except StopAsyncIteration:
             raise
         except BaseException as error:
-            self.timing.record("llm_request_failed", error_type=type(error).__name__, streaming=True, **self.fields)
+            self.timing.record(
+                self.stage_prefix + "request_failed", error_type=type(error).__name__, streaming=True, **self.fields
+            )
             raise
         kind = getattr(event, "type", "")
         if kind == "message_start":
             self.timing.record(
-                "llm_response_started", llm_response_id=getattr(event, "message_id", None), **self.fields
+                self.stage_prefix + "response_started",
+                llm_response_id=getattr(event, "message_id", None),
+                **self.fields,
             )
         elif kind == "message_end":
             self.timing.record(
-                "llm_request_completed", result=getattr(event, "stop_reason", "completed"), **self.fields
+                self.stage_prefix + "request_completed",
+                result=getattr(event, "stop_reason", "completed"),
+                **self.fields,
             )
         if (
             isinstance(kind, str)
@@ -361,7 +512,7 @@ class _TimedModelStream:
             and kind not in self.seen
         ):
             self.seen.add(kind)
-            stage = "llm_first_text_received" if kind == "text_delta" else "llm_first_thinking_received"
+            stage = self.stage_prefix + ("first_text_received" if kind == "text_delta" else "first_thinking_received")
             self.timing.record(
                 stage,
                 streaming=True,
@@ -375,14 +526,26 @@ class _TimedModelStream:
 
 
 def time_model_stream(stream: Any, **fields: Any) -> Any:
+    if _auxiliary_model_purpose.get() is None:
+        notify_progress("llm_request_started")
     timing = current_timing()
     return _TimedModelStream(stream, fields) if timing is not None and timing.active else stream
 
 
 async def time_model_complete(awaitable: Any, **fields: Any) -> Any:
-    with timing_phase("llm_request", streaming=False, **fields):
+    purpose = _auxiliary_model_purpose.get()
+    prefix = f"{purpose}_" if purpose else "llm_"
+    if purpose:
+        fields["llm_call_purpose"] = purpose
+    with timing_phase(prefix + "request", streaming=False, **fields):
         result = await awaitable
-        mark_timing("llm_response_received", streaming=False, **fields)
+        content_types = [kind for kind in ("text", "thinking") if getattr(result, kind, "")]
+        mark_timing(
+            prefix + "response_received",
+            streaming=False,
+            first_model_content_type="_and_".join(content_types) or None,
+            **fields,
+        )
         return result
 
 

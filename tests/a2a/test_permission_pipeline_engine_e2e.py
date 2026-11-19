@@ -16,7 +16,8 @@ PIPELINE = Path(__file__).resolve().parents[2] / "scripts/a2a/e2e/permission_wai
 def test_pipeline_handoff_folds_original_request_without_losing_history(tmp_path, restart):
     (tmp_path / "workspace").mkdir()
     original = "请让我选择已有 VPC。\n只选择，不创建、修改或删除资源；收到选择后结束本轮。"
-    server = Server(tmp_path, pipeline_dir=str(PIPELINE), tool_count=1, resident_timeout=0.1)
+    # Only cold recovery forces reclamation; the same-process variant must stay resident.
+    server = Server(tmp_path, pipeline_dir=str(PIPELINE), tool_count=1, resident_timeout=0.1 if restart else 300)
     try:
         server.start()
         permission = _permission(server.send(original))

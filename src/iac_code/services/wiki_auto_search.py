@@ -23,6 +23,7 @@ from typing import Any
 from iac_code.agent.message import Message, TextBlock, ToolResultBlock
 from iac_code.providers.base import Message as ProviderMessage
 from iac_code.providers.request_policy import ProviderRequestPolicy, bool_or_none
+from iac_code.services.first_token_timing import auxiliary_model_timing, timing_phase
 from iac_code.services.token_counter import TokenCounter
 from iac_code.tools.base import ToolContext
 from iac_code.tools.grep import GrepTool
@@ -402,20 +403,21 @@ class WikiAutoSearch:
             if not terms or snapshot.get("extractor_version") != EXTRACTOR_VERSION:
                 work.emit("extracting")
                 try:
-                    side = self.manager.for_side_call(ProviderRequestPolicy(thinking_enabled=False, effort="low"))
-                    response = await side.complete(
-                        messages=[
-                            ProviderMessage.user(
-                                json.dumps(
-                                    extraction_input(query, recent, TokenCounter(side.get_model_name())),
-                                    ensure_ascii=False,
+                    with timing_phase("wiki_keyword_extract"), auxiliary_model_timing("wiki_keyword_extract"):
+                        side = self.manager.for_side_call(ProviderRequestPolicy(thinking_enabled=False, effort="low"))
+                        response = await side.complete(
+                            messages=[
+                                ProviderMessage.user(
+                                    json.dumps(
+                                        extraction_input(query, recent, TokenCounter(side.get_model_name())),
+                                        ensure_ascii=False,
+                                    )
                                 )
-                            )
-                        ],
-                        system=PROMPT,
-                        tools=None,
-                        cache_policy="no_explicit_cache",
-                    )
+                            ],
+                            system=PROMPT,
+                            tools=None,
+                            cache_policy="no_explicit_cache",
+                        )
                     settings = getattr(side, "session_start_settings", None)
                     try:
                         if callable(settings):
@@ -442,7 +444,8 @@ class WikiAutoSearch:
                 snapshot.update(status="failed" if fallback else "skipped", hits=[])
             else:
                 work.emit("searching")
-                hits = await search(self.root, terms, context, permission, weights=weights)
+                with timing_phase("wiki_search"):
+                    hits = await search(self.root, terms, context, permission, weights=weights)
                 snapshot.update(hits=hits, status=("fallback_ready" if fallback else "ready") if hits else "no_matches")
         except asyncio.CancelledError:
             snapshot.update(status="canceled", hits=[])
