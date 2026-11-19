@@ -96,7 +96,7 @@ uv run --no-sync python scripts/ci/run_e2e.py --case promotional-offer-followup-
 
 ## 真实用例的模型池与思考强度
 
-真实套件默认采用滚动调度：文本用例使用 `deepseek-v4-flash-0731`、`glm-5.2-fast-preview`、`glm-5.3-prime`、`deepseek-v4.1-flash`，每模型最多两个用例；多模态用例使用 `qwen3.8-max`、`qwen3.8-max-0902`、`qwen3.8-flash`、`qwen3.8-omni-flash`，每模型最多一个用例。两类模型池不能互相借用，总共最多 12 个用例。仅有文本用例待运行时最多八个；仅有多模态用例时最多四个。
+真实套件默认采用滚动调度：文本用例使用 `deepseek-v4.1-flash-1017`、`glm-5.2-fast-preview`、`glm-5.3-prime`、`deepseek-v4.1-flash`，每模型最多两个用例；多模态用例使用 `qwen3.8-max`、`qwen3.8-max-0902`、`qwen3.8-flash`、`qwen3.8-omni-flash`，每模型最多一个用例。两类模型池不能互相借用，总共最多 12 个用例。仅有文本用例待运行时最多八个；仅有多模态用例时最多四个。
 
 用例完成并结束清理后立即补位。模型额度或资源锁不可用的用例在待执行队列中等待，不占 worker；五条共享清理锁的用例继续互斥。每个用例在整个运行、重启恢复和清理期间保持同一个模型，隔离配置中的 `modelFallbackEnabled: false` 禁止自动模型降级。模型的请求重试继续由产品处理，失败不会改用另一个模型掩盖结果。
 
@@ -250,7 +250,7 @@ uv run python scripts/ci/run_e2e.py --case ssf-step1-followup-a2a --case ssf-ste
 五个 `knowledge-wiki-*-a2a` 用例归入 `live-readonly`，通过真实 HTTP/SSE A2A 与真实模型执行，不创建云资源：
 
 - `normal`：一个独立 normal 会话，没有云凭据或 IaC Skill 前置条件。
-- `boundaries`：独立的 RVV/AVX-512 知识未命中与生日祝福翻译；验证官方来源回退或未确认范围，以及无关请求不强制搜索 Wiki。
+- `boundaries`：独立的 RVV/AVX-512 知识未命中与生日祝福翻译；验证实际未命中后仍有回答，允许使用通用知识，不强制补查官方资料；无关请求不强制搜索 Wiki。
 - `p19`：不改原文的四轮购买 TDX / SGX 质疑 / B70 问答。
 - `handoff`：一次完整的方案 → 取消并交接 → normal 咨询；查阅证据不能从旧 pipeline 冒充继承。
 - `step2`：复用 Step1/Step2 续聊验收，真实模板、预览和询价后取消；Wiki 读取仅统计 materialize 步骤。
@@ -263,7 +263,7 @@ CI 中每个 case 分配一个模型、执行一轮，默认不重跑失败用�
 模型池按 case 分配，单次同时选择四个 case 不代表四场景均覆盖四模型。完整矩阵应逐模型运行：
 
 ```bash
-for model in deepseek-v4-flash-0731 glm-5.2-fast-preview glm-5.3-prime deepseek-v4.1-flash; do
+for model in deepseek-v4.1-flash-1017 glm-5.2-fast-preview glm-5.3-prime deepseek-v4.1-flash; do
   uv run --no-sync python scripts/ci/run_e2e.py \
     --case knowledge-wiki-normal-a2a --case knowledge-wiki-p19-a2a \
     --case knowledge-wiki-boundaries-a2a \

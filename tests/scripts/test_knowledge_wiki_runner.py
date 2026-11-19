@@ -764,6 +764,28 @@ def _body_call(name, path, body="body"):
     }
 
 
+@pytest.mark.parametrize("missed,answer,expected", [
+    (True, "RVV 的 VLEN 由实现决定；AVX-512 的向量寄存器是 512 位。", True),
+    (True, "无法核实具体实现的 VLEN。", True),
+    (True, " \n", False),
+    (False, "RVV 的 VLEN 由实现决定。", False),
+])
+def test_wiki_miss_allows_general_knowledge_but_requires_actual_miss_and_answer(
+    scripted_runner, missed, answer, expected,
+):
+    first = {
+        "answer": answer,
+        "calls": [{"id": "search", "name": "grep", "input": {"path": "knowledge://", "pattern": "RVV"}}],
+        "outcomes": {"search": {"is_error": False, "content": "No matches" if missed else "RVV result"}},
+    }
+    report, _ = scripted_runner([first, {"answer": "Happy birthday!"}], scenario="boundaries")
+    assert report["status"] == ("passed" if expected else "failed")
+    assert report["checks"]["repeat-1-turn-1: actual Wiki search miss observed"] is missed
+    assert report["checks"]["repeat-1-turn-1: Wiki miss still receives an answer"] is bool(answer.strip())
+    assert report["turns"][0]["fallback_or_uncertainty"] is ("无法" in answer)
+    assert report["checks"]["repeat-1-turn-2: unrelated request avoids Wiki tools"]
+
+
 @pytest.mark.parametrize("defect", [None, "undisclosed", "confirmed", "quantity", "candidate_lost"])
 def test_runner_reports_pending_tdx_as_observation_and_keeps_other_failures_blocking(
     scripted_runner, p19_evidence, defect,

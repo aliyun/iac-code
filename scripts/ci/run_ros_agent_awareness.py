@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+WIKI_READ_TOOLS = frozenset({"read_file", "grep", "glob"})
+
 
 @dataclass(frozen=True)
 class Scenario:
@@ -57,6 +59,9 @@ async def run(args: argparse.Namespace) -> dict:
     from iac_code.services.providers.aliyun import DEFAULT_REGION, AliyunCredential, use_aliyun_credential
     from iac_code.services.session_storage import SessionStorage
     from iac_code.tools.base import ToolRegistry
+    from iac_code.tools.glob import GlobTool
+    from iac_code.tools.grep import GrepTool
+    from iac_code.tools.read_file import ReadFileTool
     from iac_code.types.stream_events import (
         AskUserQuestionEvent,
         ErrorEvent,
@@ -85,12 +90,15 @@ async def run(args: argparse.Namespace) -> dict:
     )
     workspace = args.run_dir / "workspace"
     workspace.mkdir(exist_ok=True)
+    registry = ToolRegistry()
+    for tool in (ReadFileTool(), GrepTool(), GlobTool()):
+        registry.register(tool)
     flow = PipelineRunner(
         pipeline_dir=repo / "src/iac_code/pipeline/selling_solution_first",
         provider_manager=manager,
-        # Step-local tools are registered by the production engine. Deliberately
-        # omit cloud tools: routing needs no cloud operation or cloud credential.
-        base_tool_registry=ToolRegistry(),
+        # Keep real Wiki readers; routing still needs no cloud tools or credentials.
+        # Step-local tools are registered by the production engine.
+        base_tool_registry=registry,
         session_storage=SessionStorage(args.run_dir / "projects"),
         session_id="ros-awareness-e2e-" + uuid.uuid4().hex,
         cwd=str(workspace),
@@ -125,7 +133,7 @@ async def run(args: argparse.Namespace) -> dict:
         "no model or tool errors": error_count == 0,
         "no deployment selected": flow.context.get_conclusion("selected_plan") is None,
     }
-    observations = {}
+    observations = {"wiki_read_tools": [name for name in tools if name in WIKI_READ_TOOLS]}
     if scenario.handoff:
         links = re.findall(r"https://ros\.console\.aliyun\.com/[^\s)<>\]]+", visible)
         handoff_prompts = []
@@ -146,7 +154,9 @@ async def run(args: argparse.Namespace) -> dict:
                 "guidance is saved in the early-exit conclusion": conclusion.get("status") == "rejected"
                 and conclusion.get("continue_pipeline") is False
                 and url in conclusion.get("rejection_reason", ""),
-                "handoff skips deployment questions and candidates": tools == ["complete_step"] and not asked_question,
+                "handoff skips deployment questions and candidates": [
+                    name for name in tools if name not in WIKI_READ_TOOLS
+                ] == ["complete_step"] and not asked_question,
                 "every handoff link carries one complete prompt": bool(links)
                 and len(handoff_prompts) == len(links),
                 "the same actionable link is persisted": bool(links)

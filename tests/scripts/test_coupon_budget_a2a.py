@@ -1,8 +1,14 @@
 """Acceptance distinguishes real period mistakes from free resources and prose."""
 
+from copy import deepcopy
+
 import pytest
 
-from scripts.ci.run_coupon_budget_a2a import accepted_price_calls, hourly_costs_match
+from scripts.ci.run_coupon_budget_a2a import (
+    accepted_price_calls,
+    eight_hour_candidate_prices_match,
+    hourly_costs_match,
+)
 
 
 @pytest.mark.parametrize(("outlines", "details", "expected"), [
@@ -60,3 +66,88 @@ def test_failed_presentations_cannot_supply_a_passing_hourly_estimate():
     calls = [{"id": "bad", "name": "show_candidate_detail", "input": {"total_cost": "¥3/8h"}}]
     assert accepted_price_calls(calls, {"bad": {"is_error": True}}) == []
     assert not hourly_costs_match([], [])
+
+
+def _candidate_prices():
+    return [
+        {"id": "plan", "name": "show_architecture_plan", "input": {"candidates": [
+            {"candidate_name": "按量主方案", "total_cost": "¥120/8 小时"},
+            {"candidate_name": "包月方案（对比项）", "total_cost": "¥4500/月"},
+        ]}},
+        {"id": "main", "name": "show_candidate_detail", "input": {
+            "candidate_index": 0, "candidate_name": "按量主方案", "total_cost": "¥120/8 小时",
+            "resource_inventory": [{"rough_cost": "¥15/小时 × 8 小时"}, {"rough_cost": "免费"}],
+        }},
+        {"id": "comparison", "name": "show_candidate_detail", "input": {
+            "candidate_index": 1, "candidate_name": "包月方案（对比项）", "total_cost": "¥4500/月",
+            "resource_inventory": [{"rough_cost": "¥4500/月"}],
+        }},
+    ]
+
+
+def test_explicit_monthly_comparison_does_not_fail_valid_eight_hour_main_plan():
+    calls = _candidate_prices()
+    original = deepcopy(calls)
+    accepted = accepted_price_calls(calls, {c["id"]: {"is_error": False} for c in calls})
+    assert eight_hour_candidate_prices_match(accepted)
+    # Preserve the old flat verdict as a diagnostic; its monthly comparison still fails.
+    assert not hourly_costs_match([c["input"]["total_cost"] for c in calls[1:]], ["¥15/小时", "¥4500/月"])
+    assert calls == original
+
+
+@pytest.mark.parametrize("defect", [
+    "main_monthly_total", "main_monthly_item", "main_wrong_duration", "main_hourly_rate_only",
+    "unmarked_comparison", "nonmonthly_comparison", "missing_main", "failed_main", "failed_comparison",
+    "wrong_candidate_name", "no_presentation", "comparison_only", "hidden_comparison_label",
+])
+def test_comparison_exception_cannot_hide_invalid_or_missing_main_prices(defect):
+    calls = _candidate_prices()
+    outcomes = {c["id"]: {"is_error": False} for c in calls}
+    if defect == "main_monthly_total":
+        calls[1]["input"]["total_cost"] = "¥4500/月（8 小时价格待确认）"
+    elif defect == "main_monthly_item":
+        calls[1]["input"]["resource_inventory"][0]["rough_cost"] = "¥4500/月"
+    elif defect == "main_wrong_duration":
+        calls[1]["input"]["total_cost"] = "¥90/6 小时"
+    elif defect == "main_hourly_rate_only":
+        calls[1]["input"]["total_cost"] = "¥15/小时"
+    elif defect in {"unmarked_comparison", "hidden_comparison_label"}:
+        calls[0]["input"]["candidates"][1]["candidate_name"] = "包月方案"
+        calls[2]["input"]["candidate_name"] = "包月方案"
+        if defect == "hidden_comparison_label":
+            calls[2]["input"]["cost_assumptions"] = ["仅供对比"]
+    elif defect == "nonmonthly_comparison":
+        calls[2]["input"]["total_cost"] = "费用待确认"
+    elif defect == "missing_main":
+        calls.pop(1)
+    elif defect in {"failed_main", "failed_comparison"}:
+        outcomes["main" if defect == "failed_main" else "comparison"]["is_error"] = True
+    elif defect == "wrong_candidate_name":
+        calls[1]["input"]["candidate_name"] = "另外的主方案"
+    elif defect == "no_presentation":
+        calls = []
+    elif defect == "comparison_only":
+        calls[0]["input"]["candidates"].pop(0)
+        calls.pop(1)
+        calls[1]["input"]["candidate_index"] = 0
+    assert not eight_hour_candidate_prices_match(accepted_price_calls(calls, outcomes))
+
+
+def test_period_check_accepts_main_without_comparison_and_visible_comparison_tradeoff():
+    calls = _candidate_prices()
+    calls[0]["input"]["candidates"].pop()
+    assert eight_hour_candidate_prices_match(calls[:2])
+    calls = _candidate_prices()
+    calls[0]["input"]["candidates"][1]["candidate_name"] = "包月方案"
+    calls[2]["input"]["candidate_name"] = "包月方案"
+    calls[2]["input"]["key_tradeoff"] = "仅供对比，短租明显更贵"
+    assert eight_hour_candidate_prices_match(calls)
+
+
+def test_new_batch_cannot_borrow_old_details_and_latest_detail_is_authoritative():
+    calls = _candidate_prices()
+    calls[1]["input"]["total_cost"] = "¥4500/月"
+    replacement = deepcopy(calls[1])
+    replacement["input"]["total_cost"] = "¥120/8 小时"
+    assert eight_hour_candidate_prices_match(calls + [replacement])
+    assert not eight_hour_candidate_prices_match(calls + [deepcopy(calls[0])])

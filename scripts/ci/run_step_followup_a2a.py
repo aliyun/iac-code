@@ -100,6 +100,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "IAC_CODE_PROVIDER": args.provider,
         "IAC_CODE_MODEL": args.model,
         "IAC_CODE_TELEMETRY_LOCAL_ONLY": "1",
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "SPAN_ONLY",
         "IAC_CODE_CONFIG_BACKUP_DIR": str(args.run_dir / "backup"),
         "IAC_CODE_WIKI_AUTO_SEARCH": "true",
         "IAC_CODE_ROS_AGENT_AWARENESS": "true",
@@ -272,7 +273,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         requests = main_requests(records)
         for label, window, prompts, ids in history_audits:
             selected = request_window(requests, window)
-            evidence = retained_history(selected[0], prompts=prompts, response_ids=ids) if selected else {}
+            checks[label + ": provider request evidence captured"] = bool(selected)
+            if not selected:
+                continue
+            evidence = retained_history(selected[0], prompts=prompts, response_ids=ids)
             checks[label + ": first provider request keeps same-Step history"] = (
                 bool(evidence) and all(evidence.values())
             )

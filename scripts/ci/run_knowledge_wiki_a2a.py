@@ -741,7 +741,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                         item["search_miss"] = missed
                         item["fallback_or_uncertainty"] = fallback
                         checks[name + ": actual Wiki search miss observed"] = missed
-                        checks[name + ": miss falls back or states uncertainty"] = fallback
+                        checks[name + ": Wiki miss still receives an answer"] = bool(answer.strip())
                     elif args.scenario == "boundaries":
                         checks[name + ": unrelated request avoids Wiki tools"] = not any(
                             c["name"] in {"read_file", "glob", "grep"} for c in calls

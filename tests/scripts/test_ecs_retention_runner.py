@@ -16,6 +16,88 @@ from scripts.ci.run_ecs_retention_a2a import (
 )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("variant,expected", [
+    ("direct", True), ("wiki", True), ("tool-error", False), ("question-tool", False),
+    ("question-event", False), ("candidates", False), ("missing-complete", False),
+    ("missing-prompt", False), ("not-rejected", False),
+])
+async def test_awareness_runner_allows_real_wiki_readers_without_weakening_handoff(
+    monkeypatch, tmp_path, variant, expected,
+):
+    from iac_code.tools.base import ToolContext
+    from iac_code.tools.glob import GlobTool
+    from iac_code.tools.grep import GrepTool
+    from iac_code.tools.read_file import ReadFileTool
+    from iac_code.types.stream_events import (
+        AskUserQuestionEvent,
+        MessageEndEvent,
+        TextDeltaEvent,
+        ToolResultEvent,
+        ToolUseStartEvent,
+        Usage,
+    )
+    from scripts.ci import run_ros_agent_awareness as runner
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr("iac_code.config.get_provider_config", lambda _: {})
+    monkeypatch.setattr("iac_code.config.load_credentials", lambda _: {})
+    monkeypatch.setattr("iac_code.providers.manager.ProviderManager", lambda **kwargs: SimpleNamespace())
+    link = "https://ros.console.aliyun.com/cn-beijing/chat"
+    if variant != "missing-prompt":
+        link += "?prompt=Explain%20ECS%20billing"
+    conclusion = {"status": "rejected", "continue_pipeline": False, "rejection_reason": link}
+    if variant == "not-rejected":
+        conclusion["status"] = "awaiting_selection"
+
+    class Flow:
+        def __init__(self, **kwargs):
+            self.registry = kwargs["base_tool_registry"]
+            assert {t.name for t in self.registry.list_tools()} == {"read_file", "grep", "glob"}
+            for name, cls in (("read_file", ReadFileTool), ("grep", GrepTool), ("glob", GlobTool)):
+                assert isinstance(self.registry.get(name), cls)
+            self.context = SimpleNamespace(
+                get_conclusion=lambda key: conclusion if key == "solution_selection" else None,
+            )
+
+        async def run(self, prompt):
+            yield MessageEndEvent(stop_reason="end_turn", usage=Usage(input_tokens=10, output_tokens=10))
+            yield TextDeltaEvent(text=link)
+            if variant in {"wiki", "tool-error"}:
+                for name, data in (
+                    ("glob", {"path": "knowledge://clouds/aliyun/products/ecs", "pattern": "*.md"}),
+                    ("grep", {"path": "knowledge://clouds/aliyun/products/ecs", "pattern": "ECS"}),
+                    ("read_file", {"path": "knowledge://clouds/aliyun/products/ecs/ecs.md"}),
+                ):
+                    yield ToolUseStartEvent(tool_use_id=name, name=name)
+                    result = await self.registry.get(name).execute(
+                        tool_input=data, context=ToolContext(cwd=str(tmp_path)),
+                    )
+                    assert not result.is_error
+                    yield ToolResultEvent(tool_use_id=name, tool_name=name, result=result.content,
+                                          is_error=variant == "tool-error")
+            if variant == "question-tool":
+                yield ToolUseStartEvent(tool_use_id="question", name="ask_user_question")
+            if variant == "question-event":
+                yield AskUserQuestionEvent(tool_use_id="question", question="部署在哪个地域？", options=[])
+            if variant == "candidates":
+                yield ToolUseStartEvent(tool_use_id="candidate", name="show_architecture_plan")
+            if variant != "missing-complete":
+                yield ToolUseStartEvent(tool_use_id="complete", name="complete_step")
+
+        async def persist_pending_ask_user_question(self, event):
+            pass
+
+    monkeypatch.setattr("iac_code.pipeline.engine.pipeline_runner.PipelineRunner", Flow)
+    report = await runner.run(SimpleNamespace(
+        scenario="billing-explicit", run_dir=tmp_path, provider="fixture", model="fixture",
+    ))
+    assert report["status"] == ("passed" if expected else "failed")
+    assert report["checks"]["no model or tool errors"] is (variant != "tool-error")
+    if variant in {"wiki", "tool-error"}:
+        assert report["observations"]["wiki_read_tools"] == ["glob", "grep", "read_file"]
+
+
 def test_cloud_safety_uses_the_operation_not_only_a_group_tool_name():
     from scripts.ci.run_ecs_retention_a2a import is_readonly_call
 

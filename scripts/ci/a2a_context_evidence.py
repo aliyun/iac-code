@@ -80,8 +80,10 @@ def main_requests(records: list[dict]) -> list[dict[str, Any]]:
         if "Wiki keyword extraction" in str(attrs.get("gen_ai.system_instructions", "")):
             continue
         try:
-            messages = json.loads(attrs.get("gen_ai.input.messages", "[]"))
+            messages = json.loads(attrs.get("gen_ai.input.messages"))
         except (TypeError, ValueError):
+            continue
+        if not isinstance(messages, list) or not messages or not all(isinstance(m, dict) for m in messages):
             continue
         parts = [part for message in messages for part in message.get("parts", [])]
         texts = [

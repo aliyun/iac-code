@@ -49,6 +49,7 @@ def test_permission_driver_rejects_exhaustion_but_keeps_business_waits(monkeypat
 @pytest.mark.parametrize("variant,expected", [
     ("empty", True), ("wrapped_empty", True), ("status_only", True),
     ("failed_tool", False), ("stale_tool", False), ("changed_payload", False), ("missing_marker", False),
+    ("missing_provider_evidence", False),
 ])
 def test_step1_followup_checks_current_accepted_no_change_instead_of_raw_argument_shape(
     monkeypatch, tmp_path, variant, expected,
@@ -61,6 +62,7 @@ def test_step1_followup_checks_current_accepted_no_change_instead_of_raw_argumen
     config = tmp_path / "config"
     config.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(config))
+    monkeypatch.setenv("OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT", "NO_CONTENT")
     original = {"status": "awaiting_selection", "candidate_set_id": "first", "candidates": [{"name": "ECS"}]}
     updated = {"status": "awaiting_selection", "candidate_set_id": "second", "candidates": [
         {"name": "ECS and RDS", "resource_inventory": [{"product": "RDS"}]},
@@ -72,6 +74,8 @@ def test_step1_followup_checks_current_accepted_no_change_instead_of_raw_argumen
 
     class Server:
         def __init__(self, **kwargs):
+            assert kwargs["env"]["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] == "SPAN_ONLY"
+            assert kwargs["env"]["IAC_CODE_TELEMETRY_LOCAL_ONLY"] == "1"
             self.stopped = False
             self.process = SimpleNamespace(poll=lambda: 0 if self.stopped else None)
 
@@ -132,7 +136,7 @@ def test_step1_followup_checks_current_accepted_no_change_instead_of_raw_argumen
     monkeypatch.setattr(runner, "envelopes", events)
     monkeypatch.setattr(runner, "visible_pipeline_text", lambda _: "费用说明")
     monkeypatch.setattr(runner, "main_requests", lambda _: [{}])
-    monkeypatch.setattr(runner, "request_window", lambda *a: [{}])
+    monkeypatch.setattr(runner, "request_window", lambda *a: [] if variant == "missing_provider_evidence" else [{}])
     monkeypatch.setattr(runner, "retained_history", lambda *a, **kw: {"retained": True})
     report = runner.run(SimpleNamespace(
         run_dir=tmp_path, provider="fixture", model="fixture", python="fixture", timeout=1, scenario="step1",
@@ -141,7 +145,11 @@ def test_step1_followup_checks_current_accepted_no_change_instead_of_raw_argumen
     assert report["checks"]["changed candidates use new full batch"]
     assert report["checks"]["cancel ends step1"]
     failed = [key for key, ok in report["checks"].items() if not ok]
-    assert all(key.startswith("turn 5:") for key in failed)
+    if variant == "missing_provider_evidence":
+        assert failed and all(key.endswith(": provider request evidence captured") for key in failed)
+        assert not any(key.endswith(": first provider request keeps same-Step history") for key in report["checks"])
+    else:
+        assert all(key.startswith("turn 5:") for key in failed)
 
 
 @pytest.mark.parametrize("ready,succeeded,has_quote", [
@@ -150,8 +158,9 @@ def test_step1_followup_checks_current_accepted_no_change_instead_of_raw_argumen
     (None, None, True),
     (False, False, False),
 ])
+@pytest.mark.parametrize("captured", [True, False])
 def test_context_runner_observes_preview_without_blocking_or_masking_missing_quote(
-    monkeypatch, tmp_path, ready, succeeded, has_quote,
+    monkeypatch, tmp_path, ready, succeeded, has_quote, captured,
 ):
     from scripts.ci import run_ecs_context_a2a as runner
 
@@ -171,6 +180,8 @@ def test_context_runner_observes_preview_without_blocking_or_masking_missing_quo
         instances = 0
 
         def __init__(self, **kwargs):
+            assert kwargs["env"]["OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT"] == "SPAN_ONLY"
+            assert kwargs["env"]["IAC_CODE_TELEMETRY_LOCAL_ONLY"] == "1"
             Server.instances += 1
             self.stopped = False
             self.process = SimpleNamespace(pid=Server.instances, poll=lambda: 0 if self.stopped else None)
@@ -223,14 +234,17 @@ def test_context_runner_observes_preview_without_blocking_or_masking_missing_quo
     monkeypatch.setattr(runner, "envelopes", events)
     monkeypatch.setattr(runner, "visible_pipeline_text", lambda _: "方案说明")
     monkeypatch.setattr(runner, "main_requests", lambda _: [{}])
-    monkeypatch.setattr(runner, "request_window", lambda *a: [{}])
+    monkeypatch.setattr(runner, "request_window", lambda *a: [{}] if captured else [])
     monkeypatch.setattr(runner, "retained_history", lambda *a, **kw: {"retained": True})
     monkeypatch.setattr(runner, "fresh_history", lambda *a, **kw: True)
     report = runner.run(SimpleNamespace(
         run_dir=tmp_path, provider="fixture", model="fixture", python="fixture", timeout=1,
         scenario="selection-recovery",
     ))
-    assert report["status"] == ("passed" if has_quote else "failed")
+    assert report["status"] == ("passed" if has_quote and captured else "failed")
+    if not captured:
+        assert report["checks"]["same Step1 history: provider request evidence captured"] is False
+        assert "same Step1 history" not in report["checks"]
     assert report["checks"]["real materialization and quote"] is has_quote
     assert report["observations"]["materialization Preview"] == {
         "preview_ready_for_create": ready, "succeeded": succeeded if has_quote else None, "blocking": False,
@@ -284,6 +298,12 @@ def test_only_actual_main_provider_requests_can_prove_history():
     assert requests[0]["response_ids"] == {"read"}
     assert request_window(requests, {"start_ns": 2, "end_ns": 4}) == requests
     assert request_window(requests, {"start_ns": 4, "end_ns": 5}) == []
+
+
+@pytest.mark.parametrize("body", [None, "[]", "{}", "null", "not-json", '["not-a-message"]'])
+def test_metadata_only_or_invalid_provider_spans_cannot_prove_empty_history(body):
+    attrs = {} if body is None else {"gen_ai.input.messages": body}
+    assert main_requests([{"kind": "span", "name": "chat model", "attributes": attrs}]) == []
 
 
 @pytest.mark.parametrize("flag,enabled,expected", [(True, True, "allow_once"), (True, False, "deny"),

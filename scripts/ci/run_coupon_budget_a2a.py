@@ -101,6 +101,46 @@ def accepted_price_calls(calls: list[dict], outcomes: dict[str, dict]) -> list[d
             and outcomes.get(call["id"], {}).get("is_error") is False]
 
 
+def eight_hour_candidate_prices_match(calls: list[dict]) -> bool:
+    """Validate the latest successful batch, keeping explicit monthly comparisons separate."""
+    outlines, details = [], {}
+    for call in calls:
+        value = call["input"]
+        if call["name"] == "show_architecture_plan":
+            outlines, details = value.get("candidates", []), {}
+        elif call["name"] == "show_candidate_detail":
+            index = value.get("candidate_index")
+            if type(index) is not int or not 0 <= index < len(outlines):
+                return False
+            details[index] = value
+    if not outlines or set(details) != set(range(len(outlines))):
+        return False
+    main_count = 0
+    for index, outline in enumerate(outlines):
+        detail = details[index]
+        if outline.get("candidate_name") != detail.get("candidate_name"):
+            return False
+        totals = [str(value.get("total_cost", "")) for value in (outline, detail)]
+        identity = " ".join(str(value.get(key, "")) for value in (outline, detail)
+                            for key in ("candidate_name", "summary"))
+        visible = identity + " " + " ".join(str(value.get("key_tradeoff", "")) for value in (outline, detail))
+        comparison = (
+            re.search(r"包月|包年包月|prepaid|monthly", identity, re.I)
+            and re.search(r"对比项|仅(?:作|供|用于).{0,4}(?:对比|比较)|(?:for\s+)?comparison\s+only", visible, re.I)
+            and all(re.search(r"月|months?", total, re.I) for total in totals)
+        )
+        if comparison:
+            continue
+        main_count += 1
+        costs = [str(item.get("rough_cost", item.get("rough_monthly_cost", "")))
+                 for item in detail.get("resource_inventory", [])
+                 if item.get("rough_cost", item.get("rough_monthly_cost"))]
+        if not all(re.search(r"8\s*(?:个)?\s*小时|8\s*(?:hours?|h)\b|八(?:个)?小时", total, re.I)
+                   for total in totals) or not hourly_costs_match(totals, costs):
+            return False
+    return main_count > 0
+
+
 async def verify_apis(run_dir: Path) -> dict[str, Any]:
     from iac_code.services.providers.aliyun import AliyunCredentials
     from iac_code.tools.base import ToolContext
@@ -267,8 +307,8 @@ def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
                     re.search(r"月|month", cost, re.I) for cost in outline_costs
                 )
             elif index == 1:
-                checks["explicit hourly request updates total and details"] = hourly_costs_match(
-                    outline_costs, detail_costs,
+                checks["explicit hourly request updates total and details"] = eight_hour_candidate_prices_match(
+                    pricing_calls,
                 )
                 checks["eight-hour duration is explained"] = bool(re.search(
                     r"8\s*(?:个)?\s*小时|8\s*hours?|八小时", text + json.dumps(calls, ensure_ascii=False), re.I,
@@ -289,6 +329,8 @@ def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
                 "task_state": summary.last_status_state, "outline_costs": outline_costs,
                 "detail_costs": detail_costs, "started_steps": steps,
                 "tools": [call["name"] for call in calls],
+                **({"raw_all_candidate_hourly_check": hourly_costs_match(outline_costs, detail_costs)}
+                   if index == 1 else {}),
             })
             print(json.dumps({"model": args.model, **turns[-1]}, ensure_ascii=False), flush=True)
         calls = tool_inputs(config_dir)

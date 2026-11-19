@@ -73,7 +73,7 @@
 沿用当前 `model_pool.py` 中的四文本模型：
 
 ```text
-deepseek-v4-flash-0731
+deepseek-v4.1-flash-1017
 glm-5.2-fast-preview
 glm-5.3-prime
 deepseek-v4.1-flash
@@ -115,7 +115,7 @@ uv run --no-sync python scripts/ci/run_e2e.py \
   --case wiki-auto-late-isolation-contract --case wiki-auto-recovery-contract \
   --jobs 1 --retries 0
 
-for model in deepseek-v4-flash-0731 glm-5.2-fast-preview glm-5.3-prime deepseek-v4.1-flash; do
+for model in deepseek-v4.1-flash-1017 glm-5.2-fast-preview glm-5.3-prime deepseek-v4.1-flash; do
   uv run --no-sync python scripts/ci/run_e2e.py \
     --case wiki-auto-normal-a2a --case wiki-auto-pipeline-a2a \
     --case wiki-auto-p19-a2a --case wiki-auto-handoff-a2a \

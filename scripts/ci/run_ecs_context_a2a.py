@@ -71,6 +71,7 @@ def run(args):
         "IAC_CODE_ROS_AGENT_AWARENESS": "true",
         "IAC_CODE_AUTO_MEMORY": "false",
         "IAC_CODE_TELEMETRY_LOCAL_ONLY": "1",
+        "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT": "SPAN_ONLY",
         "IAC_CODE_CONFIG_BACKUP_DIR": str(args.run_dir / "backup"),
     }
     servers, turns, audits, checks, observations = [], [], [], {}, {}
@@ -290,8 +291,12 @@ def run(args):
             selected = request_window(requests, window)
             if kind == "no-model":
                 checks[label] = not selected
-            elif kind == "retained":
-                evidence = retained_history(selected[0], prompts=prompts, response_ids=ids) if selected else {}
+                continue
+            checks[label + ": provider request evidence captured"] = bool(selected)
+            if not selected:
+                continue
+            if kind == "retained":
+                evidence = retained_history(selected[0], prompts=prompts, response_ids=ids)
                 checks[label] = bool(evidence) and all(evidence.values())
                 observations[label] = evidence
             else:
