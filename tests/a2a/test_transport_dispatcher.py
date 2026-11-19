@@ -4476,10 +4476,6 @@ async def test_dispatcher_stream_preserves_message_metadata_echo_without_safe_mo
     assert echoed_metadata["iac_code"] == {
         "cwd": str(tmp_path),
         "iac_code_model": "qwen3.6-plus",
-        "iac_code_api_key": "provider-secret",
-        "alibaba_cloud_access_key_id": "ak-id-secret",
-        "alibaba_cloud_access_key_secret": "ak-secret",
-        "alibaba_cloud_security_token": "sts-token-secret",
         "alibaba_cloud_region_id": "cn-hangzhou",
     }
     assert echoed_metadata["custom"] == {
@@ -4487,10 +4483,9 @@ async def test_dispatcher_stream_preserves_message_metadata_echo_without_safe_mo
         "nested": [{"accessKeySecret": "nested-ak-secret"}],
     }
     rendered = str(events[0])
-    assert "provider-secret" in rendered
-    assert "ak-id-secret" in rendered
-    assert "ak-secret" in rendered
-    assert "sts-token-secret" in rendered
+    assert "provider-secret" not in rendered
+    assert "ak-id-secret" not in rendered
+    assert "sts-token-secret" not in rendered
     assert "custom-api-key" in rendered
     assert "nested-ak-secret" in rendered
     await components.aclose()
