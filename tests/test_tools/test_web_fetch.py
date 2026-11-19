@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from unittest.mock import patch
 
 import httpx
 import pytest
+from bs4 import BeautifulSoup
 
 import iac_code.tools.web_fetch as web_fetch_module
 from iac_code.tools.base import ToolContext
-from iac_code.tools.web_fetch import WebFetchTool, _extract_text_from_html
+from iac_code.tools.web_fetch import (
+    WebFetchTool,
+    _expand_table_rowspans,
+    _extract_markdown_from_html,
+    _extract_text_from_html,
+)
 
 
 @pytest.fixture
@@ -132,6 +140,182 @@ class TestExtractTextFromHtml:
         assert "Visible" in result
 
 
+class TestHtmlToMarkdown:
+    @pytest.mark.parametrize("tables,cells", [(1, 12), (2, 6)])
+    def test_colspan_only_tables_share_a_budget_before_markdown_expansion(self, tables, cells):
+        html = ("<table><tr>" + '<th colspan="1000">keep</th>' * cells + "</tr></table>") * tables
+        output = _extract_markdown_from_html(html, "https://example.com/guide")
+        assert output == _extract_text_from_html(html)
+        assert "keep" in output and len(output) < 1000
+
+    def test_small_colspan_only_table_retains_markdown_columns(self):
+        output = _extract_markdown_from_html(
+            '<table><tr><th colspan=" 2 ">Location</th><th>Spec</th></tr></table>', "https://example.com",
+        )
+        assert [cell.strip() for cell in output.splitlines()[0].split("|")[1:-1]] == ["Location", "", "Spec"]
+
+    @pytest.mark.parametrize("span", ["2", " 2 ", "0"])
+    def test_rowspan_variants_keep_region_zone_and_spec_in_their_columns(self, span):
+        html = ('<table><thead><tr><th>Region</th><th>Zone</th><th>Spec</th></tr></thead>'
+                f'<tbody><tr><td rowspan="{span}">Hangzhou</td><td>J</td><td>First</td></tr>'
+                '<tr><td>K</td><td>Second</td></tr></tbody></table>')
+        output = _extract_markdown_from_html(html, "https://example.com")
+        assert "| Hangzhou | J | First |" in output
+        assert "| Hangzhou | K | Second |" in output
+        assert "| K | Second |  |" not in output.splitlines()
+
+    @pytest.mark.parametrize("span", ["0", "5"])
+    def test_rowspan_stops_at_the_end_of_its_row_group(self, span):
+        html = (f'<table><tbody><tr><td rowspan="{span}">Hangzhou</td><td>J</td></tr>'
+                '<tr><td>K</td></tr></tbody><tbody><tr><td>Beijing</td><td>A</td></tr></tbody></table>')
+        output = _extract_markdown_from_html(html, "https://example.com")
+        assert "| Hangzhou | K |" in output
+        assert "| Beijing | A |" in output
+        assert "| Hangzhou | Beijing |" not in output
+
+    @pytest.mark.parametrize("span", ["-2", "two", "1.5"])
+    def test_unreliable_rowspan_falls_back_instead_of_inventing_column_associations(self, span):
+        html = f'<table><tr><td rowspan="{span}">Region</td><td>Zone</td></tr></table>'
+        assert _extract_markdown_from_html(html, "https://example.com") == _extract_text_from_html(html)
+
+    def test_nested_merged_table_falls_back_before_duplicating_its_subtree(self):
+        html = ('<table><tr><td rowspan="2"><table><tr><td>Nested</td></tr></table></td></tr>'
+                '<tr></tr></table>')
+        assert _extract_markdown_from_html(html, "https://example.com") == _extract_text_from_html(html)
+
+    def test_aliyun_table_selected_as_article_root_still_repairs_rowspans(self):
+        html = ('<table class="markdown-body"><tr><td rowspan="2">Hangzhou</td><td>J</td></tr>'
+                '<tr><td>K</td></tr></table>')
+        assert "Hangzhou | K" in _extract_markdown_from_html(html, "https://help.aliyun.com/guide")
+
+    @pytest.mark.parametrize("tables,rows,columns", [(1, 60, 200), (2, 60, 100)])
+    def test_sparse_table_padding_is_counted_before_allocating_cells(self, tables, rows, columns):
+        table = f'<table><tr><td rowspan="2" colspan="{columns}">keep</td></tr>'
+        table += "<tr></tr>" * (rows - 1) + "</table>"
+        html = table * tables
+        soup = BeautifulSoup(html, "html.parser")
+        with pytest.raises(ValueError, match="Expanded table exceeds extraction limits"):
+            _expand_table_rowspans(soup, soup)
+        assert len(soup.find_all(["td", "th"])) <= 10_000
+        output = _extract_markdown_from_html(html, "https://example.com/guide")
+        assert "keep" in output and "|" not in output
+
+    def test_table_at_cell_budget_still_preserves_all_rows(self):
+        html = '<table><tr><td rowspan="2" colspan="100">keep</td></tr>' + "<tr></tr>" * 99 + "</table>"
+        soup = BeautifulSoup(html, "html.parser")
+        _expand_table_rowspans(soup, soup)
+        assert len(soup.find_all("td")) == 10_000
+        assert len(soup.find_all("tr")) == 100
+
+    def test_preserves_document_structure_and_resolves_links(self):
+        html = """<h1>Guide</h1><h2>Steps</h2><ul><li>First</li><li>Second</li></ul>
+        <p><a href="../api#params">API</a></p><pre><code>first\n  second</code></pre>
+        <table><tr><th>Region</th><th>Spec</th></tr>
+        <tr><td>Hangzhou J</td><td>ecs.r9i.xlarge</td></tr></table>"""
+
+        output = _extract_markdown_from_html(html, "https://example.com/docs/guide")
+
+        assert "# Guide" in output
+        assert "## Steps" in output
+        assert "- First\n- Second" in output
+        assert "[API](https://example.com/api#params)" in output
+        assert "```\nfirst\n  second\n```" in output
+        assert "| Region | Spec |\n| --- | --- |\n| Hangzhou J | ecs.r9i.xlarge |" in output
+
+    @pytest.mark.parametrize("selector", ["icms-help-docs-content", "markdown-body", "pc-markdown-container"])
+    def test_aliyun_document_uses_body_and_preserves_outside_title(self, selector):
+        attribute = f'id="{selector}"' if selector == "pc-markdown-container" else f'class="{selector}"'
+        html = f"""<nav>Products and account</nav><header><h1>TDX guide</h1></header>
+        <div {attribute}><h2>Supported regions</h2><p>Hangzhou J</p></div>
+        <footer>Related products and legal links</footer>"""
+
+        output = _extract_markdown_from_html(html, "https://help.aliyun.com/zh/ecs/guide")
+
+        assert output.startswith("# TDX guide")
+        assert "## Supported regions" in output
+        assert "Hangzhou J" in output
+        assert "Products and account" not in output
+        assert "Related products" not in output
+
+    def test_aliyun_body_prefers_inner_content_and_does_not_duplicate_heading(self):
+        html = """<div id="pc-markdown-container">Copy button<div class="markdown-body">
+        Breadcrumb<div class="icms-help-docs-content"><h1>Guide</h1><p>Body</p></div></div></div>"""
+
+        output = _extract_markdown_from_html(html, "https://help.aliyun.com/guide")
+
+        assert output.count("# Guide") == 1
+        assert "Copy button" not in output
+        assert "Breadcrumb" not in output
+
+    @pytest.mark.parametrize("host", ["example.com", "help.aliyun.com.evil.example"])
+    def test_aliyun_body_optimization_does_not_apply_to_other_hosts(self, host):
+        html = '<p>Outside content</p><div class="markdown-body"><p>Inside content</p></div>'
+
+        output = _extract_markdown_from_html(html, f"https://{host}/guide")
+
+        assert "Outside content" in output
+        assert "Inside content" in output
+
+    def test_missing_or_empty_aliyun_body_preserves_page_content(self):
+        html = '<p>Actual content</p><div class="markdown-body"></div>'
+
+        assert "Actual content" in _extract_markdown_from_html(html, "https://help.aliyun.com/guide")
+
+    def test_rowspan_and_colspan_keep_resource_columns_associated(self):
+        html = """<table><tr><th colspan="2">Location</th><th>Spec</th></tr>
+        <tr><td rowspan="2">Hangzhou</td><td>J</td><td>First</td></tr>
+        <tr><td>K</td><td>Second</td></tr></table>"""
+
+        output = _extract_markdown_from_html(html, "https://help.aliyun.com/guide")
+
+        assert "| Location |  | Spec |" in output
+        assert "| Hangzhou | J | First |" in output
+        assert "| Hangzhou | K | Second |" in output
+
+    def test_table_cell_pipe_does_not_create_extra_column(self):
+        html = "<table><tr><th>Command</th><th>Meaning</th></tr><tr><td>a | b</td><td>Pipe</td></tr></table>"
+
+        output = _extract_markdown_from_html(html, "https://example.com")
+
+        assert r"| a \| b | Pipe |" in output
+
+    def test_conversion_removes_active_content_and_unsafe_link_schemes(self):
+        html = """<script>badScript()</script><style>badStyle</style>
+        <p><a href="javascript:alert(1)">Useful label</a></p>
+        <img src="data:text/html,badImage" alt="Diagram">
+        <p><a href="//help.aliyun.com/guide">Safe link</a></p>"""
+
+        output = _extract_markdown_from_html(html, "https://example.com")
+
+        assert "Useful label" in output
+        assert "badScript" not in output
+        assert "badStyle" not in output
+        assert "javascript:" not in output
+        assert "data:text/html" not in output
+        assert "[Safe link](https://help.aliyun.com/guide)" in output
+
+    def test_extreme_heading_does_not_expand_output(self):
+        output = _extract_markdown_from_html("<h9999999>Title</h9999999>", "https://example.com")
+
+        assert "Title" in output
+        assert len(output) < 100
+
+    def test_extreme_table_spans_fall_back_without_expanding_output(self):
+        html = '<table><tr><td rowspan="999999" colspan="999999">Value</td></tr></table>'
+
+        output = _extract_markdown_from_html(html, "https://example.com")
+
+        assert "Value" in output
+        assert len(output) < 100
+
+    def test_converter_failure_preserves_plain_text_fallback(self):
+        with patch("iac_code.tools.web_fetch._WebMarkdownConverter.convert_soup", side_effect=ValueError("bad page")):
+            output = _extract_markdown_from_html("<h1>Readable</h1><p>Body</p>", "https://example.com")
+
+        assert "Readable" in output
+        assert "Body" in output
+
+
 class TestWebFetchToolProperties:
     """Tests for WebFetchTool properties."""
 
@@ -194,6 +378,35 @@ class TestWebFetchToolExecution:
     """Tests for WebFetchTool HTTP execution."""
 
     @pytest.mark.asyncio
+    async def test_html_conversion_leaves_the_event_loop_available(self, web_fetch_tool, context, monkeypatch):
+        loop = asyncio.get_running_loop()
+        entered = asyncio.Event()
+        release = threading.Event()
+        converter_threads = []
+
+        def convert(html, url):
+            converter_threads.append(threading.get_ident())
+            loop.call_soon_threadsafe(entered.set)
+            assert release.wait(5), "event loop could not release the converter"
+            return "# Converted\nBody"
+
+        stream = AsyncByteStream([b"<h1>Title</h1>"], headers={"content-type": "text/html"})
+        monkeypatch.setattr(web_fetch_module.httpx, "AsyncClient", lambda **kwargs: AsyncClientStreamOnly(stream))
+        monkeypatch.setattr(web_fetch_module, "_extract_markdown_from_html", convert)
+        task = asyncio.create_task(web_fetch_tool.execute(
+            tool_input={"url": "https://example.com", "max_length": 5}, context=context,
+        ))
+        try:
+            await asyncio.wait_for(entered.wait(), 3)
+            assert not task.done()
+            assert len(converter_threads) == 1
+            assert converter_threads[0] != threading.get_ident()
+        finally:
+            release.set()
+            result = await task
+        assert not result.is_error and result.content == "# Con"
+
+    @pytest.mark.asyncio
     async def test_fetches_html_content_and_strips_tags(self, web_fetch_tool, context):
         html_response = "<html><body><h1>Hello</h1><p>World content</p></body></html>"
         stream = AsyncByteStream(
@@ -252,6 +465,23 @@ class TestWebFetchToolExecution:
 
         assert result.is_error is False
         assert len(result.content) <= max_length
+        assert result.content.endswith("[truncated]")
+
+    @pytest.mark.asyncio
+    async def test_aliyun_article_is_converted_through_real_tool_execution(self, web_fetch_tool, context):
+        html = """<nav>Unrelated navigation</nav><h1>Cloud guide</h1>
+        <div class="markdown-body"><h2>Regions</h2><table><tr><th>Zone</th><th>Type</th></tr>
+        <tr><td>J</td><td>r9i</td></tr></table><a href="/zh/ecs/api">API</a></div>"""
+        stream = AsyncByteStream([html.encode()], headers={"content-type": "text/html; charset=utf-8"})
+        stream.url = "https://help.aliyun.com/zh/ecs/guide"
+        with patch("iac_code.tools.web_fetch.httpx.AsyncClient", return_value=AsyncClientStreamOnly(stream)):
+            result = await web_fetch_tool.execute(tool_input={"url": "https://example.com/redirect"}, context=context)
+
+        assert result.is_error is False
+        assert "# Cloud guide" in result.content
+        assert "| J | r9i |" in result.content
+        assert "Unrelated navigation" not in result.content
+        assert "[API](https://help.aliyun.com/zh/ecs/api)" in result.content
 
     @pytest.mark.asyncio
     async def test_http_error_returns_error(self, web_fetch_tool, context):

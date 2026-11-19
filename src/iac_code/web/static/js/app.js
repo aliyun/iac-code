@@ -1,4 +1,4 @@
-import * as api from "./api.js?v=web-repl-ui-316";
+import * as api from "./api.js?v=web-repl-ui-317";
 import { ResourceIndex, persistResourceChoice, queryResourceAttributes, loadResourceAccountContext } from "./resource_index.js?v=resource-references-v16";
 import { canonicalResourceType } from "./resource_link_rules.js?v=resource-links-v82";
 import { configureResourceLinks, registerResourceText } from "./resource_linkify.js?v=resource-links-v122";
@@ -23,7 +23,7 @@ import { renderToolCards, applyShimmerPhase, applySpinPhase } from "./components
 import { createWorkspaceController } from "./components/workspace.js?v=cloud-creds-v70";
 import { createOutputController, highlightTemplate } from "./components/output_panel.js?v=output-panel-v45";
 import { openImageLightbox } from "./components/image_lightbox.js?v=image-lightbox-v1";
-import { reduceEvent } from "./events.js?v=web-repl-ui-325";
+import { reduceEvent } from "./events.js?v=web-repl-ui-328";
 import { applyDomI18n, t } from "./i18n.js?v=web-repl-ui-277";
 import { renderMermaid } from "./mermaid_render.js?v=cost-period-v6";
 
@@ -1064,6 +1064,7 @@ function normalizeStoredMessage(message, index) {
     fileRefs: Array.isArray(message.fileRefs) ? message.fileRefs.map(text).filter(Boolean) : [],
     pipelineInputKind: typeof message.pipelineInputKind === "string" ? message.pipelineInputKind : "",
     pipelineInputStepId: typeof message.pipelineInputStepId === "string" ? message.pipelineInputStepId : "",
+    wikiSearch: message.wikiSearch || message.pipelineStep?.wikiSearch || null,
     status: "completed",
     sequence: index + 1,
     stored: true,
@@ -3321,6 +3322,9 @@ export function renderPipelineMarkerGroup(message, options = {}) {
 
   const body = document.createElement("div");
   body.className = "pipeline-step-body";
+  if (message.wikiSearch) {
+    body.append(buildWikiSearchSummary(message.wikiSearch));
+  }
   // 让步骤 body 自描述状态与稳定键，供心跳在事件静默期（无 SSE→无 render）从 live DOM 定位
   // 「进行中叶子步骤」并跨帧续算等待秒数（stepStatus/stepKey 三类步骤共用此唯一 body 出口）。
   body.dataset.stepStatus = status;
@@ -4023,6 +4027,24 @@ function formatTurnDuration(ms) {
   return `${seconds}s`;
 }
 
+function buildWikiSearchSummary(record) {
+  const wiki = document.createElement("details");
+  wiki.className = "wiki-search-summary";
+  wiki.dataset.openKey = `wiki-${record.queryId}`;
+  const summary = document.createElement("summary");
+  summary.textContent = record.summary || "";
+  wiki.append(summary);
+  const keywords = document.createElement("p");
+  keywords.textContent = (record.keywords || []).join(", ");
+  wiki.append(keywords);
+  for (const file of record.files || []) {
+    const row = document.createElement("p");
+    row.textContent = `${file.title} · ${file.path}`;
+    wiki.append(row);
+  }
+  return wiki;
+}
+
 function renderConversationMessage(message, state, options = {}) {
   const article = document.createElement("article");
   article.className = message.role === "user" ? "message message-user" : "message message-agent";
@@ -4057,6 +4079,9 @@ function renderConversationMessage(message, state, options = {}) {
   const body = buildMessageBodyElement(message);
   if (body) {
     article.append(body);
+  }
+  if (message.wikiSearch) {
+    article.append(buildWikiSearchSummary(message.wikiSearch));
   }
   if (message.role !== "user") {
     const messageTools = buildToolCardsElement(message, state, options.openToolUseId || "");

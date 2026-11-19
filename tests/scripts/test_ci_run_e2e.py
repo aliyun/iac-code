@@ -158,7 +158,7 @@ def test_public_live_summary_pending_state_uses_closed_vocabulary() -> None:
 def test_default_selection_is_allowlisted_and_credential_free() -> None:
     selected = run_e2e.select_cases(run_e2e.parse_args([]))
     assert selected == list(run_e2e.FAST_CASES) + [
-        case for case in run_e2e.OUTPUT_LIMIT_CASES if case.suite == "fast"
+        case for case in run_e2e.OUTPUT_LIMIT_CASES + run_e2e.WIKI_AUTO_CONTRACT_CASES if case.suite == "fast"
     ]
     assert len({case.name for case in run_e2e.CASES}) == len(run_e2e.CASES)
     assert all("--allow-real-cloud" not in case.args for case in run_e2e.CASES)
@@ -168,9 +168,10 @@ def test_default_selection_is_allowlisted_and_credential_free() -> None:
 def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> None:
     full = run_e2e.select_cases(run_e2e.parse_args(["--suite", "full", "--list"]))
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
-    assert len(full) == 77
-    assert len(live) == 136
-    assert len(run_e2e.CASES) == 213
+    assert len(full) == 86
+    assert any(case.name == "ros-agent-handoff-reply-contract" for case in full)
+    assert len(live) == 164
+    assert len(run_e2e.CASES) == 250
     assert {case.name for case in full if case.name.startswith("output-limit-")} == {
         "output-limit-" + scenario for scenario in run_e2e.OUTPUT_LIMIT_SCENARIOS
     }
@@ -308,6 +309,44 @@ def test_live_public_summary_drops_notes_error_and_paths() -> None:
         "case_id": "A01", "scenario": "example", "status": "failed", "cleanup_status": "completed",
         "checks": {"safe check": False},
     }
+
+
+def test_nonblocking_memory_quality_failure_is_visible_without_exporting_raw_constraints(tmp_path):
+    public = run_e2e._public_live_summary({
+        "scenario": "promotional-offer-followup-a2a", "status": "passed", "checks": {"flow": True},
+        "model_quality": {"minimum_memory_extraction": {
+            "status": "failed", "blocking": False,
+            "observed_constraints": [{"source_text": "sk-fixture-private", "value": 4}],
+        }},
+    })
+    assert public["model_quality"] == {"minimum_memory_extraction": {"status": "failed", "blocking": False}}
+    assert "sk-fixture" not in json.dumps(public)
+    failed, notes = run_e2e._failure_details(public)
+    assert failed == [] and "非阻塞" in notes[0] and "failed" in notes[0]
+    result = {
+        "name": "promotional-offer-followup-a2a", "status": "passed", "live": True,
+        "durationSeconds": 0.0, "artifacts": "runs/p25/", "cleanupStatus": "not-needed",
+        "error": "", "failedChecks": [], "notes": notes, "stdoutTail": "", "stderrTail": "", "summary": public,
+    }
+    run_e2e._write_reports(tmp_path, [result], 0.0)
+    for filename in ("report.md", "report.html"):
+        text = (tmp_path / filename).read_text(encoding="utf-8")
+        assert "非阻塞" in text and "最低值／推荐值提取 failed" in text
+    report = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    assert report["passed"] and report["passedCount"] == 1
+    assert report["cases"][0]["summary"]["model_quality"]["minimum_memory_extraction"]["status"] == "failed"
+    assert ET.parse(tmp_path / "junit.xml").find(".//failure") is None
+
+
+@pytest.mark.parametrize("metric", [
+    {"status": "failed", "blocking": True}, {"status": "private", "blocking": False},
+    {"status": ["private"], "blocking": False},
+])
+def test_model_quality_export_requires_known_status_and_explicit_nonblocking(metric):
+    public = run_e2e._public_live_summary({
+        "scenario": "promotional-offer-followup-a2a", "model_quality": {"minimum_memory_extraction": metric},
+    })
+    assert "model_quality" not in public
 
 
 def test_live_public_summary_keeps_safe_failure_location_only() -> None:
@@ -1437,7 +1476,10 @@ def test_step_followup_cases_reuse_readonly_and_contract_suites():
     contracts = [c for c in run_e2e.CASES if c.name.endswith("followup-contract")]
     live = [c for c in run_e2e.LIVE_CASES if c.live_runner == "step_followup"]
     assert {c.name for c in contracts} == {"ssf-step1-followup-contract", "ssf-step2-followup-contract"}
-    assert len(live) == 2
+    assert {case.name for case in live} == {
+        "ssf-step1-followup-a2a", "ssf-step2-followup-a2a",
+        "ecs-retention-selection-recovery", "ecs-retention-context-boundaries",
+    }
     assert all(c.suite == "full" for c in contracts)
     assert all(c.group == "readonly" and not c.cloud_write for c in live)
     assert all(run_e2e._live_cleanup_status(c, None) == "not-needed" for c in live)

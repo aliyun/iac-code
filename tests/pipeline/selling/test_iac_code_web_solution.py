@@ -9,9 +9,9 @@ from iac_code.tools.cloud.aliyun.ros_validation.model import MaterializedTemplat
 from iac_code.tools.cloud.aliyun.ros_validation.validator import validate_ros_template
 
 ROOT = Path(__file__).parents[3]
-BUNDLED = ROOT / "src/iac_code/skills/bundled/iac_aliyun/references/solutions"
+SOLUTIONS = ROOT / "src/iac_code/knowledge/clouds/aliyun/solutions"
 SELLING = ROOT / "src/iac_code/pipeline/selling"
-GOLDEN = BUNDLED / "iac-code-web.ros.yml"
+GOLDEN = SOLUTIONS / "iac-code-web.ros.yml"
 
 
 def _template() -> dict:
@@ -20,10 +20,9 @@ def _template() -> dict:
 
 def test_solution_reference_is_shared_and_pipeline_prompts_are_minimal() -> None:
     link = SELLING / "references/solutions"
-    assert link.is_symlink()
-    assert link.resolve() == BUNDLED.resolve()
-    assert (link / "iac-code-web.md").is_file()
-    assert (link / "iac-code-web.ros.yml").is_file()
+    assert not link.exists() and not link.is_symlink()
+    assert (SOLUTIONS / "iac-code-web.md").is_file()
+    assert GOLDEN.is_file()
 
     architecture = (SELLING / "skills/iac-aliyun-architecture/SKILL.md").read_text(encoding="utf-8")
     generating = (SELLING / "skills/iac-aliyun-template-generating/SKILL.md").read_text(encoding="utf-8")
@@ -32,11 +31,11 @@ def test_solution_reference_is_shared_and_pipeline_prompts_are_minimal() -> None
     assert "单 ECS + EIP" in architecture
     assert "安全组仅开放 8766" in architecture
     assert "不得增加其他入口资源" in architecture
-    assert "references/solutions/iac-code-web.md" in generating
-    assert "references/solutions/iac-code-web.ros.yml" in generating
+    assert "knowledge://clouds/aliyun/solutions/iac-code-web.md" in generating
+    assert "knowledge://clouds/aliyun/solutions/iac-code-web.ros.yml" in generating
     assert "iac-code-web-single-ecs" not in deploying
     assert "PublicUrl" not in deploying and "WebAccessToken" not in deploying
-    reference = (link / "iac-code-web.md").read_text(encoding="utf-8")
+    reference = (SOLUTIONS / "iac-code-web.md").read_text(encoding="utf-8")
     assert "保持现有 Pipeline" not in reference
     assert "中国内地地域" not in reference
     assert "海外地域" not in reference

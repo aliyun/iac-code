@@ -52,7 +52,7 @@ PROMPTS = (
 
 
 def hourly_costs_match(outlines: list[str], details: list[str]) -> bool:
-    """Priced items need the requested unit; free topology resources have no rate."""
+    """Priced items need the requested unit; free/excluded usage rows have no rate."""
     hour_unit = r"小时|(?<![a-z])(?:hours?|hourly|h)(?![a-z])"
     period_pattern = rf"{hour_unit}|月|months?"
 
@@ -81,9 +81,64 @@ def hourly_costs_match(outlines: list[str], details: list[str]) -> bool:
             or re.search(r"免费|无费用|免收|(?:包含|含)在|included\s+in", value, re.I)
         )
 
+    def excluded_usage(value: str) -> bool:
+        # Only unpriced usage exclusions are exempt; a monthly charge still fails.
+        return bool(
+            not re.search(r"[¥￥$]|\d+(?:\.\d+)?\s*元|月|months?", value, re.I)
+            and re.search(r"流量|traffic|data\s+transfer", value, re.I)
+            and re.search(r"另计|另行计费|单独计费|不含|不包含|not\s+included|(?:charged|billed)\s+separately",
+                          value, re.I)
+        )
+
     return bool(outlines) and all(hourly(value) for value in outlines) and all(
-        hourly(value) or free(value) for value in details
+        hourly(value) or free(value) or excluded_usage(value) for value in details
     )
+
+
+def accepted_price_calls(calls: list[dict], outcomes: dict[str, dict]) -> list[dict]:
+    """Failed/unexecuted tool arguments are not prices shown to the user."""
+    return [call for call in calls if call["name"] in {"show_architecture_plan", "show_candidate_detail"}
+            and outcomes.get(call["id"], {}).get("is_error") is False]
+
+
+def eight_hour_candidate_prices_match(calls: list[dict]) -> bool:
+    """Validate the latest successful batch, keeping explicit monthly comparisons separate."""
+    outlines, details = [], {}
+    for call in calls:
+        value = call["input"]
+        if call["name"] == "show_architecture_plan":
+            outlines, details = value.get("candidates", []), {}
+        elif call["name"] == "show_candidate_detail":
+            index = value.get("candidate_index")
+            if type(index) is not int or not 0 <= index < len(outlines):
+                return False
+            details[index] = value
+    if not outlines or set(details) != set(range(len(outlines))):
+        return False
+    main_count = 0
+    for index, outline in enumerate(outlines):
+        detail = details[index]
+        if outline.get("candidate_name") != detail.get("candidate_name"):
+            return False
+        totals = [str(value.get("total_cost", "")) for value in (outline, detail)]
+        identity = " ".join(str(value.get(key, "")) for value in (outline, detail)
+                            for key in ("candidate_name", "summary"))
+        visible = identity + " " + " ".join(str(value.get("key_tradeoff", "")) for value in (outline, detail))
+        comparison = (
+            re.search(r"包月|包年包月|prepaid|monthly", identity, re.I)
+            and re.search(r"对比项|仅(?:作|供|用于).{0,4}(?:对比|比较)|(?:for\s+)?comparison\s+only", visible, re.I)
+            and all(re.search(r"月|months?", total, re.I) for total in totals)
+        )
+        if comparison:
+            continue
+        main_count += 1
+        costs = [str(item.get("rough_cost", item.get("rough_monthly_cost", "")))
+                 for item in detail.get("resource_inventory", [])
+                 if item.get("rough_cost", item.get("rough_monthly_cost"))]
+        if not all(re.search(r"8\s*(?:个)?\s*小时|8\s*(?:hours?|h)\b|八(?:个)?小时", total, re.I)
+                   for total in totals) or not hourly_costs_match(totals, costs):
+            return False
+    return main_count > 0
 
 
 async def verify_apis(run_dir: Path) -> dict[str, Any]:
@@ -179,6 +234,8 @@ def successful_coupon_queries(config_dir: Path) -> set[str]:
 
 
 def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
+    from scripts.ci.run_step_followup_a2a import results
+
     config_dir = Path(os.environ["IAC_CODE_CONFIG_DIR"])
     if not config_dir.resolve().is_relative_to(args.run_dir.resolve()):
         raise ValueError("Run through run_e2e.py with isolated configuration")
@@ -222,18 +279,19 @@ def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
             completions = completion_inputs(config_dir)
             conclusion = conclusion or (completions[-1] if completions else {})
             calls = tool_inputs(config_dir)[before:]
+            pricing_calls = accepted_price_calls(calls, results(config_dir))
             outline_costs = [
                 str(candidate.get("total_cost", candidate.get("total_monthly_cost", "")))
-                for call in calls if call["name"] == "show_architecture_plan"
+                for call in pricing_calls if call["name"] == "show_architecture_plan"
                 for candidate in call["input"].get("candidates", [])
             ]
             outline_costs.extend(
                 str(call["input"].get("total_cost", ""))
-                for call in calls if call["name"] == "show_candidate_detail"
+                for call in pricing_calls if call["name"] == "show_candidate_detail"
             )
             detail_costs = [
                 str(resource.get("rough_cost", resource.get("rough_monthly_cost", "")))
-                for call in calls if call["name"] == "show_candidate_detail"
+                for call in pricing_calls if call["name"] == "show_candidate_detail"
                 for resource in call["input"].get("resource_inventory", [])
                 if resource.get("rough_cost", resource.get("rough_monthly_cost"))
             ]
@@ -249,8 +307,8 @@ def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
                     re.search(r"月|month", cost, re.I) for cost in outline_costs
                 )
             elif index == 1:
-                checks["explicit hourly request updates total and details"] = hourly_costs_match(
-                    outline_costs, detail_costs,
+                checks["explicit hourly request updates total and details"] = eight_hour_candidate_prices_match(
+                    pricing_calls,
                 )
                 checks["eight-hour duration is explained"] = bool(re.search(
                     r"8\s*(?:个)?\s*小时|8\s*hours?|八小时", text + json.dumps(calls, ensure_ascii=False), re.I,
@@ -271,6 +329,8 @@ def run_a2a(args: argparse.Namespace) -> dict[str, Any]:
                 "task_state": summary.last_status_state, "outline_costs": outline_costs,
                 "detail_costs": detail_costs, "started_steps": steps,
                 "tools": [call["name"] for call in calls],
+                **({"raw_all_candidate_hourly_check": hourly_costs_match(outline_costs, detail_costs)}
+                   if index == 1 else {}),
             })
             print(json.dumps({"model": args.model, **turns[-1]}, ensure_ascii=False), flush=True)
         calls = tool_inputs(config_dir)

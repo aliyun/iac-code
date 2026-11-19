@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Iterator
 
 TEXT_MODELS = (
-    "deepseek-v4-flash-0731", "glm-5.2-fast-preview", "glm-5.3-prime", "deepseek-v4.1-flash",
+    "deepseek-v4.1-flash-1017", "glm-5.2-fast-preview", "glm-5.3-prime", "deepseek-v4.1-flash",
 )
 MULTIMODAL_MODELS = ("qwen3.8-max", "qwen3.8-max-0902", "qwen3.8-flash", "qwen3.8-omni-flash")
 

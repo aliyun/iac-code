@@ -257,8 +257,12 @@ class CompleteStepTool(Tool):
         return baseline
 
     def _normalize_empty_conclusion_input(self, tool_input: dict[str, Any]) -> None:
-        """Accept one redundant empty wrapper only on an enabled waiting-state follow-up."""
-        if tool_input == {"conclusion": {"conclusion": {}}} and self._empty_conclusion_baseline() is not None:
+        """Normalize narrow no-change aliases only on an enabled waiting-state follow-up."""
+        baseline = self._empty_conclusion_baseline()
+        if baseline is not None and tool_input in (
+            {"conclusion": {"conclusion": {}}},
+            {"conclusion": {"status": baseline["status"]}},
+        ):
             tool_input["conclusion"] = {}
 
     def _unchanged_completion_error(self, tool_input: dict[str, Any], baseline: dict[str, Any]) -> str | None:

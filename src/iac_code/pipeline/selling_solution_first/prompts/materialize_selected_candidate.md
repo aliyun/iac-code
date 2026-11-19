@@ -25,8 +25,7 @@
 - 询价概览/明细：`{selected_plan.selected_candidate_result.cost.monthly_estimate}` / `{selected_plan.selected_candidate_result.cost.resources}`
 - 参数缺口：`{selected_plan.selected_candidate_result.cost.missing_deployment_parameters}` / `{selected_plan.selected_candidate_result.cost.user_required_missing_parameters}`
 
-模板正文只保存在文件，规范化价格、参数和确认等待态由 pipeline 保存。恢复轮使用干净的模型上下文；需要检查模板时读取
-`template_url` 文件，不要要求把旧工具历史重新注入。
+模板正文只保存在文件，规范化价格、参数和确认等待态由 pipeline 保存。同一步骤续聊保留历史，跨步骤或回滚重新进入时重建上下文；需要检查模板时读取 `template_url` 文件。
 
 ## 已有云资源选择
 只有在实现方案确实需要一个现有云资源或其派生值、且上下文尚无该值时才使用资源选择器，不要编造资源 ID；调用次序、禁止项与取消、`options_empty` 空列表等判据以技能为准。本步骤完成的资源选择必须在写模板、Preview、询价和部署确认之前落定，并把选中值写入模板 Default 与后续参数集。

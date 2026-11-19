@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from iac_code.skills.bundled import _bundled_skills, get_bundled_skills, init_bundled_skills
+from iac_code.tools.path_safety import resolve_read_path
 
 IAC_SKILL_ROOT = Path("src/iac_code/skills/bundled/iac_aliyun")
 SELLING_IAC_SKILLS = [
@@ -131,7 +132,8 @@ class TestIacSkill:
         assert "新建资源受限" in content
 
     def test_vpc_reference_guides_quota_remediation_and_readable_selection(self):
-        content = (IAC_SKILL_ROOT / "references" / "cloud-products" / "vpc.md").read_text(encoding="utf-8")
+        reference = resolve_read_path("knowledge://clouds/aliyun/products/vpc/vpc.md", str(IAC_SKILL_ROOT))
+        content = Path(reference).read_text(encoding="utf-8")
 
         assert "新建 VPC 因配额、容量或账号限制失败" in content
         assert "从 `create` 改为 `use_existing`" in content
@@ -140,23 +142,37 @@ class TestIacSkill:
         assert "不要求用户手工查找或输入 `vpc-...`、`vsw-...`" in content
 
     def test_ecs_reference_requires_vswitch(self):
-        content = (IAC_SKILL_ROOT / "references" / "cloud-products" / "ecs.md").read_text(encoding="utf-8")
+        content = Path("src/iac_code/knowledge/clouds/aliyun/products/ecs/ecs.md").read_text(encoding="utf-8")
 
         assert "必须在 `Properties` 中显式设置 `VSwitchId`" in content
         assert "不得省略后回退到经典网络" in content
         assert "此约束由模板校验硬门禁强制执行" in content
 
-    def test_cloud_product_catalogs_list_all_bundled_product_references(self):
-        product_names = {path.name for path in (IAC_SKILL_ROOT / "references" / "cloud-products").glob("*.md")}
-
+    def test_skills_link_directly_to_shared_product_tree(self):
+        products = Path(resolve_read_path("knowledge://clouds/aliyun/products", str(IAC_SKILL_ROOT)))
+        cloud_dir = IAC_SKILL_ROOT / "references" / "cloud-products"
+        assert not cloud_dir.exists() and not cloud_dir.is_symlink()
+        assert {p.name for p in products.iterdir() if p.is_dir()} == {
+            "ecs", "swas", "rds", "redis", "slb", "vpc", "oss", "ga", "ros", "bss",
+        }
+        for product in products.iterdir():
+            if product.is_dir():
+                guide = product / (product.name + ".md")
+                assert guide.is_file(), guide
+                assert "本产品知识已迁移" not in guide.read_text(encoding="utf-8")
         solution_first_skills = Path("src/iac_code/pipeline/selling_solution_first/skills").glob("*/SKILL.md")
-        for skill_path in [IAC_SKILL_ROOT / "SKILL.md", *SELLING_IAC_SKILLS, *solution_first_skills]:
-            content = skill_path.read_text(encoding="utf-8")
-            missing = sorted(name for name in product_names if name not in content)
-            assert not missing, f"{skill_path} is missing cloud product references: {missing}"
+        for skill in [IAC_SKILL_ROOT / "SKILL.md", *SELLING_IAC_SKILLS, *solution_first_skills]:
+            content = skill.read_text(encoding="utf-8")
+            assert "knowledge://clouds/aliyun/products/index.md" in content
+            assert "references/cloud-products/" not in content
+            assert "cloud-product-workflows.md" not in content
+            for name in ("ros-template.md", "terraform-template.md", "template-parameters.md"):
+                assert "references/" + name not in content
 
     def test_ga_reference_keeps_ros_and_terraform_boundaries_explicit(self):
-        content = (IAC_SKILL_ROOT / "references" / "cloud-products" / "ga.md").read_text(encoding="utf-8")
+        content = "\n".join(
+            p.read_text(encoding="utf-8") for p in Path("src/iac_code/knowledge/clouds/aliyun").rglob("*.md")
+        )
 
         assert "每次生成前必须查询当前 Schema 和可用性 API" in content
         assert "不得根据经验猜测 `Type`、`ListenerType` 或 `listener_type`" in content

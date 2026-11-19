@@ -46,6 +46,7 @@ from iac_code.types.stream_events import (
     TombstoneEvent,
     ToolResultEvent,
     ToolUseEndEvent,
+    WikiSearchEvent,
 )
 
 PIPELINE_EVENTS_EXTENSION_URI = "urn:iac-code:a2a:pipeline-events:v1"
@@ -292,6 +293,12 @@ class PipelineEventTranslator:
     def translate(self, event: Any) -> list[dict[str, Any]]:
         if isinstance(event, PipelineEvent):
             return self._translate_pipeline_event(event)
+        if isinstance(event, WikiSearchEvent):
+            return [
+                self._translate_parent_scoped_display_event(
+                    "wiki_search", {"phase": event.phase, "snapshot": event.snapshot}
+                )
+            ]
         if isinstance(event, MessageStartEvent):
             return [self._translate_parent_scoped_display_event("message_started", {"messageId": event.message_id})]
         if isinstance(event, MessageEndEvent):
@@ -636,6 +643,11 @@ class PipelineEventTranslator:
         elif isinstance(inner, MessageEndEvent):
             event_type = "usage"
             data = _provider_usage_data(inner.usage)
+            input_data = None
+            permission = None
+        elif isinstance(inner, WikiSearchEvent):
+            event_type = "wiki_search"
+            data = {"phase": inner.phase, "snapshot": inner.snapshot}
             input_data = None
             permission = None
         elif isinstance(inner, TextDeltaEvent):

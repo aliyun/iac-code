@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import shutil
 from pathlib import Path
 
@@ -13,6 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover - Python 3.10 compatibility
     import tomli as tomllib
 
 import iac_code
+from iac_code.tools import path_safety
 from iac_code.tools.base import ToolContext
 from iac_code.tools.read_file import ReadFileTool
 from iac_code.types.permissions import ToolPermissionContext
@@ -50,12 +52,16 @@ def _assert_expanded_selling_references(package_root: Path, skill_names: tuple[s
         references = package_root / "pipeline" / "selling" / "skills" / skill_name / "references"
         assert references.is_dir()
         assert not references.is_symlink()
-        assert (references / "ros-template.md").is_file()
-        assert (references / "template-parameters.md").is_file()
-        assert (references / "cloud-products" / "ecs.md").is_file()
-        assert (references / "cloud-products" / "ga.md").is_file()
-        assert (references / "solutions" / "iac-code-web.md").is_file()
-        assert (references / "solutions" / "iac-code-web.ros.yml").is_file()
+        for name in ("ros-template.md", "terraform-template.md", "template-parameters.md"):
+            assert not (references / name).exists() and not (references / name).is_symlink()
+            assert (package_root / "knowledge/clouds/aliyun/products/ros" / name).is_file()
+        assert not (references / "cloud-products").exists() and not (references / "cloud-products").is_symlink()
+        assert (package_root / "knowledge/clouds/aliyun/products/ecs/ecs.md").is_file()
+        assert (package_root / "knowledge/clouds/aliyun/products/ga/ga.md").is_file()
+        assert not (references / "solutions").exists() and not (references / "solutions").is_symlink()
+        assert not (references / "coupons.md").exists()
+        assert (package_root / "knowledge/clouds/aliyun/solutions/iac-code-web.md").is_file()
+        assert (package_root / "knowledge/clouds/aliyun/solutions/iac-code-web.ros.yml").is_file()
         recommendation = (references / "template-parameter-recommendation.md").read_text(encoding="utf-8")
         assert "ros_estimate_template_cost" in recommendation
         assert 'action="GetTemplateEstimateCost"' not in recommendation
@@ -63,6 +69,7 @@ def _assert_expanded_selling_references(package_root: Path, skill_names: tuple[s
 
 def _seed_solution_first_skill_files(package_root: Path) -> None:
     """Model build_py copying package data before setup materializes references."""
+    shutil.copytree(PROJECT_ROOT / "src/iac_code/knowledge", package_root / "knowledge")
     target_skills = package_root / "pipeline" / "selling_solution_first" / "skills"
     for skill_name in (
         "iac-aliyun-solution-first",
@@ -91,6 +98,21 @@ def _assert_expanded_solution_first_resources(package_root: Path, setup_module) 
         SOLUTION_FIRST_SKILLS / deploying.name / "evals.json"
     ).read_bytes()
     assert materialize_references.is_dir() and not materialize_references.is_symlink()
+    for name in ("ros-template.md", "terraform-template.md", "template-parameters.md"):
+        alias = package_root / "skills/bundled/iac_aliyun/references" / name
+        assert not alias.exists() and not alias.is_symlink()
+    # Every copied Skill can follow product topics and cross-Wiki links after installation.
+    assert not list(package_root.rglob("cloud-products"))
+    for page in (package_root / "knowledge").rglob("*.md"):
+        body = page.read_text(encoding="utf-8")
+        assert "本产品知识已迁移" not in body
+        for href in re.findall(r"\]\(([^)]+)\)", body):
+            if not href.startswith(("http://", "https://", "#")):
+                assert href.startswith("knowledge://"), (page, href)
+                target = (package_root / "knowledge" / href[len("knowledge://"):]).resolve()
+                assert target.is_file(), (page, href)
+                assert target.is_relative_to(package_root.resolve()), (page, href)
+
     _assert_expanded_selling_references(
         package_root,
         setup_module.SELLING_IAC_ALIYUN_SKILLS,
@@ -98,18 +120,30 @@ def _assert_expanded_solution_first_resources(package_root: Path, setup_module) 
     for skill_name in setup_module.SELLING_SOLUTION_FIRST_REFERENCE_SKILLS:
         references = skills / skill_name / "references"
         assert references.is_dir() and not references.is_symlink()
-        assert (references / "ros-template.md").is_file()
-        assert (references / "cloud-products" / "ecs.md").is_file()
-        assert (references / "solutions" / "iac-code-web.ros.yml").is_file()
-        assert (references / "cloud-products" / "swas.md").read_bytes() == (
-            PROJECT_ROOT / "src/iac_code/skills/bundled/iac_aliyun/references/cloud-products/swas.md"
+        for name in ("ros-template.md", "terraform-template.md", "template-parameters.md"):
+            assert not (references / name).exists() and not (references / name).is_symlink()
+        assert not (references / "cloud-products").exists() and not (references / "cloud-products").is_symlink()
+        assert not (references / "solutions").exists() and not (references / "solutions").is_symlink()
+        assert not (references / "coupons.md").exists()
+        assert (package_root / "knowledge/clouds/aliyun/products/swas/swas.md").read_bytes() == (
+            PROJECT_ROOT / "src/iac_code/knowledge/clouds/aliyun/products/swas/swas.md"
         ).read_bytes()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("reference", "expected"), [
-    ("cloud-products/swas.md", ["OriginPrice", "包月价格"]),
-    ("coupons.md", ["DescribeCoupon", "DescribeCouponItemList"]),
+    ("knowledge://clouds/aliyun/products/swas/swas.md", ["OriginPrice", "包月价格"]),
+    ("knowledge://clouds/aliyun/products/ecs/ecs.md", ["## 镜像选择", "## 安全组最佳实践"]),
+    ("knowledge://clouds/aliyun/products/ecs/sizing.md", ["突发性能型", "CPU 积分"]),
+    ("knowledge://clouds/aliyun/products/bss/coupons.md", ["DescribeCoupon", "DescribeCouponItemList"]),
+    ("knowledge://clouds/aliyun/products/ecs/availability.md", ["CpuCoreCount", "MemorySize"]),
+    ("knowledge://common/hardware/intel-arc-pro-b70.md", ["32 GB GDDR6", "Xe2"]),
+    ("knowledge://clouds/aliyun/products/ros/ros-template.md", ["ALIYUN::ECS::RunCommand", "## Outputs"]),
+    ("knowledge://clouds/aliyun/products/ros/template-parameters.md", ["AssociationProperty", "ParameterGroups"]),
+    ("knowledge://clouds/aliyun/products/ros/terraform-template.md",
+     ["knowledge://clouds/aliyun/products/ros/template-parameters.md"]),
+    ("knowledge://clouds/aliyun/solutions/iac-code-web.md", ["knowledge://clouds/aliyun/solutions/iac-code-web.ros.yml"]),
+    ("knowledge://clouds/aliyun/solutions/iac-code-web.ros.yml", ["acs:solution:iac-code:iac-code-web"]),
 ])
 async def test_installed_step_one_can_read_guides_from_an_unrelated_workspace(
     tmp_path, monkeypatch, reference, expected,
@@ -118,11 +152,12 @@ async def test_installed_step_one_can_read_guides_from_an_unrelated_workspace(
     package_root = tmp_path / "installed" / "iac_code"
     _seed_solution_first_skill_files(package_root)
     setup_module._copy_selling_skill_references_to_package_root(package_root)
+    monkeypatch.setattr(path_safety, "get_iac_code_application_root", lambda: package_root)
     skill_root = package_root / "pipeline/selling_solution_first/skills/iac-aliyun-solution-first"
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     roots = [str(skill_root)]
-    tool_input = {"path": f"references/{reference}"}
+    tool_input = {"path": reference if reference.startswith("knowledge://") else f"references/{reference}"}
     tool = ReadFileTool()
 
     permission = await tool.check_permissions(
@@ -136,6 +171,20 @@ async def test_installed_step_one_can_read_guides_from_an_unrelated_workspace(
     )
     assert not result.is_error
     assert all(value in result.content for value in expected)
+    if reference == "knowledge://clouds/aliyun/products/ecs/ecs.md":
+        links = re.findall(r"\]\((knowledge://clouds/aliyun/products/ros/[^)]+)\)", result.content)
+        assert set(links) == {
+            "knowledge://clouds/aliyun/products/ros/ros-template.md",
+            "knowledge://clouds/aliyun/products/ros/terraform-template.md",
+        }
+        for href in links:
+            assert (await tool.check_permissions({"path": href}, ToolPermissionContext(
+                cwd=str(workspace),
+            ))).behavior == "allow"
+            linked = await tool.execute(tool_input={"path": href}, context=ToolContext(
+                cwd=str(workspace),
+            ))
+            assert not linked.is_error and "File:" in linked.content
 
 
 def test_selling_skill_references_are_expanded_for_installed_artifacts(monkeypatch, tmp_path):
@@ -164,41 +213,23 @@ def test_selling_skill_references_expand_windows_symlink_placeholder_files(monke
     setup_module = _load_setup_module(monkeypatch)
     source_root = tmp_path / "src" / "iac_code"
     selling_refs = source_root / "pipeline" / "selling" / "references"
-    bundled_refs = source_root / "skills" / "bundled" / "iac_aliyun" / "references"
-    cloud_products = bundled_refs / "cloud-products"
-    solutions = bundled_refs / "solutions"
     selling_refs.mkdir(parents=True)
-    cloud_products.mkdir(parents=True)
-    solutions.mkdir(parents=True)
-    (bundled_refs / "ros-template.md").write_text("real ros template reference", encoding="utf-8")
-    (bundled_refs / "template-parameters.md").write_text("real parameter reference", encoding="utf-8")
-    (cloud_products / "ecs.md").write_text("real ecs reference", encoding="utf-8")
-    (cloud_products / "ga.md").write_text("real ga reference", encoding="utf-8")
-    (solutions / "iac-code-web.md").write_text("real solution reference", encoding="utf-8")
-    (solutions / "iac-code-web.ros.yml").write_text("ROSTemplateFormatVersion: '2015-09-01'", encoding="utf-8")
     (selling_refs / "template-parameter-recommendation.md").write_text(
         "pipeline ros_estimate_template_cost recommendation",
-        encoding="utf-8",
-    )
-    (selling_refs / "ros-template.md").write_text(
-        "../../../skills/bundled/iac_aliyun/references/ros-template.md",
-        encoding="utf-8",
-    )
-    (selling_refs / "template-parameters.md").write_text(
-        "../../../skills/bundled/iac_aliyun/references/template-parameters.md",
-        encoding="utf-8",
-    )
-    (selling_refs / "cloud-products").write_text(
-        "../../../skills/bundled/iac_aliyun/references/cloud-products",
-        encoding="utf-8",
-    )
-    (selling_refs / "solutions").write_text(
-        "../../../skills/bundled/iac_aliyun/references/solutions",
         encoding="utf-8",
     )
     monkeypatch.setattr(setup_module, "SELLING_REFERENCES_DIR", selling_refs)
     build_lib = tmp_path / "build_lib"
     _seed_solution_first_skill_files(build_lib / "iac_code")
+    for group, names in (
+        ("selling", setup_module.SELLING_IAC_ALIYUN_SKILLS),
+        ("selling_solution_first", setup_module.SELLING_SOLUTION_FIRST_REFERENCE_SKILLS),
+    ):
+        for name in names:
+            references = build_lib / "iac_code/pipeline" / group / "skills" / name / "references"
+            references.parent.mkdir(parents=True, exist_ok=True)
+            references.write_text("../../references" if group == "selling" else "../../../selling/references",
+                                  encoding="utf-8")
 
     setup_module._copy_selling_skill_references(str(build_lib))
 
@@ -207,13 +238,17 @@ def test_selling_skill_references_expand_windows_symlink_placeholder_files(monke
     references = (
         package_root / "pipeline" / "selling" / "skills" / setup_module.SELLING_IAC_ALIYUN_SKILLS[0] / "references"
     )
-    assert (references / "ros-template.md").read_text(encoding="utf-8") == "real ros template reference"
-    assert (references / "cloud-products").is_dir()
+    for name in ("ros-template.md", "terraform-template.md", "template-parameters.md"):
+        alias = package_root / "skills/bundled/iac_aliyun/references" / name
+        assert not alias.exists() and not alias.is_symlink()
+        assert not (references / name).exists()
+        assert (package_root / "knowledge/clouds/aliyun/products/ros" / name).is_file()
+    assert not list(package_root.rglob("cloud-products"))
     solution_first = package_root / "pipeline" / "selling_solution_first" / "skills"
     assert (solution_first / "iac-aliyun-deploying" / "SKILL.md").read_bytes() == (
         SOLUTION_FIRST_SKILLS / "iac-aliyun-deploying" / "SKILL.md"
     ).read_bytes()
-    assert (solution_first / "iac-aliyun-deploying" / "references" / "cloud-products").is_dir()
+    assert not (solution_first / "iac-aliyun-deploying" / "references" / "solutions").exists()
     assert (
         solution_first
         / "iac-aliyun-materialize-selected-candidate"

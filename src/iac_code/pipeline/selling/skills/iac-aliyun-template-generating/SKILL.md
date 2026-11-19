@@ -37,14 +37,14 @@ conclusion_schema:
 
 ## 模板生成流程
 
-若 `candidate.name` 精确等于 `iac-code-web-single-ecs`，先读取
-`references/solutions/iac-code-web.md`，再复制 `references/solutions/iac-code-web.ros.yml`
-作为模板基线；不要重新设计拓扑。
+若 `candidate.name` 精确等于 `iac-code-web-single-ecs`，先用 `read_file` 读取
+[方案说明](knowledge://clouds/aliyun/solutions/iac-code-web.md) 和 [YAML 基线](knowledge://clouds/aliyun/solutions/iac-code-web.ros.yml)，
+将基线内容写入目标模板；不要重新设计拓扑。
 
 1. 分析架构方案，确定资源列表
-2. 查阅 [references/cloud-products/](references/cloud-products/) 下对应产品文件，了解选型策略和库存相关属性
-3. **必须**阅读 [references/ros-template.md](references/ros-template.md)，了解 ROS 模板最佳实践，未阅读不得生成模板
-4. 生成 ROS YAML 模板（库存相关属性按 [references/cloud-products/](references/cloud-products/) 与 [references/template-parameters.md](references/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
+2. 读取 `knowledge://clouds/aliyun/products/<产品>/<产品>.md` 及相关专题（产品归属不明时查 [产品导航](knowledge://clouds/aliyun/products/index.md)），了解选型策略和库存相关属性
+3. **必须**阅读 [ros-template.md](knowledge://clouds/aliyun/products/ros/ros-template.md)，了解 ROS 模板最佳实践，未阅读不得生成模板
+4. 生成 ROS YAML 模板（库存相关属性按 对应产品文档 与 [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) 定义为 Parameters，所有 Parameters 必须添加 AssociationProperty）并写入文件
    - 生成的模板默认放在当前工作目录；仅当用户指定其他路径时才写入该路径，不要默认使用 `/tmp` 等工作目录外路径
 5. 调用 `ros_validate_template` 校验；`template_url` 使用刚写入的模板文件路径，已有具体地域时传 `region_id`，否则使用工具默认地域
 6. 校验失败 → 分析错误 → 修复 → 重试（最多 5 轮）
@@ -76,7 +76,7 @@ conclusion_schema:
 
 ## 参数化规则
 
-生成模板时，库存相关属性**必须**定义为 Parameters（部署前通过 API 查询确定实际值）。具体字段按 [references/cloud-products/](references/cloud-products/) 的产品文件和 [references/template-parameters.md](references/template-parameters.md) 执行，不在本技能重复维护产品字段清单。
+生成模板时，库存相关属性**必须**定义为 Parameters（部署前通过 API 查询确定实际值）。具体字段按 对应产品文档 和 [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) 执行，不在本技能重复维护产品字段清单。
 
 以下属性**不需要**参数化，直接使用合理默认值：
 - 网络：VPC CIDR、VSwitch CIDR
@@ -112,6 +112,6 @@ conclusion_schema:
 
 | 文件 | 内容 |
 |------|------|
-| [references/template-parameters.md](references/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 |
-| [references/cloud-products/](references/cloud-products/) | 云产品选型文件（ecs.md、swas.md、rds.md、redis.md、slb.md、vpc.md、oss.md、ga.md） |
-| [references/ros-template.md](references/ros-template.md) | ROS 模板最佳实践：RunCommand、嵌套栈、条件部署 |
+| [template-parameters.md](knowledge://clouds/aliyun/products/ros/template-parameters.md) | 模板参数规范：AssociationProperty、Label、分组 |
+| [knowledge://clouds/aliyun/products/index.md](knowledge://clouds/aliyun/products/index.md) | 产品知识与专题导航（共享 Wiki） |
+| [ros-template.md](knowledge://clouds/aliyun/products/ros/ros-template.md) | ROS 模板最佳实践：RunCommand、嵌套栈、条件部署 |

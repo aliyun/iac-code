@@ -9,7 +9,7 @@ from typing import Any
 from iac_code.i18n import _
 from iac_code.tools import path_safety
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_read_path, resolve_read_path
+from iac_code.tools.path_safety import check_read_path, knowledge_uri, resolve_read_path
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 
 MAX_READ_BYTES = 10 * 1024 * 1024
@@ -37,7 +37,9 @@ class ReadFileTool(Tool):
     @property
     def description(self) -> str:
         return (
-            "Read the contents of a file. You can optionally specify a line range "
+            "Read the contents of a file. Supports knowledge:// paths for the local Wiki. "
+            "Call this tool directly instead of running cat/head/tail through bash. "
+            "You can optionally specify a line range "
             "to read only a portion of the file. Use start_line and end_line for "
             "large files to read specific sections."
         )
@@ -49,7 +51,7 @@ class ReadFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "The path to the file to read. Can be absolute or relative to working directory.",
+                    "description": "File path: absolute, relative to cwd, or knowledge:// for local Wiki files.",
                 },
                 "start_line": {
                     "type": "integer",
@@ -98,22 +100,24 @@ class ReadFileTool(Tool):
         return decision.to_permission_result()
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
-        path = _resolve_input_path(
-            tool_input["path"],
-            context.cwd,
-            relative_read_directories=context.relative_read_directories,
-        )
+        try:
+            path = _resolve_input_path(
+                tool_input["path"], context.cwd, relative_read_directories=context.relative_read_directories,
+            )
+        except (ValueError, OSError, RuntimeError) as error:
+            return ToolResult.error(str(error))
+        display_path = knowledge_uri(path)
         start_line = tool_input.get("start_line")
         end_line = tool_input.get("end_line")
 
         try:
             selected_lines, total_lines, truncated = self._read_limited_lines(path, start_line, end_line)
         except FileNotFoundError:
-            return ToolResult.error(f"File not found: {path}")
+            return ToolResult.error(f"File not found: {display_path}")
         except PermissionError:
-            return ToolResult.error(f"Permission denied: {path}")
+            return ToolResult.error(f"Permission denied: {display_path}")
         except UnicodeDecodeError:
-            return ToolResult.error(f"Cannot read binary file: {path}")
+            return ToolResult.error(f"Cannot read binary file: {display_path}")
         except Exception as e:
             return ToolResult.error(f"Error reading file: {e}")
 
@@ -125,7 +129,9 @@ class ReadFileTool(Tool):
             numbered = [f"{line_number:>6}\t{line}" for line_number, line in selected_lines]
             content = "".join(numbered)
             suffix = ", truncated" if truncated else ""
-            return ToolResult.success(f"File: {path} (lines {start}-{end} of {total_lines}{suffix})\n\n{content}")
+            return ToolResult.success(
+                f"File: {display_path} (lines {start}-{end} of {total_lines}{suffix})\n\n{content}"
+            )
 
         # Return full file
         if total_lines > 0:
@@ -135,7 +141,7 @@ class ReadFileTool(Tool):
             content = "(empty file)"
 
         suffix = ", truncated" if truncated else ""
-        return ToolResult.success(f"File: {path} ({total_lines} lines{suffix})\n\n{content}")
+        return ToolResult.success(f"File: {display_path} ({total_lines} lines{suffix})\n\n{content}")
 
     def _read_limited_lines(
         self,

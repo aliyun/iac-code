@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the offline multi-turn Step1/Step2 contracts via the shared CI dispatcher."""
+"""Run offline Step1/Step2 followup and assistant handoff contracts via the shared CI dispatcher."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ import pytest
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-dir", type=Path, required=True)
-    parser.add_argument("--scenario", choices=("step1", "step2"), required=True)
+    parser.add_argument("--scenario", choices=("step1", "step2", "handoff-reply"), required=True)
     args = parser.parse_args()
     args.run_dir = args.run_dir.resolve()
     args.run_dir.mkdir(parents=True, exist_ok=True)
@@ -28,15 +28,16 @@ def main() -> int:
             "-o",
             "addopts=",
             "-k",
-            args.scenario,
-            "tests/pipeline/selling_solution_first/test_step_followup_e2e.py",
+            "handoff_reply" if args.scenario == "handoff-reply" else args.scenario,
+            "tests/a2a/test_ros_agent_handoff_reply_e2e.py" if args.scenario == "handoff-reply"
+            else "tests/pipeline/selling_solution_first/test_step_followup_e2e.py",
             "--basetemp=" + str(args.run_dir / "pytest"),
             "--junitxml=" + str(junit),
         ]
     )
     try:
         cases = ET.parse(junit).findall(".//testcase")
-        expected = 3 if args.scenario == "step1" else 4
+        expected = {"step1": 9, "step2": 4, "handoff-reply": 3}[args.scenario]
         completed = len(cases) == expected and not any(
             case.find(tag) is not None for case in cases for tag in ("failure", "error", "skipped")
         )

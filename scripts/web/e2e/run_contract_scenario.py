@@ -494,6 +494,7 @@ def _verify_browser(
     audit: Path | None = None,
     require_quote: bool = False,
     expand_pipeline_history: bool = False,
+    require_wiki: bool = False,
 ) -> None:
     script = REPO_ROOT / "scripts" / "web" / "e2e" / "verify_contract_dom.mjs"
     command = [
@@ -516,6 +517,8 @@ def _verify_browser(
         command.extend(("--requireQuote", "true"))
     if expand_pipeline_history:
         command.extend(("--expandPipelineHistory", "true"))
+    if require_wiki:
+        command.extend(("--requireWiki", "true"))
     subprocess.run(command, cwd=REPO_ROOT, check=True, timeout=60)
 
 

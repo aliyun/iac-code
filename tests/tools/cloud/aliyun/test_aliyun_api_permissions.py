@@ -2008,6 +2008,91 @@ async def test_action_group_executes_approved_outer_input_through_shared_runtime
     assert result.is_error is False
     assert json.loads(result.content) == {"RequestId": "request", "Business": "value"}
     assert len(runtime.transport_router.requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tool_name",
+    ["ros_get_template_parameter_constraints", "ros_preview_template", "ros_estimate_template_cost"],
+)
+async def test_ros_params_alias_survives_permission_execution_and_completion_records(tool_name, tmp_path) -> None:
+    from iac_code.agent.agent_loop import AgentLoop
+    from iac_code.pipeline.engine.completion_guard_state import record_completion_guard_tool_result
+    from iac_code.tools.base import ToolRegistry
+    from iac_code.tools.cloud.aliyun.ros_template_tools import (
+        RosEstimateTemplateCostTool,
+        RosGetTemplateParameterConstraintsTool,
+        RosPreviewTemplateTool,
+    )
+    from iac_code.tools.cloud.aliyun.runtime import AliyunDelegatedExecutor
+    from iac_code.types.stream_events import (
+        MessageEndEvent,
+        MessageStartEvent,
+        ToolResultEvent,
+        ToolUseEndEvent,
+        ToolUseStartEvent,
+        Usage,
+    )
+
+    tool_type = {
+        "ros_get_template_parameter_constraints": RosGetTemplateParameterConstraintsTool,
+        "ros_preview_template": RosPreviewTemplateTool,
+        "ros_estimate_template_cost": RosEstimateTemplateCostTool,
+    }[tool_name]
+    raw_input = {"template_url": "https://example.com/template.yml", "params": {"Count": 2}}
+    if tool_name == "ros_preview_template":
+        raw_input["stack_name"] = "preview"
+
+    class Provider:
+        def get_model_name(self):
+            return "fake"
+
+        async def stream(self, messages, system, tools=None):
+            yield MessageStartEvent(message_id="message")
+            yield ToolUseStartEvent(tool_use_id="call", name=tool_name)
+            yield ToolUseEndEvent(tool_use_id="call", name=tool_name, input=raw_input)
+            yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+
+    public_tool, runtime = _execution_runtime(
+        _canonical_contract(product="ROS", version="2019-09-10", action=tool_type.action)
+    )
+    tool = tool_type(delegated_executor=AliyunDelegatedExecutor(public_tool, action=tool_type.action))
+    registry = ToolRegistry()
+    registry.register(tool)
+    loop = AgentLoop(
+        provider_manager=Provider(),
+        system_prompt="system",
+        tool_registry=registry,
+        max_turns=1,
+        session_id="session",
+        permission_context=ToolPermissionContext(cwd=str(tmp_path)),
+    )
+    state = {"completion_record_contract": "v2"}
+    pending = {}
+    async for event in loop.run_streaming("quote"):
+        if isinstance(event, ToolUseEndEvent):
+            pending[event.tool_use_id] = copy.deepcopy(event.input)
+        elif isinstance(event, ToolResultEvent):
+            assert not event.is_error, event.result
+            record_completion_guard_tool_result(
+                state,
+                tool_name=event.tool_name,
+                tool_input=pending[event.tool_use_id],
+                content=event.result,
+                is_error=event.is_error,
+            )
+
+    assert raw_input["params"] == {"Count": 2}
+    assert "parameters" not in raw_input
+    record = state["tool_result_records"][0]
+    assert record["input"]["parameters"] == {"Count": 2}
+    assert "params" not in record["input"]
+    calls = [block for message in loop.context_manager.get_messages() for block in message.get_tool_use_blocks()]
+    assert calls[0].input == raw_input  # Permission recovery hashes the original model payload.
+    assert runtime.contract_store.size == 0
+    assert len(runtime.transport_router.requests) == 1
+    assert runtime.request_builder.inputs[-1]["params"]["Parameters.1.ParameterKey"] == "Count"
+    assert runtime.request_builder.inputs[-1]["params"]["Parameters.1.ParameterValue"] == 2
     assert runtime.contract_store.size == 0
 
 

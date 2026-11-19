@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import copy
+
 import pytest
 
+from iac_code.pipeline.selling.tools.ros_deploy_tool import RosDeployTool
 from iac_code.tools.base import ToolContext, ToolResult
 from iac_code.tools.cloud.aliyun.aliyun_api import AliyunApi
 from iac_code.tools.cloud.aliyun.public_errors import public_aliyun_error
@@ -122,6 +125,63 @@ def test_ros_template_tools_have_distinct_user_facing_names() -> None:
     assert RosGetTemplateParameterConstraintsTool().user_facing_name() == "ROS Template Parameters"
     assert RosPreviewTemplateTool().user_facing_name() == "ROS Preview Stack"
     assert RosEstimateTemplateCostTool().user_facing_name() == "ROS Estimate Cost"
+
+
+@pytest.mark.parametrize(
+    "tool_type",
+    [RosGetTemplateParameterConstraintsTool, RosPreviewTemplateTool, RosEstimateTemplateCostTool, RosDeployTool],
+)
+@pytest.mark.parametrize("parameters", [{}, {"ZoneId": "cn-hangzhou-k", "Count": 2}])
+def test_ros_template_parameter_alias_is_canonical_before_binding(tool_type, parameters) -> None:
+    tool = tool_type()
+    raw = {"template_url": "templates/app.yml", "params": parameters}
+    if tool.name == "ros_preview_template":
+        raw["stack_name"] = "preview"
+    elif tool.name == "ros_deploy":
+        raw.update(action="create", stack_name="demo")
+    original = copy.deepcopy(raw)
+
+    prepared = tool.prepare_invocation_input(raw)
+
+    assert raw == original
+    assert prepared == {**{key: value for key, value in raw.items() if key != "params"}, "parameters": parameters}
+    assert tool.validate_input(prepared) == (True, "")
+    assert tool.prepare_invocation_input(prepared) == prepared
+    valid, error = tool.validate_input(raw)
+    assert valid, error
+    assert raw == prepared
+
+
+@pytest.mark.parametrize(
+    "tool_type",
+    [RosGetTemplateParameterConstraintsTool, RosPreviewTemplateTool, RosEstimateTemplateCostTool, RosDeployTool],
+)
+@pytest.mark.parametrize("alias", [None, "{}", []])
+def test_ros_parameter_alias_does_not_weaken_validation(tool_type, alias) -> None:
+    tool = tool_type()
+    raw = {"template_url": "templates/app.yml", "params": alias, "stack_name": "demo"}
+    if tool.name != "ros_preview_template" and tool.name != "ros_deploy":
+        raw.pop("stack_name")
+    if tool.name == "ros_deploy":
+        raw["action"] = "create"
+    assert not tool.validate_input(raw)[0]
+
+
+def test_ros_parameter_alias_rejects_conflicting_names_and_unsupported_tools() -> None:
+    tool = RosEstimateTemplateCostTool()
+    raw = {"template_url": "templates/app.yml", "params": {"Count": 1}, "parameters": {"Count": 2}}
+    assert not tool.validate_input(raw)[0]
+    assert raw["parameters"] == {"Count": 2}
+    assert raw["params"] == {"Count": 1}
+    assert not RosValidateTemplateTool().validate_input({"template_url": "app.yml", "params": {}})[0]
+    assert not RosDeployTool().validate_input({"action": "wait", "stack_id": "stack", "params": {}})[0]
+
+
+def test_aliyun_api_keeps_its_params_container() -> None:
+    raw = {"product": "ecs", "action": "DescribePrice", "params": {"PriceUnit": "Hour"}}
+    prepared = AliyunApi.isolated_for_tests().prepare_invocation_input(raw)
+    assert prepared == raw
+    assert "parameters" not in prepared
 
 
 class _FakeDelegatedExecutor:

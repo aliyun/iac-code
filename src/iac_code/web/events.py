@@ -49,6 +49,7 @@ from iac_code.types.stream_events import (
     ToolUseEndEvent,
     ToolUseStartEvent,
     Usage,
+    WikiSearchEvent,
 )
 from iac_code.web.resource_references import resource_fact_to_web
 
@@ -362,6 +363,17 @@ class WebEventTranslator:
 
     def translate_stream_event(self, event: StreamEvent, *, turn_id: str) -> dict[str, Any]:
         """Translate one AgentLoop stream event into the Web event contract."""
+        if isinstance(event, WikiSearchEvent):
+            from iac_code.ui.wiki_search import wiki_projection
+
+            return self._make(
+                "context.wiki_search",
+                {
+                    "turnId": turn_id,
+                    "ownerMessageId": event.snapshot.get("owner_message_id") or "user-" + turn_id,
+                    **wiki_projection(event.snapshot, event.phase),
+                },
+            )
         if isinstance(event, SubPipelineStreamEvent):
             parent_message_id = self._current_message_id
             self._current_message_id = self._sub_pipeline_message_ids.get(event.sub_pipeline_id)

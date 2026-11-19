@@ -15,9 +15,15 @@ from iac_code.a2a.backup import run_sync_fenced
 from iac_code.desktop.external_env import create_subprocess_exec, guarded_command, spawn_env_kwargs
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_read_path, get_iac_code_application_root, resolve_read_path_with_source
+from iac_code.tools.path_safety import (
+    check_read_path,
+    get_iac_code_application_root,
+    get_knowledge_root,
+    knowledge_allowed_roots,
+    knowledge_uri,
+    resolve_read_path_with_source,
+)
 from iac_code.types.permissions import PermissionResult, ToolPermissionContext
-from iac_code.utils.platform import normalize_user_path
 
 
 def _is_rg_available() -> bool:
@@ -279,7 +285,9 @@ class GrepTool(Tool):
         return (
             "Search for a regex pattern across file contents. Uses ripgrep (rg) when "
             "available for speed, otherwise falls back to a pure-Python implementation. "
-            "Returns matching file paths or matching lines depending on output_mode."
+            "Call this tool directly instead of running grep/rg through bash. "
+            "Returns matching file paths or matching lines depending on output_mode. "
+            "Supports knowledge:// paths for the local Wiki."
         )
 
     @property
@@ -293,7 +301,7 @@ class GrepTool(Tool):
                 },
                 "path": {
                     "type": "string",
-                    "description": ("The directory to search in. Defaults to current working directory."),
+                    "description": ("Search directory: absolute, relative, or knowledge://. Defaults to cwd."),
                 },
                 "glob": {
                     "type": "string",
@@ -325,23 +333,24 @@ class GrepTool(Tool):
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         pattern: str = tool_input["pattern"]
-        raw_path: str = normalize_user_path(tool_input.get("path", context.cwd))
+        raw_path: str = tool_input.get("path", context.cwd)
         glob: str | None = tool_input.get("glob")
         case_insensitive: bool = bool(tool_input.get("case_insensitive", False))
         output_mode: str = tool_input.get("output_mode", "files_with_matches")
         max_results: int = int(tool_input.get("max_results", 100))
 
-        resolution = resolve_read_path_with_source(
-            raw_path,
-            context.cwd,
-            relative_read_directories=context.relative_read_directories,
-        )
+        try:
+            resolution = resolve_read_path_with_source(
+                raw_path, context.cwd, relative_read_directories=context.relative_read_directories,
+            )
+        except (ValueError, OSError, RuntimeError) as error:
+            return ToolResult.error(str(error))
         path = resolution.path
 
         if not os.path.exists(path):
-            return ToolResult.error(f"Path not found: {path}")
+            return ToolResult.error(f"Path not found: {knowledge_uri(path)}")
 
-        allowed_roots = _effective_allowed_roots(path, context)
+        allowed_roots = knowledge_allowed_roots(raw_path, _effective_allowed_roots(path, context))
         if _is_rg_available() and not resolution.used_relative_root and not _contains_directory_symlink(path):
             returncode, stdout, stderr = await _run_rg(
                 pattern,
@@ -379,7 +388,19 @@ class GrepTool(Tool):
         if len(lines) > max_results:
             output = "\n".join(lines[:max_results])
 
-        return ToolResult.success(output)
+        prefix = str(get_knowledge_root()) + os.sep
+        displayed = []
+        path_labels = {}
+        for line in output.splitlines():
+            if line.startswith(prefix):
+                relative, separator, suffix = line[len(prefix):].partition(":") if output_mode == "content" else (
+                    line[len(prefix):], "", "",
+                )
+                if relative not in path_labels:
+                    path_labels[relative] = knowledge_uri(prefix + relative)
+                line = path_labels[relative] + separator + suffix
+            displayed.append(line)
+        return ToolResult.success("\n".join(displayed))
 
     async def check_permissions(self, input: dict, context=None) -> PermissionResult:
         if not isinstance(context, ToolPermissionContext):

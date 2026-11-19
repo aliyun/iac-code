@@ -32,6 +32,83 @@ from iac_code.types.stream_events import (
 SIMPLE_DEPS = {"intent": [], "architecture": ["intent"]}
 
 
+@pytest.mark.asyncio
+async def test_fresh_recovery_keeps_clarification_results_paired_when_reusing_wiki(tmp_path, monkeypatch):
+    import copy
+
+    from iac_code.types.permissions import PermissionMode, ToolPermissionContext
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "backup"))
+    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", "true")
+
+    class Provider:
+        def __init__(self):
+            self.requests = []
+
+        def get_model_name(self):
+            return "offline"
+
+        def for_side_call(self, policy):
+            return self
+
+        async def complete(self, **kwargs):
+            return SimpleNamespace(text='{"keywords":["B70"]}', usage=Usage(), usage_attribution=None)
+
+        async def stream(self, messages, system, tools=None):
+            self.requests.append(copy.deepcopy(messages))
+            calls = set()
+            for message in messages:
+                for block in message.content if isinstance(message.content, list) else []:
+                    if block.type == "tool_use":
+                        calls.add(block.tool_use_id)
+                    elif block.type == "tool_result":
+                        assert block.tool_use_id in calls, "recovery sent an orphaned tool result"
+            number = len(self.requests)
+            yield MessageStartEvent(message_id=f"message-{number}")
+            if number in {3, 5, 7}:
+                yield TextDeltaEvent(text="Please complete the step.")
+                yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+                return
+            name, arguments = ("ask_user_question", {
+                "question": "Which model?", "options": [{"id": "b70", "label": "B70"}],
+            }) if number == 1 else (
+                "complete_step", {"conclusion": {"result": "ok"}} if number == 8 else {},
+            )
+            yield ToolUseStartEvent(tool_use_id=f"call-{number}", name=name)
+            yield ToolUseEndEvent(tool_use_id=f"call-{number}", name=name, input=arguments)
+            yield MessageEndEvent(stop_reason="tool_use", usage=Usage())
+
+    provider = Provider()
+    step = StepSpec(
+        step_id="probe", conclusion_field="answer", forward=None, prompt_file="",
+        inject_tools=["ask_user_question"], config={"wiki_search_on_enter": True},
+        conclusion_schema={"type": "object", "required": ["result"], "properties": {"result": {"type": "string"}}},
+    )
+    pipeline = LoadedPipeline(
+        name="probe", steps=[step], context_dependencies={"answer": []}, max_rollbacks=1, skills={},
+    )
+    executor = StepExecutor(
+        provider, ToolRegistry(), pipeline, tmp_path, cwd=str(tmp_path),
+        permission_context_getter=lambda: ToolPermissionContext(
+            cwd=str(tmp_path), mode=PermissionMode.BYPASS_PERMISSIONS,
+        ),
+    )
+    results = []
+    answered = 0
+    async for event in executor.execute(step, PipelineContext({"answer": []}), "session", "Explain this model"):
+        if isinstance(event, AskUserQuestionEvent):
+            answered += 1
+            event.response_future.set_result({"free_text": "B70"})
+        if isinstance(event, StepResult):
+            results.append(event)
+    assert answered == 1
+    assert len(provider.requests) == 8
+    assert str(provider.requests[-1]).count("<knowledge_search_results") == 1
+    assert results[-1].status == StepStatus.COMPLETED
+    assert results[-1].conclusion == {"result": "ok"}
+
+
 def _make_step() -> StepSpec:
     return StepSpec(
         step_id="intent_parsing",
@@ -3517,7 +3594,8 @@ async def test_resumed_step_uses_continue_streaming_without_duplicate_prompt(mon
 
 
 @pytest.mark.asyncio
-async def test_resumed_step_returns_reconstructed_complete_step(monkeypatch, tmp_path):
+@pytest.mark.parametrize("consultation_enabled", [False, True])
+async def test_resumed_step_returns_reconstructed_complete_step(monkeypatch, tmp_path, consultation_enabled):
     class FailIfAgentLoopIsCreated:
         def __init__(self, *args, **kwargs):
             raise AssertionError("AgentLoop should not be created for already-completed transcript")
@@ -3526,6 +3604,7 @@ async def test_resumed_step_returns_reconstructed_complete_step(monkeypatch, tmp
 
     executor = _make_executor(tmp_path)
     step = _make_step()
+    step.config["allow_empty_conclusion_on_resume"] = consultation_enabled
     ctx = PipelineContext(SIMPLE_DEPS)
     resume_messages = [
         Message(role="user", content="start"),
@@ -3558,6 +3637,26 @@ async def test_resumed_step_returns_reconstructed_complete_step(monkeypatch, tmp
     assert results[0].status == StepStatus.COMPLETED
     assert results[0].conclusion == {"result": "restored"}
     assert ctx.get_conclusion(step.conclusion_field) == {"result": "restored"}
+
+
+@pytest.mark.parametrize("latest_content", ["Explain the previous plan", [{"type": "text", "text": "Explain it"}]])
+def test_consultation_recovery_does_not_restore_an_earlier_turn(tmp_path, latest_content):
+    executor = _make_executor(tmp_path)
+    step = _make_step()
+    step.config["allow_empty_conclusion_on_resume"] = True
+    messages = [
+        Message(role="user", content="Plan"),
+        Message(role="assistant", content=[ToolUseBlock(
+            id="old", name="complete_step", input={"conclusion": {"result": "old"}},
+        )]),
+        Message(role="user", content=[ToolResultBlock(tool_use_id="old", content="ok", is_error=False)]),
+        Message(role="user", content=latest_content),
+        Message(role="assistant", content="I will explain the plan."),
+    ]
+    context = executor.build_agent_loop_context(step, PipelineContext(SIMPLE_DEPS), "root", resume_messages=messages)
+    assert context.restored_step_result is None
+    assert context.agent_loop is not None
+    assert context.agent_loop.context_manager.get_context_messages() == messages
 
 
 @pytest.mark.asyncio

@@ -27,10 +27,11 @@ from iac_code.tools.cloud.aliyun.api_contract import ApiContractResolver, Reques
 from iac_code.tools.cloud.aliyun.contract_store import ResolvedContractStore, canonical_input_sha256
 from iac_code.tools.cloud.aliyun.endpoint_resolver import EndpointResolver
 from iac_code.tools.cloud.aliyun.openmeta import OpenMetaClient
+from iac_code.tools.path_safety import resolve_read_path
 from iac_code.types.permissions import InvocationBinding, PermissionResult, ToolPermissionContext
 
 SKILL_ROOT = Path(__file__).resolve().parents[4] / "src/iac_code/skills/bundled/iac_aliyun"
-SKILL_EXAMPLES = ("SKILL.md", "references/cloud-products/ga.md")
+SKILL_EXAMPLES = ("SKILL.md", "knowledge://clouds/aliyun/products/ga/ga.md")
 API_PATH = "/meta/v1/products/IaCService/versions/2021-08-06/apis/GetResourceType/api.json"
 DOCS_PATH = "/meta/v1/products/IaCService/versions/2021-08-06/api-docs.json"
 
@@ -109,7 +110,7 @@ class IacServiceSkillRuntime:
 
     @staticmethod
     def skill_input(relative_path: str, resource_type: str) -> dict[str, Any]:
-        content = (SKILL_ROOT / relative_path).read_text(encoding="utf-8")
+        content = Path(resolve_read_path(relative_path, str(SKILL_ROOT))).read_text(encoding="utf-8")
         examples = re.findall(r'aliyun_api\(product="IaCService"[^\n)]*\)', content)
         assert len(examples) == 1
         expression = ast.parse(examples[0], mode="eval").body

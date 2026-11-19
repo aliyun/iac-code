@@ -5,7 +5,7 @@
 ## 适用范围
 
 - 支持：ROS 原生模板；ROS Terraform 类型模板（`Transform: Aliyun::Terraform-*` / `Aliyun::OpenTofu-*`）。
-- 不支持：纯 Terraform 工作目录（先按 [terraform-template.md](terraform-template.md) 用 `tf2ros.py` 打包）；`UpdateStack`、`ContinueCreateStack`、栈组、栈实例。
+- 不支持：纯 Terraform 工作目录（先按 [terraform-template.md](knowledge://clouds/aliyun/products/ros/terraform-template.md) 用 `tf2ros.py` 打包）；`UpdateStack`、`ContinueCreateStack`、栈组、栈实例。
 
 ## 核心原则
 
