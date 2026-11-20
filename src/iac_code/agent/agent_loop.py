@@ -1100,6 +1100,21 @@ class AgentLoop:
                 await work.task
             except asyncio.CancelledError:
                 work.cancel()
+                # Do not publish a released checkpoint while Wiki can still
+                # write its final metadata. Its tool-free inference uses the
+                # same exact adapter/lease proof as the first answer request.
+                with suppress(asyncio.CancelledError):
+                    await work.task
+                from iac_code.services.wiki_auto_search import WikiWork
+
+                if (
+                    self._model_only_preflight
+                    and self._model_request_count == 0
+                    and type(work) is WikiWork
+                    and work.model_request_adapter
+                    and self._wiki_preparation_is_idle()
+                ):
+                    self.canceled_first_model_request = work.model_request_adapter
                 raise
             finally:
                 if pending_event is not None and not pending_event.done():

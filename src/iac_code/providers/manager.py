@@ -2261,6 +2261,7 @@ class ProviderManager:
                 model_override=active_lease.context_window_model,
                 cache_policy=cache_policy,
                 telemetry_messages=telemetry_messages,
+                request_lease=active_lease,
             )
             attribution = self._usage_attribution(
                 active_lease,
@@ -2306,6 +2307,7 @@ class ProviderManager:
         refusal_detected: bool = False,
         allow_model_fallback: bool = True,
         telemetry_messages: list[Any] | None = None,
+        request_lease: ProviderRequestLease | None = None,
     ) -> _CompletionResult:
         if provider_override is None and model_override is None:
             provider, model = self._active_provider_and_model()
@@ -2368,6 +2370,8 @@ class ProviderManager:
                             },
                         )
                         request_started = time.monotonic()
+                        if request_lease is not None:
+                            request_lease._lease_token.inference_requests += 1
                         response = await time_model_complete(
                             provider.complete(messages, system, tools, **kwargs),
                             llm_call_id=timing_call_id,
@@ -2504,6 +2508,7 @@ class ProviderManager:
                         fallback_visited=frozenset(visited),
                         allow_model_fallback=not isinstance(original_exc, _ModelRefusalError),
                         telemetry_messages=telemetry_messages,
+                        request_lease=request_lease,
                     )
                     if isinstance(original_exc, _ModelRefusalError):
                         self._pinned_provider = result.provider

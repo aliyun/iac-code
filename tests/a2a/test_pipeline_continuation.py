@@ -978,6 +978,13 @@ class _WaitingFirstModel:
 
         if payload["messages"][0].get("content") == PROMPT:
             self.wiki_requests.append(payload)
+            if self.fault == "wiki-retry" and len(self.wiki_requests) == 1:
+                return httpx.Response(500, json={"error": {"message": "offline extraction failure"}})
+            if self.fault in ("wiki-interrupted", "wiki-custom-adapter", "wiki-retry") and (
+                len(self.wiki_requests) == (2 if self.fault == "wiki-retry" else 1)
+            ):
+                self.entered.set()
+                await asyncio.Event().wait()
             return httpx.Response(
                 200,
                 json={
@@ -1315,6 +1322,9 @@ class _ActiveModelStopCase:
         (False, None),
         (True, None),
         (True, "wiki"),
+        (True, "wiki-interrupted"),
+        (True, "wiki-custom-adapter"),
+        (True, "wiki-retry"),
         (True, "checkpoint-clock"),
         (True, "sdk-retry"),
         (True, "supplement"),
@@ -1361,8 +1371,9 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
     cwd.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "shared"))
-    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", "true" if fault == "wiki" else "false")
-    if fault == "wiki":
+    wiki_enabled = fault is not None and fault.startswith("wiki")
+    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", str(wiki_enabled).lower())
+    if wiki_enabled:
         (cwd / "knowledge").mkdir()
         (cwd / "knowledge" / "index.md").write_text("# Offline Wiki\nNo matching resources.\n", encoding="utf-8")
         monkeypatch.setattr("iac_code.services.wiki_auto_search.get_iac_code_application_root", lambda: cwd)
@@ -1375,7 +1386,7 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
             "conclusion_field": "plan",
             "forward": None,
             "prompt": "model.md",
-            "config": {"wiki_search_on_enter": fault == "wiki"},
+            "config": {"wiki_search_on_enter": wiki_enabled},
         }
     ]
     dependencies = {"plan": []}
@@ -1419,7 +1430,7 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
             ignore_llm_source=True,
             provider_config_override={},
             retry_config=RetryConfig(
-                max_retries=1 if fault == "request-retry" else 0, base_delay=0.01, jitter_factor=0
+                max_retries=1 if fault in ("request-retry", "wiki-retry") else 0, base_delay=0.01, jitter_factor=0
             ),
         )
         await provider._provider._client.close()
@@ -1438,7 +1449,7 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
     owner = await store.get_or_create_task(task_id="task-old", context_id="ctx-1")
     pipeline_dir = a2a_pipeline_dir_for_session(cwd=str(cwd), session_id="session-1")
     case = _ActiveModelStopCase(runner, None, store, owner, pipeline_dir, model)
-    if fault == "wiki":
+    if wiki_enabled:
         from iac_code.providers import manager as manager_module
 
         create_provider = manager_module.create_provider
@@ -1452,6 +1463,8 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
                 max_retries=0,
             )
             case.successor_clients.append(adapter._client)
+            if fault == "wiki-custom-adapter":
+                adapter.__class__ = _CustomModelAdapter
             return adapter
 
         monkeypatch.setattr(manager_module, "create_provider", offline_provider)
@@ -1480,6 +1493,8 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
             assert len(model.wiki_requests) == 1
             work = runner._step_executor.current_agent_loop._wiki_work
             assert work.snapshot["status"] == "no_matches" and work.task.done()
+        elif wiki_enabled:
+            assert len(model.wiki_requests) == (2 if fault == "wiki-retry" else 1) and model.calls == 0
         old_attempt_id = "att_0002" if fault == "hard-interrupt-earlier" else "att_0001"
         assert runner._execution["active_attempt_id"] == old_attempt_id
         old_transcript_id = f"transcript_{old_attempt_id}"
@@ -1487,8 +1502,8 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
         initial_requests = model.calls
         stopped_model_users = (
             [row["content"] for row in model.requests[-1]["messages"] if row["role"] == "user"]
-            if standard_provider
-            else None
+            if model.requests
+            else [_MODEL_INITIAL_REQUEST]
         )
         if fault == "hard-interrupt-earlier":
             assert runner._attempts["items"]["att_0001"]["status"] == "completed"
@@ -1561,6 +1576,7 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
         positive = standard_provider and fault in (
             None,
             "wiki",
+            "wiki-interrupted",
             "checkpoint-clock",
             "sdk-retry",
             "supplement",
