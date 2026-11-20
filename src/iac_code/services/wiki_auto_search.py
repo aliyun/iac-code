@@ -306,6 +306,14 @@ class WikiAutoSearch:
         self.root = root or get_iac_code_application_root() / "knowledge"
         self._task_owner = task_owner if task_owner is not None else object()
 
+    @property
+    def has_active_tasks(self) -> bool:
+        """Include earlier queries whose final metadata write has not finished."""
+        return any(
+            owner == self._task_owner and work.task is not None and not work.task.done()
+            for (owner, _scope, _query), work in _TASKS.items()
+        )
+
     def cancel_scope(self, scope_id: str) -> None:
         for (owner, scope, _query), work in list(_TASKS.items()):
             if owner == self._task_owner and scope == scope_id:
