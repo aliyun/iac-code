@@ -16,8 +16,10 @@ from iac_code.a2a.transports.http import HttpA2AClient
 from iac_code.services import first_token_timing as timing_module
 from iac_code.services.first_token_timing import (
     RequestTiming,
+    auxiliary_model_timing,
     current_timing,
     mark_timing,
+    time_model_complete,
     time_model_stream,
     timed_lock,
     timed_phase,
@@ -29,7 +31,7 @@ from iac_code.types.stream_events import MessageEndEvent, MessageStartEvent, Tex
 
 
 @pytest.fixture
-def records(monkeypatch):
+def records(monkeypatch, caplog):
     result = []
 
     class Capture(logging.Handler):
@@ -39,7 +41,7 @@ def records(monkeypatch):
 
     monkeypatch.setattr(timing_module.logger, "handlers", [Capture()])
     monkeypatch.setattr(timing_module.logger, "propagate", False)
-    monkeypatch.setattr(timing_module.logger, "level", logging.INFO)
+    caplog.set_level(logging.INFO, logger=timing_module.logger.name)
     return result
 
 
@@ -82,7 +84,16 @@ def frame(payload):
 
 
 async def run_wire(
-    chunks, *, request_id=b"request-1", send=None, status=200, protocol="a2a", sse=True, app=None, path="/"
+    chunks,
+    *,
+    request_id=b"request-1",
+    send=None,
+    status=200,
+    protocol="a2a",
+    sse=True,
+    app=None,
+    path="/",
+    new_session=None,
 ):
     sent = []
 
@@ -104,7 +115,12 @@ async def run_wire(
         for index, chunk in enumerate(chunks):
             await send({"type": "http.response.body", "body": chunk, "more_body": index < len(chunks) - 1})
 
-    await FirstTokenTimingMiddleware(app or source, protocol=protocol)(
+    async def classified_app(scope, receive, send):
+        if new_session is not None:
+            current_timing().bind(is_new_session=new_session)
+        await (app or source)(scope, receive, send)
+
+    await FirstTokenTimingMiddleware(classified_app, protocol=protocol)(
         {"type": "http", "path": path, "method": "POST", "headers": [(b"x-request-id", request_id)]},
         receive,
         send or capture,
@@ -295,7 +311,7 @@ def test_summary_bounds_repeated_details_and_reports_truncation(records, monkeyp
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("thinking", [False, True])
-async def test_restore_and_chat_emit_nine_or_ten_logs_with_all_internal_details_in_summary(
+async def test_restore_and_chat_emit_ten_or_eleven_logs_with_all_internal_details_in_summary(
     records, monkeypatch, thinking
 ):
     from iac_code.services.telemetry.scope import use_span_attributes
@@ -344,7 +360,7 @@ async def test_restore_and_chat_emit_nine_or_ten_logs_with_all_internal_details_
 
     await run_wire([], app=restore, path="/iac-code/session/ensure-restored", sse=False)
     await run_wire([], app=chat)
-    assert len(records) == (10 if thinking else 9)
+    assert len(records) == (11 if thinking else 10)
     restore_logs = [r for r in records if r["request_kind"] == "session_restore"]
     chat_logs = [r for r in records if r["request_kind"] == "a2a"]
     assert stages(restore_logs) == [
@@ -358,6 +374,7 @@ async def test_restore_and_chat_emit_nine_or_ten_logs_with_all_internal_details_
         "llm_request_started",
         *(["llm_first_thinking_received"] if thinking else []),
         "llm_first_text_received",
+        "first_event_send_completed",
         "first_text_send_completed",
         "first_token_summary",
     ]
@@ -675,6 +692,53 @@ async def test_model_observer_ignores_empty_and_metadata_deltas(records):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_auxiliary_inference_keeps_its_timing_without_claiming_first_content(records, streaming):
+    clock = Clock()
+    timing = RequestTiming("req", clock_ns=clock, protocol="a2a", request_kind="a2a", is_new_session=True)
+
+    async def source():
+        clock.advance(100)
+        yield ThinkingDeltaEvent(text="internal extraction")
+        yield TextDeltaEvent(text="internal JSON")
+        yield MessageEndEvent(stop_reason="end_turn", usage=Usage())
+
+    async def complete():
+        clock.advance(100)
+        return SimpleNamespace(text="internal JSON", thinking="")
+
+    async def answer():
+        clock.advance(20)
+        yield ThinkingDeltaEvent(text="answer thinking")
+
+    with use_request_timing(timing):
+        with auxiliary_model_timing("wiki_keyword_extract"):
+            if streaming:
+                stream = time_model_stream(source(), llm_call_id="side")
+            else:
+                await time_model_complete(complete(), llm_call_id="side")
+        if streaming:
+            # The stream retains its purpose even when consumed after its creation scope exits.
+            async for _ in stream:
+                pass
+            await stream.aclose()
+        assert "first_model_content_summary" not in stages(records)
+        assert "llm_request_started" not in timing.milestones
+        async for _ in time_model_stream(answer(), llm_call_id="answer"):
+            pass
+        clock.advance(5)
+        timing.record_send_completed(event_type="text", content_type="text", text=True)
+    model = next(record for record in records if record["stage"] == "first_model_content_summary")
+    content = next(record for record in records if record["stage"] == "first_content_summary")
+    assert model["elapsed_ms"] == 120 and model["first_model_content_type"] == "thinking"
+    assert content["model_content_to_send_ms"] == 5
+    assert timing.milestones["llm_request_started"] == 100
+    auxiliary = [event for event in timing.timeline if event.get("llm_call_purpose") == "wiki_keyword_extract"]
+    assert auxiliary and all(not event["stage"].startswith("llm_") for event in auxiliary)
+    assert "internal JSON" not in json.dumps(records)
+
+
+@pytest.mark.asyncio
 async def test_provider_non_streaming_completion_is_measured_without_faking_first_delta(records, monkeypatch, tmp_path):
     from tests.providers.test_manager_stream_lifecycle import (
         ControlledIterator,
@@ -868,3 +932,711 @@ def test_real_restore_endpoint_correlates_two_calls_and_reports_restore_actions(
         stages(records)
         == ["request_received", "backup_restore_started", "backup_restore_completed", "first_token_summary"] * 2
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload,event_type",
+    [
+        ({"result": {"task": {"id": "task-1", "status": {"state": "working"}}}}, None),
+        ({"result": {"statusUpdate": {"status": {"state": "TASK_STATE_WORKING"}}}}, None),
+        ({"result": {"artifactUpdate": {"artifact": {"parts": [{"text": "private tool result"}]}}}}, None),
+        ({"result": {"kind": "task", "id": "task-1"}}, None),
+        ({"result": {"kind": "status-update", "status": {"state": "working"}}}, None),
+        ({"result": {"kind": "artifact-update", "artifact": {}}}, None),
+        ({"result": {"kind": "message", "parts": []}}, None),
+        ({"result": {"artifact_update": {"artifact": {}}}}, None),
+        ({"jsonrpc": "2.0", "error": {"code": -32602, "message": "private error"}}, "error"),
+    ],
+)
+async def test_fragmented_protocol_events_count_only_when_they_have_effective_display_content(
+    records, payload, event_type
+):
+    body = frame(payload)
+    chunks = [body[i : i + 1] for i in range(len(body))]
+    sent = await run_wire([b": heartbeat\n\n", *chunks], new_session=False)
+    summary = next(r for r in records if r["stage"] == "first_token_summary")
+    assert summary["schema_version"] == 2
+    assert summary["first_event_sent"] is (event_type is not None)
+    assert summary.get("first_event_type") == event_type
+    assert summary["first_event_definition"] == "effective_display"
+    assert summary["first_event_observation_complete"] is True
+    assert summary["first_text_sent"] is False
+    assert stages(records).count("first_token_summary") == 1
+    assert "first_content_summary" not in stages(records)
+    assert b"".join(m.get("body", b"") for m in sent) == b": heartbeat\n\n" + body
+    assert "private" not in json.dumps(records)
+
+
+def thinking_update():
+    return {"result": {"statusUpdate": {"metadata": {"iac_code": {"thinking": {"text": "private thought"}}}}}}
+
+
+def question_update():
+    return {
+        "result": {
+            "statusUpdate": {
+                "metadata": {
+                    "iac_code": {
+                        "pipeline": {
+                            "eventType": "input_required",
+                            "data": {"kind": "ask_user_question", "question": "private question"},
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_session", [False, True])
+@pytest.mark.parametrize("sse", [False, True])
+async def test_question_is_first_effective_display_without_text_for_fresh_and_followup_requests(
+    records, monkeypatch, new_session, sse
+):
+    clock = Clock()
+    monkeypatch.setattr(timing_module.time, "monotonic_ns", clock)
+    delivered = []
+
+    async def app(scope, receive, send):
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [(b"content-type", b"text/event-stream" if sse else b"application/json")],
+            }
+        )
+        if sse:
+            for delta, payload in (
+                (5, {"result": {"task": {}}}),
+                (
+                    5,
+                    {
+                        "result": {
+                            "statusUpdate": {
+                                "metadata": {
+                                    "iac_code": {
+                                        "pipeline": {"eventType": "step_started", "data": {"name": "placeholder"}}
+                                    }
+                                }
+                            }
+                        }
+                    },
+                ),
+                (
+                    5,
+                    {
+                        "result": {
+                            "statusUpdate": {
+                                "metadata": {
+                                    "iac_code": {
+                                        "pipeline": {
+                                            "eventType": "input_received",
+                                            "data": {"prompt": "private receipt"},
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                ),
+            ):
+                clock.advance(delta)
+                await send({"type": "http.response.body", "body": frame(payload), "more_body": True})
+                assert "first_token_summary" not in stages(records)
+        clock.advance(25)
+        body = frame(question_update()).replace(b"\n", b"\r\n") if sse else json.dumps(question_update()).encode()
+        await send({"type": "http.response.body", "body": body, "more_body": True})
+        if not sse:
+            assert "first_token_summary" not in stages(records)
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            delivered.append(message["body"])
+            assert "first_event_send_completed" not in stages(records) or not message["body"]
+
+    await run_wire([], app=app, send=send, new_session=new_session)
+    summary = next(row for row in records if row["stage"] == "first_token_summary")
+    assert summary["first_event_sent"] is True
+    assert summary["first_event_type"] == "question"
+    assert summary["elapsed_ms"] == (40 if sse else 25)
+    assert summary["first_event_definition"] == "effective_display"
+    assert summary["first_text_sent"] is False
+    assert stages(records).count("first_token_summary") == 1
+    if new_session:
+        content = next(row for row in records if row["stage"] == "first_content_summary")
+        assert content["first_content_sent"] is False
+    assert delivered and "private" not in json.dumps(records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_session", [False, True])
+async def test_receipt_text_does_not_close_display_observation_or_satisfy_new_content(
+    records, monkeypatch, new_session
+):
+    clock = Clock()
+    monkeypatch.setattr(timing_module.time, "monotonic_ns", clock)
+    receipt = text_update("private receipt")
+    receipt["result"]["statusUpdate"]["metadata"] = {"iac_code": {"inputReceived": {"accepted": True}}}
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/event-stream")]})
+        clock.advance(5)
+        await send({"type": "http.response.body", "body": frame(receipt), "more_body": True})
+        assert current_timing().active
+        assert "first_token_summary" not in stages(records)
+        assert "first_content_summary" not in stages(records)
+        clock.advance(10)
+        await send({"type": "http.response.body", "body": frame(question_update()), "more_body": True})
+        clock.advance(20)
+        await send({"type": "http.response.body", "body": frame(text_update("private answer")), "more_body": False})
+
+    await run_wire([], app=app, new_session=new_session)
+    summary = next(row for row in records if row["stage"] == "first_token_summary")
+    assert summary["elapsed_ms"] == 15
+    assert summary["first_event_type"] == "question"
+    if new_session:
+        content = next(row for row in records if row["stage"] == "first_content_summary")
+        assert content["first_content_sent"] is True and content["elapsed_ms"] == 35
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "result": {
+                "statusUpdate": {
+                    "metadata": {
+                        "iac_code": {
+                            "pipelineBatch": {
+                                "events": [
+                                    {"eventType": "step_started"},
+                                    {
+                                        "eventType": "input_required",
+                                        "data": {"kind": "ask_user_question", "question": "private question"},
+                                    },
+                                    {"eventType": "text_delta", "data": {"text": "private answer"}},
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        question_update(),
+    ],
+)
+async def test_display_cards_keep_original_send_failure_and_never_claim_success(records, payload):
+    failure = OSError("private send failure")
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            raise failure
+
+    with pytest.raises(OSError) as raised:
+        await run_wire([frame(payload)], send=send)
+    assert raised.value is failure
+    summary = next(row for row in records if row["stage"] == "first_token_summary")
+    assert summary["first_event_sent"] is False and summary["result"] == "failed"
+    assert "private" not in json.dumps(records)
+
+
+@pytest.mark.asyncio
+async def test_hidden_protocol_text_before_visible_text_keeps_followup_observation_open(records, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(timing_module.time, "monotonic_ns", clock)
+
+    async def app(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"text/event-stream")]})
+        for delay, text in ((5, "<|DSML|invoke>private protocol</|DSML|invoke>"), (10, "visible answer")):
+            clock.advance(delay)
+            payload = {
+                "result": {
+                    "statusUpdate": {
+                        "metadata": {"iac_code": {"pipeline": {"eventType": "text_delta", "data": {"text": text}}}}
+                    }
+                }
+            }
+            await send({"type": "http.response.body", "body": frame(payload), "more_body": True})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    await run_wire([], app=app, new_session=False)
+    summary = next(row for row in records if row["stage"] == "first_token_summary")
+    assert summary["elapsed_ms"] == 15 and summary["first_event_type"] == "text"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("thinking_first", [False, True])
+@pytest.mark.parametrize("late_classification", [False, True])
+async def test_new_session_retains_content_timing_after_first_event_snapshot(
+    records, monkeypatch, thinking_first, late_classification
+):
+    clock = Clock()
+    monkeypatch.setattr(timing_module.time, "monotonic_ns", clock)
+    body = frame(thinking_update() if thinking_first else text_update())
+
+    async def app(scope, receive, send):
+        if not late_classification:
+            current_timing().bind(is_new_session=True)
+        await send({"type": "http.response.start", "headers": [(b"content-type", b"text/event-stream")], "status": 200})
+        with timing_phase("runtime_acquire"):
+            clock.advance(10)
+            await send({"type": "http.response.body", "body": frame({"result": {"task": {}}}), "more_body": True})
+            assert "first_token_summary" not in stages(records)
+            await send({"type": "http.response.body", "body": frame(question_update()), "more_body": True})
+            first = next(r for r in records if r["stage"] == "first_token_summary")
+            assert first["elapsed_ms"] == 10
+            assert first["first_content_sent"] is False
+            assert first["in_progress_phases"][0]["elapsed_ms"] == 10
+            if late_classification:
+                current_timing().bind(is_new_session=True)
+            clock.advance(20)
+        clock.advance(5)
+        mark_timing("llm_request_started", llm_call_id="llm-after-first-event")
+        mark_timing("llm_first_thinking_received" if thinking_first else "llm_first_text_received")
+        clock.advance(7)
+        await send({"type": "http.response.body", "body": body, "more_body": True})
+        clock.advance(100)
+        await send({"type": "http.response.body", "body": frame(text_update("later answer")), "more_body": False})
+
+    await run_wire([], app=app)
+    first = next(r for r in records if r["stage"] == "first_token_summary")
+    model = next(r for r in records if r["stage"] == "first_model_content_summary")
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert first["elapsed_ms"] == 10
+    assert first["phase_totals_ms"] == {}
+    assert "runtime_acquire_completed" not in stages(first["timeline"])
+    assert "llm_request_started" not in stages(first["timeline"])
+    assert model["elapsed_ms"] == 35
+    assert model["first_model_content_received"] is True
+    assert model["first_model_content_type"] == ("thinking" if thinking_first else "text")
+    assert model["first_content_sent"] is False
+    assert content["elapsed_ms"] == 42
+    assert content["model_content_to_send_ms"] == 7
+    assert content["is_new_session"] is True
+    assert content["first_content_sent"] is True
+    assert content["first_content_type"] == ("thinking" if thinking_first else "text")
+    assert content["first_content_observation_complete"] is True
+    assert content["phase_totals_ms"]["runtime_acquire"] == 30
+    assert "llm_request_started" in stages(content["timeline"])
+    assert first["call_id"] == content["call_id"]
+    assert stages(records).count("first_content_summary") == 1
+    assert "private" not in json.dumps(records)
+
+
+@pytest.mark.asyncio
+async def test_existing_session_does_not_emit_new_session_content_metric(records):
+    await run_wire([frame({"result": {"task": {}}}), frame(thinking_update()), frame(text_update())], new_session=False)
+    assert stages(records).count("first_token_summary") == 1
+    assert "first_content_summary" not in stages(records)
+    assert "first_model_content_summary" not in stages(records)
+    assert next(r for r in records if r["stage"] == "first_token_summary")["first_event_type"] == "thinking"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first", ["thinking_delta", "text_delta"])
+async def test_pipeline_batch_content_uses_first_real_delta_and_ignores_tool_text(records, first):
+    second = "text_delta" if first == "thinking_delta" else "thinking_delta"
+    payload = {
+        "result": {
+            "statusUpdate": {
+                "metadata": {
+                    "iac_code": {
+                        "pipelineBatch": {
+                            "events": [
+                                {"eventType": "tool_result", "data": {"text": "private tool output"}},
+                                {"eventType": first, "data": {"text": "private first"}},
+                                {"eventType": second, "data": {"text": "private second"}},
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    }
+    await run_wire([frame(payload)], new_session=True)
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert content["first_content_type"] == ("thinking" if first == "thinking_delta" else "text")
+    assert "private" not in json.dumps(records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"result": {"task": {"history": [{"role": "agent", "messageId": "old-message", "parts": [{"text": "old"}]}]}}},
+        {
+            "result": {
+                "statusUpdate": {
+                    "metadata": {"iac_code": {"pipeline": {"eventType": "tool_result", "data": {"text": "tool text"}}}}
+                }
+            }
+        },
+        {"result": {"statusUpdate": {"metadata": {"iac_code": {"thinking": {"text": ""}}}}}},
+    ],
+)
+async def test_history_tools_and_empty_thinking_do_not_satisfy_new_session_content(records, payload):
+    await run_wire([frame(payload)], new_session=True)
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert content["first_event_sent"] is False
+    assert content["first_content_sent"] is False
+    assert "first_content_send_completed" not in content["milestones_ms"]
+
+
+@pytest.mark.asyncio
+async def test_send_completion_timestamps_exclude_logging_delay_for_both_metrics(records, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(timing_module.time, "monotonic_ns", clock)
+    info = timing_module.logger.info
+    sent_at = []
+
+    def slow_log(*args, **kwargs):
+        info(*args, **kwargs)
+        clock.advance(100)
+
+    monkeypatch.setattr(timing_module.logger, "info", slow_log)
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            assert "first_event_send_completed" not in stages(records)
+            clock.advance(7)
+            sent_at.append(clock.ns / 1_000_000)
+
+    await run_wire([frame(text_update())], send=send, new_session=True)
+    first = next(r for r in records if r["stage"] == "first_token_summary")
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert first["elapsed_ms"] == content["elapsed_ms"] == sent_at[0]
+    assert first["milestones_ms"]["first_event_send_completed"] == sent_at[0]
+    assert content["milestones_ms"]["first_content_send_completed"] == sent_at[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [OSError("private failure"), asyncio.CancelledError()])
+async def test_failed_new_session_send_does_not_claim_either_metric(records, failure):
+    async def send(message):
+        if message["type"] == "http.response.body":
+            raise failure
+
+    with pytest.raises(type(failure)) as raised:
+        await run_wire([frame(text_update())], send=send, new_session=True)
+    assert raised.value is failure
+    assert all(
+        r["first_event_sent"] is False and r["first_content_sent"] is False for r in records if "summary" in r["stage"]
+    )
+    assert stages(records).count("first_token_summary") == stages(records).count("first_content_summary") == 1
+    assert "private" not in json.dumps(records)
+
+
+@pytest.mark.asyncio
+async def test_new_session_without_first_content_reports_disconnect(records):
+    async def receive():
+        return {"type": "http.disconnect"}
+
+    async def send(message):
+        pass
+
+    async def app(scope, receive, send):
+        current_timing().bind(is_new_session=True)
+        await send({"type": "http.response.start", "headers": [(b"content-type", b"text/event-stream")], "status": 200})
+        await send({"type": "http.response.body", "body": frame({"result": {"task": {}}}), "more_body": True})
+        await send({"type": "http.response.body", "body": frame(question_update()), "more_body": True})
+        await receive()
+
+    await FirstTokenTimingMiddleware(app)({"type": "http", "method": "POST", "path": "/"}, receive, send)
+    first = next(r for r in records if r["stage"] == "first_token_summary")
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert first["first_event_sent"] is True
+    assert content["first_content_sent"] is False
+    assert content["result"] == "disconnected"
+
+
+@pytest.mark.asyncio
+async def test_new_session_classification_survives_repeated_acquisition_and_excludes_cold_restore(
+    records, monkeypatch, tmp_path
+):
+    from iac_code.a2a.persistence import A2APersistenceStore
+    from iac_code.a2a.task_store import A2ATaskStore
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    persistence = A2APersistenceStore(tmp_path / "state")
+    store = A2ATaskStore(persistence=persistence)
+    cwd = str(tmp_path)
+    fresh = RequestTiming("fresh", protocol="a2a")
+    with use_request_timing(fresh):
+        original = await store.get_or_create_context(context_id="ctx-1", cwd=cwd, runtime_factory=lambda sid: object())
+        await store.get_or_create_context(context_id="ctx-1", cwd=cwd, runtime_factory=lambda sid: object())
+    assert fresh.identity["is_new_session"] is True
+    followup = RequestTiming("followup", protocol="a2a")
+    with use_request_timing(followup):
+        await store.get_or_create_context(context_id="ctx-1", cwd=cwd, runtime_factory=lambda sid: object())
+    assert followup.identity["is_new_session"] is False
+    restored = RequestTiming("restored", protocol="a2a")
+    cold_store = A2ATaskStore(persistence=persistence)
+    with use_request_timing(restored):
+        recovered = await cold_store.get_or_create_context(
+            context_id="ctx-1", cwd=cwd, runtime_factory=lambda sid: object()
+        )
+    assert recovered.session_id == original.session_id
+    assert restored.identity["is_new_session"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("v03", [False, True])
+async def test_standalone_agent_message_with_arbitrary_id_is_new_session_content(records, v03):
+    message = {"messageId": "arbitrary-response-id", "role": "agent", "parts": [{"text": "private answer"}]}
+    payload = {"result": {"kind": "message", **message}} if v03 else {"result": {"message": message}}
+    await run_wire([frame(payload)], new_session=True)
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert content["first_content_sent"] is True
+    assert content["first_content_type"] == "text"
+    assert "private" not in json.dumps(records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata_only_key", ["isMetadataOnly", "is_metadata_only"])
+async def test_metadata_only_thinking_is_not_new_session_content(records, metadata_only_key):
+    payload = thinking_update()
+    payload["result"]["statusUpdate"]["metadata"]["iac_code"]["thinking"][metadata_only_key] = True
+    await run_wire([frame(payload)], new_session=True)
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert content["first_content_sent"] is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_new_and_existing_sessions_do_not_share_content_classification(records):
+    await asyncio.gather(
+        run_wire([frame({"result": {"task": {}}}), frame(thinking_update())], new_session=True),
+        run_wire([frame({"result": {"task": {}}}), frame(text_update())], new_session=False),
+    )
+    firsts = [r for r in records if r["stage"] == "first_token_summary"]
+    contents = [r for r in records if r["stage"] == "first_content_summary"]
+    assert len(firsts) == 2 and len(contents) == 1
+    assert len({r["call_id"] for r in firsts}) == 2
+    assert next(r for r in firsts if r["call_id"] == contents[0]["call_id"])["is_new_session"] is True
+    assert contents[0]["first_content_type"] == "thinking"
+
+
+def test_client_metadata_cannot_classify_a_session_as_new(records):
+    timing = RequestTiming("req", protocol="a2a")
+    with use_request_timing(timing):
+        observe_request_data({"message": {"metadata": {"iac_code": {"is_new_session": True}}}})
+    assert "is_new_session" not in timing.identity
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_session", [False, True])
+async def test_model_content_snapshot_is_once_per_new_request_and_precedes_logging_delay(records, new_session):
+    clock = Clock()
+    timing = RequestTiming("req", protocol="a2a", is_new_session=new_session, clock_ns=clock)
+    write = timing._write
+
+    def slow_write(fields):
+        write(fields)
+        clock.advance(100)
+
+    timing._write = slow_write
+
+    async def source():
+        clock.advance(5)
+        yield SimpleNamespace(type="thinking_delta", text="", is_metadata_only=True)
+        yield SimpleNamespace(type="thinking_delta", text="private signature", is_metadata_only=True)
+        yield TextDeltaEvent(text="")
+        clock.advance(10)
+        yield ThinkingDeltaEvent(text="private thought")
+        yield TextDeltaEvent(text="private answer")
+
+    with use_request_timing(timing):
+        async for _ in time_model_stream(source(), llm_call_id="first-call"):
+            pass
+        async for _ in time_model_stream(source(), llm_call_id="second-call"):
+            pass
+        timing.summary("completed")
+    models = [r for r in records if r["stage"] == "first_model_content_summary"]
+    assert len(models) == int(new_session)
+    if new_session:
+        assert models[0]["first_model_content_type"] == "thinking"
+        assert models[0]["elapsed_ms"] == models[0]["milestones_ms"]["first_model_content_received"] == 115
+        assert models[0]["milestones_ms"]["llm_first_thinking_received"] == 115
+        assert models[0]["first_content_sent"] is False
+    assert "private" not in json.dumps(records)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "text,thinking,kind",
+    [("answer", "", "text"), ("", "thought", "thinking"), ("answer", "thought", "text_and_thinking"), ("", "", None)],
+)
+async def test_nonstreaming_model_content_is_received_before_the_first_a2a_response(
+    records, monkeypatch, text, thinking, kind
+):
+    clock = Clock()
+    monkeypatch.setattr(timing_module.time, "monotonic_ns", clock)
+
+    async def complete():
+        clock.advance(20)
+        return SimpleNamespace(text=text, thinking=thinking)
+
+    async def app(scope, receive, send):
+        await time_model_complete(complete(), llm_call_id="complete-1")
+        assert current_timing().active
+        clock.advance(7)
+        await send({"type": "http.response.start", "headers": [(b"content-type", b"application/json")], "status": 200})
+        await send({"type": "http.response.body", "body": json.dumps(text_update()).encode(), "more_body": False})
+
+    await run_wire([], app=app, new_session=True)
+    first = next(r for r in records if r["stage"] == "first_token_summary")
+    model = next(r for r in records if r["stage"] == "first_model_content_summary")
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert first["first_event_sent"] is True and first["elapsed_ms"] == 27
+    assert content["first_content_sent"] is True and content["elapsed_ms"] == 27
+    assert model["first_model_content_received"] is (kind is not None)
+    if kind is not None:
+        assert model["elapsed_ms"] == 20
+        assert model["first_model_content_type"] == kind
+        assert model["first_event_sent"] is False
+        assert content["model_content_to_send_ms"] == 7
+    else:
+        assert "first_model_content_received" not in model["milestones_ms"]
+        assert content["model_content_to_send_ms"] is None
+    assert "llm_first_text_received" not in stages(records)
+    assert stages(records).count("first_model_content_summary") == 1
+
+
+@pytest.mark.asyncio
+async def test_wire_content_before_model_content_preserves_both_without_a_negative_duration(records, monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(timing_module.time, "monotonic_ns", clock)
+
+    async def source():
+        clock.advance(25)
+        yield TextDeltaEvent(text="private model answer")
+
+    async def app(scope, receive, send):
+        clock.advance(20)
+        await send({"type": "http.response.start", "headers": [(b"content-type", b"text/event-stream")], "status": 200})
+        await send({"type": "http.response.body", "body": frame(text_update("cached answer")), "more_body": True})
+        assert current_timing().active
+        async for _ in time_model_stream(source()):
+            pass
+        assert not current_timing().active
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    await run_wire([], app=app, new_session=True)
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    model = next(r for r in records if r["stage"] == "first_model_content_summary")
+    assert content["elapsed_ms"] == 20 and content["first_model_content_received"] is False
+    assert model["elapsed_ms"] == 45 and model["first_content_sent"] is True
+    assert model["model_content_to_send_ms"] is None
+    assert model["call_id"] == content["call_id"]
+    assert stages(records).count("first_content_summary") == stages(records).count("first_model_content_summary") == 1
+
+
+@pytest.mark.asyncio
+async def test_received_model_content_is_not_successful_delivery_if_send_fails(records):
+    async def source():
+        yield ThinkingDeltaEvent(text="private thought")
+
+    async def app(scope, receive, send):
+        async for _ in time_model_stream(source()):
+            pass
+        await send({"type": "http.response.start", "headers": [(b"content-type", b"text/event-stream")], "status": 200})
+        await send({"type": "http.response.body", "body": frame(thinking_update()), "more_body": False})
+
+    async def send(message):
+        if message["type"] == "http.response.body":
+            raise OSError("private failure")
+
+    with pytest.raises(OSError):
+        await run_wire([], app=app, send=send, new_session=True)
+    model = next(r for r in records if r["stage"] == "first_model_content_summary")
+    content = next(r for r in records if r["stage"] == "first_content_summary")
+    assert model["first_model_content_received"] is True
+    assert content["first_model_content_received"] is True
+    assert content["first_content_sent"] is False and content["model_content_to_send_ms"] is None
+    assert content["result"] == "failed"
+    assert stages(records).count("first_model_content_summary") == 1
+    assert "private" not in json.dumps(records)
+
+
+@pytest.mark.parametrize("thinking_first", [False, True])
+@pytest.mark.parametrize("expose_thinking", [False, True])
+@pytest.mark.parametrize("progress", [False, True])
+def test_sdk_stream_records_first_event_and_content_only_for_the_initial_session(
+    records, monkeypatch, tmp_path, thinking_first, expose_thinking, progress
+):
+    from starlette.testclient import TestClient
+
+    from iac_code.a2a.app import create_app
+    from tests.a2a.fakes import FakeAgentLoop, FakeRuntime
+
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setenv("IAC_CODE_A2A_PROGRESS_ENABLED", str(progress).lower())
+    monkeypatch.delenv("IAC_CODE_MODE", raising=False)
+    events = ([ThinkingDeltaEvent(text="private thought")] if thinking_first else []) + [
+        TextDeltaEvent(text="private answer")
+    ]
+
+    class TimedFakeLoop(FakeAgentLoop):
+        async def run_streaming(self, prompt):
+            stream = time_model_stream(super().run_streaming(prompt), llm_call_id="fake-model")
+            async for event in stream:
+                yield event
+
+    monkeypatch.setattr(
+        "iac_code.a2a.executor.create_agent_runtime",
+        lambda options: FakeRuntime(agent_loop=TimedFakeLoop(events), session_id=options.session_id),
+    )
+    app = create_app(
+        host="127.0.0.1",
+        port=41242,
+        token=None,
+        model="qwen3.6-plus",
+        persistence_dir=tmp_path / "state",
+        thinking_exposure="raw_thinking" if expose_thinking else None,
+    )
+    with TestClient(app) as client:
+        context_id = None
+        for request_id in ("fresh-sdk", "followup-sdk"):
+            message = {
+                "messageId": request_id,
+                "role": "ROLE_USER",
+                "parts": [{"text": "hello"}],
+                "metadata": {"iac_code": {"cwd": str(tmp_path)}},
+            }
+            if context_id is not None:
+                message["contextId"] = context_id
+            response = client.post(
+                "/",
+                headers={"A2A-Version": "1.0", "X-Request-Id": request_id},
+                json={
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "method": "SendStreamingMessage",
+                    "params": {"message": message},
+                },
+            )
+            assert response.status_code == 200
+            assert "private answer" in response.text
+            assert ("private thought" in response.text) is (thinking_first and expose_thinking)
+            if context_id is None:
+                assert ('"progress"' in response.text) is progress
+                content = next(r for r in records if r["stage"] == "first_content_summary")
+                context_id = content["context_id"]
+    firsts = [r for r in records if r["stage"] == "first_token_summary"]
+    models = [r for r in records if r["stage"] == "first_model_content_summary"]
+    contents = [r for r in records if r["stage"] == "first_content_summary"]
+    assert len(firsts) == 2 and len(contents) == len(models) == 1
+    assert {r["request_id"] for r in firsts} == {"fresh-sdk", "followup-sdk"}
+    assert all(r["first_event_sent"] for r in firsts)
+    assert models[0]["request_id"] == "fresh-sdk"
+    assert models[0]["first_model_content_received"] is True
+    assert models[0]["first_model_content_type"] == ("thinking" if thinking_first else "text")
+    assert contents[0]["request_id"] == "fresh-sdk"
+    assert contents[0]["first_content_type"] == ("thinking" if thinking_first and expose_thinking else "text")
+    assert contents[0]["model_content_to_send_ms"] >= 0
+    assert models[0]["call_id"] == contents[0]["call_id"]
+    assert next(r for r in firsts if r["request_id"] == "fresh-sdk")["elapsed_ms"] <= contents[0]["elapsed_ms"]
+    assert "private" not in json.dumps(records)
