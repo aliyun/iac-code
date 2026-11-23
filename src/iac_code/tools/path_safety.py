@@ -6,11 +6,13 @@ import os
 import sys
 import tempfile
 from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, overload
 
-from iac_code.i18n import _
+from iac_code.i18n import _, translate_message
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult
 from iac_code.utils.platform import normalize_user_path
 
@@ -75,6 +77,24 @@ class _SensitivePaths(Sequence[str]):
 
 SENSITIVE_PATHS: Sequence[str] = _SensitivePaths()
 KNOWLEDGE_PREFIX = "knowledge://"
+_write_policy_language: ContextVar[str | None] = ContextVar("write_policy_language", default=None)
+_cwd_only_writes: ContextVar[bool] = ContextVar("cwd_only_writes", default=False)
+
+
+@contextmanager
+def request_write_policy(*, language: str | None = None, cwd_only: bool = False) -> Iterator[None]:
+    """Protect application files and optionally confine request writes to cwd."""
+    token = _write_policy_language.set(language or _write_policy_language.get() or "en")
+    cwd_token = _cwd_only_writes.set(cwd_only or _cwd_only_writes.get())
+    try:
+        yield
+    finally:
+        _cwd_only_writes.reset(cwd_token)
+        _write_policy_language.reset(token)
+
+
+def cwd_only_write_language() -> str | None:
+    return _write_policy_language.get() if _cwd_only_writes.get() else None
 
 
 def _normalize_for_platform(path: str, *, case_insensitive: bool | None = None) -> str:
@@ -196,16 +216,21 @@ def knowledge_allowed_roots(path: str, roots: list[str]) -> list[str]:
         return roots
     wiki = str(get_knowledge_root())
     return [
-        wiki if _path_is_under(wiki, root) else root for root in roots
+        wiki if _path_is_under(wiki, root) else root
+        for root in roots
         if _path_is_under(wiki, root) or _path_is_under(root, wiki)
     ]
 
 
 def _resolve_knowledge_path(path: str) -> str:
-    relative = path[len(KNOWLEDGE_PREFIX):].replace("\\", "/")
+    relative = path[len(KNOWLEDGE_PREFIX) :].replace("\\", "/")
     parts = relative.split("/")
-    if (relative.startswith("/") or ".." in parts or any(c in relative for c in ":%?#")
-        or any(ord(c) < 32 for c in relative)):
+    if (
+        relative.startswith("/")
+        or ".." in parts
+        or any(c in relative for c in ":%?#")
+        or any(ord(c) < 32 for c in relative)
+    ):
         raise ValueError("Knowledge path must stay inside knowledge://")
     root = get_knowledge_root()
     resolved = root.joinpath(*parts).resolve()
@@ -347,13 +372,17 @@ def check_read_path_with_resolution(
     """Resolve a read path once and return both its decision and physical path."""
     try:
         resolution = resolve_read_path_with_source(
-            path, cwd, relative_read_directories=relative_read_directories,
+            path,
+            cwd,
+            relative_read_directories=relative_read_directories,
         )
     except (ValueError, OSError, RuntimeError):
         if not is_knowledge_path(path):
             raise
         return ReadPathDecision(
-            "deny", reason_type="path_constraint", detail=_("path outside allowed read directories"),
+            "deny",
+            reason_type="path_constraint",
+            detail=_("path outside allowed read directories"),
         ), ReadPathResolution(path=path)
     resolved = resolution.path
 
@@ -392,6 +421,37 @@ def check_read_path_with_resolution(
     )
 
 
+def check_protected_write_path(path: str, *, cwd: str) -> ReadPathDecision | None:
+    """Apply request write boundaries before configurable permission rules."""
+    language = _write_policy_language.get()
+    if language is None:
+        return None
+    resolved = resolve_candidate(path, cwd)
+    if _cwd_only_writes.get() and not _path_is_under(resolved, cwd):
+        return ReadPathDecision(
+            "deny",
+            reason_type="path_constraint",
+            detail=translate_message("Files can only be written under {cwd}.", language=language).format(cwd="./"),
+        )
+    if _path_is_under(resolved, str(get_iac_code_application_root())):
+        return ReadPathDecision(
+            "deny",
+            reason_type="path_constraint",
+            detail=translate_message(
+                "The iac-code installation directory is read-only. Write generated files under {cwd}.",
+                language=language,
+            ).format(cwd="./"),
+        )
+    if _cwd_only_writes.get():
+        from iac_code.tools.safe_file_io import validate_safe_write_path
+
+        try:
+            validate_safe_write_path(path, cwd=cwd, language=language)
+        except (OSError, ValueError) as error:
+            return ReadPathDecision("deny", reason_type="path_constraint", detail=str(error))
+    return None
+
+
 def check_write_path(
     path: str,
     *,
@@ -401,6 +461,8 @@ def check_write_path(
     """Decide whether a write path is safe or should ask for confirmation."""
     if is_knowledge_path(path):
         return ReadPathDecision("deny", reason_type="path_constraint", detail=_("path outside allowed directories"))
+    if decision := check_protected_write_path(path, cwd=cwd):
+        return decision
     resolved = resolve_candidate(path, cwd)
 
     if _path_hits_sensitive(resolved):

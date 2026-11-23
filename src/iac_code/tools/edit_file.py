@@ -4,12 +4,19 @@ from __future__ import annotations
 
 import mimetypes
 import os
+from contextlib import ExitStack
 from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_write_path, is_knowledge_path
+from iac_code.tools.path_safety import (
+    check_protected_write_path,
+    check_write_path,
+    cwd_only_write_language,
+    is_knowledge_path,
+)
 from iac_code.tools.result_storage import RESULT_URI_PREFIX
+from iac_code.tools.safe_file_io import safe_write_target
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
@@ -85,6 +92,8 @@ class EditFileTool(Tool):
             return ToolResult.error("Tool result references are read-only.")
         if is_knowledge_path(tool_input["path"]):
             return ToolResult.error(_("path outside allowed directories"))
+        if decision := check_protected_write_path(tool_input["path"], cwd=context.cwd):
+            return ToolResult.error(decision.detail)
         path = normalize_user_path(tool_input["path"])
         old_string = tool_input["old_string"]
         new_string = tool_input["new_string"]
@@ -92,36 +101,45 @@ class EditFileTool(Tool):
         if not os.path.isabs(path):
             path = os.path.join(context.cwd, path)
 
-        if not os.path.exists(path):
-            return ToolResult.error(f"File not found: {path}")
+        with ExitStack() as stack:
+            target = None
+            try:
+                if language := cwd_only_write_language():
+                    target = stack.enter_context(safe_write_target(path, cwd=context.cwd, language=language))
+                    assert target is not None
+                    content = target.read_text()
+                else:
+                    with open(path, encoding="utf-8") as f:
+                        content = f.read()
+            except FileNotFoundError:
+                return ToolResult.error(f"File not found: {path}")
+            except Exception as e:
+                return ToolResult.error(f"Error reading file: {e}")
 
-        try:
-            with open(path, encoding="utf-8") as f:
-                content = f.read()
-        except Exception as e:
-            return ToolResult.error(f"Error reading file: {e}")
+            # Check for exact match
+            count = content.count(old_string)
+            if count == 0:
+                return ToolResult.error(
+                    f"old_string not found in {path}. Make sure the string matches exactly, "
+                    "including whitespace and indentation."
+                )
+            if count > 1:
+                return ToolResult.error(
+                    f"old_string found {count} times in {path}. It must match exactly once. "
+                    "Include more surrounding context to make the match unique."
+                )
 
-        # Check for exact match
-        count = content.count(old_string)
-        if count == 0:
-            return ToolResult.error(
-                f"old_string not found in {path}. Make sure the string matches exactly, "
-                "including whitespace and indentation."
-            )
-        if count > 1:
-            return ToolResult.error(
-                f"old_string found {count} times in {path}. It must match exactly once. "
-                "Include more surrounding context to make the match unique."
-            )
+            # Perform the replacement
+            new_content = content.replace(old_string, new_string, 1)
 
-        # Perform the replacement
-        new_content = content.replace(old_string, new_string, 1)
-
-        try:
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-        except Exception as e:
-            return ToolResult.error(f"Error writing file: {e}")
+            try:
+                if target is not None:
+                    target.write_text(new_content, newline=None)
+                else:
+                    with open(path, "w", encoding="utf-8") as f:
+                        f.write(new_content)
+            except Exception as e:
+                return ToolResult.error(f"Error writing file: {e}")
 
         return ToolResult(
             content=f"Successfully edited {path}",

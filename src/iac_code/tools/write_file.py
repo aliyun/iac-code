@@ -8,8 +8,14 @@ from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
-from iac_code.tools.path_safety import check_write_path, is_knowledge_path
+from iac_code.tools.path_safety import (
+    check_protected_write_path,
+    check_write_path,
+    cwd_only_write_language,
+    is_knowledge_path,
+)
 from iac_code.tools.result_storage import RESULT_URI_PREFIX
+from iac_code.tools.safe_file_io import safe_write_target
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
@@ -81,6 +87,8 @@ class WriteFileTool(Tool):
             return ToolResult.error("Tool result references are read-only.")
         if is_knowledge_path(tool_input["path"]):
             return ToolResult.error(_("path outside allowed directories"))
+        if decision := check_protected_write_path(tool_input["path"], cwd=context.cwd):
+            return ToolResult.error(decision.detail)
         path = normalize_user_path(tool_input["path"])
         content = tool_input["content"]
 
@@ -88,9 +96,14 @@ class WriteFileTool(Tool):
             path = os.path.join(context.cwd, path)
 
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-            with open(path, "w", encoding="utf-8", newline="") as f:
-                f.write(content)
+            if language := cwd_only_write_language():
+                with safe_write_target(path, cwd=context.cwd, language=language, create_parents=True) as target:
+                    assert target is not None
+                    target.write_text(content, newline="")
+            else:
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    f.write(content)
         except PermissionError:
             return ToolResult.error(f"Permission denied: {path}")
         except Exception as e:

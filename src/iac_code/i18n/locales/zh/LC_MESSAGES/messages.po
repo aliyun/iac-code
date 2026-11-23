@@ -13766,3 +13766,23 @@ msgstr "后台 Wiki 搜索"
 #: src/iac_code/ui/wiki_search.py
 msgid "Wiki search"
 msgstr "Wiki 搜索"
+
+#: src/iac_code/tools/path_safety.py
+msgid "The iac-code installation directory is read-only. Write generated files under {cwd}."
+msgstr "iac-code 安装目录为只读。请将生成的文件写入工作目录 {cwd} 下。"
+
+#: src/iac_code/tools/path_safety.py
+msgid "Files can only be written under {cwd}."
+msgstr "只能写入目录 {cwd} 及其子目录。"
+
+#: src/iac_code/tools/safe_file_io.py
+msgid "Safe writes do not support symbolic links, hard links, or non-regular files: {path}"
+msgstr "安全写入不支持符号链接、硬链接或非普通文件：{path}"
+
+#: src/iac_code/tools/safe_file_io.py
+msgid "The file or its directory changed during the write. Retry the operation."
+msgstr "写入期间文件或其目录发生变化，请重试。"
+
+#: src/iac_code/tools/safe_file_io.py
+msgid "Safe file writes are not supported on this platform."
+msgstr "当前平台不支持安全文件写入。"
