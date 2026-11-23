@@ -1,6 +1,7 @@
 """Tests for the ReadFile tool."""
 
 import ntpath
+from contextlib import contextmanager
 
 import pytest
 
@@ -269,7 +270,7 @@ class TestReadFileTool:
         assert "Line 3" not in result.content
 
     @pytest.mark.asyncio
-    async def test_read_file_truncates_at_max_lines(self, tmp_path, read_file_tool, monkeypatch):
+    async def test_read_file_pages_at_max_lines(self, tmp_path, read_file_tool, monkeypatch):
         monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_LINES", 3)
         test_file = tmp_path / "long.txt"
         test_file.write_text("one\ntwo\nthree\nfour\nfive\n", encoding="utf-8")
@@ -278,12 +279,12 @@ class TestReadFileTool:
         result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
 
         assert result.is_error is False
-        assert "truncated" in result.content.lower()
+        assert result.metadata["file_page"]["has_more"] is True
         assert "three" in result.content
         assert "four" not in result.content
 
     @pytest.mark.asyncio
-    async def test_read_file_truncates_at_max_bytes(self, tmp_path, read_file_tool, monkeypatch):
+    async def test_read_file_pages_at_max_bytes(self, tmp_path, read_file_tool, monkeypatch):
         monkeypatch.setattr("iac_code.tools.read_file.MAX_READ_BYTES", 8)
         test_file = tmp_path / "long.txt"
         test_file.write_text("12345\n67890\n", encoding="utf-8")
@@ -292,7 +293,7 @@ class TestReadFileTool:
         result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
 
         assert result.is_error is False
-        assert "truncated" in result.content.lower()
+        assert result.metadata["file_page"]["has_more"] is True
         assert "12345" in result.content
 
     @pytest.mark.asyncio
@@ -305,7 +306,7 @@ class TestReadFileTool:
         result = await read_file_tool.execute(tool_input={"path": str(test_file)}, context=context)
 
         assert result.is_error is False
-        assert "truncated" in result.content.lower()
+        assert result.metadata["file_page"]["has_more"] is True
         assert "é" in result.content
         assert "binary" not in result.content.lower()
 
@@ -315,43 +316,48 @@ class TestReadFileTool:
         target = tmp_path / "stream.txt"
         target.write_text("unused", encoding="utf-8")
 
+        from iac_code.tools.file_pages import open_text_no_follow as real_open
+
         class NoPreloadFile:
-            def __init__(self):
+            def __init__(self, stream):
+                self.stream = stream
                 self.readline_calls = 0
-                self.read_calls = 0
 
             def __enter__(self):
+                self.stream.__enter__()
                 return self
 
-            def __exit__(self, exc_type, exc, tb):
-                return False
+            def __exit__(self, *args):
+                return self.stream.__exit__(*args)
 
-            def readlines(self):
-                raise AssertionError("readlines should not be used")
+            def __getattr__(self, name):
+                return getattr(self.stream, name)
 
             def read(self, size=-1):
-                self.read_calls += 1
-                if size == -1:
-                    raise AssertionError("unbounded read should not be used")
-                return b"x"
+                assert size >= 0, "unbounded read should not be used"
+                return self.stream.read(size)
 
             def readline(self, size=-1):
+                assert 0 < size <= 20000
                 self.readline_calls += 1
-                if self.readline_calls > 1:
-                    raise AssertionError("reader continued after line cap")
-                return b"one\n"
+                return self.stream.readline(size)
 
-        fake_file = NoPreloadFile()
-        monkeypatch.setattr("builtins.open", lambda *args, **kwargs: fake_file)
+        target.write_text("one\n" + "x" * 100000, encoding="utf-8")
+        opened = []
 
-        context = ToolContext(cwd=str(tmp_path))
-        result = await read_file_tool.execute(tool_input={"path": str(target)}, context=context)
+        @contextmanager
+        def instrument(*args, **kwargs):
+            with real_open(*args, **kwargs) as stream:
+                wrapper = NoPreloadFile(stream)
+                opened.append(wrapper)
+                yield wrapper
 
-        assert result.is_error is False
+        monkeypatch.setattr("iac_code.tools.file_pages.open_text_no_follow", instrument)
+        result = await read_file_tool.execute(tool_input={"path": str(target)}, context=ToolContext(cwd=str(tmp_path)))
+        assert not result.is_error
         assert "one" in result.content
-        assert "truncated" in result.content.lower()
-        assert fake_file.readline_calls == 1
-        assert fake_file.read_calls == 1
+        assert result.metadata["file_page"]["has_more"]
+        assert sum(stream.readline_calls for stream in opened) == 1
 
     @pytest.mark.asyncio
     async def test_windows_posix_path_conversion(self, tmp_path, read_file_tool, monkeypatch):
@@ -525,7 +531,7 @@ class TestReadFileErrors:
         def boom(*a, **kw):
             raise PermissionError("denied")
 
-        monkeypatch.setattr("builtins.open", boom)
+        monkeypatch.setattr("iac_code.tools.file_pages.open_text_no_follow", boom)
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(tool_input={"path": str(file_path)}, context=context)
         assert result.is_error is True
@@ -539,7 +545,7 @@ class TestReadFileErrors:
         def boom(*a, **kw):
             raise UnicodeDecodeError("utf-8", b"\x00", 0, 1, "invalid")
 
-        monkeypatch.setattr("builtins.open", boom)
+        monkeypatch.setattr("iac_code.tools.file_pages.open_text_no_follow", boom)
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(tool_input={"path": str(file_path)}, context=context)
         assert result.is_error is True
@@ -553,7 +559,7 @@ class TestReadFileErrors:
         def boom(*a, **kw):
             raise RuntimeError("unexpected")
 
-        monkeypatch.setattr("builtins.open", boom)
+        monkeypatch.setattr("iac_code.tools.file_pages.open_text_no_follow", boom)
         context = ToolContext(cwd=str(tmp_path))
         result = await read_file_tool.execute(tool_input={"path": str(file_path)}, context=context)
         assert result.is_error is True

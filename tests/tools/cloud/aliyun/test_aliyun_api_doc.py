@@ -470,9 +470,7 @@ async def test_doc_fetches_the_exact_version_selected_by_the_contract_resolver()
 
 @pytest.mark.asyncio
 async def test_doc_exposes_local_ots_list_table_contract_without_openmeta_api_lookup() -> None:
-    metadata = document_metadata(
-        raw_api(product="Tablestore", version="2020-12-09", action="ListInstances")
-    )
+    metadata = document_metadata(raw_api(product="Tablestore", version="2020-12-09", action="ListInstances"))
     openmeta = FakeOpenMeta(metadata)
     resolver = ApiContractResolver(openmeta)
     tool = AliyunApiDoc(SimpleNamespace(openmeta=openmeta, contract_resolver=resolver))
@@ -1091,7 +1089,7 @@ async def _render_at_character_count(metadata: Any, target: int) -> Any:
 
 
 @pytest.mark.asyncio
-async def test_full_document_48000_is_inline_and_low_priority_overflow_is_compacted() -> None:
+async def test_full_document_keeps_all_fields_above_previous_inline_limit() -> None:
     metadata, _, _ = rpc_case()
 
     inline = await _render_at_character_count(metadata, 48_000)
@@ -1100,9 +1098,10 @@ async def test_full_document_48000_is_inline_and_low_priority_overflow_is_compac
 
     overflow = await _render_at_character_count(metadata, 48_001)
     payload = json.loads(overflow.content)
-    assert len(overflow.content) <= 48_000
+    assert len(overflow.content) == 48_001
     assert payload["parameters"][0]["schema"] == {"type": "string"}
-    assert "summary" in payload["truncated_sections"]
+    assert payload["summary"]
+    assert "truncated_sections" not in payload
     assert overflow.metadata is None
 
 
@@ -1126,7 +1125,7 @@ async def test_full_document_returns_complete_schema_when_it_cannot_fit_inline_b
 
 
 @pytest.mark.asyncio
-async def test_full_document_compaction_preserves_executable_parameter_schema() -> None:
+async def test_full_document_preserves_duplicate_schema_indexes() -> None:
     enum_value = "e" * 24_000
     raw = raw_api()
     raw["parameters"][0]["schema"] = {"type": "string", "enum": [enum_value]}
@@ -1141,7 +1140,7 @@ async def test_full_document_compaction_preserves_executable_parameter_schema() 
     payload = json.loads(result.content)
     assert result.is_error is False
     assert payload["parameters"][0]["schema"] == {"type": "string", "enum": [enum_value]}
-    assert "enum" not in payload["required_parameters"][0]
+    assert payload["required_parameters"][0]["enum"] == [enum_value]
 
 
 @pytest.mark.asyncio

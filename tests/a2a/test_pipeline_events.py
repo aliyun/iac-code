@@ -368,7 +368,6 @@ def test_pipeline_result_storage_content_is_preserved_for_aliyun_results(tmp_pat
     storage = ResultStorage(
         storage_dir=str(tmp_path / "tool-results"),
         max_inline_chars=50_000,
-        preview_chars=2_000,
     )
     new_result = storage.process("new", new_content)
     old_result = storage.process("old", old_content)
@@ -393,10 +392,11 @@ def test_pipeline_result_storage_content_is_preserved_for_aliyun_results(tmp_pat
     assert new_envelope["data"]["result"] == new_result.content
     assert old_result.is_externalized is True
     assert old_envelope["data"]["result"] == old_result.content
-    assert old_result.file_path in old_envelope["data"]["result"]
+    assert "tool-result://local/" in old_envelope["data"]["result"]
+    assert "/old.txt" in old_envelope["data"]["result"]
 
 
-def test_tool_result_preserves_externalized_infraguard_file_content_preview(tmp_path) -> None:
+def test_tool_result_preserves_externalized_infraguard_reference(tmp_path) -> None:
     translator = PipelineEventTranslator(_ctx())
     raw_template = "ROSTemplateFormatVersion: '2015-09-01'\nResources: {}\n" + ("X" * 500)
     raw_result = json.dumps(
@@ -412,12 +412,12 @@ def test_tool_result_preserves_externalized_infraguard_file_content_preview(tmp_
         ResultStorage(
             storage_dir=str(tmp_path / "tool-results"),
             max_inline_chars=10,
-            preview_chars=180,
         )
         .process("toolu-1", raw_result)
         .content
     )
-    assert "ROSTemplateFormatVersion" in preview
+    reference = preview.split("Complete output saved as ", 1)[1].splitlines()[0]
+    assert reference.startswith("tool-result://local/") and reference.endswith("/toolu-1.txt")
 
     [envelope] = translator.translate(
         ToolResultEvent(
@@ -429,9 +429,9 @@ def test_tool_result_preserves_externalized_infraguard_file_content_preview(tmp_
     )
 
     rendered = json.dumps(envelope, ensure_ascii=False)
-    assert "ROSTemplateFormatVersion" in rendered
-    assert "file_content" in rendered
-    assert "sha256-value" in rendered
+    assert reference in rendered
+    assert "file_content" not in rendered
+    assert "sha256-value" not in rendered
 
 
 def test_pipeline_warning_translates_to_non_terminal_envelope() -> None:

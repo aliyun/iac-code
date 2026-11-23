@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 
 
 _DETAILS = frozenset({"summary", "full"})
-_MAX_INLINE_CHARACTERS = 48_000
 _DOCUMENT_REGION_SENTINEL = "cn-hangzhou"
 _TRUNCATED_SECTIONS = [
     "parameters",
@@ -236,9 +235,8 @@ class AliyunApiDoc(Tool):
                 )
             )
 
-        inline_content = content if detail == "summary" else _fit_inline_document(document)
         emit_aliyun_api_doc(detail, "success")
-        return ToolResult.success(inline_content if inline_content is not None else content)
+        return ToolResult.success(content)
 
 
 def _normalize_doc_input(tool_input: Mapping[str, Any]) -> AliyunApiIdentity:
@@ -478,161 +476,3 @@ def _json_value(value: Any) -> Any:
 
 def _serialize(document: Mapping[str, Any]) -> str:
     return json.dumps(document, ensure_ascii=False, separators=(",", ":"))
-
-
-def _fit_inline_document(document: Mapping[str, Any]) -> str | None:
-    full_content = _serialize(document)
-    if len(full_content) <= _MAX_INLINE_CHARACTERS:
-        return full_content
-
-    candidate = _json_value(document)
-    truncated: list[str] = []
-
-    def serialized_if_fits() -> str | None:
-        candidate["truncated_sections"] = list(truncated)
-        content = _serialize(candidate)
-        return content if len(content) <= _MAX_INLINE_CHARACTERS else None
-
-    for section in ("static_info", "change_set", "error_codes"):
-        value = candidate.get(section)
-        if value not in (None, {}, []):
-            candidate.pop(section, None)
-            truncated.append(section)
-            if content := serialized_if_fits():
-                return content
-
-    responses = candidate.get("responses")
-    if _remove_response_annotations(responses):
-        truncated.append("response_annotations")
-        if content := serialized_if_fits():
-            return content
-
-    if _remove_document_schema_annotations(candidate):
-        truncated.append("schema_annotations")
-        if content := serialized_if_fits():
-            return content
-
-    required_parameters = candidate.get("required_parameters")
-    if _remove_required_parameter_schema_summaries(required_parameters):
-        truncated.append("required_parameter_schema_summaries")
-        if content := serialized_if_fits():
-            return content
-
-    if candidate.get("summary") not in (None, ""):
-        candidate.pop("summary", None)
-        truncated.append("summary")
-        if content := serialized_if_fits():
-            return content
-
-    if "parameters" in candidate and any(
-        section in candidate for section in ("required_parameters", "optional_parameters")
-    ):
-        candidate.pop("required_parameters", None)
-        candidate.pop("optional_parameters", None)
-        truncated.append("parameter_summary_indexes")
-        if content := serialized_if_fits():
-            return content
-
-    parameters = candidate.get("parameters")
-    if isinstance(parameters, list):
-        for field, section in (("example", "parameter_examples"), ("description", "parameter_descriptions")):
-            removed = False
-            for parameter in parameters:
-                if isinstance(parameter, dict) and parameter.get(field) is not None:
-                    parameter.pop(field, None)
-                    removed = True
-            if field == "example":
-                required_parameters = candidate.get("required_parameters")
-                if isinstance(required_parameters, list):
-                    for parameter in required_parameters:
-                        if isinstance(parameter, dict) and parameter.get(field) is not None:
-                            parameter.pop(field, None)
-                            removed = True
-            if removed:
-                truncated.append(section)
-                if content := serialized_if_fits():
-                    return content
-
-    return None
-
-
-def _remove_response_annotations(value: Any) -> bool:
-    removed = False
-    if isinstance(value, dict):
-        for key in list(value):
-            if key in {"description", "example", "examples"} or (isinstance(key, str) and key.startswith("x-")):
-                value.pop(key, None)
-                removed = True
-                continue
-            if key != "schema":
-                removed = _remove_response_annotations(value[key]) or removed
-    elif isinstance(value, list):
-        for item in value:
-            removed = _remove_response_annotations(item) or removed
-    return removed
-
-
-def _remove_document_schema_annotations(document: Mapping[str, Any]) -> bool:
-    removed = False
-    parameters = document.get("parameters")
-    if isinstance(parameters, list):
-        for parameter in parameters:
-            if isinstance(parameter, dict):
-                removed = _remove_schema_annotations(parameter.get("schema")) or removed
-    removed = _remove_nested_response_schema_annotations(document.get("responses")) or removed
-    components = document.get("components")
-    if isinstance(components, dict):
-        schemas = components.get("schemas")
-        if isinstance(schemas, dict):
-            for schema in schemas.values():
-                removed = _remove_schema_annotations(schema) or removed
-    return removed
-
-
-def _remove_nested_response_schema_annotations(value: Any) -> bool:
-    removed = False
-    if isinstance(value, dict):
-        for key, item in value.items():
-            if key == "schema":
-                removed = _remove_schema_annotations(item) or removed
-            else:
-                removed = _remove_nested_response_schema_annotations(item) or removed
-    elif isinstance(value, list):
-        for item in value:
-            removed = _remove_nested_response_schema_annotations(item) or removed
-    return removed
-
-
-def _remove_schema_annotations(value: Any) -> bool:
-    removed = False
-    if isinstance(value, dict):
-        for key in list(value):
-            if key in {
-                "description",
-                "example",
-                "examples",
-                "externalDocs",
-                "title",
-            } or (isinstance(key, str) and key.startswith("x-")):
-                value.pop(key, None)
-                removed = True
-                continue
-            removed = _remove_schema_annotations(value[key]) or removed
-    elif isinstance(value, list):
-        for item in value:
-            removed = _remove_schema_annotations(item) or removed
-    return removed
-
-
-def _remove_required_parameter_schema_summaries(value: Any) -> bool:
-    removed = False
-    if not isinstance(value, list):
-        return False
-    for parameter in value:
-        if not isinstance(parameter, dict):
-            continue
-        for field in ("type", "format", "enum", "example"):
-            if field in parameter:
-                parameter.pop(field, None)
-                removed = True
-    return removed

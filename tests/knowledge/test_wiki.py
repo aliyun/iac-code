@@ -76,8 +76,9 @@ async def test_wiki_grep_and_reads_do_not_include_administrative_records(tmp_pat
     context = ToolContext(cwd=str(tmp_path))
     found = await GrepTool().execute(tool_input=arguments, context=context)
     assert not found.is_error and found.content == "No matches"
-    body = await ReadFileTool().execute(tool_input={"path": "knowledge://clouds/aliyun/products/ecs/ecs.md"},
-                                        context=context)
+    body = await ReadFileTool().execute(
+        tool_input={"path": "knowledge://clouds/aliyun/products/ecs/ecs.md"}, context=context
+    )
     assert not body.is_error and "     1\t# 阿里云 ECS 选型指南" in body.content
     assert "aliases:" not in body.content
 
@@ -113,11 +114,16 @@ def test_migrated_template_documents_preserve_content_without_skill_aliases():
         original_path = PACKAGE / document["source"].removeprefix("src/iac_code/")
         for legacy in (original_path, PACKAGE / "pipeline/selling/references" / target.name):
             assert not legacy.exists() and not legacy.is_symlink(), legacy
-        text = target.read_text(encoding="utf-8").replace(
-            "(knowledge://clouds/aliyun/products/ros/template-parameters.md)", "(template-parameters.md)",
-        ).replace(
-            "使用 `iac-aliyun` Skill 提供的脚本，运行 `python <Skill目录>/scripts/tf2ros.py",
-            "运行 `python ../scripts/tf2ros.py",
+        text = (
+            target.read_text(encoding="utf-8")
+            .replace(
+                "(knowledge://clouds/aliyun/products/ros/template-parameters.md)",
+                "(template-parameters.md)",
+            )
+            .replace(
+                "使用 `iac-aliyun` Skill 提供的脚本，运行 `python <Skill目录>/scripts/tf2ros.py",
+                "运行 `python ../scripts/tf2ros.py",
+            )
         )
         assert hashlib.sha256(text.encode()).hexdigest() == document["sha256"], document
 
@@ -182,8 +188,19 @@ async def test_shared_coupon_and_solution_assets_read_without_skill_roots(tmp_pa
         assert (await tool.check_permissions(arguments, permission)).behavior == "allow"
         result = await tool.execute(tool_input=arguments, context=context)
         assert not result.is_error, result.content
-    # Materialize the full YAML returned by read_file in the project workspace.
-    body = re.sub(r"(?m)^ *\d+\t", "", result.content.split("\n\n", 1)[1])
+    # Materialize every page, including a continuation within a long line.
+    chunks = []
+    while True:
+        chunks.append(re.sub(r"(?m)^ *\d+(?::\d+)?\t", "", result.content.split("\n\n", 1)[1]))
+        page = result.metadata["file_page"]
+        if not page["has_more"]:
+            break
+        result = await tool.execute(
+            tool_input={**arguments, "cursor": page["next_cursor"]},
+            context=context,
+        )
+        assert not result.is_error
+    body = "".join(chunks)
     output = await WriteFileTool().execute(tool_input={"path": "web.yml", "content": body}, context=context)
     assert not output.is_error
     assert (tmp_path / "web.yml").read_bytes() == (WIKI / "clouds/aliyun/solutions/iac-code-web.ros.yml").read_bytes()
@@ -262,7 +279,10 @@ def test_production_steps_share_entry_without_expanding_tool_whitelists(name, tm
         prompt = executor._build_full_system_prompt(step, context)
         assert prompt.count("# Shared Technical Knowledge Base") == 1
         if step.step_id not in {
-            "intent_parsing", "confirm_and_select", "solution_planning_and_selection", "materialize_selected_candidate",
+            "intent_parsing",
+            "confirm_and_select",
+            "solution_planning_and_selection",
+            "materialize_selected_candidate",
         }:
             continue
         effective = executor._build_step_tools(step, context)
@@ -271,9 +291,14 @@ def test_production_steps_share_entry_without_expanding_tool_whitelists(name, tm
         else:
             assert effective.get("read_file") is not None and effective.get("grep") is not None
         checked.add(step.step_id)
-    assert checked == ({"intent_parsing", "confirm_and_select"} if name == "selling" else {
-        "solution_planning_and_selection", "materialize_selected_candidate",
-    })
+    assert checked == (
+        {"intent_parsing", "confirm_and_select"}
+        if name == "selling"
+        else {
+            "solution_planning_and_selection",
+            "materialize_selected_candidate",
+        }
+    )
 
 
 @pytest.mark.asyncio
@@ -331,10 +356,23 @@ async def test_search_backends_compare_untruncated_sets_and_refine_full_results(
     monkeypatch.setattr(grep, "_is_rg_available", lambda: False)
     full = await tool.execute(tool_input={"pattern": "shared-term", "path": str(tmp_path)}, context=context)
     bounded = await tool.execute(
-        tool_input={"pattern": "shared-term", "path": str(tmp_path), "max_results": 8}, context=context,
+        tool_input={"pattern": "shared-term", "path": str(tmp_path), "max_results": 8},
+        context=context,
     )
     assert len(full.content.splitlines()) == 10
-    assert len(bounded.content.splitlines()) == 8  # Full means possibly incomplete, never proof of absence.
+    assert bounded.metadata["search_page"]["count"] == 8
+    assert bounded.metadata["search_page"]["has_more"]
+    continuation = await tool.execute(
+        tool_input={
+            "pattern": "shared-term",
+            "path": str(tmp_path),
+            "max_results": 8,
+            "cursor": bounded.metadata["search_page"]["next_cursor"],
+        },
+        context=context,
+    )
+    assert continuation.metadata["search_page"]["count"] == 2
+    assert not continuation.metadata["search_page"]["has_more"]
     refined = await tool.execute(tool_input={"pattern": "unique-9", "path": str(tmp_path)}, context=context)
     assert refined.content == str(tmp_path / "page-9.md")
     if native_available:

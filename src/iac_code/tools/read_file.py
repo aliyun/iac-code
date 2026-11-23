@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import codecs
 import os
 from typing import Any
 
 from iac_code.i18n import _
 from iac_code.tools import path_safety
 from iac_code.tools.base import Tool, ToolContext, ToolResult
+from iac_code.tools.file_pages import read_text_page
 from iac_code.tools.path_safety import check_read_path, knowledge_uri, resolve_read_path
+from iac_code.tools.result_storage import RESULT_URI_PREFIX, resolve_result_reference
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 
 MAX_READ_BYTES = 10 * 1024 * 1024
@@ -41,7 +42,10 @@ class ReadFileTool(Tool):
             "Call this tool directly instead of running cat/head/tail through bash. "
             "You can optionally specify a line range "
             "to read only a portion of the file. Use start_line and end_line for "
-            "large files to read specific sections."
+            "large files to read specific sections. Results are paginated within 20,000 characters. "
+            "Use tool-result:// references from any tool output as paths. "
+            "Use start_char/end_char (0-based, end exclusive) for long lines. "
+            "Repeat the same path and range with the returned cursor to continue without losing content."
         )
 
     @property
@@ -51,7 +55,7 @@ class ReadFileTool(Tool):
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "File path: absolute, relative to cwd, or knowledge:// for local Wiki files.",
+                    "description": "File path, knowledge:// path, or current-session tool-result:// reference.",
                 },
                 "start_line": {
                     "type": "integer",
@@ -61,6 +65,10 @@ class ReadFileTool(Tool):
                     "type": "integer",
                     "description": "The ending line number to read to (1-based, inclusive). Optional.",
                 },
+                "start_char": {"type": "integer", "minimum": 0},
+                "end_char": {"type": "integer", "minimum": 0},
+                "max_chars": {"type": "integer", "minimum": 2048, "maximum": 20000},
+                "cursor": {"type": "string"},
             },
             "required": ["path"],
         }
@@ -86,6 +94,13 @@ class ReadFileTool(Tool):
                 reason=PermissionDecisionReason(type="path_constraint", detail=message),
             )
 
+        if path.startswith(RESULT_URI_PREFIX):
+            try:
+                resolve_result_reference(path, context.tool_result_directory)
+            except (ValueError, OSError):
+                return PermissionResult(behavior="deny", message="Invalid current-session tool result reference.")
+            return PermissionResult(behavior="allow")
+
         decision = check_read_path(
             path,
             cwd=context.cwd,
@@ -100,100 +115,36 @@ class ReadFileTool(Tool):
         return decision.to_permission_result()
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        raw_path = tool_input["path"]
         try:
-            path = _resolve_input_path(
-                tool_input["path"], context.cwd, relative_read_directories=context.relative_read_directories,
+            path = (
+                resolve_result_reference(raw_path, context.tool_result_directory)
+                if raw_path.startswith(RESULT_URI_PREFIX)
+                else _resolve_input_path(
+                    raw_path,
+                    context.cwd,
+                    relative_read_directories=context.relative_read_directories,
+                )
             )
+            from iac_code.a2a.backup import run_sync_fenced
+
+            content, page = await run_sync_fenced(
+                read_text_page,
+                path,
+                raw_path if raw_path.startswith(RESULT_URI_PREFIX) else knowledge_uri(path),
+                tool_input,
+                max_read_bytes=MAX_READ_BYTES,
+                max_read_lines=MAX_READ_LINES,
+            )
+            return ToolResult(content=content, metadata={"file_page": page})
+        except FileNotFoundError:
+            return ToolResult.error(f"File not found: {locals().get('path', raw_path)}")
+        except PermissionError:
+            return ToolResult.error(f"Permission denied: {raw_path}")
+        except UnicodeDecodeError:
+            return ToolResult.error(f"Cannot read binary file: {raw_path}")
         except (ValueError, OSError, RuntimeError) as error:
             return ToolResult.error(str(error))
-        display_path = knowledge_uri(path)
-        start_line = tool_input.get("start_line")
-        end_line = tool_input.get("end_line")
-
-        try:
-            selected_lines, total_lines, truncated = self._read_limited_lines(path, start_line, end_line)
-        except FileNotFoundError:
-            return ToolResult.error(f"File not found: {display_path}")
-        except PermissionError:
-            return ToolResult.error(f"Permission denied: {display_path}")
-        except UnicodeDecodeError:
-            return ToolResult.error(f"Cannot read binary file: {display_path}")
-        except Exception as e:
-            return ToolResult.error(f"Error reading file: {e}")
-
-        # Apply line range if specified
-        if start_line is not None or end_line is not None:
-            start = max(1, start_line or 1)
-            end = min(total_lines, end_line or total_lines)
-            # Add line numbers
-            numbered = [f"{line_number:>6}\t{line}" for line_number, line in selected_lines]
-            content = "".join(numbered)
-            suffix = ", truncated" if truncated else ""
-            return ToolResult.success(
-                f"File: {display_path} (lines {start}-{end} of {total_lines}{suffix})\n\n{content}"
-            )
-
-        # Return full file
-        if total_lines > 0:
-            numbered = [f"{line_number:>6}\t{line}" for line_number, line in selected_lines]
-            content = "".join(numbered)
-        else:
-            content = "(empty file)"
-
-        suffix = ", truncated" if truncated else ""
-        return ToolResult.success(f"File: {display_path} ({total_lines} lines{suffix})\n\n{content}")
-
-    def _read_limited_lines(
-        self,
-        path: str,
-        start_line: int | None,
-        end_line: int | None,
-    ) -> tuple[list[tuple[int, str]], int, bool]:
-        selected: list[tuple[int, str]] = []
-        total_lines = 0
-        bytes_read = 0
-        truncated = False
-        start = max(1, start_line or 1)
-        decoder = codecs.getincrementaldecoder("utf-8")()
-
-        with open(path, "rb") as f:
-            while True:
-                if total_lines >= MAX_READ_LINES:
-                    truncated = bool(f.read(1))
-                    break
-
-                remaining_bytes = MAX_READ_BYTES - bytes_read
-                if remaining_bytes <= 0:
-                    truncated = bool(f.read(1))
-                    break
-
-                raw_line = f.readline(remaining_bytes + 1)
-                if not raw_line:
-                    break
-
-                if len(raw_line) > remaining_bytes:
-                    raw_line = raw_line[:remaining_bytes]
-                    truncated = True
-
-                bytes_read += len(raw_line)
-                total_lines += 1
-                line = decoder.decode(raw_line, final=False)
-                if total_lines >= start and (end_line is None or total_lines <= end_line):
-                    selected.append((total_lines, line))
-
-                if truncated:
-                    break
-
-            if not truncated:
-                remainder = decoder.decode(b"", final=True)
-                if remainder and total_lines >= start and (end_line is None or total_lines <= end_line):
-                    if selected and selected[-1][0] == total_lines:
-                        line_number, line = selected[-1]
-                        selected[-1] = (line_number, line + remainder)
-                    else:
-                        selected.append((total_lines, remainder))
-
-        return selected, total_lines, truncated
 
     # UI rendering methods
     def render_tool_use_message(self, input: dict, *, verbose: bool = False):
@@ -211,8 +162,8 @@ class ReadFileTool(Tool):
     def render_tool_result_message(self, output: str, *, is_error: bool = False, verbose: bool = False):
         if is_error:
             return output
-        lines = output.splitlines()
-        total = len(lines) - 2  # subtract header + blank line
+        body = output.split("\n\n", 1)
+        total = len(body[1].splitlines()) if len(body) == 2 else max(0, len(output.splitlines()) - 2)
         if total < 0:
             total = 0
         if verbose:

@@ -9,6 +9,7 @@ from typing import Any
 from iac_code.i18n import _
 from iac_code.tools.base import Tool, ToolContext, ToolResult
 from iac_code.tools.path_safety import check_write_path, is_knowledge_path
+from iac_code.tools.result_storage import RESULT_URI_PREFIX
 from iac_code.types.permissions import PermissionDecisionReason, PermissionResult, ToolPermissionContext
 from iac_code.utils.platform import normalize_user_path
 
@@ -51,6 +52,9 @@ class WriteFileTool(Tool):
             tool_input["path"] = tool_input.pop("file_path")
 
     async def check_permissions(self, input: dict, context=None) -> PermissionResult:
+        path = input.get("path") or input.get("file_path")
+        if isinstance(path, str) and path.startswith(RESULT_URI_PREFIX):
+            return PermissionResult(behavior="deny", message="Tool result references are read-only.")
         if not isinstance(context, ToolPermissionContext):
             return await super().check_permissions(input, context)
 
@@ -73,6 +77,8 @@ class WriteFileTool(Tool):
         return await super().check_permissions(input, context)
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
+        if tool_input["path"].startswith(RESULT_URI_PREFIX):
+            return ToolResult.error("Tool result references are read-only.")
         if is_knowledge_path(tool_input["path"]):
             return ToolResult.error(_("path outside allowed directories"))
         path = normalize_user_path(tool_input["path"])

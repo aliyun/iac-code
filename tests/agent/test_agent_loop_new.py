@@ -192,14 +192,14 @@ def test_tool_result_metadata_marks_content_state_and_persists_only_internal_all
     )
 
     assert event_metadata is not None
-    assert event_metadata["aliyun_http"]["content_state"] == "externalized_preview"
+    assert event_metadata["aliyun_http"]["content_state"] == "externalized_reference"
     assert "unknown" not in event_metadata["aliyun_http"]
     assert event_metadata["ros_validation"] == {"valid": True}
     assert event_metadata["private_plugin_value"] is not None
 
     block_metadata = AgentLoop._tool_result_block_metadata(processed, event_metadata)
 
-    assert block_metadata["aliyun_http"]["content_state"] == "externalized_preview"
+    assert block_metadata["aliyun_http"]["content_state"] == "externalized_reference"
     assert block_metadata[EXTERNALIZED_RESULT_PATH_METADATA_KEY] == str(processed.file_path)
     assert "ros_validation" not in block_metadata
     assert "private_plugin_value" not in block_metadata

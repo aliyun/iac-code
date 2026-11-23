@@ -120,7 +120,8 @@ def test_convert_mcp_result_stores_large_text_without_inlining(monkeypatch, tmp_
     assert artifact["kind"] == "text"
     assert artifact["mime_type"] == "text/plain"
     assert artifact["size"] == len(large_text.encode("utf-8"))
-    assert str(artifact_path) in result.content
+    assert "tool-result://local/" in result.content
+    assert "/mcp/" in result.content
 
 
 def test_convert_mcp_result_stores_large_resource_text_with_mime_extension(monkeypatch, tmp_path: Path) -> None:
