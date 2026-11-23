@@ -97,6 +97,9 @@ class _RecordingExecutor:
         type(self).constructions.append(kwargs)
 
     async def execute(self, **_kwargs: Any) -> None:
+        from iac_code.services.wiki_auto_search import enabled
+
+        assert enabled() is True
         return None
 
 
@@ -151,6 +154,16 @@ def _pipeline_session(**overrides: Any) -> Any:
     }
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+@pytest.mark.asyncio
+async def test_web_pipeline_enables_wiki_without_changing_the_remote_default(monkeypatch):
+    from iac_code.services.wiki_auto_search import enabled
+
+    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", "false")
+    assert enabled() is False
+    await _executor_kwargs_for_session(monkeypatch, _pipeline_session())
+    assert enabled() is False
 
 
 @pytest.mark.asyncio

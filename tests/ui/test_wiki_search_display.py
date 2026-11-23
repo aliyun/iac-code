@@ -78,6 +78,22 @@ def test_web_steered_query_keeps_its_exact_owner():
     assert event["payload"]["ownerMessageId"] == "user-t1-steer-abc"
 
 
+@pytest.mark.parametrize("saved", [False, True])
+def test_wiki_projection_keeps_saved_hit_excerpts_without_rereading_documents(saved, monkeypatch):
+    from iac_code.ui.wiki_search import wiki_projection
+
+    data = snapshot()
+    if saved:
+        data["hits"][0]["lines"] = [
+            {"number": 42, "text": "The **B70** has 32 GB memory.", "score": 0.9},
+            {"number": 0, "text": "invalid line"},
+            {"number": 43, "text": None},
+        ]
+    monkeypatch.setattr("pathlib.Path.read_text", lambda *args, **kwargs: pytest.fail("must use saved excerpts"))
+    files = wiki_projection(data)["files"]
+    assert files[0]["lines"] == ([{"number": 42, "text": "The **B70** has 32 GB memory."}] if saved else [])
+
+
 def test_web_history_projects_snapshot_without_extra_assistant_message(tmp_path, monkeypatch):
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     cwd = tmp_path / "project"

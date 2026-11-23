@@ -50,6 +50,24 @@ def test_create_agent_runtime_minimal_options(tmp_path, monkeypatch) -> None:
     assert runtime.session_id  # non-empty
 
 
+@pytest.mark.parametrize("env", [None, "false", "true"])
+@pytest.mark.parametrize("web_wiki", [False, True])
+def test_wiki_runtime_default_does_not_require_an_environment_flag(tmp_path, monkeypatch, env, web_wiki):
+    from contextlib import nullcontext
+
+    from iac_code.services.wiki_auto_search import local_ui_auto_search
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
+    if env is None:
+        monkeypatch.delenv("IAC_CODE_WIKI_AUTO_SEARCH", raising=False)
+    else:
+        monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", env)
+    with local_ui_auto_search() if web_wiki else nullcontext():
+        runtime = create_agent_runtime(AgentFactoryOptions(model="offline", cwd=str(tmp_path)))
+    assert (runtime.agent_loop._wiki_search is not None) is (web_wiki or env == "true")
+
+
 @pytest.mark.parametrize(
     ("has_aliyun_credentials", "selector_capability_enabled", "selectors_expected"),
     (

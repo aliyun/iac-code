@@ -4674,3 +4674,43 @@ msgstr "Geschätzte Kosten"
 #~ "Die Rolle wurde erstellt, aber die "
 #~ "aktuelle Identität benötigt noch die "
 #~ "Berechtigung sts:AssumeRole."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Search keywords"
+msgstr "Suchbegriffe"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Matched documents"
+msgstr "Gefundene Dokumente"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search in progress"
+msgstr "Wiki-Suche läuft"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search completed"
+msgstr "Wiki-Suche abgeschlossen"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search not needed"
+msgstr "Keine Wiki-Suche erforderlich"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search failed"
+msgstr "Wiki-Suche fehlgeschlagen"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search cancelled"
+msgstr "Wiki-Suche abgebrochen"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search interrupted"
+msgstr "Wiki-Suche unterbrochen"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Matched {count} files"
+msgstr "{count} Dateien gefunden"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Duration: {seconds}s"
+msgstr "Dauer: {seconds} s"

@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from iac_code.i18n import _
 from iac_code.pipeline.engine.user_input import PipelineInputContent, normalize_pipeline_user_input
+from iac_code.services.wiki_auto_search import async_local_ui_auto_search
 from iac_code.web.events import normalize_event_payload
 from iac_code.web.pipeline import PipelineCandidateSelection
 from iac_code.web.pipeline_transcript import PipelineTranscriptTranslator
@@ -383,6 +384,7 @@ class A2APipelineActionRunner:
             recovered=recovered,
         )
 
+    @async_local_ui_auto_search()
     async def _execute(
         self,
         session: Any,
