@@ -10,6 +10,8 @@ from typing import Any
 ALIYUN_PROMPT_MARKER = "[E2E_ALIYUN]"
 PIPELINE_PROMPT_MARKER = "[E2E_PIPELINE]"
 FINAL_RESPONSE = "E2E_RESPONSE_OK"
+RELOAD_PROMPT_MARKER = "[E4_RELOAD]"
+RELOAD_RESPONSE = "E2E_RELOAD_OK"
 FIXTURE_MODEL = "e2e-fixture-model"
 
 PIPELINE_TEMPLATE_PATH = "templates/1-contract-vpc.yml"
@@ -65,6 +67,20 @@ Outputs:
 """
 
 
+def is_wiki_request(payload: dict[str, Any]) -> bool:
+    from iac_code.services.wiki_auto_search import PROMPT
+
+    messages = payload.get("messages")
+    return (
+        payload.get("stream") is not True
+        and isinstance(messages, list)
+        and any(
+            isinstance(message, dict) and message.get("role") == "system" and message.get("content") == PROMPT
+            for message in messages
+        )
+    )
+
+
 class DeterministicOpenAIServer:
     """A narrow OpenAI-compatible SSE endpoint for contract E2E scenarios."""
 
@@ -118,7 +134,11 @@ class _Handler(BaseHTTPRequestHandler):
         if response_delay:
             time.sleep(response_delay)
         if payload.get("stream") is not True:
-            self._write_non_streaming_response()
+            self._write_non_streaming_response(
+                json.dumps({"keywords": [{"text": "VPC", "relevance": 1.0}]})
+                if is_wiki_request(payload)
+                else "E2E contract chat"
+            )
             return
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
@@ -135,6 +155,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._write_pipeline_response(payload)
             elif last_role == "tool":
                 self._write_text_response()
+            elif RELOAD_PROMPT_MARKER in last_user_text:
+                self._write_text_response(RELOAD_RESPONSE)
             elif ALIYUN_PROMPT_MARKER in last_user_text:
                 self._write_tool_response()
             else:
@@ -146,7 +168,7 @@ class _Handler(BaseHTTPRequestHandler):
             # Cancellation scenarios intentionally close the streaming response.
             return
 
-    def _write_non_streaming_response(self) -> None:
+    def _write_non_streaming_response(self, content: str) -> None:
         body = json.dumps(
             {
                 "id": "chatcmpl-e2e-title",
@@ -156,7 +178,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "choices": [
                     {
                         "index": 0,
-                        "message": {"role": "assistant", "content": "E2E contract chat"},
+                        "message": {"role": "assistant", "content": content},
                         "finish_reason": "stop",
                     }
                 ],

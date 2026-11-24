@@ -33,7 +33,10 @@ from scripts.repl.e2e.deterministic_openai_server import (  # noqa: E402
     ALIYUN_PROMPT_MARKER,
     FINAL_RESPONSE,
     FIXTURE_MODEL,
+    RELOAD_PROMPT_MARKER,
+    RELOAD_RESPONSE,
     DeterministicOpenAIServer,
+    is_wiki_request,
 )
 from scripts.repl.e2e.run_contract_scenarios import (  # noqa: E402
     EXPECTED_BODY,
@@ -79,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         "mode": "normal",
         "provider": "openai_compatible",
         "model": FIXTURE_MODEL,
-        "expected_provider_attempts": 4,
+        "expected_provider_attempts": 6,
         "process_epochs": [],
         "base_url": base_url,
     }
@@ -141,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         _stop_web_server(server, timeout=args.timeout)
         server = None
         epoch1_records = observe.wait_for(
-            lambda records: _terminal_count(records) >= 3 and _has_request_metrics(records),
+            lambda records: _terminal_count(records) >= 4 and _has_request_metrics(records),
             timeout=args.timeout,
         )
         epoch1_end = len(epoch1_records)
@@ -168,28 +171,31 @@ def main(argv: list[str] | None = None) -> int:
             base_url,
             "POST",
             _session_path(web_session_id, "/messages"),
-            {"text": "请只回复恢复成功 [E4_RELOAD]"},
+            {"text": "请只回复恢复成功 " + RELOAD_PROMPT_MARKER},
         )
         public_payloads.append(followup)
         final_transcript = _wait_for_provider_count_and_transcript(
             base_url,
             web_session_id,
             provider,
-            expected_requests=4,
-            expected_text=FINAL_RESPONSE,
+            expected_requests=6,
+            expected_text=RELOAD_RESPONSE,
             timeout=args.timeout,
         )
         public_payloads.append(final_transcript)
         provider_requests = provider.requests()
-        checks["reload follow-up used same session"] = len(provider_requests) == 4
-        checks["Web title used one non-streaming provider request"] = sum(
-            request.get("stream") is not True for request in provider_requests
-        ) == 1
+        checks["reload follow-up used same session"] = len(provider_requests) == 6
+        checks["reload transcript rendered the new reply"] = _contains_text(final_transcript, RELOAD_RESPONSE)
+        checks["Web title used one non-streaming provider request"] = (
+            sum(request.get("stream") is not True and not is_wiki_request(request) for request in provider_requests)
+            == 1
+        )
+        checks["Web Wiki extracted keywords for both turns"] = sum(map(is_wiki_request, provider_requests)) == 2
 
         _stop_web_server(server, timeout=args.timeout)
         server = None
         all_records = observe.wait_for(
-            lambda records: _terminal_count(records[epoch1_end:]) >= 1 and _has_request_metrics(records[epoch1_end:]),
+            lambda records: _terminal_count(records[epoch1_end:]) >= 2 and _has_request_metrics(records[epoch1_end:]),
             timeout=args.timeout,
         )
         epoch2_records = all_records[epoch1_end:]
@@ -216,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
             all_records[:epoch1_end],
             required_attributes={"iac_code.mode": "normal"},
         )
-        epoch1_title_records = _records_for_request_spans(
+        epoch1_preparation_records = _records_for_request_spans(
             all_records[:epoch1_end],
             required_attributes={"iac_code.mode": None},
         )
@@ -227,23 +233,37 @@ def main(argv: list[str] | None = None) -> int:
             expected_model=TELEMETRY_MODEL,
             expected_span_attributes={"iac_code.mode": "normal", "gen_ai.session.id": f"iac_sess_{session_id}"},
         )
-        telemetry_title = audit_provider_attempts(
-            epoch1_title_records,
-            expected_attempts=1,
+        telemetry_preparation = audit_provider_attempts(
+            epoch1_preparation_records,
+            expected_attempts=2,
             expected_provider="openai",
             expected_model=TELEMETRY_MODEL,
             expected_span_attributes={"gen_ai.session.id": f"iac_sess_{session_id}"},
         )
         telemetry2 = audit_provider_attempts(
-            epoch2_records,
+            _records_for_request_spans(epoch2_records, required_attributes={"iac_code.mode": "normal"}),
             expected_attempts=1,
             expected_provider="openai",
             expected_model=TELEMETRY_MODEL,
             expected_span_attributes={"iac_code.mode": "normal", "gen_ai.session.id": f"iac_sess_{session_id}"},
         )
+        telemetry_wiki2 = audit_provider_attempts(
+            _records_for_request_spans(epoch2_records, required_attributes={"iac_code.mode": None}),
+            expected_attempts=1,
+            expected_provider="openai",
+            expected_model=TELEMETRY_MODEL,
+            expected_span_attributes={"gen_ai.session.id": f"iac_sess_{session_id}"},
+        )
         telemetry = {
-            "passed": telemetry1["passed"] and telemetry_title["passed"] and telemetry2["passed"],
-            "process_epochs": {"initial": telemetry1, "initial_title": telemetry_title, "reload": telemetry2},
+            "passed": all(
+                audit["passed"] for audit in (telemetry1, telemetry_preparation, telemetry2, telemetry_wiki2)
+            ),
+            "process_epochs": {
+                "initial": telemetry1,
+                "initial_preparation": telemetry_preparation,
+                "reload": telemetry2,
+                "reload_wiki": telemetry_wiki2,
+            },
         }
         (run_dir / "telemetry-audit.json").write_text(
             json.dumps(telemetry, ensure_ascii=False, indent=2), encoding="utf-8"
