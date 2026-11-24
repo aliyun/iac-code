@@ -3,6 +3,7 @@ import hashlib
 import json
 import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -1323,6 +1324,8 @@ class _ActiveModelStopCase:
         (True, None),
         (True, "wiki"),
         (True, "wiki-interrupted"),
+        (True, "web-wiki"),
+        (True, "web-wiki-interrupted"),
         (True, "wiki-custom-adapter"),
         (True, "wiki-retry"),
         (True, "checkpoint-clock"),
@@ -1371,8 +1374,15 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
     cwd.mkdir()
     monkeypatch.setenv("IAC_CODE_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("IAC_CODE_CONFIG_BACKUP_DIR", str(tmp_path / "shared"))
-    wiki_enabled = fault is not None and fault.startswith("wiki")
-    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", str(wiki_enabled).lower())
+    from iac_code.services.wiki_auto_search import local_ui_auto_search
+
+    local_ui_wiki = fault is not None and fault.startswith("web-wiki")
+    wiki_fault = fault.removeprefix("web-") if fault else ""
+    wiki_enabled = wiki_fault.startswith("wiki")
+    if local_ui_wiki:
+        monkeypatch.delenv("IAC_CODE_WIKI_AUTO_SEARCH", raising=False)
+    else:
+        monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", str(wiki_enabled).lower())
     if wiki_enabled:
         (cwd / "knowledge").mkdir()
         (cwd / "knowledge" / "index.md").write_text("# Offline Wiki\nNo matching resources.\n", encoding="utf-8")
@@ -1415,7 +1425,7 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
     storage.ensure_v2_session_dir_for_new_session(str(cwd), "session-1")
     service = StagedSessionBackupService(tmp_path / "staging", storage, retry_delays=())
     service.initialize_session(str(cwd), "session-1")
-    model = _WaitingFirstModel(fault=fault)
+    model = _WaitingFirstModel(fault=wiki_fault if local_ui_wiki else fault)
     provider = MagicMock()
     provider.get_model_name.return_value = "test-model"
     provider.stream = model.stream
@@ -1482,14 +1492,15 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
     )
     control.bind_session("session-1")
     case.control = control
-    active = asyncio.create_task(case.consume())
+    with local_ui_auto_search() if local_ui_wiki else nullcontext():
+        active = asyncio.create_task(case.consume())
     owner.active_task = active
     context.active_task_id = owner.task_id
     resumed = None
     control_service = None
     try:
         await asyncio.wait_for(model.entered.wait(), timeout=3)
-        if fault == "wiki":
+        if wiki_fault == "wiki":
             assert len(model.wiki_requests) == 1
             work = runner._step_executor.current_agent_loop._wiki_work
             assert work.snapshot["status"] == "no_matches" and work.task.done()
@@ -1577,6 +1588,8 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
             None,
             "wiki",
             "wiki-interrupted",
+            "web-wiki",
+            "web-wiki-interrupted",
             "checkpoint-clock",
             "sdk-retry",
             "supplement",
@@ -1615,7 +1628,8 @@ async def test_first_model_stop_reentry_continues_real_canceled_runner(
             request.message.message_id = "reentry-1"
             model.entered.clear()
             event_queue = FakeEventQueue()
-            resumed = asyncio.create_task(public_executor.execute(request, event_queue))
+            with local_ui_auto_search() if local_ui_wiki else nullcontext():
+                resumed = asyncio.create_task(public_executor.execute(request, event_queue))
             if fault == "seed-identity-change":
                 await resumed
                 runner = case.successor_runner

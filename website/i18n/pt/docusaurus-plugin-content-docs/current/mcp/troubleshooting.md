@@ -170,7 +170,7 @@ O OAuth flow iniciou, mas nao terminou corretamente: o callback URL pode estar i
 ter expirado ou o authorization server pode ter retornado um erro. Se um novo flow falhar antes de concluir,
 o IaC Code restaura o auth state anterior.
 
-Tente **Autenticar** ou **Autenticar novamente** em **Plugins → MCP**. Limpe a autenticação apenas se o estado salvo estiver obsoleto. Equivalentes CLI:
+Tente **Autenticar** ou **Reautenticar** em **Plugins → MCP**. Limpe a autenticação apenas se o estado salvo estiver obsoleto. Equivalentes CLI:
 
 ```bash
 iac-code mcp auth name --scope user
@@ -188,7 +188,7 @@ Symptom:
 invalid_client
 ```
 
-O iac-code limpa o estado inválido do cliente e dos tokens. Selecione **Autenticar novamente** em **Plugins → MCP** ou use:
+O iac-code limpa o estado inválido do cliente e dos tokens. Selecione **Reautenticar** em **Plugins → MCP** ou use:
 
 ```bash
 iac-code mcp auth name
@@ -202,7 +202,7 @@ Symptom:
 insufficient_scope
 ```
 
-O servidor exige scopes OAuth adicionais. Conclua o link de autorização oferecido na conversa atual para conceder os scopes solicitados. **Plugins → MCP → Autenticar novamente** e `iac-code mcp auth name` iniciam a autorização normal, sem scopes exclusivos do challenge de uma sessão anterior.
+O servidor exige scopes OAuth adicionais. Conclua o link de autorização oferecido na conversa atual para conceder os scopes solicitados. **Plugins → MCP → Reautenticar** e `iac-code mcp auth name` iniciam a autorização normal, sem scopes exclusivos do challenge de uma sessão anterior.
 
 ## Scope Ambiguity
 

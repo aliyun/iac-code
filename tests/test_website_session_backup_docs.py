@@ -288,7 +288,7 @@ def test_mcp_oauth_and_troubleshooting_docs_describe_cleanup_and_auth_failures(t
     assert not failures, "\n".join(failures)
 
 
-def test_mcp_configuration_docs_start_with_claude_style_quick_start() -> None:
+def test_mcp_configuration_docs_prioritize_web_desktop_quick_start() -> None:
     docs = list(
         dict.fromkeys(
             [WEBSITE_ROOT / "docs" / "mcp" / "configuration.md"]
@@ -296,7 +296,7 @@ def test_mcp_configuration_docs_start_with_claude_style_quick_start() -> None:
         )
     )
     remote_add = "iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp"
-    remote_auth = "iac-code mcp auth yuque"
+    remote_auth = "iac-code mcp auth"
     stdio_add = (
         "iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates"
     )
@@ -321,12 +321,9 @@ def test_mcp_configuration_docs_start_with_claude_style_quick_start() -> None:
                 failures.append(f"{path.relative_to(PROJECT_ROOT)}: missing {label} example")
         if any(position < 0 for position in positions.values()):
             continue
-        first_legacy = positions["legacy add"]
-        for label in ("remote add", "remote auth", "stdio add"):
-            if positions[label] > first_legacy:
-                failures.append(
-                    f"{path.relative_to(PROJECT_ROOT)}: {label} example appears after legacy local add example"
-                )
+        ui_quick_start = text.find("(./quick-start.md)")
+        if ui_quick_start < 0 or ui_quick_start > min(positions.values()):
+            failures.append(f"{path.relative_to(PROJECT_ROOT)}: UI quick start must precede CLI reference examples")
 
     assert not failures, "\n".join(failures)
 
@@ -696,13 +693,13 @@ def test_locale_mcp_troubleshooting_docs_use_localized_auth_action_labels() -> N
         locale = _locale_for_doc_root(root)
         path = root / "mcp" / "troubleshooting.md"
         text = path.read_text(encoding="utf-8")
-        auth_label = _message_translation(locale, "Authenticate")
-        reauth_label = _message_translation(locale, "Re-authenticate")
+        auth_label = _webui_translation(locale, "Authenticate")
+        reauth_label = _webui_translation(locale, "Re-authenticate")
         for label in [auth_label, reauth_label]:
-            if f"`{label}`" not in text:
-                failures.append(f"{path.relative_to(PROJECT_ROOT)}: missing localized action label `{label}`")
+            if not any(f"{markup}{label}{markup}" in text for markup in ("`", "**")):
+                failures.append(f"{path.relative_to(PROJECT_ROOT)}: missing localized action label {label!r}")
         for english_label in ["Authenticate", "Re-authenticate"]:
-            if f"`{english_label}`" in text:
+            if any(f"{markup}{english_label}{markup}" in text for markup in ("`", "**")):
                 failures.append(f"{path.relative_to(PROJECT_ROOT)}: kept English action label `{english_label}`")
 
     assert not failures, "\n".join(failures)
@@ -772,8 +769,8 @@ def _locale_for_doc_root(root: Path) -> str:
     return "zh" if locale == "zh-Hans" else locale
 
 
-def _message_translation(locale: str, msgid: str) -> str:
-    path = PROJECT_ROOT / "src" / "iac_code" / "i18n" / "locales" / locale / "LC_MESSAGES" / "messages.po"
+def _webui_translation(locale: str, msgid: str) -> str:
+    path = PROJECT_ROOT / "src" / "iac_code" / "i18n" / "locales" / locale / "LC_MESSAGES" / "webui.po"
     current: str | None = None
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.startswith("msgid "):

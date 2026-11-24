@@ -150,7 +150,7 @@ Symptom:
 MCP server 'name' requires authentication.
 ```
 
-Choisissez **Authentifier** pour le serveur dans **Plugins → MCP**. En CLI :
+Choisissez **S’authentifier** pour le serveur dans **Plugins → MCP**. En CLI :
 
 ```bash
 iac-code mcp auth name --scope user
@@ -170,7 +170,7 @@ Le OAuth flow a demarre mais ne s'est pas termine proprement: le callback URL pe
 peut avoir expire, ou le authorization server peut avoir renvoye une erreur. Si un nouveau flow echoue avant la fin,
 IaC Code restaure le auth state precedent.
 
-Réessayez **Authentifier** ou **Réauthentifier** dans **Plugins → MCP**. Effacez l’authentification uniquement si son état enregistré est périmé. Équivalents CLI :
+Réessayez **S’authentifier** ou **Se réauthentifier** dans **Plugins → MCP**. Effacez l’authentification uniquement si son état enregistré est périmé. Équivalents CLI :
 
 ```bash
 iac-code mcp auth name --scope user
@@ -188,7 +188,7 @@ Symptom:
 invalid_client
 ```
 
-iac-code efface l’état client et les jetons invalides. Choisissez **Réauthentifier** dans **Plugins → MCP**, ou utilisez :
+iac-code efface l’état client et les jetons invalides. Choisissez **Se réauthentifier** dans **Plugins → MCP**, ou utilisez :
 
 ```bash
 iac-code mcp auth name
@@ -202,7 +202,7 @@ Symptom:
 insufficient_scope
 ```
 
-Le serveur exige des scopes OAuth supplémentaires. Terminez le lien d’autorisation proposé dans la conversation active pour autoriser ses scopes. **Plugins → MCP → Réauthentifier** et `iac-code mcp auth name` lancent une autorisation normale sans reprendre les scopes propres au challenge d’une session précédente.
+Le serveur exige des scopes OAuth supplémentaires. Terminez le lien d’autorisation proposé dans la conversation active pour autoriser ses scopes. **Plugins → MCP → Se réauthentifier** et `iac-code mcp auth name` lancent une autorisation normale sans reprendre les scopes propres au challenge d’une session précédente.
 
 ## Scope Ambiguity
 
