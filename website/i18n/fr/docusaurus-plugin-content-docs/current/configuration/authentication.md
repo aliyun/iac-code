@@ -1,18 +1,16 @@
 ---
 title: Authentification
-description: Configurer les identifiants LLM et cloud avec le flux d'authentification.
+description: Configurer les accès au modèle et au cloud dans les paramètres de Desktop ou Web.
 ---
 
 # Authentification
 
-Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
+Ouvrez Desktop, ou lancez `iac-code` dans un terminal interactif pour ouvrir Web. Configurez le modèle et les identifiants cloud nécessaires dans les paramètres.
 
-- **Paramètres → Modèles** : choisissez le fournisseur, saisissez sa clé API et sélectionnez un modèle.
-- **Paramètres → Identifiants cloud** : choisissez Alibaba Cloud, la méthode d’authentification et la région.
+- [Configurer un fournisseur dans Desktop ou Web](./llm-providers.md)
+- [Configurer l’accès cloud dans Desktop ou Web](./alibaba-cloud-credentials.md)
 
 Web, Desktop et les exécutions headless partagent ces identifiants enregistrés.
-
-Pour configurer depuis le terminal, lancez `iac-code tui`, puis exécutez `/auth`.
 
 La configuration d'exécution est stockée dans le répertoire de configuration utilisateur :
 

@@ -11,10 +11,6 @@
     "message": "Documentacao",
     "description": "Navbar item with label Docs"
   },
-  "item.label.CLI": {
-    "message": "CLI",
-    "description": "Navbar item with label CLI"
-  },
   "item.label.Pipeline": {
     "message": "Pipeline",
     "description": "Navbar item with label Pipeline"
@@ -22,5 +18,13 @@
   "item.label.GitHub": {
     "message": "GitHub",
     "description": "Navbar item with label GitHub"
+  },
+  "item.label.Desktop": {
+    "message": "Desktop",
+    "description": "Navbar item with label Desktop"
+  },
+  "item.label.Web": {
+    "message": "Web",
+    "description": "Navbar item with label Web"
   }
 }

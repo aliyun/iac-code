@@ -49,7 +49,7 @@ En las aplicaciones web y de escritorio, seleccione el pipeline al crear la conv
 
 ## Variables de entorno
 
-Estas variables configuran los valores de inicio predeterminados de A2A, del modo de proceso SDK y de la TUI conservada. Las aplicaciones web y de escritorio seleccionan el modo y el pipeline por conversación; la API web solo recurre a `IAC_CODE_MODE` e `IAC_CODE_PIPELINE_NAME` cuando se omiten los campos correspondientes de la solicitud.
+Estas variables fijan los valores predeterminados de A2A y del modo de proceso SDK. Web y escritorio eligen modo y pipeline por conversación; la API web solo usa `IAC_CODE_MODE` e `IAC_CODE_PIPELINE_NAME` si faltan los campos correspondientes.
 
 | Variable | Propósito |
 |---|---|
@@ -87,7 +87,7 @@ Cuando el pipeline termina, falla, sale antes de tiempo o se cancela, IaC Code v
 
 ## Integraciones de automatización
 
-El modo pipeline está diseñado actualmente sobre todo para el REPL interactivo. El modo servidor A2A puede exponer progreso del pipeline, artefactos, resultados de permisos e información de recuperación, lo que resulta útil para conectar un pipeline a una consola externa o a un sistema de tareas.
+El pipeline puede integrarse mediante el servidor A2A o el modo de proceso SDK. A2A expone progreso, artefactos, resultados de permisos e información de recuperación. El modo de proceso SDK usa un subproceso local e intercambia JSON delimitado por líneas a través de stdin/stdout.
 
 Al integrar el pipeline mediante A2A, los llamadores también pueden declarar dos capacidades en los metadatos del mensaje: `metadata.iac_code.preferredLanguage` hace que el progreso, las preguntas y los avisos de permisos se devuelvan en el idioma preferido del llamador; `metadata.iac_code.candidatePresentation: rich-v1` hace que el paso de confirmación del plan devuelva una carga estructurada (nombre del candidato, resumen, diagrama de arquitectura, coste mensual total, partidas de coste) apta para renderizado enriquecido en interfaces externas. Cuando un despliegue u operación de herramienta requiere permiso, el pipeline publica un sobre de permiso pendiente y los llamadores responden con `allow_once` o `deny` mediante un mensaje de banda lateral; consulta la [Referencia del protocolo](../a2a/protocol-reference.md) para más detalles.
 
@@ -96,8 +96,6 @@ ACP no admite actualmente el modo pipeline. `--prompt` / el [modo no interactivo
 ## Limitaciones actuales
 
 - La versión actual incluye `selling` y `selling_solution_first`, ambos orientados principalmente a flujos de infraestructura de Alibaba Cloud. `selling` sigue siendo el predeterminado.
-- En el modo pipeline de la terminal, se ignoran las imágenes pegadas en el REPL.
-- `iac-code tui`: Durante el pipeline, los shell escapes, disparadores de skills y la mayoría de los slash commands están restringidos salvo que la definición del pipeline los permita explícitamente. Comandos básicos como `/help`, `/status`, `/resume` y `/exit` siguen disponibles.
 
 
 ## Puntos de control de backup

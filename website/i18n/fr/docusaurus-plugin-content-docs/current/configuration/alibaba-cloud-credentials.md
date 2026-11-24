@@ -5,7 +5,27 @@ description: Configurer les identifiants Alibaba Cloud, y compris l'authentifica
 
 # Identifiants Alibaba Cloud
 
-Dans Web ou Desktop, ouvrez **Paramètres → Identifiants cloud** pour configurer l’authentification Alibaba Cloud et la région par défaut.
+Ces étapes s’appliquent à Desktop et à Web, qui utilisent la même interface de conversation.
+
+## Configurer l’accès cloud dans Desktop ou Web
+
+1. Ouvrez **Paramètres → Identifiants cloud** et choisissez **Alibaba Cloud**.
+
+2. Choisissez la région de consultation et de déploiement, par exemple `cn-hangzhou`.
+
+3. Sélectionnez la méthode d’authentification et renseignez les champs ci-dessous.
+
+4. Pour AccessKey, STS ou un rôle RAM/ECS RAM, cliquez sur **Enregistrer les identifiants cloud**. Pour OAuth, suivez les étapes de connexion par navigateur ci-dessous.
+
+5. Revenez à la conversation et décrivez la tâche. L’enregistrement configure l’accès ; il ne crée aucune ressource et n’ajoute aucune permission RAM.
+
+| Méthode | Champs requis |
+|---|---|
+| AccessKey | `AccessKeyId` et `AccessKeySecret`. |
+| STS Token | `AccessKeyId`, `AccessKeySecret` et `StsToken` issus des mêmes identifiants temporaires. |
+| Rôle RAM | Clés source `AccessKeyId` et `AccessKeySecret`, cible `RamRoleArn` et `RamSessionName` facultatif. |
+| Rôle ECS RAM | Nom de rôle facultatif ; vide, il est découvert sur l’instance ECS qui exécute IaC Code. |
+| OAuth par navigateur | Choisissez le site du compte et terminez l’autorisation dans le navigateur, sans saisir de jetons. |
 
 Les identifiants Alibaba Cloud sont requis pour les opérations qui inspectent ou gèrent des ressources cloud.
 
@@ -15,10 +35,7 @@ Les outils `resolve_cloud_resource_selector` et `select_cloud_resource` suivent 
 
 Utilisez **ECS RAM Role** lorsque IaC Code s'exécute sur une instance ECS Alibaba Cloud à laquelle un rôle RAM est associé. IaC Code obtient des identifiants STS temporaires auprès du service de métadonnées de l'instance ECS (IMDS), les renouvelle automatiquement et n'enregistre aucun AccessKey ID, AccessKey Secret ou jeton STS dans sa configuration.
 
-Vous pouvez configurer ce mode depuis toutes les interfaces utilisateur :
-
-- Dans l'application Web ou Desktop, ouvrez **Paramètres > Identifiants cloud**, choisissez **Alibaba Cloud**, puis sélectionnez **ECS RAM Role** comme méthode d'authentification.
-- Dans le REPL, exécutez `/auth`, choisissez **Configurer le service cloud IaC**, puis **Alibaba Cloud** et **ECS RAM Role**.
+Dans l'application Web ou Desktop, ouvrez **Paramètres > Identifiants cloud**, choisissez **Alibaba Cloud**, puis sélectionnez **ECS RAM Role** comme méthode d'authentification.
 
 Sélectionnez la région utilisée pour les appels aux API cloud. Le nom du rôle RAM ECS est facultatif : laissez-le vide pour détecter via IMDS le rôle associé à l'instance. Le nom enregistré dans IaC Code est prioritaire sur `ALIBABA_CLOUD_ECS_METADATA` ; si aucun des deux n'est défini, IaC Code demande à IMDS de détecter le nom du rôle.
 
@@ -37,13 +54,15 @@ La configuration peut être enregistrée sur n'importe quelle machine, mais les 
 
 ## Connexion OAuth dans le navigateur
 
-Dans Web ou Desktop, ouvrez **Paramètres → Identifiants cloud**, sélectionnez Alibaba Cloud et **Connexion OAuth via le navigateur**, puis lancez l’autorisation. IaC Code ouvre le parcours dans le navigateur, échange le code via PKCE et enregistre les identifiants OAuth dans `.cloud-credentials.yml`.
+1. Ouvrez **Paramètres → Identifiants cloud**, choisissez **Alibaba Cloud** puis **Connexion OAuth par navigateur**.
 
-Pendant la configuration, vous pouvez choisir le site OAuth Chine ou international. IaC Code enregistre le site choisi avec le refresh token afin que les actualisations ultérieures utilisent le même endpoint.
+2. Choisissez la région et le **Site de connexion** du compte : Chine ou International.
+
+3. Cliquez sur **Se connecter via le navigateur**, puis connectez-vous et autorisez l’accès sur la page Alibaba Cloud.
+
+4. Revenez à IaC Code et attendez la confirmation. Le flux enregistre les identifiants et le site sélectionné.
 
 Les identifiants OAuth sont renouvelés automatiquement lorsque le jeton d’accès ou les identifiants STS approchent de leur expiration. Si le jeton de renouvellement expire ou est révoqué, autorisez à nouveau l’accès depuis **Paramètres → Identifiants cloud**.
-
-Pour configurer depuis le terminal, lancez `iac-code tui`, puis exécutez `/auth`.
 
 ## Variables d'environnement
 

@@ -1,49 +1,60 @@
 ---
 sidebar_position: 2
 title: MCP クイックスタート
-description: Claude style commands で remote HTTP MCP server または stdio server を追加します。
+description: デスクトップまたは Web のプラグイン画面から MCP サーバーを追加して接続します。
 ---
 
 # MCP クイックスタート
 
-MCP server URL またはローカル stdio server command が分かっている場合は、この主経路を使います。
+デスクトップと Web では**プラグイン**の **MCP** タブからサーバーを追加・管理します。CLI と設定ファイルは自動化や詳細設定向けに説明します。
 
-## リモート HTTP Server
+## リモート HTTP サーバーを接続する
 
-位置 URL 形式で remote server を追加します。
+1. **プラグイン → MCP**を開き、プロジェクトを選択して**サーバーを追加**をクリックします。
+
+2. **名前**、**スコープ**を入力し、通信方式は **http（リモート）**を選択します。
+
+3. **URL**と必要なヘッダーを入力します。秘密情報は環境変数の参照で指定します。
+
+4. **作成**をクリックします。プロジェクト設定が承認待ちなら、内容を確認して**承認**します。
+
+5. 必要なら**認証**をクリックしてブラウザーで承認を完了し、画面に戻ります。
+
+6. **接続を確認**、**機能を表示**の順にクリックし、必要なツール、リソース、プロンプトが検出されたことを確認します。
+
+## ローカル stdio サーバーを接続する
+
+1. **プラグイン → MCP**でプロジェクトを選び、**サーバーを追加**をクリックします。
+
+2. **名前**と**スコープ**を入力し、**stdio（ローカルコマンド）**を選びます。
+
+3. **コマンド**、1 行に 1 個の**引数**、必要な環境変数を入力します。コマンドは IaC Code の実行マシンに存在する必要があります。
+
+4. **作成**をクリックし、必要ならプロジェクト設定を承認します。
+
+5. **接続を確認**と**機能を表示**で接続と検出結果を確認します。
+
+:::note
+
+ユーザースコープはプロジェクト共通、ローカルは選んだ作業ディレクトリ専用です。プロジェクトは共有可能な `.mcp.json` に保存され、ローカル承認が必要です。既存サーバーの変更は編集操作を開き、**保存**します。
+
+:::
+
+## CLI 自動化
 
 ```bash
 iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
-```
-
-server が OAuth を使う場合は、authorization flow を開始します。
-
-```bash
 iac-code mcp auth yuque
-```
-
-authorization 後、bounded health check を実行します。
-
-```bash
 iac-code mcp get yuque --check
 ```
 
-## Stdio サーバー
-
-stdio サーバーの場合は、サブプロセスのコマンドを `--` の後に指定します。リモート HTTP サーバーにラッパーは不要です。上の例のように `--transport http` で追加してください。
-
 ```bash
 iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
-```
-
-次に、接続せずに configured server を確認します。
-
-```bash
 iac-code mcp get local-files --config-only
 ```
 
 ## 次のステップ
 
-- scope、project files、headers、OAuth options、advanced JSON forms は [MCP 設定](./configuration.md) を参照してください。
-- token storage、reset、approval behavior は [OAuth とセキュリティ](./oauth-and-security.md) を参照してください。
-- pending approval、needs auth、connection failed の server は [トラブルシューティング](./troubleshooting.md) を参照してください。
+- スコープ、プロジェクトファイル、ヘッダー、OAuth、JSON の詳細は [MCP 設定](./configuration.md)を参照してください。
+- トークン保存、認証リセット、承認については [OAuth とセキュリティ](./oauth-and-security.md)を参照してください。
+- 承認待ち、認証要求、接続失敗は[トラブルシューティング](./troubleshooting.md)を参照してください。

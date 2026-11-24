@@ -8,7 +8,7 @@ description: Visao geral do suporte ao Agent Client Protocol no iac-code.
 
 ## O que e ACP
 
-O [Agent Client Protocol (ACP)](<https://agentclientprotocol.com/get-started/introduction)>) e um protocolo de comunicacao padronizado entre agentes de IA e seus clientes. Ele define como os clientes (IDEs, editores, ferramentas de automacao) iniciam, interagem e gerenciam sessoes de agentes atraves de mensagens JSON-RPC estruturadas.
+O [Agent Client Protocol (ACP)](https://agentclientprotocol.com/get-started/introduction) e um protocolo de comunicacao padronizado entre agentes de IA e seus clientes. Ele define como os clientes (IDEs, editores, ferramentas de automacao) iniciam, interagem e gerenciam sessoes de agentes atraves de mensagens JSON-RPC estruturadas.
 
 ## iac-code como um servidor ACP
 
@@ -19,7 +19,7 @@ O iac-code expoe suas capacidades de Infrastructure as Code atraves de um servid
 - Aprovar ou rejeitar operacoes de escrita de arquivos e operacoes destrutivas
 - Gerenciar multiplas sessoes simultaneas
 
-Isso transforma o iac-code de uma ferramenta de terminal em um **backend componivel** para qualquer ambiente de desenvolvimento.
+Assim, o iac-code funciona como um **backend combinável** para ambientes de desenvolvimento.
 
 ## Casos de uso
 
@@ -31,11 +31,11 @@ Isso transforma o iac-code de uma ferramenta de terminal em um **backend componi
 
 | Modo | Comando | Melhor para |
 |------|---------|-------------|
-| **REPL interativo** | `iac-code` | Exploracao pratica, autoria iterativa de templates |
-| **CLI nao interativo** | `iac-code --prompt "..."` ou `--headless` | Scripting, geracao unica, pipelines de CI |
+| **Web** | `iac-code` | Exploracao pratica, autoria iterativa de templates |
+| **CLI nao interativo** | `iac-code --prompt "..."` | Scripting, geracao unica, pipelines de CI |
 | **Servidor ACP** | `iac-code acp` | Integracao com IDE, gerenciamento multi-sessao, acesso programatico |
 
-O modo Servidor ACP e o unico modo que suporta multiplas sessoes simultaneas e fornece eventos de streaming estruturados (chamadas de ferramentas, solicitacoes de permissao, raciocinio) em vez de saida em texto simples.
+ACP oferece integração de clientes orientada a sessões com eventos estruturados em streaming. Web, A2A e o modo de processo SDK possuem suas próprias interfaces de sessão e streaming.
 
 ## Capacidades principais
 

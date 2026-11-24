@@ -1,13 +1,13 @@
 ---
 title: Web-App
-description: IaC Code als lokale Web-App mit derselben Engine wie die CLI ausführen.
+description: Die lokale Web-App starten und Einstellungen, Gespräche und Eingabesteuerung verwenden.
 ---
 
 # Web-App
 
 Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Konfigurieren Sie bei der ersten Verwendung den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen.
 
-Die Web-App liest und schreibt denselben Sitzungsspeicher wie die CLI, sodass eine an einer Stelle begonnene Konversation an der anderen fortgesetzt werden kann.
+Desktop und Web teilen Gespräche und Einstellungen. Über andere Schnittstellen erstellte Gespräche sind gegebenenfalls nur lesbar; siehe [Sitzungen](./cli/sessions.md) zu Anzeige und Fortsetzung.
 
 ## Installation
 
@@ -43,27 +43,41 @@ iac-code web --port 9000 --no-open
 
 Ohne `--access-token-file` akzeptiert der Server nur Loopback-Hosts (`127.0.0.1`, `localhost` oder `::1`) und prüft lokale Anfragen. Der explizite Token-Modus akzeptiert auch andere IP-Adressen und schützt API-Anfragen über den verschlüsselten Token-Transport.
 
+## Eine vorhandene ROS-Vorlage bereitstellen
+
+1. Richten Sie [Cloud-Zugangsdaten](./configuration/alibaba-cloud-credentials.md) ein und öffnen Sie ein Gespräch im Projekt der Vorlage.
+
+2. Geben Sie `@` ein, wählen Sie die Datei und lassen Sie Vorlage und benötigte Parameter prüfen.
+
+3. Nennen Sie Region, Stack-Namen und Parameterwerte und bitten Sie vor der Erstellung um Validierung.
+
+4. Prüfen Sie Ergebnis und geplante Änderungen und beauftragen Sie danach die Stack-Erstellung.
+
+5. Prüfen Sie angezeigte Cloud-API-Freigaben und genehmigen oder verweigern Sie sie. Eine genehmigte Erstellung kann kostenpflichtige Ressourcen anlegen.
+
+6. Lesen Sie Stack-ID, Fortschritt und Ergebnis im Gespräch. Lassen Sie bei einem Fehler die konkrete Meldung im selben Gespräch untersuchen.
+
 ## Überblick über die Oberfläche
 
 ### Sitzungs-Seitenleiste
 
-Die Seitenleiste listet die Konversationen des ausgewählten Projekts auf. Von hier aus können Sie:
+Die Seitenleiste gruppiert gespeicherte Gespräche nach Projekt. Hier können Sie:
 
-- Einen **neuen Chat** starten oder mit der Projektauswahl das Projekt wechseln.
+- Einen **Neuen Chat** starten und darunter das Projekt auswählen.
 - Konversationen **durchsuchen** oder die Befehlspalette öffnen, um einen Befehl auszuführen.
 - Eine Konversation **anheften**, **umbenennen** oder **archivieren** und archivierte Konversationen durchsehen.
 
-Da Sitzungen mit der CLI geteilt werden, erscheint eine mit `iac-code tui --resume` fortgesetzte Konversation auch hier. Wie der Sitzungsspeicher funktioniert, erfahren Sie unter [Sitzungen](./cli/sessions.md).
+Web, Desktop und Headless teilen gespeicherte Unterhaltungen. Unter [Sitzungen](./cli/sessions.md) erfahren Sie, wie Sie diese fortsetzen und umbenennen.
 
 ### Eingabebereich (Composer)
 
-Im Eingabebereich formulieren Sie Ihre Anfragen. Er bietet dieselben Steuerelemente, die die CLI über Slash-Befehle und Flags bereitstellt:
+Beschreiben Sie die Aufgabe im Eingabefeld und wählen Sie die Arbeitsweise über dessen Steuerelemente:
 
 - Auswahl von **Modell und Anbieter** für die aktive Sitzung.
 - Einen **Denken**-Schalter, um erweitertes Schlussfolgern für unterstützte Modelle ein- oder auszuschalten.
 - Ein Steuerelement für den **Berechtigungsmodus**, das festlegt, wie Werkzeugaktionen genehmigt werden.
 - **Bildanhänge** für multimodale Modelle.
-- **Slash-Befehle** (mit `/` eingegeben) und **`@`-Dateiverweise**, um auf Dateien in Ihrem Arbeitsbereich zu verweisen.
+- **Skills** aus `/`- oder `$`-Vorschlägen und **`@`-Verweise auf Workspace-Dateien**.
 
 ### Normaler Chat und Pipeline-Modus
 
@@ -79,7 +93,7 @@ Werkzeugaufrufe werden im Transkript als Karten dargestellt. Wenn ein Werkzeug I
 
 ### Einstellungen
 
-Der Einstellungsbereich bündelt dieselbe Konfiguration, die die CLI verwaltet:
+Desktop und Web verwenden dieselbe Oberfläche. Nutzen Sie für die tägliche Arbeit Einstellungen und die sichtbaren Steuerelemente.
 
 - **Cloud-Anmeldedaten** für Alibaba Cloud (siehe [Alibaba-Cloud-Anmeldedaten](./configuration/alibaba-cloud-credentials.md)).
 - **Modelle** und Anbieterkonfiguration (siehe [LLM-Anbieter](./configuration/llm-providers.md)).

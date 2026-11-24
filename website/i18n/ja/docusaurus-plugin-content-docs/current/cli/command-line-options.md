@@ -5,26 +5,26 @@ description: IaC Code の起動オプションとワンショット実行パラ�
 
 # コマンドラインオプション
 
-`iac-code` は既定で Web アプリを開きます。ターミナル用のオプションは `iac-code tui --resume <id>` のように `tui` の後に指定してください。headless の `--prompt` と stream-json のオプションは従来どおりルートコマンドに指定します。対話型ターミナルがない場合は `iac-code web --no-open` で明示的に起動してください。
+ルートコマンドは既定で Web を起動します。以下は Web の起動、単発 headless 実行、stream-json サブプロセスのオプションです。対話会話の設定は Web またはデスクトップで行います。
 
 「使用できる入口」列は各オプションを指定できる場所を示します。`headless` は `iac-code --prompt ...`、`process` は stream-json サブプロセスモードです。Web のモデルと権限は画面で設定します。
 
 | オプション | 目的 | 使用できる入口 |
 |---|---|---|
-| `-h`, `--help` | CLI ヘルプを表示して終了します。インストールされたバージョンがサポートするオプションを確認できます。 | `iac-code`, `web`, `tui` |
+| `-h`, `--help` | CLI ヘルプを表示して終了します。インストールされたバージョンがサポートするオプションを確認できます。 | `iac-code`, `web` |
 | `-v`, `-V`, `--version` | インストールされた IaC Code のバージョンを表示して終了します。 | `iac-code` |
-| `-m <model>`, `--model <model>` | 特定の LLM モデルで起動します。今回の実行で保存済みモデルを上書きします。 | `headless`, `process`, `tui` |
+| `-m <model>`, `--model <model>` | 特定の LLM モデルで起動します。今回の実行で保存済みモデルを上書きします。 | `headless`, `process` |
 | `-p <prompt>`, `--prompt <prompt>` | 単一のプロンプトを実行して終了します。非対話モードが有効になります。`--prompt -` で標準入力からプロンプトを読み取ります。 | `iac-code` |
 | `--output-format <format>` | 非対話モードの出力形式を設定します。サポートされる値は `text`、`json`、`stream-json` です。デフォルトは `text` です。 | `headless`, `process` |
 | `--max-turns <number>` | 非対話モードでのエージェントの最大ターン数を制限します。デフォルトは `100` です。 | `headless`, `process` |
 | `--thinking-enabled`, `--no-thinking-enabled` | ワンショットの非対話リクエストで thinking を明示的に有効化するかどうかを制御します。デフォルトは `--thinking-enabled` です。`--no-thinking-enabled` はこの実行だけ `thinking_enabled=false` を送信し、`settings.yml` は書き換えません。 | `headless` |
-| `-d`, `--debug` | 今回の実行でデバッグログを有効にします。対話モードでは、起動後に `/debug` を使用してデバッグログを確認または変更できます。 | `headless`, `process`, `tui`, `web` |
+| `-d`, `--debug` | 今回の実行でデバッグログを有効にします。 | `headless`, `process`, `web` |
 | `--verbose` | ヘッドレス（非対話）実行の進捗を標準エラー出力に表示します。 | `headless` |
-| `-r <セッションIDまたは名前>`, `--resume <セッションIDまたは名前>` | 正確なセッション ID、一意の ID プレフィックス、または一意の名前で再開します。`tui` は別プロジェクトのセッションに対して正しいディレクトリのコマンドを表示します。ヘッドレス実行ではセッションのプロジェクトディレクトリを使用してください。 | `headless`, `tui` |
-| `-c`, `--continue` | 最新のセッションを再開します。`--resume` と同時に使用できません。 | `headless`, `tui` |
-| `--allowed-tools <patterns>` | 許可するツール権限パターンをカンマ区切りで指定します。例：`'bash(git *),write_file'`。 | `headless`, `process`, `tui` |
-| `--disallowed-tools <patterns>` | 拒否するツール権限パターンをカンマ区切りで指定します。例：`'bash(rm *)'`。 | `headless`, `process`, `tui` |
-| `--permission-mode <mode>` | 権限モード：`default`、`accept_edits`、`bypass_permissions`、`dont_ask`。 | `headless`, `process`, `tui` |
+| `-r <セッションIDまたは名前>`, `--resume <セッションIDまたは名前>` | 正確なセッション ID、一意の ID プレフィックス、一意の名前で復元します。headless は対象プロジェクトのディレクトリで実行してください。 | `headless` |
+| `-c`, `--continue` | 最新のセッションを再開します。`--resume` と同時に使用できません。 | `headless` |
+| `--allowed-tools <patterns>` | 許可するツール権限パターンをカンマ区切りで指定します。例：`'bash(git *),write_file'`。 | `headless`, `process` |
+| `--disallowed-tools <patterns>` | 拒否するツール権限パターンをカンマ区切りで指定します。例：`'bash(rm *)'`。 | `headless`, `process` |
+| `--permission-mode <mode>` | 権限モード：`default`、`accept_edits`、`bypass_permissions`、`dont_ask`。 | `headless`, `process` |
 
 ## 権限モード
 
@@ -71,10 +71,10 @@ iac-code --prompt "Create an OSS Bucket" --no-thinking-enabled
 echo "Create a VPC and two ECS instances" | iac-code --prompt -
 ```
 
-ターミナル UI で最新のセッションを再開する：
+単一プロンプトで最新のセッションを続けます。
 
 ```bash
-iac-code tui --continue
+iac-code --continue --prompt "VPC テンプレートを生成する"
 ```
 
 `git *` に一致する bash コマンドを事前に許可する：

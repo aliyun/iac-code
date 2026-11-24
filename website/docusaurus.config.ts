@@ -115,8 +115,13 @@ const config: Config = {
           label: 'Docs',
         },
         {
-          to: '/docs/cli/usage',
-          label: 'CLI',
+          to: '/docs/desktop-app',
+          label: 'Desktop',
+          position: 'left',
+        },
+        {
+          to: '/docs/web-app',
+          label: 'Web',
           position: 'left',
         },
         {
@@ -146,15 +151,19 @@ const config: Config = {
               to: '/docs/getting-started/installation',
             },
             {
-              label: 'CLI Overview',
-              to: '/docs/cli/usage',
+              label: 'Desktop App',
+              to: '/docs/desktop-app',
+            },
+            {
+              label: 'Web App',
+              to: '/docs/web-app',
             },
             {
               label: 'Pipeline Mode',
               to: '/docs/automation/pipeline-mode',
             },
             {
-              label: 'Slash Commands',
+              label: 'Common Actions',
               to: '/docs/cli/commands',
             },
           ],

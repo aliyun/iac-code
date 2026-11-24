@@ -14,7 +14,7 @@ Verwenden Sie MCP, wenn Sie möchten, dass IaC-Code eine lokale oder Remote-Funk
 
 | Surface | MCP support |
 |---|---|
-| Interaktive REPL | Lädt Benutzer-, lokale und genehmigte Projektserver. Eingabeaufforderungen, bevor neuen Projekt-`.mcp.json`-Servern vertraut wird. |
+| Web / Desktop | Lädt konfigurierte und genehmigte Server; ausstehende Projektgenehmigungen werden in den MCP-Einstellungen verwaltet. |
 | Nicht interaktiver Modus | Lädt Benutzer-, lokale und genehmigte Projektserver. Nie Aufforderungen; Ausstehende Projektserver werden mit Warnungen übersprungen. |
 | ACP-Server | Akzeptiert Sitzungs-MCP-Serverkonfigurationen von ACP-Clients und stellt erkannte MCP-Funktionen innerhalb dieser Sitzung bereit. |
 | A2A-Server | Lädt MCP über die normale Laufzeit und kann MCP-Warnungen und Tool-Fortschritt in A2A-Aufgabenmetadaten veröffentlichen. |
@@ -52,7 +52,7 @@ At runtime IaC Code:
 6. Registriert diese Funktionen in den vorhandenen Tool- und Befehlsregistern.
 7. Fügt Anweisungen für verbundene Server als serverbezogene Anleitung in die Agent-Eingabeaufforderung ein.
 8. Konvertiert MCP-Tool-Ergebnisse in normale IaC-Code-Tool-Ergebnisse und speichert binäre Artefakte und große Textartefakte im Runtime-Konfigurationsverzeichnis.
-9. Trennt MCP-Clients, wenn REPL, Headless-Ausführung, ACP-Sitzung oder A2A-Runtime geschlossen werden.
+9. Trennt MCP-Clients, wenn Web / Desktop, Headless-Ausführung, ACP-Sitzung oder A2A-Runtime geschlossen werden.
 
 Ein ausgefallener MCP-Server blockiert andere konfigurierte Server nicht. Verbindungs- und Erkennungsfehler bleiben als MCP-Warnungen sichtbar.
 

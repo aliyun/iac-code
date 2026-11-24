@@ -1,45 +1,80 @@
 ---
-title: Slash Commands
-description: Complete reference for built-in interactive commands.
+title: Common Actions
+description: Use the settings, conversation controls, and composer in Desktop and Web.
 ---
 
-# Slash Commands
+# Common Actions
 
-This page documents slash commands in the [terminal interface](./interactive-mode.md), started with `iac-code tui`. Web and Desktop expose their own command menus and Settings.
+The steps below apply to both Desktop and Web; they use the same conversation interface.
 
-Slash commands control IaC Code from inside an interactive session. Type `/` to see available commands, then continue typing to filter the list. A command is recognized only when it appears at the start of your message.
+## Start a conversation
 
-The `/` listing includes both built-in commands and any skills you have configured. To restrict suggestions to skills only, use `$` instead — `$<name>` lists and invokes skills exclusively, and typing `$` followed by a built-in command name (for example `$help`) prints an error pointing at the `/` equivalent.
+1. Open Desktop, or run `iac-code` in an interactive terminal to open Web.
 
-Text after the command name is passed as arguments. In the table below, `<arg>` indicates a required argument and `[arg]` indicates an optional argument.
+2. Click **New chat** in the sidebar. In the project control below the composer, select the directory that contains your templates or should receive generated files.
 
-| Command | Purpose |
+3. Before sending the first message, select **Normal mode** or **Pipeline mode**. For Pipeline, also choose the pipeline to run.
+
+4. Enter the task and send it. The conversation appears under its project in the sidebar; follow-up messages belong to the same conversation.
+
+## Use an existing file or an image
+
+1. Open the conversation for the project containing the file.
+
+2. Type `@` in the composer, enter part of the workspace file name, and select the matching item. A file reference appears beside the input. For an image, use the attachment control and select the image.
+
+3. Add the instruction, for example “Check the referenced ROS template and explain the parameters,” then send. Review the selected references before sending.
+
+## Choose a model and thinking settings
+
+1. Configure the provider first using the [model setup steps](../configuration/llm-providers.md).
+
+2. Return to the conversation and open the model control below the composer. Choose an available provider and model.
+
+3. Choose a reasoning effort when the model supports it, and use **Thinking** to enable or disable thinking for this conversation.
+
+4. Confirm the model shown below the input, then send the next request. Available thinking options depend on the model.
+
+## Handle a tool approval
+
+1. Before sending the request, open the permission control in the composer and choose the policy you want.
+
+2. When an approval card appears in the conversation, read the tool name and proposed operation, including the target file or cloud API.
+
+3. Use the card’s approval or rejection controls. Approval allows the pending operation to continue; rejection returns the decision to the assistant. Answer question cards separately when more information is needed.
+
+## Edit instructions and manage memory
+
+1. Open **Settings → Memory** and select the target project at the top.
+
+2. Under **Project memory**, enter instructions that apply to that project and click its **Save** button.
+
+3. Under **User memory**, enter preferences that apply across projects and click that section’s **Save** button. Wait for the saved status after each edit.
+
+4. To let the assistant record useful facts while working, switch **Automatic memory → Auto-record** on or off. This switch saves automatically.
+
+5. In **Memory library**, search for recorded entries and inspect their content. Use an entry’s delete control and confirm it to remove an obsolete entry.
+
+## Change language or appearance
+
+1. Open **Settings → General**.
+
+2. Choose a value under **Language**. It is saved automatically and the page reloads in the selected language.
+
+3. Under **Color scheme**, click a theme. The interface updates and saves the choice automatically.
+
+## Other tasks
+
+For detailed steps, see [Sessions](./sessions.md), [Skills](./skills.md), and [MCP Quick Start](../mcp/quick-start.md).
+
+## Optional input shortcuts
+
+In an existing normal conversation, typing `/` exposes a small set of shortcuts:
+
+| Shortcut | Purpose |
 |---|---|
-| `/auth` | Configure model provider access and Alibaba Cloud credentials through the interactive authentication flow. Use this when setting up IaC Code for the first time, changing API keys, switching providers, or updating cloud access. Alias: `/login`. |
-| `/clear` | Clear the current conversation history and reset the active context manager. In interactive mode, it also clears the terminal screen and re-renders the welcome banner. Use it when you want to start a fresh request without leaving the REPL. |
-| `/compact` | Summarize the current conversation to reduce context usage while preserving recent turns. Use it after a long session when you want to continue working with less accumulated context. If the conversation is empty or too short, the command reports that there is nothing to compact. |
-| `/debug [on\|off\|status]` | Inspect or change runtime debug logging for the active session. `/debug` and `/debug status` show whether logging is enabled and, when enabled, the log file path. `/debug on` enables logging for the current session. `/debug off` disables it. |
-| `/effort [level]` | Show or change thinking effort for the active model when the selected model supports effort control. With a level, it applies the requested value if valid for the model. Without a level, it opens an interactive picker in the REPL, or prints the current effort in non-interactive contexts. |
-| `/thinking_enabled [on\|off]` | Show or change whether the active provider should request thinking. With `on` or `off`, it persists `thinkingEnabled` for the active provider and reconfigures the running REPL provider. Without an argument, it opens an interactive Enable/Disable picker in the REPL, or prints the current value in non-interactive contexts. |
-| `/exit` | Exit the interactive REPL. Aliases: `/quit`, `/q`. |
-| `/help` | Show available commands and common keyboard shortcuts inside the REPL. Alias: `/?`. |
-| `/memory` | Open the memory selector. Edit project or user `AGENTS.md` files, toggle auto-memory, and open the project auto-memory folder when auto-memory is on. |
-| `/mcp [enable\|disable\|reconnect ...]` | Manage MCP servers from the interactive REPL. With no arguments, opens the MCP manager for status, diagnostics, tools, resources, prompts, OAuth authentication, approval, enable/disable, reconnect, and removal actions. Quick actions can enable, disable, or reconnect configured servers. |
-| `/model [model_name]` | Show or switch the active model. With `model_name`, it switches directly to that model for the active provider. Without an argument, it opens an interactive model picker when a provider is configured, or prints the current model when no console UI is available. |
-| `/rename <name>` | Name the current session. Names appear in the welcome banner, exit hint, and `/resume` picker, and can be used with `/resume` or `--resume` when they uniquely identify a session. |
-| `/resume [session id\|unique id prefix\|unique session name]` | Resume a previous session. With an argument, IaC Code resolves it as an exact session ID, unique ID prefix, or unique session name. Without an argument, it opens the interactive session picker. Cross-project sessions print a `cd ... && iac-code tui --resume <id>` command instead of hot-swapping the current project. |
-| `/skills` | Open the skill management picker. Search skills, sort by name/source/size, and enable or disable user and project skills. Bundled skills remain locked on. |
-| `/status` | Show current session ID, provider, model, Alibaba Cloud region, working directory, recorded API token usage, turn count, and context utilization. In debug mode, it also shows memory recall side-call counts and token usage. |
+| `/status` | Show the current session status. |
+| `/compact` | Summarize the conversation to reduce context usage. |
+| `/mcp` | Show MCP server status; manage connections in **Plugins → MCP**. |
 
-The exact command list can change between releases. Use `/help` or type `/` in the REPL to inspect the commands available in your installed version.
-
-## Memory
-
-Use `/memory` to edit the memory files IaC Code loads into the conversation:
-
-- Project memory is saved in `AGENTS.md` at the project root by default.
-- User memory is saved in `AGENTS.md` in the runtime configuration directory, `~/.iac-code/` by default.
-- Set `IAC_CODE_INSTRUCTION_MEMORY_FILE` to use another filename, for example `IAC-CODE.md`.
-- The editor is a compact Vim-like full-screen editor. Use `i`, `a`, or `o` to enter insert mode, `Esc` to return to normal mode, `:wq` to save, and `:q!` to discard.
-- The `Auto-memory` row can be toggled with `Enter`. When auto-memory is on, IaC Code can recall relevant project topic memories as hidden conversation context.
-- The auto-memory folder option appears only when auto-memory is on.
+Pipeline conversations omit `/compact`; these session shortcuts are absent from a new-conversation draft. Skills also appear in the suggestions: select one, add your request, and send. See [Skills](./skills.md) for details.

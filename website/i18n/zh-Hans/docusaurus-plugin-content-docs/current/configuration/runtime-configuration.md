@@ -5,9 +5,9 @@ description: 运行时配置顺序和本地文件。
 
 # 配置
 
-IaC Code 会从 CLI 参数、环境变量以及运行时配置目录中的文件读取配置。
+桌面版和 Web 的日常偏好通过设置及输入框控件管理。本页供查询已保存的配置文件、项目覆盖和自动化配置。
 
-配置优先级：
+下面的优先级适用于命令行启动；Web/桌面版中已经明确选择的会话选项由该会话的控件管理。
 
 ```text
 CLI 参数 > 环境变量 > 配置文件
@@ -95,7 +95,7 @@ IaC Code 不设置可配置的输出 Token 上限。Chat Completions 和 Respons
 
 对阿里云百炼 DashScope 和 DashScope Token Plan，IaC Code 为 `glm-5.2` 和 `kimi-k2.7-code` 内置了 `thinkingBudget=8192`。
 
-交互式 REPL 用户可以通过 `/thinking_enabled on` 或 `/thinking_enabled off` 持久化 provider 级 `thinkingEnabled` 值；直接运行 `/thinking_enabled` 时，如果有控制台 UI，会打开“启用/禁用”选择器。一次性 headless 运行可以用 `--thinking-enabled` 或 `--no-thinking-enabled` 只覆盖本次请求的 thinking 行为，不会改写 `settings.yml`。
+Web 和桌面版通过输入框中的 Thinking 控件控制当前会话的思考开关。单次 headless 运行可使用 `--thinking-enabled` 或 `--no-thinking-enabled` 覆盖本次请求，不会改写 `settings.yml`。
 
 A2A 请求可以通过 `message.metadata.iac_code.thinking` 或 `iac-code a2a-client call` 的 `--thinking-enabled`、`--thinking-effort`、`--thinking-budget` flag 在单次 message turn 覆盖这些设置。如果没有发送显式 A2A thinking metadata，runtime 会使用上述配置和 provider 自身默认行为。对于 base URL 指向 DashScope compatible-mode 的通用 `openai_compatible` provider，只有存在显式 thinking 策略时，iac-code 才会切换到 DashScope 原生 thinking wire format。
 

@@ -5,7 +5,7 @@ description: Executar prompts únicos a partir de argumentos ou stdin.
 
 # Modo não interativo
 
-O modo não interativo executa um único prompt e sai. Use quando quiser que o IaC Code produza uma saída para uma tarefa repetível sem permanecer no REPL.
+O modo headless executa um prompt e encerra. Use-o para tarefas repetíveis, scripts e CI.
 
 Use `--prompt` para passar o prompt diretamente:
 

@@ -1,27 +1,18 @@
 ---
 sidebar_position: 2
 title: MCP 設定
-description: CLI コマンド、設定ファイル、プロジェクトファイル、ACP セッションで MCP サーバーを設定します。
+description: プラグインでの MCP 管理と、CLI、スコープ、詳細設定のリファレンス。
 ---
 
 # MCP 設定
+
+デスクトップと Web では**プラグイン**の **MCP** タブからサーバーを追加・管理します。CLI と設定ファイルは自動化や詳細設定向けに説明します。
 
 MCP servers は `mcpServers` object の下で設定します。IaC Code は Claude Code 互換の core schema として `stdio`, `http`, `sse`, and URL-only `ws` servers をサポートします。
 
 ## クイックスタート
 
-Yuque などのリモート HTTP MCP サーバーでは、位置 URL 形式でサーバーを追加してから OAuth を開始します。
-
-```bash
-iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
-iac-code mcp auth yuque
-```
-
-stdio サーバーの場合は、サブプロセスのコマンドを `--` の後に指定します。リモート HTTP サーバーにラッパーは不要です。上の例のように `--transport http` で追加してください。
-
-```bash
-iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
-```
+通常は [MCP クイックスタート](./quick-start.md)に従って**プラグイン → MCP**で追加します。以下は保存スコープ、CLI 自動化、詳細設定のリファレンスです。
 
 ## Configuration Sources
 
@@ -123,13 +114,11 @@ iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server
 
 既存の永続化サーバー上で動作するコマンドの場合、`--scope`を省略すると、IaC コードは永続化スコープ全体で一意のサーバーを見つけることができます。同じ名前が複数のスコープに存在する場合、曖昧さを解消するための正確な `--scope` コマンドではコマンドは失敗します。
 
-## 対話型 MCP マネージャー
+## MCP サーバーの管理
 
-対話 REPL では、`/mcp` が全画面の MCP マネージャーを開きます。サーバーをソース別にグループ化し、接続状態、認証状態、設定診断、失敗詳細、設定場所を表示します。
+Web またはデスクトップの MCP 設定で、接続、ツール、リソース、プロンプトを確認し、リモートサーバーの認証、プロジェクトサーバーの承認、保存済みサーバーの再接続、有効化、無効化、削除を行えます。
 
-マネージャーでは、接続済みサーバーの tools、resources、prompts を確認できます。リモートサーバーの authenticate、re-authenticate、clear authentication、サーバーの再接続、永続化サーバーの有効化/無効化、プロジェクト `.mcp.json` サーバーの承認/拒否、永続化エントリの削除も実行できます。OAuth フローは認可 URL を表示し、コピーに対応し、ブラウザーリダイレクトがローカル callback listener に到達できない場合は貼り付けた callback URL または認可コードを受け付けます。
-
-`/mcp enable <name>`、`/mcp disable <name>`、`/mcp reconnect <name>` は、マネージャーを開かずにクイック操作を実行します。`/mcp` がパイプされた stdin やその他の非 TTY 入力から渡された場合、IaC Code は端末が必要であることを表示します。非対話の自動化には `iac-code mcp <command>` を使用してください。
+会話内の `/mcp` は状態を表示します。自動化では `iac-code mcp <command>` を使用してください。操作一覧は上のコマンドリファレンスにあります。
 
 ## Stdio Servers
 
@@ -220,19 +209,15 @@ default のない欠落変数は MCP warning を生成し、対象 server はス
 
 プレーンテキストのシークレットをヘッダーまたは環境値に保存しないでください。環境変数参照または OAuth シークレット ストレージを使用します。
 
-## Project Approval
+## プロジェクトの承認
 
-プロジェクト `.mcp.json` はリポジトリにコミットできるため、IaC コードはそれを自動的に信頼しません。
+プロジェクトの `.mcp.json` は自動では信頼されません。Web またはデスクトップの MCP 設定で承認するか、プロジェクトディレクトリで実行します。
 
-Interactive REPL startup asks:
-
-```text
-Approve project MCP server 'name' from /path/to/.mcp.json? [y/N]
+```bash
+iac-code mcp approve catalog
 ```
 
-Enter キーを押すと、デフォルトの`N`が維持され、その正確なプロジェクト サーバー構成が拒否されます。承認するには「y」または「yes」を入力します。承認は IaC コード構成ディレクトリの下にローカルに保存され、ワー​​クスペース パス、プロジェクト ファイル パス、サーバー名、構成署名が含まれます。 `.mcp.json`サーバー構成が変更されると、承認は無効になり、サーバーは再び保留状態になります。
-
-ヘッドレス、ACP、および A2A のスタートアップでは、対話型の承認の質問をすることはありません。保留中のプロジェクト サーバーはスキップされ、警告として報告されます。
+承認はローカルに保存され、ワークスペース、設定ファイル、サーバー名、設定署名に紐づきます。設定を変更すると再承認が必要です。Headless、ACP、A2A は承認待ちサーバーをスキップして警告を出します。
 
 ## Disabled Servers
 

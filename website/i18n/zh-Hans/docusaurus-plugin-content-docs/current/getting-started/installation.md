@@ -5,11 +5,13 @@ description: 安装 IaC Code 并验证命令可用。
 
 # 安装
 
-IaC Code 需要 Python 3.10 或更高版本。支持 macOS、Linux 和 Windows。
+## 安装桌面版
 
-## 安装
+需要图形应用时，下载适合操作系统的[桌面安装包](../desktop-app.md)。安装包已包含 Python 运行时，无需自行安装 Python 或执行 pip。安装步骤和各平台要求见桌面版文档。
 
-从已配置的 Python 包索引安装：
+## 安装 Web 与 headless
+
+使用本地 Web 或命令行自动化时，先安装 Python 3.10 或更高版本，再安装下方的软件包。该方式支持 macOS、Linux 和 Windows。
 
 ```bash
 pip install iac-code
@@ -20,6 +22,8 @@ pip install iac-code
 ```bash
 iac-code --help
 ```
+
+在交互终端中运行 `iac-code` 即可启动 Web 并打开浏览器；使用 `iac-code web --no-open` 可只启动服务。下一步见[快速开始](./quick-start.md)。
 
 ## 可选功能
 

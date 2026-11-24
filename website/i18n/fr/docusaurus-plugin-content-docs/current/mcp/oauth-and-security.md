@@ -8,6 +8,8 @@ description: Authentifier les serveurs MCP distants et comprendre le modèle de 
 
 MCP peut démarrer des processus locaux et appeler des services distants. IaC Code traite donc la configuration et l'authentification de MCP comme étant sensibles à la sécurité.
 
+Dans **Plugins → MCP**, sélectionnez le serveur puis **Authentifier** ou **Réauthentifier**, et terminez l’autorisation dans le navigateur. **Effacer l’authentification** est également disponible. Les exemples CLI ci-dessous concernent l’automatisation.
+
 ## OAuth
 
 Les servers distants `http` et `sse` peuvent utiliser OAuth. Les servers conformes aux standards qui publient OAuth metadata et prennent en charge Dynamic Client Registration ne demandent pas de client id fourni a l'avance. Ajoutez le server, puis lancez auth :

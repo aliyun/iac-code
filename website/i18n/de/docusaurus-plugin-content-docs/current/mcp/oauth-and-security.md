@@ -8,6 +8,8 @@ description: Remote-MCP-Server authentifizieren und das MCP-Sicherheitsmodell in
 
 MCP kann lokale Prozesse starten und Remote-Dienste aufrufen, daher behandelt IaC-Code die MCP-Konfiguration und -Authentifizierung als sicherheitsrelevant.
 
+Wählen Sie unter **Plugins → MCP** den Server und **Authentifizieren** oder **Erneut authentifizieren**. Schließen Sie die Browserautorisierung ab. **Authentifizierung löschen** ist ebenfalls verfügbar. Die CLI-Beispiele unten dienen der Automatisierung.
+
 ## OAuth
 
 Remote `http`- und `sse` servers koennen OAuth verwenden. Standardkonforme servers, die OAuth metadata veroeffentlichen und Dynamic Client Registration unterstuetzen, benoetigen keine vorab angegebene client id. Fuege den server hinzu und fuehre dann auth aus:

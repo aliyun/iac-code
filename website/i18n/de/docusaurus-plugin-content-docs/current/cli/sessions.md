@@ -5,88 +5,58 @@ description: Konversationen über Läufe hinweg speichern und fortsetzen.
 
 # Sitzungen
 
-Wählen Sie in Web oder Desktop das Projekt und öffnen Sie eine Unterhaltung in der Seitenleiste. Über das Unterhaltungsmenü können Sie sie umbenennen. Die folgenden Terminalbefehle verwenden denselben Sitzungsspeicher.
+Web, Desktop und Headless verwenden denselben Sitzungsspeicher. Unterhaltungen werden automatisch im Laufzeit-Konfigurationsverzeichnis gespeichert.
 
-IaC Code speichert jede Konversation automatisch auf der Festplatte. Sie können frühere Sitzungen fortsetzen und dort weiterarbeiten, wo Sie aufgehört haben.
+## Web und Desktop
 
-## Sitzungen fortsetzen
+### Ein Gespräch fortsetzen
 
-### Interaktiv: `/resume`
+1. Öffnen Sie das Gespräch unter seinem Projekt in der Seitenleiste oder finden Sie es über **Suchen**.
 
-Verwenden Sie im REPL den Befehl `/resume`:
+2. Prüfen Sie die gespeicherten Nachrichten und Dateien.
 
-```text
-/resume
-```
+3. Senden Sie eine weitere Anfrage. Für eine unabhängige Aufgabe wählen Sie **Neuer Chat**.
 
-Dies öffnet eine interaktive Auswahl mit den letzten Sitzungen des aktuellen Projekts. Wenn ein Sitzungsname gesetzt ist, wird er als Titel angezeigt; sonst wird die letzte Eingabe oder ersatzweise die erste Eingabe verwendet.
+### Ein Gespräch umbenennen oder anheften
 
-Eine bestimmte Sitzung können Sie über die exakte Sitzungs-ID, ein eindeutiges ID-Präfix oder einen eindeutigen Sitzungsnamen fortsetzen:
+1. Öffnen Sie das Gespräch und sein Menü **…**.
 
-```text
-/resume abc123
-```
+2. Wählen Sie **Unterhaltung umbenennen**, geben Sie den Titel ein und klicken Sie auf **Speichern**. Die Seitenleiste zeigt den neuen Titel.
 
-### Sitzungen benennen
+3. Wählen Sie im selben Menü **Gespräch anheften**, um es leichter zu finden. Die Gegenaktion löst die Anheftung.
 
-Verwenden Sie `/rename`, um der aktiven Sitzung einen stabilen, gut lesbaren Namen zu geben:
+### Ein Gespräch archivieren und wiederherstellen
 
-```text
-/rename deploy-prod
-```
+1. Wählen Sie im Menü **…** die Aktion **Unterhaltung archivieren**. Es verschwindet aus der aktiven Liste.
 
-Der Name wird in den Sitzungsmetadaten gespeichert. Er erscheint beim Fortsetzen im Willkommensbanner, im Exit-Hinweis und in der `/resume`-Auswahl.
+2. Öffnen Sie **Einstellungen → Archivierte Unterhaltungen** und suchen oder filtern Sie nach dem Projekt.
 
-Wenn der Name eine Sitzung eindeutig identifiziert, können Sie damit fortsetzen:
+3. Klicken Sie beim Gespräch auf **Aus Archiv holen**. Öffnen Sie es danach aus der Seitenleiste.
 
-```text
-/resume deploy-prod
-iac-code tui --resume deploy-prod
-```
+:::note
 
-### CLI: `--resume` und `--continue`
+Über CLI, A2A oder ACP erstellte Gespräche sind standardmäßig ausgeblendet. Aktivieren Sie zum Anzeigen die entsprechende Nur-Lese-Option unter **Einstellungen → Allgemein → Sichtbarkeit fremder Sitzungen**. Gemeinsamer Speicher bedeutet nicht, dass diese Gespräche in Web/Desktop bearbeitbar sind.
 
-Eine bestimmte Sitzung können Sie über die Befehlszeile per exakter Sitzungs-ID, eindeutigem ID-Präfix oder eindeutigem Sitzungsnamen fortsetzen:
+:::
+
+## Headless fortsetzen
+
+Führen Sie den Befehl im Projektverzeichnis der Sitzung aus. `--resume` setzt eine bestimmte Sitzung fort, `--continue` die neueste im Projekt. Die Kurzformen `-r` und `-c` dürfen nicht kombiniert werden.
 
 ```bash
-iac-code tui --resume <session-id-oder-name>
+iac-code --resume deploy-prod --prompt "Eine VPC-Vorlage erzeugen"
+iac-code --continue --prompt "Eine VPC-Vorlage erzeugen"
 ```
 
-Die zuletzt verwendete Sitzung fortsetzen:
+## Andere Projekte
+
+Öffnen Sie in Web oder Desktop das Gespräch unter seinem Projekt in der Seitenleiste. Wechseln Sie für Headless zuerst in das Projektverzeichnis:
 
 ```bash
-iac-code tui --continue
+cd /path/to/project
+iac-code --resume <session-id> --prompt "Eine VPC-Vorlage erzeugen"
 ```
 
-Die Kurzoptionen `-r` und `-c` sind ebenfalls verfügbar:
+## Unterbrochene Unterhaltungen
 
-```bash
-iac-code tui -r <session-id-oder-name>
-iac-code tui -c
-```
-
-### Projektübergreifende Sitzungen
-
-Wenn eine Sitzung zu einem anderen Projektverzeichnis gehört, wechselt IaC Code das Arbeitsverzeichnis nicht direkt. Stattdessen wird ein Befehl ausgegeben, der die Sitzung im richtigen Kontext fortsetzt:
-
-```text
-cd /path/to/other/project && iac-code tui --resume <session-id>
-```
-
-Dieser Befehl wird nach Möglichkeit auch in die Zwischenablage kopiert.
-
-## Wiederherstellung nach Unterbrechungen
-
-Wenn eine Sitzung mitten in der Ausführung unterbrochen wurde, etwa weil der Prozess während eines Tool-Laufs beendet wurde, erkennt IaC Code beim Fortsetzen verwaiste Tool-Aufrufe und ergänzt synthetische Fehlerergebnisse. So kann das Modell sauber weiterarbeiten, statt dauerhaft auf Tool-Ausgabe zu warten, die nie eintreffen wird.
-
-## Sitzungsauswahl
-
-Die `/resume`-Auswahl zeigt:
-
-| Spalte | Beschreibung |
-|--------|--------------|
-| Titel | Sitzungsname, falls gesetzt; sonst letzte oder erste Benutzereingabe |
-| Branch | Git-Branch zum Zeitpunkt der Sitzung |
-| Zeit | Letzte Änderungszeit |
-
-Sitzungen werden absteigend nach Aktualität sortiert. Sie können Text eingeben, um nach dem Titelinhalt zu filtern.
+Öffnen Sie die gespeicherte Unterhaltung, um den Verlauf zu prüfen und fortzufahren. Die Wiederherstellung gleicht unvollständige Werkzeugaufrufe ab. Pipeline-Fortschritt und ausstehende Entscheidungen folgen der [Pipeline-Wiederherstellung](../automation/pipeline-mode.md). Einzelne `--prompt`-Aufrufe führen keine Pipelines aus.

@@ -8,6 +8,8 @@ description: Diagnostica problemas de configuración, conexión, autenticación 
 
 Los MCP warnings no son fatales salvo que todas las capabilities que necesitas queden no disponibles. Un server fallido no deberia impedir que otros MCP servers o las tools integradas de IaC Code sigan funcionando.
 
+En **Plugins → MCP**, elija el proyecto y revise conexión, autenticación y aprobación. Compruebe todas las conexiones o un servidor, vea sus capacidades o autentíquelo. Los comandos siguientes sirven para diagnóstico automatizado.
+
 ## Inspect Configuration
 
 Inspecciona los servers configurados sin conectarte:
@@ -90,13 +92,11 @@ Symptom:
 Project MCP server 'name' is pending approval.
 ```
 
-Fix:
+En **Plugins → MCP**, elige el proyecto y aprueba el servidor pendiente. En CLI:
 
 ```bash
 iac-code mcp approve name
 ```
-
-o inicie el REPL interactivo en ese proyecto y responda "y" cuando se le solicite. Presionar Enter significa `N` y rechaza el servidor.
 
 Si la aprobación solía funcionar pero se detuvo, verifique si `.mcp.json` cambió. La aprobación está ligada a la firma de configuración.
 
@@ -150,7 +150,7 @@ Symptom:
 MCP server 'name' requires authentication.
 ```
 
-Fix:
+Elige **Autenticar** para el servidor en **Plugins → MCP**. En CLI:
 
 ```bash
 iac-code mcp auth name --scope user
@@ -170,7 +170,7 @@ El OAuth flow comenzo, pero no termino limpiamente: el callback URL puede estar 
 haber expirado o el authorization server puede haber devuelto un error. Si un flow nuevo falla antes de completarse,
 IaC Code restaura el auth state anterior.
 
-Correccion:
+Reintenta **Autenticar** o **Volver a autenticar** en **Plugins → MCP**. Borra la autenticación solo si el estado guardado está obsoleto. Equivalentes CLI:
 
 ```bash
 iac-code mcp auth name --scope user
@@ -188,7 +188,7 @@ Symptom:
 invalid_client
 ```
 
-El código IaC borra el cliente OAuth almacenado y el estado del token para ese servidor. Ejecute la autenticación nuevamente:
+iac-code borra el estado del cliente y los tokens inválidos. Elige **Volver a autenticar** en **Plugins → MCP** o usa:
 
 ```bash
 iac-code mcp auth name
@@ -202,10 +202,7 @@ Symptom:
 insufficient_scope
 ```
 
-El servidor solicitó ámbitos OAuth adicionales. En la sesión actual, abra `/mcp` y elija `Autenticar` o
-`Volver a autenticar` para ese servidor; El código IaC incluye los alcances informados por el desafío del servidor en ese flujo. el
-El comando independiente `iac-code mcp auth name` inicia un flujo de autenticación normal y no incluye alcances de solo desafío desde un
-previous session.
+El servidor requiere scopes OAuth adicionales. Complete el enlace de autorización ofrecido en la conversación actual para sus scopes. **Plugins → MCP → Volver a autenticar** y `iac-code mcp auth name` inician una autorización normal sin scopes exclusivos del challenge de una sesión anterior.
 
 ## Scope Ambiguity
 

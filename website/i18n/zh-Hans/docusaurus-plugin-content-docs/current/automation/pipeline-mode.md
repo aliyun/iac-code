@@ -49,7 +49,7 @@ Web 和桌面版在新建会话时选择具体流水线；A2A 和 SDK process �
 
 ## 环境变量
 
-以下变量用于设置 A2A、SDK process 模式及保留的 TUI 的启动默认值。Web 和桌面版按会话选择模式和流水线；只有 Web API 请求未提供对应字段时，才会回退到 `IAC_CODE_MODE` 和 `IAC_CODE_PIPELINE_NAME`。
+这些变量设置 A2A 和 SDK process 模式的默认值。Web 和桌面版按会话选择模式与流水线；Web API 仅在请求省略对应字段时，回退到 `IAC_CODE_MODE` 和 `IAC_CODE_PIPELINE_NAME`。
 
 | 变量 | 用途 |
 |---|---|
@@ -98,8 +98,6 @@ ACP 目前不支持 Pipeline 模式。`--prompt` / [非交互模式](./non-inter
 ## 当前限制
 
 - 当前内置 `selling` 和 `selling_solution_first`，两者主要面向阿里云基础设施工作流；`selling` 仍是默认值。
-- 在终端的 Pipeline 模式下，粘贴到 REPL 的图片会被忽略。
-- `iac-code tui`: Pipeline 运行期间，shell escape、技能触发器和大多数 slash command 会被限制，除非 pipeline 定义显式允许。`/help`、`/status`、`/resume`、`/exit` 等基础命令仍然可用。
 
 
 ## 备份检查点

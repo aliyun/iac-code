@@ -1,30 +1,22 @@
 ---
 title: Démarrage rapide
-description: Configurer IaC Code et exécuter votre première requête.
+description: Démarrer bureau ou web, configurer les accès et envoyer la première demande.
 ---
 
 # Démarrage rapide
 
-Lancez `iac-code` dans un terminal pour démarrer l’application web locale et ouvrir le navigateur. À la première utilisation, configurez le fournisseur LLM et les identifiants Alibaba Cloud dans les paramètres.
+Ces étapes s’appliquent à Desktop et à Web, qui utilisent la même interface de conversation.
 
-```bash
-iac-code
-```
+1. Ouvrez [Desktop](../desktop-app.md) ou lancez `iac-code` dans un terminal interactif pour ouvrir Web.
 
-Puis demandez votre infrastructure :
+2. Cliquez sur **Nouvelle discussion** et choisissez le répertoire de destination sous la saisie.
 
-```text
-Create a VPC and two ECS instances
-```
+3. Suivez la [configuration du modèle](../configuration/llm-providers.md) et définissez le modèle actuel. Pour consulter ou déployer des ressources cloud, configurez aussi les [identifiants cloud](../configuration/alibaba-cloud-credentials.md).
 
-Pour une requête ponctuelle, utilisez le mode non interactif :
+4. Revenez à la saisie, choisissez **Mode normal** et envoyez : « Génère un modèle ROS de VPC dans templates/vpc.yml, sans le déployer. »
 
-```bash
-iac-code --prompt "Create an OSS Bucket"
-```
+5. Suivez les étapes dans la conversation. Si une recherche Wiki a lieu, développez son entrée pour voir les mots-clés et les résultats. Vérifiez toute demande d’autorisation d’écriture.
 
-Vous pouvez également lire la requête depuis l'entrée standard :
+6. Après l’écriture du modèle, cliquez sur son nom dans **Sortie** pour le prévisualiser. Poursuivez en demandant l’explication ou la validation des paramètres. La conversation reste dans la barre latérale.
 
-```bash
-echo "Create a VPC and two ECS instances" | iac-code --prompt -
-```
+Pour un parcours guidé de planification et déploiement, créez une conversation en [mode Pipeline](../automation/pipeline-mode.md). Consultez les [opérations courantes](../cli/commands.md) et l’[automatisation headless](../automation/non-interactive-mode.md).

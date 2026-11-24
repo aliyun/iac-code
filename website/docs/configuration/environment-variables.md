@@ -5,7 +5,7 @@ description: All supported environment variables and precedence rules.
 
 # Environment Variables
 
-IaC Code reads configuration from CLI arguments, environment variables, and configuration files. The precedence is:
+Desktop and Web can be configured in Settings without environment variables. Use the variables below for CI, services, and launch-time overrides. For command-line startup, the precedence is:
 
 ```text
 CLI arguments > environment variables > configuration files

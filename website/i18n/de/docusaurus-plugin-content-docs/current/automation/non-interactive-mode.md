@@ -5,7 +5,7 @@ description: Einmalige Prompts aus Argumenten oder stdin ausführen.
 
 # Nicht-interaktiver Modus
 
-Der nicht-interaktive Modus führt einen einzelnen Prompt aus und beendet sich. Verwenden Sie ihn, wenn IaC Code eine Ausgabe für eine wiederholbare Aufgabe erzeugen soll, ohne in der REPL zu bleiben.
+Headless führt einen Prompt aus und beendet sich anschließend. Verwenden Sie es für wiederholbare Aufgaben, Skripte und CI.
 
 Verwenden Sie `--prompt`, um den Prompt direkt zu übergeben:
 

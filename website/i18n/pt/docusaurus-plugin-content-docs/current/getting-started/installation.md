@@ -5,11 +5,13 @@ description: Instale o IaC Code e verifique o comando.
 
 # Instalacao
 
-O IaC Code requer Python 3.10 ou posterior. É compatível com macOS, Linux e Windows.
+## Instalação do Desktop
 
-## Instalar
+Para o aplicativo gráfico, instale o [pacote Desktop](../desktop-app.md) do seu sistema. O Python está incluído; não é necessário instalá-lo manualmente nem executar pip. O guia do Desktop apresenta os requisitos por plataforma.
 
-Instale o pacote a partir do indice de pacotes Python configurado:
+## Instalar Web e headless
+
+Para Web local ou automação por linha de comando, instale Python 3.10 ou posterior e o pacote abaixo. Essa opção oferece suporte a macOS, Linux e Windows.
 
 ```bash
 pip install iac-code
@@ -20,6 +22,8 @@ Verifique o comando:
 ```bash
 iac-code --help
 ```
+
+Execute `iac-code` em um terminal interativo para iniciar Web e navegador, ou `iac-code web --no-open` para iniciar apenas o servidor. Continue pelo [início rápido](./quick-start.md).
 
 ## Recursos opcionais
 

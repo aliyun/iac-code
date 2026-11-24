@@ -8,6 +8,8 @@ description: 认证远程 MCP 服务器，并了解 IaC Code 中的 MCP 安全�
 
 MCP 可以启动本地进程并调用远程服务，因此 IaC Code 将 MCP 配置和身份验证视为安全敏感的。
 
+桌面版或 Web 中，打开**插件 → MCP**，选择服务器并点击**认证**或**重新认证**，随后完成浏览器授权；面板也提供**清除认证**。下方 CLI 示例用于终端自动化。
+
 ## OAuth
 
 远程 `http` 和 `sse` servers 可以使用 OAuth。发布 OAuth metadata 并支持 Dynamic Client Registration 的标准服务器不需要你预先提供 client id。添加 server 后运行 auth：

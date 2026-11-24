@@ -28,8 +28,8 @@ Use A2A quando outro agente, mecanismo de workflow ou serviço precisar chamar o
 
 | Modo | Comando | Melhor para |
 |------|---------|-------------|
-| **REPL interativo** | `iac-code` | Exploração prática e autoria iterativa de templates |
-| **CLI não interativa** | `iac-code --prompt "..."` ou `--headless` | Scripts de uma única execução e jobs de CI |
+| **Web** | `iac-code` | Exploração prática e autoria iterativa de templates |
+| **CLI não interativa** | `iac-code --prompt "..."` | Scripts de uma única execução e jobs de CI |
 | **Servidor ACP** | `iac-code acp` | Integração com IDE/editor e controle de cliente multi-sessão |
 | **Servidor A2A** | `iac-code a2a` | Interoperabilidade agente-a-agente sobre transports A2A |
 | **Cliente A2A** | `iac-code a2a-client call` | Chamar agentes A2A remotos a partir do iac-code |

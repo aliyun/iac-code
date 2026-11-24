@@ -110,7 +110,7 @@ When the pipeline completes, fails, exits early, or is canceled, it hands the sa
 
 ## Interfaces and Languages
 
-The pipeline works in the interactive terminal, local Web app, Desktop Web shell, SDK process mode, and A2A server mode. Interface capabilities differ—for example, A2A can request structured `rich-v1` candidate presentation—but the pipeline state and safety boundaries are shared.
+The pipeline supports the local Web app, Desktop app, SDK process mode, and A2A server mode. Presentation capabilities differ, such as A2A’s structured `rich-v1` candidates; pipeline state and safety boundaries are shared.
 
 User-visible pipeline text supports English, Simplified Chinese, Spanish, French, German, Japanese, and Portuguese. A2A callers select a request language with `metadata.iac_code.preferredLanguage`; protocol field names, enum values, IDs, and JSON shapes are not translated.
 

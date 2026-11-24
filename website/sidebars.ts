@@ -19,14 +19,11 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Using IaC Code',
       items: [
-        'cli/usage',
-        'cli/interactive-mode',
-        'cli/command-line-options',
-        'cli/commands',
-        'cli/skills',
-        'cli/sessions',
-        'web-app',
         'desktop-app',
+        'web-app',
+        'cli/commands',
+        'cli/sessions',
+        'cli/skills',
         {
           type: 'category',
           label: 'IaC Code Skill',
@@ -65,6 +62,8 @@ const sidebars: SidebarsConfig = {
       type: 'category',
       label: 'Automation',
       items: [
+        'cli/usage',
+        'cli/command-line-options',
         'automation/non-interactive-mode',
         'automation/pipeline-mode',
         'automation/solution-first-pipeline',

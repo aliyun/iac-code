@@ -1,49 +1,60 @@
 ---
 sidebar_position: 2
 title: Inicio rapido MCP
-description: Adicione um servidor MCP HTTP remoto ou servidor stdio com comandos estilo Claude.
+description: Adicionar e conectar servidores MCP no painel Plugins do Desktop ou Web.
 ---
 
 # Inicio rapido MCP
 
-Use este caminho quando voce ja tiver uma URL de servidor MCP ou um comando local de servidor stdio.
+No Desktop e Web, adicione e gerencie servidores na aba **MCP** de **Plugins**. Os comandos CLI e arquivos abaixo servem para automação e configurações avançadas.
 
-## Servidor HTTP remoto
+## Conectar um servidor HTTP remoto
 
-Adicione o servidor remoto com a forma de URL posicional:
+1. Abra **Plugins → MCP**, escolha o projeto e clique em **Adicionar servidor**.
+
+2. Informe o **Nome**, escolha o **Escopo** e selecione **http (remoto)** como transporte.
+
+3. Preencha a **URL** e os cabeçalhos necessários; use referências a variáveis de ambiente para segredos.
+
+4. Clique em **Criar**. Se a configuração de projeto aguardar aprovação, revise e clique em **Aprovar**.
+
+5. Se necessário, clique em **Autenticar**, conclua a autorização no navegador e volte ao painel.
+
+6. Clique em **Verificar conexão** e em **Ver capacidades**. Confira as ferramentas, recursos ou prompts esperados antes de usá-los.
+
+## Conectar um servidor stdio local
+
+1. Abra **Plugins → MCP**, escolha o projeto e clique em **Adicionar servidor**.
+
+2. Informe o **Nome**, o **Escopo** e selecione **stdio (comando local)**.
+
+3. Preencha o **Comando**, um argumento por linha em **Argumentos**, e as variáveis de ambiente necessárias. O executável deve existir na máquina que executa o IaC Code.
+
+4. Clique em **Criar** e aprove a configuração de projeto se necessário.
+
+5. Use **Verificar conexão** e **Ver capacidades** para confirmar a conexão e a descoberta.
+
+:::note
+
+O escopo de usuário vale entre projetos; o local é privado ao diretório escolhido; o de projeto grava um `.mcp.json` compartilhável e exige aprovação local. Para alterar um servidor, use sua ação de edição e clique em **Salvar**.
+
+:::
+
+## Automação CLI
 
 ```bash
 iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
-```
-
-Se o servidor usa OAuth, inicie o fluxo de autorizacao:
-
-```bash
 iac-code mcp auth yuque
-```
-
-Depois da autorizacao, execute um health check limitado:
-
-```bash
 iac-code mcp get yuque --check
 ```
 
-## Servidor stdio
-
-Para servidores stdio, coloque o comando do subprocesso depois de `--`. Um servidor HTTP remoto não precisa de wrapper: adicione-o com `--transport http` como mostrado acima.
-
 ```bash
 iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
-```
-
-Depois inspecione o servidor configurado sem conectar:
-
-```bash
 iac-code mcp get local-files --config-only
 ```
 
 ## Proximos passos
 
-- Use [Configuração MCP](./configuration.md) para scopes, project files, headers, OAuth options e advanced JSON forms.
-- Use [OAuth e segurança](./oauth-and-security.md) para token storage, reset e approval behavior.
-- Use [Solução de problemas](./troubleshooting.md) quando um servidor estiver pending approval, needs auth ou connection failed.
+- Consulte [Configuração MCP](./configuration.md) para escopos, arquivos de projeto, cabeçalhos, opções OAuth e formatos JSON avançados.
+- Consulte [OAuth e segurança](./oauth-and-security.md) para armazenamento de tokens, redefinição e aprovações.
+- Consulte [Solução de problemas](./troubleshooting.md) se o servidor precisar de aprovação ou autenticação, ou falhar ao conectar.

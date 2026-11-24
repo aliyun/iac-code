@@ -8,6 +8,8 @@ description: MCP の設定、接続、認証、機能検出の問題を診断し
 
 MCP warnings は、必要な capabilities がすべて利用不能な場合を除き fatal ではありません。失敗した server が他の MCP servers や組み込みの IaC Code tools の動作を妨げるべきではありません。
 
+**プラグイン → MCP**でプロジェクトを選び、接続・認証・承認状態を確認します。**すべての接続を確認**や個別の接続チェックを使い、機能を確認して認証します。以下のコマンドは端末での自動診断向けです。
+
 ## Inspect Configuration
 
 サーバーへ接続せず、設定済み servers を確認します:
@@ -90,13 +92,11 @@ Symptom:
 Project MCP server 'name' is pending approval.
 ```
 
-Fix:
+**プラグイン → MCP**でプロジェクトを選び、承認待ちのサーバーを承認します。CLI の場合：
 
 ```bash
 iac-code mcp approve name
 ```
-
-または、そのプロジェクトで対話型 REPL を開始し、プロンプトが表示されたら「y」と答えます。 Enter を押すと`N`を意味し、サーバーを拒否します。
 
 以前は承認が機能していたが停止した場合は、`.mcp.json` が変更されているかどうかを確認してください。承認は構成署名に関連付けられています。
 
@@ -150,7 +150,7 @@ Symptom:
 MCP server 'name' requires authentication.
 ```
 
-Fix:
+**プラグイン → MCP**でサーバーの**認証**を選びます。CLI の場合：
 
 ```bash
 iac-code mcp auth name --scope user
@@ -170,7 +170,7 @@ OAuth flow は開始されましたが正常に完了していません。callba
 または authorization server が error を返した可能性があります。新しい flow が完了前に失敗した場合、
 IaC Code は以前の auth state を復元します。
 
-修正:
+**プラグイン → MCP**で**認証**または**再認証**を再試行します。保存済みの状態が無効な場合のみ認証をクリアします。CLI の例：
 
 ```bash
 iac-code mcp auth name --scope user
@@ -188,7 +188,7 @@ Symptom:
 invalid_client
 ```
 
-IaC コードは、そのサーバーに保存されている OAuth クライアントとトークンの状態をクリアします。認証を再度実行します。
+無効なクライアントとトークンの状態はクリアされます。**プラグイン → MCP**で**再認証**するか、次を実行します。
 
 ```bash
 iac-code mcp auth name
@@ -202,10 +202,7 @@ Symptom:
 insufficient_scope
 ```
 
-サーバーは追加の OAuth スコープを要求しました。現在のセッションで`/mcp`を開き、`認証`を選択するか、
-そのサーバーを`再認証`します。 IaC コードには、そのフロー内のサーバー チャレンジによって報告されるスコープが含まれます。の
-スタンドアロンの`iac-code mcp auth name`コマンドは通常の認証フローを開始し、チャレンジのみのスコープを実行しません。
-previous session.
+追加の OAuth スコープが必要な場合、現在の会話が提示する認証リンクで要求されたスコープを承認します。**プラグイン → MCP → 再認証**と `iac-code mcp auth name` は通常の認証であり、以前のセッションの challenge 専用スコープを引き継ぎません。
 
 ## Scope Ambiguity
 

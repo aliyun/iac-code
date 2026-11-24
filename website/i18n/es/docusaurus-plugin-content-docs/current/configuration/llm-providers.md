@@ -5,11 +5,29 @@ description: Proveedores de modelos soportados y variables de entorno.
 
 # Proveedores de LLM
 
-IaC Code admite multiples backends de proveedores de modelos. La seleccion del proveedor puede provenir de las opciones del CLI, variables de entorno o archivos de configuracion. La precedencia es:
+Los pasos se aplican tanto a Desktop como a Web, que comparten la misma interfaz de conversación.
 
-```text
-CLI arguments > environment variables > configuration files
-```
+## Configurar un proveedor en Desktop o Web
+
+1. Abre **Ajustes → Modelos**.
+
+2. Elige a la izquierda el grupo y después el proveedor. Su formulario aparece a la derecha.
+
+3. Selecciona o introduce el **Modelo** y la **Clave API** cuando sea necesaria. Cambia la **URL base de la API** solo para un endpoint personalizado; vacía usa el valor predeterminado.
+
+4. Si el modelo lo admite, elige el **Esfuerzo de razonamiento** o ajusta el presupuesto en **Ajustes avanzados**.
+
+5. Pulsa **Guardar configuración** y espera la confirmación. Para usar el modelo guardado como predeterminado actual, pulsa después **Establecer como modelo actual**.
+
+6. Vuelve a la conversación y comprueba el modelo debajo de la entrada. Ese control permite elegir el modelo de la conversación.
+
+:::note
+
+Guardar la configuración y establecer el modelo actual son acciones distintas. Guarda los campos editados antes de activar el proveedor.
+
+:::
+
+El catálogo y las opciones avanzadas aparecen abajo. Las variables de entorno y archivos manuales se destinan a scripts, servicios o inicios personalizados; consulte [variables](./environment-variables.md) y [archivos](./runtime-configuration.md).
 
 ## Proveedores en la Nube
 

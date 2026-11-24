@@ -5,7 +5,7 @@ description: Toutes les variables d'environnement prises en charge et les règle
 
 # Variables d'environnement
 
-IaC Code lit la configuration depuis les arguments CLI, les variables d'environnement et les fichiers de configuration. L'ordre de priorité est :
+Bureau et web se configurent dans les paramètres sans variables d’environnement. Les variables ci-dessous servent à la CI, aux services et aux surcharges de démarrage. Pour le démarrage en ligne de commande, la priorité est :
 
 ```text
 CLI arguments > environment variables > configuration files

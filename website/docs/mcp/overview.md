@@ -14,7 +14,7 @@ Use MCP when you want IaC Code to call a local or remote capability that is not 
 
 | Surface | MCP support |
 |---|---|
-| Interactive REPL | Loads user, local, and approved project servers. Prompts before trusting new project `.mcp.json` servers. |
+| Web / Desktop | Loads configured and approved servers; manage pending project approvals in MCP settings. |
 | Non-interactive mode | Loads user, local, and approved project servers. Never prompts; pending project servers are skipped with warnings. |
 | ACP server | Accepts session MCP server configs from ACP clients and exposes discovered MCP capabilities inside that session. |
 | A2A server | Loads MCP through the normal runtime and can publish MCP warnings and tool progress in A2A task metadata. |
@@ -52,7 +52,7 @@ At runtime IaC Code:
 6. Registers those capabilities into the existing tool and command registries.
 7. Injects connected server instructions into the agent prompt as server-scoped guidance.
 8. Converts MCP tool results into normal IaC Code tool results, storing binary artifacts and large text artifacts under the runtime configuration directory.
-9. Disconnects MCP clients when the REPL, headless run, ACP session, or A2A runtime closes.
+9. Disconnects MCP clients when the Web / Desktop, headless run, ACP session, or A2A runtime closes.
 
 One failed MCP server does not block other configured servers. Connection and discovery failures stay visible as MCP warnings.
 

@@ -5,88 +5,58 @@ description: Persist and resume conversations across runs.
 
 # Sessions
 
-In Web and Desktop, select the project and open a conversation from the sidebar. Use the conversation menu to rename it. The terminal commands below operate on the same session store.
+Web, Desktop, and headless runs share the session store. Conversations are saved automatically under the runtime configuration directory.
 
-IaC Code automatically persists every conversation to disk. You can resume any previous session to continue where you left off.
+## Web and Desktop
 
-## Resuming Sessions
+### Continue a conversation
 
-### Interactive: `/resume`
+1. Find the project group in the sidebar and click the conversation. If necessary, use **Search** to find it by title.
 
-In the REPL, use the `/resume` command:
+2. Review the saved messages and generated files.
 
-```text
-/resume
-```
+3. Enter a follow-up request and send it. To start an independent task, use **New chat** instead.
 
-This opens an interactive picker showing recent sessions for the current project, with the session name as the title when set, otherwise the last prompt or first prompt fallback.
+### Rename or pin a conversation
 
-To resume a specific session by exact session ID, unique ID prefix, or unique session name:
+1. Open the conversation, then open its **…** menu.
 
-```text
-/resume abc123
-```
+2. Choose **Rename conversation**, enter the new title, and click **Save**. The sidebar shows the updated title.
 
-### Naming Sessions
+3. To keep it easy to find, choose **Pin conversation** in the same menu. Use the unpin action to remove the pin later.
 
-Use `/rename` to give the active session a stable, human-readable name:
+### Archive and restore a conversation
 
-```text
-/rename deploy-prod
-```
+1. Open the conversation’s **…** menu and choose **Archive conversation**. It leaves the active sidebar list.
 
-The name is stored in the session metadata. It appears in the welcome banner when you resume, in the exit hint, and in the `/resume` picker.
+2. To restore it, open **Settings → Archived conversations**, then find it with the search and project filters.
 
-You can resume by name when it uniquely identifies a session:
+3. Click **Unarchive** beside the conversation. Return to the sidebar and open it to continue.
 
-```text
-/resume deploy-prod
-iac-code tui --resume deploy-prod
-```
+:::note
 
-### CLI: `--resume` and `--continue`
+Conversations created through CLI, A2A, or ACP are hidden by default. To inspect them, open **Settings → General → Foreign session visibility** and enable the relevant read-only option. Sharing the session store does not make these conversations editable in Web/Desktop.
 
-Resume a specific session from the command line by exact session ID, unique ID prefix, or unique session name:
+:::
+
+## Headless continuation
+
+Run from the session’s project directory. Add `--resume` to continue a specific session, or `--continue` to use the latest session in that project. The short forms are `-r` and `-c`; do not combine the two options.
 
 ```bash
-iac-code tui --resume <session-id-or-name>
+iac-code --resume deploy-prod --prompt "Generate a VPC template"
+iac-code --continue --prompt "Generate a VPC template"
 ```
 
-Resume the most recent session:
+## Other projects
+
+In Web or Desktop, open a conversation under its project in the sidebar. For headless runs, first change to that project’s directory:
 
 ```bash
-iac-code tui --continue
+cd /path/to/project
+iac-code --resume <session-id> --prompt "Generate a VPC template"
 ```
 
-The short flags `-r` and `-c` are also available:
+## Interrupted conversations
 
-```bash
-iac-code tui -r <session-id-or-name>
-iac-code tui -c
-```
-
-### Cross-project Sessions
-
-When a session belongs to a different project directory, IaC Code does not hot-swap the working directory. Instead, it prints the command to resume in the correct context:
-
-```text
-cd /path/to/other/project && iac-code tui --resume <session-id>
-```
-
-This command is also copied to the clipboard when possible.
-
-## Interruption Recovery
-
-If a session was interrupted mid-execution (e.g., the process was killed while a tool was running), IaC Code detects the orphaned tool calls on resume and appends synthetic error results. This allows the model to recover gracefully without getting stuck waiting for tool output that will never arrive.
-
-## Session Picker
-
-The `/resume` picker displays:
-
-| Column | Description |
-|--------|-------------|
-| Title | Session name when set, otherwise last user prompt or first prompt |
-| Branch | Git branch at the time of the session |
-| Time | Last modification time |
-
-Sessions are sorted by most recent first. You can type to filter by title content.
+Reopen the saved conversation to inspect its history and continue. Recovery reconciles unfinished tool calls. Pipeline progress and pending decisions are restored through the [pipeline recovery flow](../automation/pipeline-mode.md#interaction-and-recovery); one-shot `--prompt` runs do not execute pipelines.
