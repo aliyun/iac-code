@@ -115,7 +115,7 @@ AG-UI adapter 按 thread 分文件保存协议映射、幂等信息和待处理 
 | 在 UI 中处理权限、提问和方案选择 | **AG-UI** |
 | 另一个 agent 或编排系统直接调用 iac-code | **A2A** |
 | IDE/编辑器使用 ACP session 和终端能力 | **ACP** |
-| 本地人工操作 | **交互式 REPL 或 Web/Desktop** |
+| 本地人工操作 | **Web / Desktop** |
 
 AG-UI 和 A2A 可以同时启动。对外提供两种协议时，它们仍共享 iac-code 的执行实现，而不是共享同一个 HTTP 端点。
 

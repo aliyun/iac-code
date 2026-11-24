@@ -11,10 +11,11 @@ from iac_code.config import get_config_dir
 from iac_code.i18n import _
 from iac_code.services.session_layout import SessionPaths, ensure_session_owned_dir
 from iac_code.tools.base import ToolResult
+from iac_code.tools.result_storage import DEFAULT_MAX_INLINE_CHARS, ResultStorage, result_reference, store_result_text
 from iac_code.utils.file_security import ensure_private_dir
 from iac_code.utils.state_io import atomic_write_bytes
 
-MAX_INLINE_TEXT_CHARS = 50_000
+MAX_INLINE_TEXT_CHARS = DEFAULT_MAX_INLINE_CHARS
 MAX_INLINE_TEXT_BYTES = 100_000
 
 
@@ -25,6 +26,7 @@ def convert_mcp_tool_result(
     tool_name: str,
     session_id: str,
     session_dir: Path | str | None = None,
+    result_storage_dir: Path | str | None = None,
 ) -> ToolResult:
     """Convert an MCP tool result into iac-code's model-visible ToolResult."""
 
@@ -39,6 +41,7 @@ def convert_mcp_tool_result(
             tool_name=tool_name,
             session_id=session_id,
             session_dir=session_dir,
+            result_storage_dir=result_storage_dir,
             index=index,
             artifacts=artifacts,
         )
@@ -55,6 +58,7 @@ def convert_mcp_tool_result(
             tool_name=tool_name,
             session_id=session_id,
             session_dir=session_dir,
+            result_storage_dir=result_storage_dir,
             index=len(content_blocks),
             artifacts=artifacts,
         )
@@ -87,6 +91,7 @@ def _convert_content_block(
     tool_name: str,
     session_id: str,
     session_dir: Path | str | None,
+    result_storage_dir: Path | str | None = None,
     index: int,
     artifacts: list[dict[str, Any]],
 ) -> str:
@@ -100,6 +105,7 @@ def _convert_content_block(
             tool_name=tool_name,
             session_id=session_id,
             session_dir=session_dir,
+            result_storage_dir=result_storage_dir,
             index=index,
             artifacts=artifacts,
         )
@@ -113,6 +119,7 @@ def _convert_content_block(
             tool_name=tool_name,
             session_id=session_id,
             session_dir=session_dir,
+            result_storage_dir=result_storage_dir,
             index=index,
             artifacts=artifacts,
         )
@@ -134,6 +141,7 @@ def _convert_content_block(
                 tool_name=tool_name,
                 session_id=session_id,
                 session_dir=session_dir,
+                result_storage_dir=result_storage_dir,
                 index=index,
                 artifacts=artifacts,
                 uri=uri,
@@ -150,6 +158,7 @@ def _convert_content_block(
                 tool_name=tool_name,
                 session_id=session_id,
                 session_dir=session_dir,
+                result_storage_dir=result_storage_dir,
                 index=index,
                 artifacts=artifacts,
                 uri=uri,
@@ -176,6 +185,7 @@ def _convert_text_content(
     tool_name: str,
     session_id: str,
     session_dir: Path | str | None,
+    result_storage_dir: Path | str | None = None,
     index: int,
     artifacts: list[dict[str, Any]],
     uri: str | None = None,
@@ -190,6 +200,7 @@ def _convert_text_content(
         tool_name=tool_name,
         session_id=session_id,
         session_dir=session_dir,
+        result_storage_dir=result_storage_dir,
         index=index,
         artifacts=artifacts,
         uri=uri,
@@ -202,7 +213,11 @@ def _artifact_directory(
     tool_name: str,
     session_id: str,
     session_dir: Path | str | None,
+    result_storage_dir: Path | str | None = None,
 ) -> Path:
+    if result_storage_dir is not None:
+        directory = Path(result_storage_dir) / "mcp" / _safe_path_segment(server_name) / _safe_path_segment(tool_name)
+        return ResultStorage(str(directory)).prepare_directory()
     if session_dir is not None:
         session_root = Path(session_dir)
         session_paths = SessionPaths.require_supported(session_root)
@@ -224,6 +239,7 @@ def _store_text_artifact(
     tool_name: str,
     session_id: str,
     session_dir: Path | str | None,
+    result_storage_dir: Path | str | None = None,
     index: int,
     artifacts: list[dict[str, Any]],
     uri: str | None = None,
@@ -236,9 +252,10 @@ def _store_text_artifact(
         tool_name=tool_name,
         session_id=session_id,
         session_dir=session_dir,
+        result_storage_dir=result_storage_dir,
     )
     path = directory / "{:02d}-{}-{}{}".format(index, _safe_path_segment(kind), digest, extension)
-    atomic_write_bytes(path, data)
+    path = store_result_text(path, text)
 
     artifact_id = "{}/{}/{}".format(
         _safe_path_segment(server_name),
@@ -256,6 +273,14 @@ def _store_text_artifact(
     if uri:
         artifact["uri"] = uri
     artifacts.append(artifact)
+    root = (
+        Path(result_storage_dir)
+        if result_storage_dir is not None
+        else SessionPaths.require_supported(Path(session_dir)).tool_results_dir
+        if session_dir is not None
+        else get_config_dir() / "tool-results" / session_id
+    )
+    reference = result_reference(path, root)
     return (
         _("Saved large MCP text output as {artifact_id} ({chars} chars, {bytes} bytes).").format(
             artifact_id=artifact_id,
@@ -263,7 +288,8 @@ def _store_text_artifact(
             bytes=len(data),
         )
         + "\n"
-        + _("Read the full output from {path}.").format(path=path)
+        + _("Read the full output from {path}.").format(path=reference)
+        + "\nUse grep/read_file with this reference to search or read pages."
     )
 
 
@@ -276,6 +302,7 @@ def _store_base64_artifact(
     tool_name: str,
     session_id: str,
     session_dir: Path | str | None,
+    result_storage_dir: Path | str | None = None,
     index: int,
     artifacts: list[dict[str, Any]],
     uri: str | None = None,
@@ -291,6 +318,7 @@ def _store_base64_artifact(
         tool_name=tool_name,
         session_id=session_id,
         session_dir=session_dir,
+        result_storage_dir=result_storage_dir,
     )
     path = directory / "{:02d}-{}-{}{}".format(index, _safe_path_segment(kind), digest, extension)
     atomic_write_bytes(path, data)

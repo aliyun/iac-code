@@ -1,11 +1,29 @@
 ---
 title: Skills
-description: Create and use reusable prompt templates as slash commands.
+description: Skills in der Eingabe auswählen, unter Plugins verwalten und eigene Skills erstellen.
 ---
 
 # Skills
 
-Skills are reusable prompt templates that extend IaC Code with custom slash commands. They let you package complex instructions, tool configurations, and workflow patterns into named commands that can be invoked during a conversation.
+## Skills verwalten
+
+1. Öffnen Sie **Plugins → Skills** über Seitenleiste oder Einstellungen.
+
+2. Wählen Sie oben das Projekt und suchen Sie nach Name oder Beschreibung.
+
+3. Aktivieren oder deaktivieren Sie Benutzer- und Projekt-Skills über deren Schalter. Integrierte Skills bleiben aktiv; Änderungen werden automatisch gespeichert.
+
+### Einen Skill auswählen und aufrufen
+
+1. Geben Sie im Gespräch `$` und einen Teil des Skill-Namens ein. Auch `/` zeigt Skills an.
+
+2. Wählen Sie den Skill. Eine Skill-Markierung erscheint an der Eingabe.
+
+3. Ergänzen Sie Aufgabe oder Argumente und senden Sie die Nachricht. Beantworten Sie danach Fragen und Freigabekarten.
+
+Deaktivierte Skills werden in `settings.yml` unter `disabled_skills` gespeichert. Gebündelte Skills sind fest aktiviert und werden nicht in die Deaktivierungsliste geschrieben.
+
+Die weiteren Abschnitte richten sich an Skill-Autoren. Für integrierte Skills müssen Sie keine `SKILL.md` erstellen.
 
 ## Skill-Dateiformat
 
@@ -76,16 +94,6 @@ paths:
 | `context` | No | `"inline"` | Execution mode: `inline` or `fork` |
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
-
-## Skills verwalten
-
-Öffnen Sie in Web oder Desktop **Einstellungen → Plugins → Skills**, um Skills zu suchen und Benutzer- oder Projekt-Skills zu aktivieren oder zu deaktivieren.
-
-Führen Sie `/skills` im interaktiven REPL aus, um die Skill-Verwaltungsauswahl zu öffnen. Die Auswahl zeigt gefundene gebündelte, Benutzer- und Projekt-Skills mit Quelle, Größe und Aktivierungsstatus. Sie können nach Name oder Beschreibung suchen, nach Name/Quelle/Größe sortieren und Benutzer- oder Projekt-Skills ein- und ausschalten.
-
-Deaktivierte Skills werden in `settings.yml` unter `disabled_skills` gespeichert. Gebündelte Skills sind fest aktiviert und werden nicht in die Deaktivierungsliste geschrieben.
-
-Verwenden Sie `$<skill-name>`, wenn Autovervollständigung und Aufruf nur auf Skills zielen sollen. Das ist nützlich, wenn ein Skill-Name sich mit normalem Text überschneidet oder wenn Sie eingebaute Slash-Befehle vermeiden möchten.
 
 ## Execution Modes
 
@@ -179,7 +187,7 @@ Review the current project and generate a pre-deployment checklist covering:
 If a stack name is provided, also check the current stack status.
 ```
 
-Save this as `~/.iac-code/skills/checklist/SKILL.md` or `.iac-code/skills/checklist/SKILL.md` in your project. Then invoke it with `/checklist` in the REPL — or with `$checklist`, which is identical but filters autocomplete suggestions to skills only.
+Speichern Sie die Datei als `~/.iac-code/skills/checklist/SKILL.md` oder `.iac-code/skills/checklist/SKILL.md` und rufen Sie `/checklist` oder `$checklist` im Eingabefeld von Web oder Desktop auf. `$` begrenzt Vorschläge auf Skills.
 
 ## Permissions
 

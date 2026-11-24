@@ -1,13 +1,13 @@
 ---
 title: Web App
-description: Run IaC Code as a local web app with the same engine as the CLI.
+description: Start the local Web app and use its settings, conversations, and composer.
 ---
 
 # Web App
 
 Run `iac-code` in a terminal to start the local Web app and open your browser. On first use, configure the LLM provider and Alibaba Cloud credentials in Settings.
 
-The web app reads and writes the same session store as the CLI, so conversations started in one place can be resumed in the other.
+Desktop and Web share saved conversations and settings. Conversations created through other interfaces may be visible only in read-only mode; see [Sessions](./cli/sessions.md) for visibility and continuation.
 
 ## Installation
 
@@ -43,27 +43,41 @@ iac-code web --port 9000 --no-open
 
 Without `--access-token-file`, the server accepts only loopback hosts (`127.0.0.1`, `localhost`, or `::1`) and checks local requests. Explicit token mode also accepts other IP addresses and protects API requests with the encrypted token transport.
 
+## Deploy an existing ROS template
+
+1. Configure [cloud credentials](./configuration/alibaba-cloud-credentials.md), then open a conversation in the project containing the template.
+
+2. Type `@`, select the template file, and ask the assistant to inspect it and list the parameters needed for deployment.
+
+3. Provide the target region, stack name, and parameter values in the conversation. Ask for validation before creating the stack.
+
+4. Review the validation result and proposed changes. When ready, ask the assistant to create the stack.
+
+5. If a cloud API approval card appears, check the operation and approve or reject it. An approved create operation can create billable cloud resources.
+
+6. Read the stack ID, progress, and final result in the conversation. On failure, ask the assistant to diagnose the reported error in the same conversation.
+
 ## Interface Overview
 
 ### Sessions Sidebar
 
-The sidebar lists conversations for the selected project. From here you can:
+The sidebar groups saved conversations by project. From here you can:
 
-- Start a **New chat**, or switch projects with the project selector.
+- Start a **New chat**; choose its project below the composer.
 - **Search** conversations, or open the command palette to run a command.
 - **Pin**, **rename**, or **archive** a conversation, and browse archived conversations.
 
-Because sessions are shared with the CLI, a conversation you resume with `iac-code tui --resume` also appears here. See [Sessions](./cli/sessions.md) for how the session store works.
+Web, Desktop, and headless share saved conversations. See [Sessions](./cli/sessions.md) for resuming and renaming them.
 
 ### Composer
 
-The composer is where you type requests. It exposes the same controls the CLI offers through slash commands and flags:
+Use the composer and its controls to describe a task and choose how the conversation runs:
 
 - **Model and provider** selection for the active session.
 - A **Thinking** toggle to enable or disable extended reasoning for supported models.
 - A **permission mode** control for how tool actions are approved.
 - **Image attachments** for multimodal models.
-- **Slash commands** (typed with `/`) and **`@` file references** to point at files in your workspace.
+- **Skills** selected from `/` or `$` suggestions, and **`@` workspace file references**.
 
 ### Normal Chat and Pipeline Mode
 
@@ -79,7 +93,7 @@ Tool calls render as cards in the transcript. When a tool needs your approval, a
 
 ### Settings
 
-The settings area collects the same configuration the CLI manages:
+Desktop and Web share the same interface. Use Settings and the visible conversation controls for everyday work.
 
 - **Cloud credentials** for Alibaba Cloud (see [Alibaba Cloud Credentials](./configuration/alibaba-cloud-credentials.md)).
 - **Models** and provider configuration (see [LLM Providers](./configuration/llm-providers.md)).

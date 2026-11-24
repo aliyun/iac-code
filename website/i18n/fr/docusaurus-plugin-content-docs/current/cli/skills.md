@@ -1,11 +1,29 @@
 ---
 title: Skills
-description: Create and use reusable prompt templates as slash commands.
+description: Sélectionner les skills dans la saisie, les gérer dans les plugins et créer des skills personnalisés.
 ---
 
 # Skills
 
-Skills are reusable prompt templates that extend IaC Code with custom slash commands. They let you package complex instructions, tool configurations, and workflow patterns into named commands that can be invoked during a conversation.
+## Gérer les compétences
+
+1. Ouvrez **Modules d’extension → Compétences** depuis la barre latérale ou les paramètres.
+
+2. Choisissez le projet, puis recherchez un skill par son nom ou sa description.
+
+3. Activez ou désactivez les skills utilisateur ou projet avec leur interrupteur. Les skills intégrés restent actifs ; les changements sont enregistrés automatiquement.
+
+### Sélectionner et invoquer un skill
+
+1. Dans la conversation, tapez `$` et une partie du nom ; les suggestions `/` contiennent aussi les skills.
+
+2. Sélectionnez le skill. Une pastille apparaît près de la saisie.
+
+3. Ajoutez votre demande ou les arguments et envoyez. Répondez ensuite aux questions et aux cartes d’autorisation.
+
+Les compétences désactivées sont enregistrées dans `settings.yml` sous `disabled_skills`. Les compétences intégrées restent verrouillées comme activées et ne sont pas écrites dans la liste des désactivations.
+
+La suite concerne les auteurs de skills. L’utilisation des skills intégrés n’exige pas d’écrire un fichier `SKILL.md`.
 
 ## Format des fichiers de compétence
 
@@ -76,16 +94,6 @@ paths:
 | `context` | No | `"inline"` | Execution mode: `inline` or `fork` |
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
-
-## Gérer les compétences
-
-Dans Web et Desktop, ouvrez **Paramètres → Modules d’extension → Compétences** pour rechercher des compétences et activer ou désactiver celles de l’utilisateur et du projet.
-
-Exécutez `/skills` dans le REPL interactif pour ouvrir le sélecteur de gestion des compétences. Le sélecteur affiche les compétences intégrées, utilisateur et projet détectées, avec leur source, leur taille et leur état d'activation. Vous pouvez rechercher par nom ou description, trier par nom/source/taille, et activer ou désactiver les compétences utilisateur ou projet.
-
-Les compétences désactivées sont enregistrées dans `settings.yml` sous `disabled_skills`. Les compétences intégrées restent verrouillées comme activées et ne sont pas écrites dans la liste des désactivations.
-
-Utilisez `$<skill-name>` lorsque vous voulez limiter l'autocomplétion et l'appel aux compétences uniquement. C'est utile lorsqu'un nom de compétence recoupe du texte ordinaire ou lorsque vous voulez éviter les commandes slash intégrées.
 
 ## Execution Modes
 
@@ -179,7 +187,7 @@ Review the current project and generate a pre-deployment checklist covering:
 If a stack name is provided, also check the current stack status.
 ```
 
-Save this as `~/.iac-code/skills/checklist/SKILL.md` or `.iac-code/skills/checklist/SKILL.md` in your project. Then invoke it with `/checklist` in the REPL — or with `$checklist`, which is identical but filters autocomplete suggestions to skills only.
+Enregistrez le fichier sous `~/.iac-code/skills/checklist/SKILL.md` ou `.iac-code/skills/checklist/SKILL.md`, puis invoquez `/checklist` ou `$checklist` dans le champ de saisie web ou de bureau. `$` limite les suggestions aux skills.
 
 ## Permissions
 

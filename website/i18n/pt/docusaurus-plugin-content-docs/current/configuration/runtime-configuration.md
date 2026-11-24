@@ -5,9 +5,9 @@ description: Ordem de configuração em tempo de execução e arquivos locais.
 
 # Configuração
 
-O IaC Code lê a configuração a partir de argumentos CLI, variáveis de ambiente e arquivos no diretório de configuração em tempo de execução.
+Gerencie preferências comuns de Desktop e Web nas configurações e nos controles de entrada. Esta página referencia arquivos salvos, substituições de projeto e configuração de automação.
 
-Precedência de configuração:
+A prioridade abaixo vale para a inicialização por linha de comando. As escolhas explícitas de uma conversa Web/Desktop são gerenciadas pelos controles da própria conversa.
 
 ```text
 Argumentos CLI > variáveis de ambiente > arquivos de configuração
@@ -95,7 +95,7 @@ Valores válidos no nível do modelo em `providers.<provider>.models.<model>` su
 
 Para Alibaba Cloud DashScope e DashScope Token Plan, o IaC Code tem um `thinkingBudget=8192` integrado para `glm-5.2` e `kimi-k2.7-code`.
 
-No REPL interativo, `/thinking_enabled on` ou `/thinking_enabled off` permite persistir o valor `thinkingEnabled` no nível do provedor. Executar `/thinking_enabled` sem argumento abre o seletor Habilitar/Desabilitar quando há uma UI de console disponível. Execuções headless de uma única vez podem substituir thinking para essa solicitação com `--thinking-enabled` ou `--no-thinking-enabled`, sem reescrever `settings.yml`.
+No Web e Desktop, o controle Thinking do campo de entrada ajusta o raciocínio da conversa atual. Uma execução headless pontual pode substituí-lo com `--thinking-enabled` ou `--no-thinking-enabled`, sem regravar `settings.yml`.
 
 Requisições A2A podem substituir essas configurações por um único turno de mensagem por meio de `message.metadata.iac_code.thinking` ou dos flags `--thinking-enabled`, `--thinking-effort` e `--thinking-budget` de `iac-code a2a-client call`. Se nenhum metadado explícito de thinking A2A for enviado, o runtime usa as configurações acima e os padrões normais do provedor. Para provedores genéricos `openai_compatible` com base URL em modo compatível do DashScope, o iac-code muda para o formato wire nativo de thinking do DashScope somente quando uma política explícita de thinking está presente.
 

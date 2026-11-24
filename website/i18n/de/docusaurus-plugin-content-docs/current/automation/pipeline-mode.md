@@ -49,7 +49,7 @@ In Web und Desktop wählen Sie die Pipeline beim Erstellen einer Unterhaltung. F
 
 ## Umgebungsvariablen
 
-Diese Variablen legen die Startvorgaben für A2A, den SDK-Prozessmodus und die beibehaltene TUI fest. Web und Desktop wählen Modus und Pipeline pro Unterhaltung; die Web-API greift nur auf `IAC_CODE_MODE` und `IAC_CODE_PIPELINE_NAME` zurück, wenn die entsprechenden Felder in der Anfrage fehlen.
+Diese Variablen legen Vorgaben für A2A und den SDK-Prozessmodus fest. Web und Desktop wählen Modus und Pipeline pro Unterhaltung. Die Web-API verwendet `IAC_CODE_MODE` und `IAC_CODE_PIPELINE_NAME` nur bei fehlenden Anfragefeldern.
 
 | Variable | Zweck |
 |---|---|
@@ -87,7 +87,7 @@ Nachdem die Pipeline abgeschlossen ist, fehlschlägt, frühzeitig beendet oder a
 
 ## Automatisierungsintegrationen
 
-Der Pipeline-Modus ist derzeit hauptsächlich für die interaktive REPL gedacht. Der A2A-Servermodus kann Pipeline-Fortschritt, Artefakte, Berechtigungsergebnisse und Wiederherstellungsinformationen nach außen bereitstellen. Das ist nützlich, wenn eine Pipeline an eine externe Konsole oder ein Aufgabensystem angebunden wird.
+Pipelines können über den A2A-Server oder den SDK-Prozessmodus integriert werden. A2A stellt Fortschritt, Artefakte, Berechtigungsergebnisse und Wiederherstellungsinformationen bereit. Der SDK-Prozessmodus verwendet einen lokalen Unterprozess und tauscht zeilenweise JSON über stdin/stdout aus.
 
 Bei der Integration der Pipeline ueber A2A koennen Aufrufer zusaetzlich zwei Faehigkeiten in den Nachrichtenmetadaten deklarieren: `metadata.iac_code.preferredLanguage` liefert Fortschritt, Fragen und Berechtigungs-Prompts in der bevorzugten Sprache des Aufrufers; `metadata.iac_code.candidatePresentation: rich-v1` laesst den Planbestaetigungs-Step eine strukturierte Payload (Kandidatenname, Zusammenfassung, Architekturdiagramm, monatliche Gesamtkosten, Kostenpositionen) liefern, die fuer Rich-Rendering in externen Oberflaechen geeignet ist. Wenn ein Deployment oder eine Tool-Operation eine Berechtigung erfordert, veroeffentlicht die Pipeline einen ausstehenden Berechtigungs-Umschlag, und Aufrufer antworten mit `allow_once` oder `deny` ueber eine Sideband-Nachricht; Details finden Sie in der [Protokollreferenz](../a2a/protocol-reference.md).
 
@@ -96,8 +96,6 @@ ACP unterstützt den Pipeline-Modus derzeit nicht. `--prompt` / der [nicht inter
 ## Aktuelle Einschränkungen
 
 - Die aktuelle Version enthält `selling` und `selling_solution_first`, beide hauptsächlich für Alibaba-Cloud-Infrastrukturworkflows. `selling` bleibt die Voreinstellung.
-- Im Pipeline-Modus der Terminaloberfläche werden in die REPL eingefügte Bilder ignoriert.
-- `iac-code tui`: Während einer Pipeline sind Shell-Escapes, Skill-Trigger und die meisten Slash-Befehle eingeschränkt, sofern die Pipeline-Definition sie nicht ausdrücklich erlaubt. Grundlegende Befehle wie `/help`, `/status`, `/resume` und `/exit` bleiben verfügbar.
 
 
 ## Backup-Checkpoints

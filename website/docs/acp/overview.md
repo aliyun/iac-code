@@ -8,7 +8,7 @@ description: Overview of Agent Client Protocol support in iac-code.
 
 ## What is ACP
 
-[Agent Client Protocol (ACP)](<https://agentclientprotocol.com/get-started/introduction)>) is a standardized communication protocol between AI agents and their clients. It defines how clients (IDEs, editors, automation tools) start, interact with, and manage agent sessions over structured JSON-RPC messages.
+[Agent Client Protocol (ACP)](https://agentclientprotocol.com/get-started/introduction) is a standardized communication protocol between AI agents and their clients. It defines how clients (IDEs, editors, automation tools) start, interact with, and manage agent sessions over structured JSON-RPC messages.
 
 ## iac-code as an ACP Server
 
@@ -19,7 +19,7 @@ iac-code exposes its Infrastructure as Code capabilities through an ACP server. 
 - Approve or reject file-write and destructive operations
 - Manage multiple concurrent sessions
 
-This turns iac-code from a terminal tool into a **composable backend** for any development environment.
+This makes iac-code a **composable backend** for development environments.
 
 ## Use Cases
 
@@ -31,11 +31,11 @@ This turns iac-code from a terminal tool into a **composable backend** for any d
 
 | Mode | Command | Best For |
 |------|---------|----------|
-| **Interactive REPL** | `iac-code` | Hands-on exploration, iterative template authoring |
-| **Non-interactive CLI** | `iac-code --prompt "..."` or `--headless` | Scripting, one-shot generation, CI pipelines |
+| **Web** | `iac-code` | Hands-on exploration, iterative template authoring |
+| **Non-interactive CLI** | `iac-code --prompt "..."` | Scripting, one-shot generation, CI pipelines |
 | **ACP Server** | `iac-code acp` | IDE integration, multi-session management, programmatic access |
 
-The ACP Server mode is the only mode that supports multiple concurrent sessions and provides structured streaming events (tool calls, permission requests, thinking) rather than plain text output.
+ACP provides session-oriented client integration with structured streaming events. Web, A2A, and SDK process mode have their own session and streaming interfaces.
 
 ## Core Capabilities
 

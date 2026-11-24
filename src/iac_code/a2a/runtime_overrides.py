@@ -8,12 +8,14 @@ from typing import Any
 
 from google.protobuf.json_format import MessageToDict
 
+from iac_code.a2a.projection import a2a_safe_mode_enabled
 from iac_code.i18n import SUPPORTED_LANGUAGES, use_request_language
 from iac_code.providers.request_headers import use_provider_request_headers
 from iac_code.providers.request_policy import ProviderRequestPolicy
 from iac_code.services.permission_wait import permission_execution_identity_cache_scope
 from iac_code.services.providers.aliyun import AliyunCredential, use_aliyun_credential
 from iac_code.services.telemetry import use_session_id, use_telemetry_channel, use_user_id
+from iac_code.tools.path_safety import request_write_policy
 
 _RUNTIME_OVERRIDE_UNSET = object()
 _HTTP_HEADER_NAME = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
@@ -105,6 +107,7 @@ def a2a_request_context(
     llm_headers: Mapping[str, str] | None = None,
 ) -> Iterator[None]:
     with contextlib.ExitStack() as stack:
+        stack.enter_context(request_write_policy(language=preferred_language, cwd_only=a2a_safe_mode_enabled()))
         stack.enter_context(permission_execution_identity_cache_scope())
         if llm_headers is not None:
             stack.enter_context(use_provider_request_headers(llm_headers))

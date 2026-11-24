@@ -150,15 +150,18 @@ class TestHtmlToMarkdown:
 
     def test_small_colspan_only_table_retains_markdown_columns(self):
         output = _extract_markdown_from_html(
-            '<table><tr><th colspan=" 2 ">Location</th><th>Spec</th></tr></table>', "https://example.com",
+            '<table><tr><th colspan=" 2 ">Location</th><th>Spec</th></tr></table>',
+            "https://example.com",
         )
         assert [cell.strip() for cell in output.splitlines()[0].split("|")[1:-1]] == ["Location", "", "Spec"]
 
     @pytest.mark.parametrize("span", ["2", " 2 ", "0"])
     def test_rowspan_variants_keep_region_zone_and_spec_in_their_columns(self, span):
-        html = ('<table><thead><tr><th>Region</th><th>Zone</th><th>Spec</th></tr></thead>'
-                f'<tbody><tr><td rowspan="{span}">Hangzhou</td><td>J</td><td>First</td></tr>'
-                '<tr><td>K</td><td>Second</td></tr></tbody></table>')
+        html = (
+            "<table><thead><tr><th>Region</th><th>Zone</th><th>Spec</th></tr></thead>"
+            f'<tbody><tr><td rowspan="{span}">Hangzhou</td><td>J</td><td>First</td></tr>'
+            "<tr><td>K</td><td>Second</td></tr></tbody></table>"
+        )
         output = _extract_markdown_from_html(html, "https://example.com")
         assert "| Hangzhou | J | First |" in output
         assert "| Hangzhou | K | Second |" in output
@@ -166,8 +169,10 @@ class TestHtmlToMarkdown:
 
     @pytest.mark.parametrize("span", ["0", "5"])
     def test_rowspan_stops_at_the_end_of_its_row_group(self, span):
-        html = (f'<table><tbody><tr><td rowspan="{span}">Hangzhou</td><td>J</td></tr>'
-                '<tr><td>K</td></tr></tbody><tbody><tr><td>Beijing</td><td>A</td></tr></tbody></table>')
+        html = (
+            f'<table><tbody><tr><td rowspan="{span}">Hangzhou</td><td>J</td></tr>'
+            "<tr><td>K</td></tr></tbody><tbody><tr><td>Beijing</td><td>A</td></tr></tbody></table>"
+        )
         output = _extract_markdown_from_html(html, "https://example.com")
         assert "| Hangzhou | K |" in output
         assert "| Beijing | A |" in output
@@ -179,13 +184,13 @@ class TestHtmlToMarkdown:
         assert _extract_markdown_from_html(html, "https://example.com") == _extract_text_from_html(html)
 
     def test_nested_merged_table_falls_back_before_duplicating_its_subtree(self):
-        html = ('<table><tr><td rowspan="2"><table><tr><td>Nested</td></tr></table></td></tr>'
-                '<tr></tr></table>')
+        html = '<table><tr><td rowspan="2"><table><tr><td>Nested</td></tr></table></td></tr><tr></tr></table>'
         assert _extract_markdown_from_html(html, "https://example.com") == _extract_text_from_html(html)
 
     def test_aliyun_table_selected_as_article_root_still_repairs_rowspans(self):
-        html = ('<table class="markdown-body"><tr><td rowspan="2">Hangzhou</td><td>J</td></tr>'
-                '<tr><td>K</td></tr></table>')
+        html = (
+            '<table class="markdown-body"><tr><td rowspan="2">Hangzhou</td><td>J</td></tr><tr><td>K</td></tr></table>'
+        )
         assert "Hangzhou | K" in _extract_markdown_from_html(html, "https://help.aliyun.com/guide")
 
     @pytest.mark.parametrize("tables,rows,columns", [(1, 60, 200), (2, 60, 100)])
@@ -393,9 +398,12 @@ class TestWebFetchToolExecution:
         stream = AsyncByteStream([b"<h1>Title</h1>"], headers={"content-type": "text/html"})
         monkeypatch.setattr(web_fetch_module.httpx, "AsyncClient", lambda **kwargs: AsyncClientStreamOnly(stream))
         monkeypatch.setattr(web_fetch_module, "_extract_markdown_from_html", convert)
-        task = asyncio.create_task(web_fetch_tool.execute(
-            tool_input={"url": "https://example.com", "max_length": 5}, context=context,
-        ))
+        task = asyncio.create_task(
+            web_fetch_tool.execute(
+                tool_input={"url": "https://example.com", "max_length": 5},
+                context=context,
+            )
+        )
         try:
             await asyncio.wait_for(entered.wait(), 3)
             assert not task.done()
@@ -496,9 +504,8 @@ class TestWebFetchToolExecution:
         assert result.is_error is True
 
     @pytest.mark.asyncio
-    async def test_default_max_length_is_50000(self, web_fetch_tool, context):
-        # Content longer than default 50000
-        long_content = "B" * 60000
+    async def test_default_max_length_is_100000(self, web_fetch_tool, context):
+        long_content = "B" * 110000
         stream = AsyncByteStream(
             [long_content.encode()],
             headers={"content-type": "text/plain"},
@@ -513,7 +520,8 @@ class TestWebFetchToolExecution:
             )
 
         assert result.is_error is False
-        assert len(result.content) <= 50000
+        assert len(result.content) == 100000
+        assert result.metadata["web_fetch"]["source_truncated"]
 
     @pytest.mark.asyncio
     async def test_streaming_stops_at_download_byte_cap(self, web_fetch_tool, context, monkeypatch):
@@ -707,3 +715,50 @@ class TestWebFetchToolUI:
         summary = web_fetch_tool.get_tool_use_summary()
         # May return None when no input
         assert summary is None or isinstance(summary, str)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("final_url", "official"),
+    [
+        ("https://help.aliyun.com/zh/ecs/user-guide/example", True),
+        ("https://help.aliyun.com/en/ecs/user-guide/example", True),
+        ("https://help.aliyun.com/document_detail/123.html", True),
+        ("https://help.aliyun.com.evil.example/zh/ecs/example", False),
+        ("https://help.aliyun.com@evil.example/zh/ecs/example", False),
+        ("https://help.aliyun.com/search", False),
+        ("http://help.aliyun.com/zh/ecs/example", False),
+        ("https://example.com/doc", False),
+    ],
+)
+async def test_official_classification_uses_final_url(monkeypatch, final_url, official):
+    original = "article body\n" * 5000
+    response = AsyncByteStream([original.encode()], headers={"content-type": "text/plain"})
+    response.url = httpx.URL(final_url)
+    monkeypatch.setattr(web_fetch_module.httpx, "AsyncClient", lambda **kwargs: AsyncClientStreamOnly(response))
+    result = await WebFetchTool().execute(
+        tool_input={"url": "https://help.aliyun.com/zh/ecs/original", "max_length": 500},
+        context=ToolContext(),
+    )
+    assert not result.is_error
+    assert result.metadata["web_fetch"]["official_document"] == official
+    assert result.metadata["web_fetch"]["source_truncated"] == (not official)
+    if official:
+        assert result.content == original
+    else:
+        assert len(result.content) <= 500
+        assert "[truncated]" in result.content
+
+
+@pytest.mark.asyncio
+async def test_official_document_still_obeys_download_cap(monkeypatch):
+    monkeypatch.setattr(web_fetch_module, "MAX_DOWNLOAD_BYTES", 10)
+    response = AsyncByteStream([b"x" * 100], headers={"content-type": "text/plain"})
+    response.url = httpx.URL("https://help.aliyun.com/zh/ecs/example")
+    monkeypatch.setattr(web_fetch_module.httpx, "AsyncClient", lambda **kwargs: AsyncClientStreamOnly(response))
+    result = await WebFetchTool().execute(
+        tool_input={"url": str(response.url)},
+        context=ToolContext(),
+    )
+    assert result.metadata["web_fetch"]["source_truncated"]
+    assert result.content == "x" * 10 + web_fetch_module.TRUNCATION_MARKER

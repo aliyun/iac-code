@@ -1,30 +1,22 @@
 ---
 title: クイックスタート
-description: IaC Code の設定と最初のプロンプトの実行。
+description: デスクトップまたは Web を起動し、設定して最初の依頼を送ります。
 ---
 
 # クイックスタート
 
-ターミナルで `iac-code` を実行すると、ローカル Web アプリが起動し、ブラウザが開きます。初回は設定画面で LLM プロバイダーと Alibaba Cloud の認証情報を設定してください。
+以下の手順はデスクトップと Web に共通です。両者は同じ会話画面を使用します。
 
-```bash
-iac-code
-```
+1. [デスクトップ](../desktop-app.md)を開くか、対話端末で `iac-code` を実行して Web を開きます。
 
-次にインフラを指示します：
+2. **新しいチャット**をクリックし、入力欄の下でテンプレートの保存先ディレクトリを選びます。
 
-```text
-Create a VPC and two ECS instances
-```
+3. [モデル設定](../configuration/llm-providers.md)に従って保存し、現在のモデルに設定します。クラウド照会やデプロイには[クラウド認証情報](../configuration/alibaba-cloud-credentials.md)も設定します。
 
-ワンショットプロンプトの場合は、非対話モードを使用します：
+4. **通常モード**を選び、「VPC の ROS テンプレートを templates/vpc.yml に保存し、まだデプロイしないでください」と送信します。
 
-```bash
-iac-code --prompt "Create an OSS Bucket"
-```
+5. 会話の処理状況を確認します。Wiki 検索が行われた場合は項目を展開し、キーワードと一致内容を確認できます。ファイル書き込みの承認が出たら確認して回答します。
 
-標準入力からプロンプトを読み取ることもできます：
+6. 保存後、**出力**のファイル名をクリックしてプレビューを開きます。続けてパラメーターの説明や検証を依頼できます。会話はサイドバーに保存されます。
 
-```bash
-echo "Create a VPC and two ECS instances" | iac-code --prompt -
-```
+段階的な計画とデプロイには新しい会話で[パイプラインモード](../automation/pipeline-mode.md)を選びます。[基本操作](../cli/commands.md)と[headless 自動化](../automation/non-interactive-mode.md)も参照してください。

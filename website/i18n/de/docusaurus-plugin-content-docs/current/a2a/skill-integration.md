@@ -57,7 +57,7 @@ SHA-256 der passenden Runtime geprueft; spaetere Aufgaben nutzen die verifiziert
 
 ## Modell und Alibaba-Cloud-Identitaet konfigurieren
 
-Der Skill verwendet standardmaessig `~/.iac-code/` und uebernimmt vorhandene Einstellungen aus REPL, Web- oder
+Der Skill verwendet standardmaessig `~/.iac-code/` und uebernimmt vorhandene Einstellungen aus Web- oder
 Desktop-App. Ein anderes Verzeichnis wird mit `IAC_CODE_CONFIG_DIR` gewaehlt. Automatisierte Umgebungen sollten Modell-
 und Cloud-Zugangsdaten aus einer Geheimnisverwaltung beziehen. Schreiben Sie sie nicht in `SKILL.md`, Prompts,
 Projektdateien oder die Shell-Historie. Bevorzugen Sie temporaere Zugangsdaten, RAM-Rollen oder OAuth mit minimalen

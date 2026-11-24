@@ -68,7 +68,7 @@ py -3 scripts\iac_code.py ensure-runtime
 
 ## 配置模型和阿里云身份
 
-Skill 默认使用 IaC Code 的标准配置目录 `~/.iac-code/`。如果你已经在 REPL、Web 版或桌面版中配置过
+Skill 默认使用 IaC Code 的标准配置目录 `~/.iac-code/`。如果你已经在 Web 版或桌面版中配置过
 IaC Code，Skill 会复用这些设置。可以通过 `IAC_CODE_CONFIG_DIR` 指定其他配置目录。
 
 在自动化环境中，请通过密钥管理方案注入模型设置和阿里云凭证。不要把凭证写入 `SKILL.md`、提示词、

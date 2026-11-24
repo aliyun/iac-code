@@ -5,23 +5,20 @@ description: Starten Sie IaC Code vom Terminal und waehlen Sie den richtigen Wor
 
 # CLI-Uebersicht
 
-Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Konfigurieren Sie bei der ersten Verwendung den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen.
+Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Richten Sie beim ersten Start den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen ein.
 
 ```bash
 iac-code
 iac-code web --no-open
 ```
 
-[Interaktiver Modus](./interactive-mode.md):
+Wählen Sie beim Erstellen einer Unterhaltung in Web oder Desktop normalen Chat oder Pipeline. Für Automatisierung verwenden Sie einen einzelnen Prompt oder einen stream-json-Unterprozess:
 
 ```bash
-iac-code tui
-iac-code tui --help
-```
-
-`iac-code` öffnet standardmäßig die Web-App. Terminaloptionen stehen hinter `iac-code tui`, zum Beispiel `iac-code tui --resume <id>`. Die Headless-Optionen `--prompt` und stream-json bleiben beim Hauptbefehl. Ohne interaktives Terminal starten Sie Web ausdrücklich mit `iac-code web --no-open`.
-
-```bash
-iac-code --prompt "Create an OSS Bucket"
+iac-code --prompt "Eine VPC-Vorlage erzeugen"
 iac-code --input-format stream-json --output-format stream-json
 ```
+
+Siehe [Kommandozeilenoptionen](./command-line-options.md) und [Headless-Automatisierung](../automation/non-interactive-mode.md). Ohne interaktives Terminal starten Sie Web ausdrücklich mit `iac-code web --no-open`.
+
+Für bestehende Terminalabläufe siehe [bisherige Terminaloberfläche](./interactive-mode.md).

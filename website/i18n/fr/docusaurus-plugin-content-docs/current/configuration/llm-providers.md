@@ -5,11 +5,29 @@ description: Fournisseurs de modèles pris en charge et variables d'environnemen
 
 # Fournisseurs LLM
 
-IaC Code prend en charge plusieurs backends de fournisseurs de modèles. La sélection du fournisseur peut provenir des options CLI, des variables d'environnement ou des fichiers de configuration. L'ordre de priorité est :
+Ces étapes s’appliquent à Desktop et à Web, qui utilisent la même interface de conversation.
 
-```text
-CLI arguments > environment variables > configuration files
-```
+## Configurer un fournisseur dans Desktop ou Web
+
+1. Ouvrez **Paramètres → Modèles**.
+
+2. Sélectionnez le groupe puis le fournisseur à gauche. Son formulaire apparaît à droite.
+
+3. Choisissez ou saisissez le **Modèle**, renseignez la **Clé API** si nécessaire et modifiez l’**URL de base de l’API** seulement pour un endpoint personnalisé. Une URL vide utilise la valeur par défaut.
+
+4. Si le modèle le permet, réglez l’**Effort de raisonnement** ou le budget dans **Paramètres avancés**.
+
+5. Cliquez sur **Enregistrer la configuration** et attendez la confirmation. Pour utiliser le modèle enregistré comme valeur courante, cliquez ensuite sur **Définir comme modèle actuel**.
+
+6. Revenez à la conversation et vérifiez le modèle sous la saisie. Ce contrôle permet de choisir le modèle de la conversation.
+
+:::note
+
+Enregistrer la configuration et définir le modèle actuel sont deux actions distinctes. Enregistrez les modifications avant d’activer le fournisseur.
+
+:::
+
+Le catalogue et les réglages avancés figurent ci-dessous. Variables d’environnement et fichiers manuels servent aux scripts, services et démarrages personnalisés ; voir [variables](./environment-variables.md) et [fichiers](./runtime-configuration.md).
 
 ## Fournisseurs Cloud
 

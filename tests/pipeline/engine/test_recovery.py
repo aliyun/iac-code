@@ -705,7 +705,6 @@ async def test_aliyun_completion_guard_contract_for_live_and_resume(
     storage = ResultStorage(
         storage_dir=str(tmp_path / "tool-results"),
         max_inline_chars=50_000,
-        preview_chars=2_000,
     )
     processed = storage.process("tool-1", content)
     if processed.is_externalized:

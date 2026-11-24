@@ -10,7 +10,7 @@ description: Lanzar el servidor ACP y conectar tu primer cliente.
 
 1. **iac-code instalado** — Consulta la guia de [Instalacion](../getting-started/installation.md).
 
-2. **Credenciales de LLM configuradas** — Consulta la guia de [Autenticacion](../configuration/authentication.md) para configurar las credenciales de tu proveedor de modelos mediante el comando `/auth`.
+2. **Credenciales LLM configuradas** — Configure **Ajustes → Modelos** en escritorio o Web, o proporcione los parámetros para automatización. Consulte [Autenticación](../configuration/authentication.md).
 
 3. **SDK de Python para ACP** (opcional, para clientes programaticos)
 

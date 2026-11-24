@@ -56,7 +56,7 @@ est téléchargé et sa taille ainsi que son SHA-256 sont vérifiés ; la copie 
 
 ## Configurer le modèle et l'identité Alibaba Cloud
 
-Le Skill utilise par défaut `~/.iac-code/` et réemploie les réglages du REPL, de l'application Web ou Desktop.
+Le Skill utilise par défaut `~/.iac-code/` et réemploie les réglages de l'application Web ou Desktop.
 `IAC_CODE_CONFIG_DIR` permet de choisir un autre répertoire. Dans les environnements automatisés, injectez les réglages
 du modèle et les identifiants Alibaba Cloud avec un gestionnaire de secrets. Ne placez aucun identifiant dans
 `SKILL.md`, les prompts, les fichiers du projet ou l'historique du shell. Préférez les identifiants temporaires, les

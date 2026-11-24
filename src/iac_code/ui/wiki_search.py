@@ -31,6 +31,22 @@ def wiki_projection(snapshot: dict[str, Any], phase: str | None = None) -> dict[
         "dispatchMode": snapshot.get("dispatch_mode", "serial"),
         "phase": phase or snapshot.get("status", "pending"),
         "summary": wiki_summary(snapshot, phase),
+        "elapsedMs": snapshot.get("elapsed_ms"),
         "keywords": list(snapshot.get("keywords", [])),
-        "files": [{"path": hit["path"], "title": hit["title"]} for hit in snapshot.get("hits", [])],
+        "files": [
+            {
+                "path": hit["path"],
+                "title": hit["title"],
+                "lines": [
+                    {"number": line["number"], "text": line["text"]}
+                    for line in (hit.get("lines") or [])
+                    if isinstance(line, dict)
+                    and type(line.get("number")) is int
+                    and line["number"] > 0
+                    and isinstance(line.get("text"), str)
+                    and line["text"]
+                ],
+            }
+            for hit in snapshot.get("hits", [])
+        ],
     }

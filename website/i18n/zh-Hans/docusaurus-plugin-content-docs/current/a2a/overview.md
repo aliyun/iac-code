@@ -28,8 +28,8 @@ iac-code 可以作为 A2A 1.0 Server / Agent 运行。其他兼容 A2A 的客户
 
 | 模式 | 命令 | 最适合 |
 |------|---------|----------|
-| **交互式 REPL** | `iac-code` | 上手探索和迭代式模板编写 |
-| **非交互式 CLI** | `iac-code --prompt "..."` 或 `--headless` | 一次性脚本和 CI 作业 |
+| **Web** | `iac-code` | 上手探索和迭代式模板编写 |
+| **非交互式 CLI** | `iac-code --prompt "..."` | 一次性脚本和 CI 作业 |
 | **ACP Server** | `iac-code acp` | IDE/编辑器集成和多会话客户端控制 |
 | **A2A Server** | `iac-code a2a` | 通过 A2A 传输实现 agent 到 agent 的互操作 |
 | **A2A Client** | `iac-code a2a-client call` | 从 iac-code 调用远程 A2A agent |

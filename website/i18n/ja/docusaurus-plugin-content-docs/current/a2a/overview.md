@@ -28,8 +28,8 @@ iac-code は A2A 1.0 Server / Agent として実行できます。他の A2A 互
 
 | モード | コマンド | 最適な用途 |
 |------|---------|----------|
-| **Interactive REPL** | `iac-code` | 手元での探索と反復的なテンプレート作成 |
-| **Non-interactive CLI** | `iac-code --prompt "..."` or `--headless` | 1 回限りのスクリプト実行と CI ジョブ |
+| **Web** | `iac-code` | 手元での探索と反復的なテンプレート作成 |
+| **Non-interactive CLI** | `iac-code --prompt "..."` | 1 回限りのスクリプト実行と CI ジョブ |
 | **ACP Server** | `iac-code acp` | IDE/エディター統合と複数セッションのクライアント制御 |
 | **A2A Server** | `iac-code a2a` | A2A トランスポート上のエージェント間相互運用 |
 | **A2A Client** | `iac-code a2a-client call` | iac-code からリモート A2A エージェントを呼び出す |

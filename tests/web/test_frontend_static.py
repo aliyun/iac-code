@@ -1957,8 +1957,8 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
     app_source = _source(APP_JS)
     workspace_source = _source(WORKSPACE_JS)
 
-    assert "/static/styles.css?v=web-repl-ui-327" in html
-    assert "/static/js/app.js?v=web-repl-ui-393" in html
+    assert "/static/styles.css?v=web-repl-ui-330" in html
+    assert "/static/js/app.js?v=web-repl-ui-396" in html
     # api.js 导出 WEB_EVENT_TYPES(EventSource 订阅白名单)与 openEventStream;新增
     # pipeline.step.marker 订阅后必须 bump 其 import 版本位,否则回访浏览器加载「新
     # app.js + 旧缓存 api.js」,EventSource 仍不监听该事件名,实时流水线主区照样空白。
@@ -1994,7 +1994,7 @@ def test_static_asset_versions_reload_rename_api_changes() -> None:
 
     # cloud-creds 面板(Task 5/6)重写后须 bump 全局版本位并给 workspace.js 加 per-file
     # 版本位,否则回访浏览器加载旧缓存 workspace.js,拿不到新的云凭证面板结构。
-    assert "web-repl-ui-393" in index_html
+    assert "web-repl-ui-396" in index_html
     assert "web-repl-ui-333" not in index_html
     # events.js 新增实时 MCP/工具进度归并，必须 bump 版本避免旧 reducer 丢事件。
     assert "./events.js?v=web-repl-ui-328" in app_source
@@ -12016,7 +12016,7 @@ def test_session_updated_folds_current_session_into_sidebar_arrays() -> None:
 
 def test_index_html_cache_version_bumped() -> None:
     html = _source(INDEX_HTML)
-    assert "web-repl-ui-393" in html
+    assert "web-repl-ui-396" in html
     assert "web-repl-ui-343" not in html
 
 
@@ -14083,4 +14083,4 @@ def test_resource_console_preview_keeps_desktop_width_inside_the_viewport() -> N
     assert "width: 100%;" in frame
     assert "height: 100%;" in frame
     assert ".resource-link-preview { width: 100vw; }" in styles
-    assert "/static/styles.css?v=web-repl-ui-327" in _source(INDEX_HTML)
+    assert "/static/styles.css?v=web-repl-ui-330" in _source(INDEX_HTML)

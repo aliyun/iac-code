@@ -8,7 +8,7 @@ description: Uebersicht ueber die Agent Client Protocol-Unterstuetzung in iac-co
 
 ## Was ist ACP
 
-[Agent Client Protocol (ACP)](<https://agentclientprotocol.com/get-started/introduction)>) ist ein standardisiertes Kommunikationsprotokoll zwischen KI-Agenten und ihren Clients. Es definiert, wie Clients (IDEs, Editoren, Automatisierungstools) Agentensitzungen ueber strukturierte JSON-RPC-Nachrichten starten, mit ihnen interagieren und sie verwalten.
+[Agent Client Protocol (ACP)](https://agentclientprotocol.com/get-started/introduction) ist ein standardisiertes Kommunikationsprotokoll zwischen KI-Agenten und ihren Clients. Es definiert, wie Clients (IDEs, Editoren, Automatisierungstools) Agentensitzungen ueber strukturierte JSON-RPC-Nachrichten starten, mit ihnen interagieren und sie verwalten.
 
 ## iac-code als ACP-Server
 
@@ -19,7 +19,7 @@ iac-code stellt seine Infrastructure-as-Code-Faehigkeiten ueber einen ACP-Server
 - Dateischreib- und destruktive Operationen genehmigen oder ablehnen
 - Mehrere gleichzeitige Sitzungen verwalten
 
-Dies verwandelt iac-code von einem Terminal-Tool in ein **komponierbares Backend** fuer jede Entwicklungsumgebung.
+Damit lässt sich iac-code als **kombinierbares Backend** in Entwicklungsumgebungen einbinden.
 
 ## Anwendungsfaelle
 
@@ -31,11 +31,11 @@ Dies verwandelt iac-code von einem Terminal-Tool in ein **komponierbares Backend
 
 | Modus | Befehl | Geeignet fuer |
 |------|---------|----------|
-| **Interaktives REPL** | `iac-code` | Praktische Erkundung, iteratives Erstellen von Vorlagen |
-| **Nicht-interaktive CLI** | `iac-code --prompt "..."` oder `--headless` | Skripting, einmalige Generierung, CI-Pipelines |
+| **Web** | `iac-code` | Praktische Erkundung, iteratives Erstellen von Vorlagen |
+| **Nicht-interaktive CLI** | `iac-code --prompt "..."` | Skripting, einmalige Generierung, CI-Pipelines |
 | **ACP-Server** | `iac-code acp` | IDE-Integration, Multi-Sitzungs-Verwaltung, programmatischer Zugriff |
 
-Der ACP-Server-Modus ist der einzige Modus, der mehrere gleichzeitige Sitzungen unterstuetzt und strukturierte Streaming-Ereignisse (Tool-Aufrufe, Berechtigungsanfragen, Denkprozesse) statt reiner Textausgabe bereitstellt.
+ACP bietet sitzungsorientierte Client-Integration mit strukturierten Streaming-Ereignissen. Web, A2A und der SDK-Prozessmodus haben eigene Sitzungs- und Streaming-Schnittstellen.
 
 ## Kernfaehigkeiten
 

@@ -115,7 +115,7 @@ L’adaptateur conserve les associations de protocole, les données d’idempote
 | Gérer les autorisations, questions et choix dans une interface | **AG-UI** |
 | Permettre à un autre agent ou orchestrateur d’appeler directement iac-code | **A2A** |
 | Intégrer un IDE/éditeur avec sessions ACP et terminal | **ACP** |
-| Utiliser iac-code manuellement | **REPL interactif ou Web/Desktop** |
+| Utiliser iac-code manuellement | **Web / Desktop** |
 
 AG-UI et A2A peuvent fonctionner simultanément. Ils exposent des points d’accès HTTP distincts tout en partageant la même implémentation d’exécution.
 

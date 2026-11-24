@@ -4028,21 +4028,115 @@ function formatTurnDuration(ms) {
 }
 
 function buildWikiSearchSummary(record) {
+  const busy = ["extracting", "searching"].includes(record.phase);
   const wiki = document.createElement("details");
   wiki.className = "wiki-search-summary";
   wiki.dataset.openKey = `wiki-${record.queryId}`;
+  wiki.dataset.phase = record.phase || "pending";
+  wiki.setAttribute("aria-busy", String(busy));
   const summary = document.createElement("summary");
-  summary.textContent = record.summary || "";
-  wiki.append(summary);
-  const keywords = document.createElement("p");
-  keywords.textContent = (record.keywords || []).join(", ");
-  wiki.append(keywords);
-  for (const file of record.files || []) {
-    const row = document.createElement("p");
-    row.textContent = `${file.title} · ${file.path}`;
-    wiki.append(row);
+  const icon = document.createElement("span");
+  icon.className = busy ? "thread-spinner wiki-search-icon" : "wiki-search-icon";
+  icon.setAttribute("aria-hidden", "true");
+  if (busy) {
+    applySpinPhase(icon, 1.4);
   }
+  const label = document.createElement("span");
+  label.className = "wiki-search-label";
+  label.setAttribute("role", "status");
+  const phaseLabels = {
+    extracting: t("Wiki search in progress"),
+    searching: t("Wiki search in progress"),
+    ready: t("Wiki search completed"),
+    fallback_ready: t("Wiki search completed"),
+    no_matches: t("Wiki search completed"),
+    skipped: t("Wiki search not needed"),
+    failed: t("Wiki search failed"),
+    canceled: t("Wiki search cancelled"),
+    pending: t("Wiki search interrupted"),
+  };
+  label.textContent = phaseLabels[record.phase] || phaseLabels.pending;
+  summary.append(icon, label);
+  wiki.append(summary);
+  const content = document.createElement("div");
+  content.className = "wiki-search-content";
+  const meta = document.createElement("p");
+  meta.className = "wiki-search-meta";
+  if (["ready", "fallback_ready", "no_matches"].includes(record.phase)) {
+    const count = document.createElement("span");
+    count.textContent = t("Matched {count} files", {count: record.files?.length || 0});
+    meta.append(count);
+  }
+  if (typeof record.elapsedMs === "number" && Number.isFinite(record.elapsedMs) && record.elapsedMs >= 0) {
+    const elapsed = document.createElement("span");
+    elapsed.className = "wiki-search-elapsed";
+    elapsed.textContent = t("Duration: {seconds}s", {seconds: (record.elapsedMs / 1000).toFixed(1)});
+    meta.append(elapsed);
+  }
+  if (meta.childElementCount) {
+    content.append(meta);
+  }
+  if (record.keywords?.length) {
+    const heading = document.createElement("p");
+    heading.className = "wiki-search-heading";
+    heading.textContent = t("Search keywords");
+    const keywords = document.createElement("div");
+    keywords.className = "wiki-search-keywords";
+    for (const term of record.keywords) {
+      const chip = document.createElement("span");
+      chip.textContent = term;
+      keywords.append(chip);
+    }
+    content.append(heading, keywords);
+  }
+  if (record.files?.length) {
+    const heading = document.createElement("p");
+    heading.className = "wiki-search-heading";
+    heading.textContent = t("Matched documents");
+    const files = document.createElement("ul");
+    files.className = "wiki-search-files";
+    for (const file of record.files) {
+      const row = document.createElement("li");
+      const title = document.createElement("span");
+      title.textContent = file.title;
+      const path = document.createElement("small");
+      path.textContent = file.path;
+      row.append(title, path);
+      if (file.lines?.length) {
+        const excerpts = document.createElement("ol");
+        excerpts.className = "wiki-search-excerpts";
+        for (const line of file.lines) {
+          const item = document.createElement("li");
+          const number = document.createElement("span");
+          number.className = "wiki-search-line-number";
+          number.setAttribute("aria-hidden", "true");
+          number.textContent = String(line.number);
+          const excerpt = document.createElement("p");
+          for (const part of line.text.split(/(\*\*[^*]+\*\*)/g)) {
+            if (!part) continue;
+            const bold = part.startsWith("**") && part.endsWith("**");
+            const fragment = document.createElement(bold ? "strong" : "span");
+            fragment.textContent = bold ? part.slice(2, -2) : part;
+            excerpt.append(fragment);
+          }
+          item.append(number, excerpt);
+          excerpts.append(item);
+        }
+        row.append(excerpts);
+      }
+      files.append(row);
+    }
+    content.append(heading, files);
+  }
+  wiki.append(content);
   return wiki;
+}
+
+function renderWikiSearchProcess(record) {
+  const article = document.createElement("article");
+  article.className = "message message-agent wiki-search-process";
+  article.append(buildWikiSearchSummary(record));
+  return article;
 }
 
 function renderConversationMessage(message, state, options = {}) {
@@ -4080,9 +4174,6 @@ function renderConversationMessage(message, state, options = {}) {
   if (body) {
     article.append(body);
   }
-  if (message.wikiSearch) {
-    article.append(buildWikiSearchSummary(message.wikiSearch));
-  }
   if (message.role !== "user") {
     const messageTools = buildToolCardsElement(message, state, options.openToolUseId || "");
     if (messageTools) {
@@ -4094,8 +4185,11 @@ function renderConversationMessage(message, state, options = {}) {
 
 // 渲染一个「已结束」轮次：中间过程（思考 + 工具卡片）折进「已处理 <时间>」可展开块，
 // 最终回答正文留在分割线下方始终显示。若该轮没有任何过程内容，则退化为普通渲染。
-function renderCollapsedTurn(container, agentMessages, state, turnId, boundaries = []) {
+function renderCollapsedTurn(container, agentMessages, state, turnId, boundaries = [], wikiSearch = null) {
   const processNodes = [];
+  if (wikiSearch) {
+    processNodes.push(buildWikiSearchSummary(wikiSearch));
+  }
   const answerNodes = [];
   // 中途压缩分隔线按「处理完前 afterCount 条助手消息后」登记；折进过程区(「已处理」组)内对应位置，
   // 使中途压缩的整段工具循环仍是一个组、而非被分隔线切成上下两个。
@@ -4772,6 +4866,9 @@ function renderMessages(state) {
     // 中途压缩边界登记为 {afterCount, message}:处理完前 afterCount 条助手消息后画分隔线。
     const boundaries = pendingTurn.boundaries || [];
     if (active) {
+      if (pendingTurn.wikiSearch) {
+        stack.append(renderWikiSearchProcess(pendingTurn.wikiSearch));
+      }
       let bi = 0;
       for (let i = 0; i < pendingTurn.agentMessages.length; i += 1) {
         while (bi < boundaries.length && boundaries[bi].afterCount === i) {
@@ -4785,7 +4882,7 @@ function renderMessages(state) {
         bi += 1;
       }
     } else {
-      renderCollapsedTurn(stack, pendingTurn.agentMessages, state, pendingTurn.turnId, boundaries);
+      renderCollapsedTurn(stack, pendingTurn.agentMessages, state, pendingTurn.turnId, boundaries, pendingTurn.wikiSearch);
     }
     pendingTurn = null;
   };
@@ -4939,13 +5036,16 @@ function renderMessages(state) {
       pipelineStack[pipelineStack.length - 1].body.append(
         renderConversationMessage(message, state, { hideLabel: true, openToolUseId: latestToolUseId }),
       );
+      if (message.role === "user" && message.wikiSearch) {
+        pipelineStack[pipelineStack.length - 1].body.append(renderWikiSearchProcess(message.wikiSearch));
+      }
       continue;
     }
 
     if (message.role === "user") {
       flushPendingTurn(false);
       stack.append(renderConversationMessage(message, state));
-      pendingTurn = { turnId: message.turnId || null, agentMessages: [] };
+      pendingTurn = { turnId: message.turnId || null, agentMessages: [], wikiSearch: message.wikiSearch || null };
     } else {
       if (!pendingTurn) {
         pendingTurn = { turnId: message.turnId || null, agentMessages: [] };

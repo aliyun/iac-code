@@ -19,6 +19,19 @@ from iac_code.tools.base import Tool, ToolContext, ToolResult
 MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
 MAX_TABLE_CELLS = 10_000
 TRUNCATION_MARKER = "\n\n[truncated]"
+DEFAULT_MAX_LENGTH = 100_000
+
+
+def _is_official_document(url: str) -> bool:
+    parsed = urlparse(url)
+    return (
+        parsed.scheme == "https"
+        and parsed.hostname == "help.aliyun.com"
+        and parsed.port in (None, 443)
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path.startswith(("/zh/", "/en/", "/document_detail/"))
+    )
 
 
 def _table_span(cell: Tag, attribute: str) -> int:
@@ -196,7 +209,9 @@ class WebFetchTool(Tool):
             "Fetch the content of a web page. Supports HTTP and HTTPS URLs. "
             "HTML is converted to Markdown, preserving headings, tables, links and code blocks; "
             "Alibaba Cloud documentation returns the article body without site navigation. "
-            "Returns the page content truncated to max_length characters."
+            "Official Alibaba Cloud help articles retain their full fetched body. Other websites "
+            "are limited by max_length (default 100000). Large results are saved as tool-result:// "
+            "files; use grep/read_file to search and read pages."
         )
 
     @property
@@ -210,7 +225,7 @@ class WebFetchTool(Tool):
                 },
                 "max_length": {
                     "type": "integer",
-                    "description": "Maximum number of characters to return. Defaults to 50000.",
+                    "description": "Maximum retained characters for non-official websites. Defaults to 100000.",
                 },
             },
             "required": ["url"],
@@ -218,7 +233,7 @@ class WebFetchTool(Tool):
 
     async def execute(self, *, tool_input: dict[str, Any], context: ToolContext) -> ToolResult:
         url: str = tool_input.get("url", "")
-        max_length: int = int(tool_input.get("max_length", 50000))
+        max_length: int = int(tool_input.get("max_length", DEFAULT_MAX_LENGTH))
 
         # Validate URL is not empty
         if not url or not url.strip():
@@ -282,7 +297,13 @@ class WebFetchTool(Tool):
                 if "text/html" in content_type.lower():
                     text = await run_sync_fenced(_extract_markdown_from_html, text, str(getattr(response, "url", url)))
 
-                if max_length <= 0:
+                final_url = str(getattr(response, "url", url))
+                official = _is_official_document(final_url)
+                source_truncated = download_truncated or (not official and len(text) > max(0, max_length))
+                if official:
+                    if download_truncated:
+                        text += TRUNCATION_MARKER
+                elif max_length <= 0:
                     text = ""
                 elif (download_truncated or len(text) > max_length) and max_length >= len(TRUNCATION_MARKER):
                     available_length = max_length - len(TRUNCATION_MARKER)
@@ -290,7 +311,16 @@ class WebFetchTool(Tool):
                 elif len(text) > max_length:
                     text = text[:max_length]
 
-                return ToolResult.success(text)
+                return ToolResult(
+                    content=text,
+                    metadata={
+                        "web_fetch": {
+                            "url": final_url,
+                            "official_document": official,
+                            "source_truncated": source_truncated,
+                        }
+                    },
+                )
 
         except httpx.HTTPStatusError as e:
             return ToolResult.error(_("HTTP error {status}: {url}").format(status=e.response.status_code, url=url))

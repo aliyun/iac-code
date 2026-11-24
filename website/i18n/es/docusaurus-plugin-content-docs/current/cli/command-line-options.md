@@ -5,26 +5,26 @@ description: Referencia para las opciones de inicio y ejecución única de IaC C
 
 # Opciones de línea de comandos
 
-`iac-code` abre la aplicación web de forma predeterminada. Coloca las opciones de terminal después de `iac-code tui`, por ejemplo `iac-code tui --resume <id>`. Las opciones headless `--prompt` y stream-json siguen en el comando principal. Sin una terminal interactiva, inicia la web explícitamente con `iac-code web --no-open`.
+El comando principal inicia la web por defecto. Las opciones siguientes cubren el inicio web, la ejecución headless puntual y los subprocesos stream-json. Configure las conversaciones interactivas en Web o escritorio.
 
 La columna de entrada indica dónde se acepta cada opción. `headless` significa `iac-code --prompt ...`; `process` indica el modo de subproceso stream-json. El modelo y los permisos de Web se configuran en la interfaz.
 
 | Opción | Propósito | Entrada |
 |---|---|---|
-| `-h`, `--help` | Mostrar la ayuda del CLI y salir. Use esto para inspeccionar las opciones soportadas por su versión instalada. | `iac-code`, `web`, `tui` |
+| `-h`, `--help` | Mostrar la ayuda del CLI y salir. Use esto para inspeccionar las opciones soportadas por su versión instalada. | `iac-code`, `web` |
 | `-v`, `-V`, `--version` | Imprimir la versión instalada de IaC Code y salir. | `iac-code` |
-| `-m <model>`, `--model <model>` | Iniciar con un modelo LLM específico. Esto anula el modelo guardado para la ejecución actual. | `headless`, `process`, `tui` |
+| `-m <model>`, `--model <model>` | Iniciar con un modelo LLM específico. Esto anula el modelo guardado para la ejecución actual. | `headless`, `process` |
 | `-p <prompt>`, `--prompt <prompt>` | Ejecutar un único prompt y salir. Esto habilita el modo no interactivo. Use `--prompt -` para leer el prompt desde la entrada estándar. | `iac-code` |
 | `--output-format <format>` | Establecer el formato de salida para el modo no interactivo. Los valores soportados son `text`, `json` y `stream-json`. El valor predeterminado es `text`. | `headless`, `process` |
 | `--max-turns <number>` | Limitar el número máximo de turnos del agente en modo no interactivo. El valor predeterminado es `100`. | `headless`, `process` |
 | `--thinking-enabled`, `--no-thinking-enabled` | Controla si las solicitudes no interactivas de una sola ejecucion habilitan explicitamente thinking. El valor predeterminado es `--thinking-enabled`; usa `--no-thinking-enabled` para enviar `thinking_enabled=false` en esta ejecucion sin reescribir `settings.yml`. | `headless` |
-| `-d`, `--debug` | Habilitar el registro de depuración para la ejecución actual. En modo interactivo, use `/debug` para inspeccionar o cambiar el registro de depuración después del inicio. | `headless`, `process`, `tui`, `web` |
+| `-d`, `--debug` | Activar los registros de depuración para esta ejecución. | `headless`, `process`, `web` |
 | `--verbose` | Mostrar el progreso del modo headless (no interactivo) en la salida de error estándar. | `headless` |
-| `-r <id-o-nombre-de-sesion>`, `--resume <id-o-nombre-de-sesion>` | Reanudar por ID exacto, prefijo único o nombre único. En `tui`, las sesiones de otro proyecto muestran un comando para el directorio correcto; las ejecuciones headless requieren el directorio del proyecto de la sesión. | `headless`, `tui` |
-| `-c`, `--continue` | Reanudar la sesión más reciente. No se puede usar junto con `--resume`. | `headless`, `tui` |
-| `--allowed-tools <patterns>` | Patrones de permisos de herramientas separados por comas para permitir, ej. `'bash(git *),write_file'`. | `headless`, `process`, `tui` |
-| `--disallowed-tools <patterns>` | Patrones de permisos de herramientas separados por comas para denegar, ej. `'bash(rm *)'`. | `headless`, `process`, `tui` |
-| `--permission-mode <mode>` | Modo de permisos: `default`, `accept_edits`, `bypass_permissions`, `dont_ask`. | `headless`, `process`, `tui` |
+| `-r <id-o-nombre-de-sesion>`, `--resume <id-o-nombre-de-sesion>` | Reanudar por ID exacto, prefijo único o nombre único. Ejecute los comandos headless desde el directorio del proyecto de la sesión. | `headless` |
+| `-c`, `--continue` | Reanudar la sesión más reciente. No se puede usar junto con `--resume`. | `headless` |
+| `--allowed-tools <patterns>` | Patrones de permisos de herramientas separados por comas para permitir, ej. `'bash(git *),write_file'`. | `headless`, `process` |
+| `--disallowed-tools <patterns>` | Patrones de permisos de herramientas separados por comas para denegar, ej. `'bash(rm *)'`. | `headless`, `process` |
+| `--permission-mode <mode>` | Modo de permisos: `default`, `accept_edits`, `bypass_permissions`, `dont_ask`. | `headless`, `process` |
 
 ## Modos de permisos
 
@@ -71,10 +71,10 @@ Leer el prompt desde la entrada estándar:
 echo "Create a VPC and two ECS instances" | iac-code --prompt -
 ```
 
-Reanudar la última sesión en la interfaz de terminal:
+Continuar la sesión más reciente con un prompt único:
 
 ```bash
-iac-code tui --continue
+iac-code --continue --prompt "Generar una plantilla VPC"
 ```
 
 Preaprobar comandos bash que coincidan con `git *`:

@@ -5,11 +5,13 @@ description: IaC Code のインストールとコマンドの確認。
 
 # インストール
 
-IaC Code には Python 3.10 以降が必要です。macOS、Linux、Windows に対応しています。
+## デスクトップのインストール
 
-## インストール
+GUI を使う場合は、OS に対応する[デスクトップパッケージ](../desktop-app.md)をインストールします。Python ランタイムが同梱されているため、Python の手動インストールや pip の実行は不要です。プラットフォーム要件はデスクトップのガイドにあります。
 
-設定済みの Python パッケージインデックスからパッケージをインストールします：
+## Web と headless のインストール
+
+ローカル Web やコマンドライン自動化には Python 3.10 以降をインストールし、以下のパッケージを追加します。macOS、Linux、Windows に対応しています。
 
 ```bash
 pip install iac-code
@@ -20,6 +22,8 @@ pip install iac-code
 ```bash
 iac-code --help
 ```
+
+対話端末で `iac-code` を実行すると Web とブラウザーが開きます。ブラウザーを開かずサーバーを起動するには `iac-code web --no-open` を使います。次は[クイックスタート](./quick-start.md)を参照してください。
 
 ## オプション機能
 

@@ -5,11 +5,29 @@ description: Supported model providers and environment variables.
 
 # LLM Providers
 
-IaC Code supports multiple model provider backends. Provider selection can come from CLI options, environment variables, or configuration files. Precedence is:
+The steps below apply to both Desktop and Web; they use the same conversation interface.
 
-```text
-CLI arguments > environment variables > configuration files
-```
+## Configure a provider in Desktop or Web
+
+1. Open **Settings → Models**.
+
+2. Select the provider group and then the provider on the left. Its configuration form appears on the right.
+
+3. Enter or select **Models**, fill **API key** when required, and change **API base URL** only if needed. Leave the URL blank to use the provider default.
+
+4. If supported, select **Reasoning effort** or expand **Advanced settings** to set the thinking budget.
+
+5. Click **Save configuration** and wait for the saved message. To make this provider’s saved model the current default, click **Set as current model**.
+
+6. Return to a conversation and check the model control below the composer. Use that control to choose the model for the conversation.
+
+:::note
+
+Saving a configuration and setting the current model are separate actions. Save edited fields before activating a provider.
+
+:::
+
+The provider catalog and advanced options are listed below. Environment variables and manual files are intended for scripts, services, or custom startup configuration; see [environment variables](./environment-variables.md) and [configuration files](./runtime-configuration.md).
 
 ## Cloud Providers
 

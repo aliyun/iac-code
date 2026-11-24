@@ -11,7 +11,10 @@ from scripts.repl.e2e.deterministic_openai_server import (
     PIPELINE_PROMPT_MARKER,
     PIPELINE_TEMPLATE_PATH,
     PIPELINE_VSWITCH_TEMPLATE_PATH,
+    RELOAD_PROMPT_MARKER,
+    RELOAD_RESPONSE,
     DeterministicOpenAIServer,
+    is_wiki_request,
 )
 
 
@@ -60,6 +63,47 @@ async def test_server_returns_json_for_non_streaming_title_request(tmp_path) -> 
 
     assert response.choices[0].message.content == "E2E contract chat"
     assert server.requests()[0].get("stream") is not True
+
+
+@pytest.mark.asyncio
+async def test_server_returns_keyword_json_for_the_real_wiki_prompt(tmp_path) -> None:
+    from iac_code.services.wiki_auto_search import PROMPT
+
+    with DeterministicOpenAIServer(tmp_path / "requests.jsonl") as server:
+        async with AsyncOpenAI(api_key="test", base_url=server.base_url) as client:
+            response = await client.chat.completions.create(
+                model="fixture",
+                messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": "Find a VPC"}],
+                stream=False,
+            )
+
+    assert json.loads(response.choices[0].message.content) == {"keywords": [{"text": "VPC", "relevance": 1.0}]}
+    assert is_wiki_request(server.requests()[0])
+
+
+def test_wiki_request_classifier_does_not_treat_user_text_as_a_system_prompt() -> None:
+    from iac_code.services.wiki_auto_search import PROMPT
+
+    assert not is_wiki_request({"messages": [{"role": "user", "content": PROMPT}]})
+    assert not is_wiki_request({"messages": None})
+    assert not is_wiki_request({"stream": True, "messages": [{"role": "system", "content": PROMPT}]})
+
+
+@pytest.mark.asyncio
+async def test_server_distinguishes_the_reload_reply_from_historical_text(tmp_path) -> None:
+    with DeterministicOpenAIServer(tmp_path / "requests.jsonl") as server:
+        async with AsyncOpenAI(api_key="test", base_url=server.base_url) as client:
+            chunks = await _completion(
+                client,
+                [
+                    {"role": "user", "content": ALIYUN_PROMPT_MARKER},
+                    {"role": "assistant", "content": FINAL_RESPONSE},
+                    {"role": "user", "content": "Confirm recovery " + RELOAD_PROMPT_MARKER},
+                ],
+            )
+
+    assert chunks[0].choices[0].delta.content == RELOAD_RESPONSE
+    assert RELOAD_RESPONSE != FINAL_RESPONSE
 
 
 @pytest.mark.asyncio

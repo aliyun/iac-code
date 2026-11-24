@@ -1,27 +1,18 @@
 ---
 sidebar_position: 2
 title: MCP 配置
-description: 通过 CLI 命令、设置文件、项目文件和 ACP 会话配置 MCP 服务器。
+description: 在插件中管理 MCP 服务器；查询 CLI 命令、作用域和高级配置。
 ---
 
 # MCP 配置
+
+桌面版和 Web 通过**插件**中的 **MCP** 标签页添加、管理服务器。下面也保留 CLI 命令和配置文件说明，供自动化和高级配置使用。
 
 MCP servers 配置在 `mcpServers` object 下。IaC Code 支持与 Claude Code 兼容的核心 schema，覆盖 `stdio`, `http`, `sse`, and URL-only `ws` servers。
 
 ## 快速开始
 
-对于语雀等远程 HTTP MCP 服务器，请使用位置 URL 形式添加服务器，然后启动 OAuth：
-
-```bash
-iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
-iac-code mcp auth yuque
-```
-
-对于 stdio server，请将 subprocess 命令放在 `--` 后。远程 HTTP server 不需要 wrapper：按上文用 `--transport http` 添加即可。
-
-```bash
-iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
-```
+日常使用请按 [MCP 快速开始](./quick-start.md)在**插件 → MCP**中添加服务器。下文介绍持久化作用域、CLI 自动化及高级配置字段。
 
 ## Configuration Sources
 
@@ -123,13 +114,11 @@ iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server
 
 对于在现有持久服务器上运行的命令，当省略 `--scope` 时，IaC 代码可以跨持久范围找到唯一的服务器。如果多个作用域中存在相同的名称，则该命令会失败，并使用精确的 `--scope` 命令来消除歧义。
 
-## 交互式 MCP 管理器
+## 管理 MCP 服务器
 
-在交互式 REPL 中，`/mcp` 会打开全屏 MCP 管理器。它会按来源分组服务器，并显示连接状态、认证状态、配置诊断、失败详情和配置位置。
+在 Web 或桌面版的 MCP 设置中，可以查看连接、工具、资源和提示词，认证远程服务器，审批项目服务器，以及重连、启用、禁用或删除已保存的服务器。
 
-在管理器中，你可以查看已连接服务器的 tools、resources 和 prompts；对远程服务器执行 authenticate、re-authenticate 或 clear authentication；重连服务器；启用或禁用持久服务器；批准或拒绝项目 `.mcp.json` 服务器；以及删除持久配置项。OAuth 流程会显示授权 URL，支持复制 URL，并在浏览器重定向无法到达本地 callback listener 时接受粘贴的 callback URL 或授权码。
-
-`/mcp enable <name>`、`/mcp disable <name>` 和 `/mcp reconnect <name>` 可以不打开管理器直接执行快捷操作。如果 `/mcp` 来自管道 stdin 或其他非 TTY 输入，IaC Code 会打印需要终端的提示；非交互自动化请使用 `iac-code mcp <command>`。
+会话中的 `/mcp` 命令用于查看服务器状态。自动化场景请使用 `iac-code mcp <command>`，支持的操作见上方命令参考。
 
 ## Stdio Servers
 
@@ -220,19 +209,15 @@ ${VAR:-default-value}
 
 不要将明文机密存储在标头或环境值中。使用环境变量引用或 OAuth 秘密存储。
 
-## Project Approval
+## 项目审批
 
-项目 `.mcp.json` 可以提交到存储库，因此 IaC Code 不会自动信任它。
+项目 `.mcp.json` 不会被自动信任。请在 Web 或桌面版的 MCP 设置中批准服务器，或在项目目录中运行：
 
-Interactive REPL startup asks:
-
-```text
-Approve project MCP server 'name' from /path/to/.mcp.json? [y/N]
+```bash
+iac-code mcp approve catalog
 ```
 
-按 Enter 键将保留默认的 `N` 并拒绝该确切的项目服务器配置。输入 `y` 或 `yes` 进行批准。批准存储在本地 IaC 代码配置目录下，包括工作区路径、项目文件路径、服务器名称和配置签名。如果 `.mcp.json` 服务器配置发生更改，批准将失效，服务器将再次变为待处理状态。
-
-Headless、ACP 和 A2A 初创公司从不询问交互式审批问题。待处理的项目服务器将被跳过并报告为警告。
+审批记录保存在本地，并绑定工作区、配置来源、服务器名称和配置签名；配置变更后需要重新审批。Headless、ACP 和 A2A 会跳过待审批的项目服务器并报告警告。
 
 ## Disabled Servers
 

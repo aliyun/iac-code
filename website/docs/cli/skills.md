@@ -1,11 +1,29 @@
 ---
 title: Skills
-description: Create and use reusable prompt templates as slash commands.
+description: Use skills from the composer and manage them in Plugins; author custom skills when needed.
 ---
 
 # Skills
 
-Skills are reusable prompt templates that extend IaC Code with custom slash commands. They let you package complex instructions, tool configurations, and workflow patterns into named commands that can be invoked during a conversation.
+## Managing Skills
+
+1. Open **Plugins → Skills** from the sidebar or Settings.
+
+2. Select the project at the top, then search for a skill by name or description.
+
+3. Use the skill’s switch to enable or disable user or project skills. Built-in skills stay enabled; changes are saved automatically.
+
+### Select and invoke a skill
+
+1. Return to the conversation and type `$` followed by part of the skill name; `/` suggestions also include skills.
+
+2. Select the skill. A skill chip appears beside the input.
+
+3. Add the request or skill arguments and send it. Respond to any questions or permission cards in the conversation.
+
+Disabled skills are saved in `settings.yml` under `disabled_skills`. Bundled skills are locked enabled and are not written to the disabled list.
+
+The remaining sections describe how to create skills. You do not need to write a `SKILL.md` file to use the bundled skills.
 
 ## Skill File Format
 
@@ -76,16 +94,6 @@ paths:
 | `context` | No | `"inline"` | Execution mode: `inline` or `fork` |
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
-
-## Managing Skills
-
-In Web and Desktop, open **Settings → Plugins → Skills** to search skills and enable or disable user and project skills.
-
-Run `/skills` in the interactive REPL to open the skill management picker. The picker lists discovered bundled, user, and project skills with their source, size, and enabled state. You can search by name or description, sort by name/source/size, and toggle user or project skills on and off.
-
-Disabled skills are saved in `settings.yml` under `disabled_skills`. Bundled skills are locked enabled and are not written to the disabled list.
-
-Use `$<skill-name>` when you want autocomplete and invocation to target skills only. This is useful when a skill name overlaps with ordinary text or when you want to avoid built-in slash commands.
 
 ## Execution Modes
 
@@ -179,7 +187,7 @@ Review the current project and generate a pre-deployment checklist covering:
 If a stack name is provided, also check the current stack status.
 ```
 
-Save this as `~/.iac-code/skills/checklist/SKILL.md` or `.iac-code/skills/checklist/SKILL.md` in your project. Then invoke it with `/checklist` in the REPL — or with `$checklist`, which is identical but filters autocomplete suggestions to skills only.
+Save this as `~/.iac-code/skills/checklist/SKILL.md` or `.iac-code/skills/checklist/SKILL.md`, then invoke `/checklist` or `$checklist` in the Web or Desktop composer. `$` filters suggestions to skills only.
 
 ## Permissions
 

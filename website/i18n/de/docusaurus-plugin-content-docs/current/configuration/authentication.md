@@ -1,18 +1,16 @@
 ---
 title: Authentifizierung
-description: Konfigurieren Sie LLM- und Cloud-Anmeldedaten mit dem Authentifizierungsablauf.
+description: Modell- und Cloud-Zugriff in den Einstellungen von Desktop oder Web einrichten.
 ---
 
 # Authentifizierung
 
-Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Konfigurieren Sie bei der ersten Verwendung den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen.
+Öffnen Sie Desktop oder starten Sie Web mit `iac-code` in einem interaktiven Terminal. Richten Sie das Modell und erforderliche Cloud-Zugangsdaten in den Einstellungen ein.
 
-- **Einstellungen → Modelle**: Anbieter auswählen, API-Schlüssel eingeben und Modell auswählen.
-- **Einstellungen → Cloud-Anmeldedaten**: Alibaba Cloud, Authentifizierungsmethode und Region auswählen.
+- [Einen Anbieter in Desktop oder Web einrichten](./llm-providers.md)
+- [Cloud-Zugriff in Desktop oder Web einrichten](./alibaba-cloud-credentials.md)
 
 Web, Desktop und Headless-Aufrufe verwenden diese gespeicherten Zugangsdaten gemeinsam.
-
-Für die Einrichtung im Terminal starten Sie `iac-code tui` und führen `/auth` aus.
 
 Die Laufzeitkonfiguration wird im Benutzerkonfigurationsverzeichnis gespeichert:
 

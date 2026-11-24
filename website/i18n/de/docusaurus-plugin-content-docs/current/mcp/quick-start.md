@@ -1,49 +1,60 @@
 ---
 sidebar_position: 2
 title: MCP Schnellstart
-description: Remote HTTP MCP server oder stdio server mit Claude-style Befehlen hinzufuegen.
+description: MCP-Server im Plugin-Bereich von Desktop oder Web hinzufügen und verbinden.
 ---
 
 # MCP Schnellstart
 
-Verwenden Sie diesen Einstieg, wenn Sie bereits eine MCP server URL oder einen lokalen stdio server command haben.
+Verwalten Sie Server im Register **MCP** unter **Plugins** in Desktop oder Web. CLI-Befehle und Konfigurationsdateien unten dienen Automatisierung und erweiterten Einstellungen.
 
-## Remote HTTP Server
+## Einen entfernten HTTP-Server verbinden
 
-Fuegen Sie den remote server mit der positionalen URL-Form hinzu:
+1. Öffnen Sie **Plugins → MCP**, wählen Sie das Projekt und klicken Sie auf **Server hinzufügen**.
+
+2. Geben Sie **Name** und **Geltungsbereich** ein und wählen Sie **http (entfernt)** als Transport.
+
+3. Tragen Sie die **URL** und erforderliche Header ein. Verweisen Sie bei Geheimnissen auf Umgebungsvariablen.
+
+4. Klicken Sie auf **Erstellen**. Prüfen und **Genehmigen** Sie gegebenenfalls eine ausstehende Projektkonfiguration.
+
+5. Klicken Sie bei Bedarf auf **Authentifizieren** und schließen Sie die Browserautorisierung ab. Kehren Sie zum Bereich zurück.
+
+6. Klicken Sie auf **Verbindung prüfen** und **Funktionen anzeigen**. Prüfen Sie die erwarteten Werkzeuge, Ressourcen oder Prompts vor der Verwendung.
+
+## Einen lokalen stdio-Server verbinden
+
+1. Öffnen Sie **Plugins → MCP**, wählen Sie das Projekt und klicken Sie auf **Server hinzufügen**.
+
+2. Tragen Sie **Name** und **Geltungsbereich** ein und wählen Sie **stdio (lokaler Befehl)**.
+
+3. Geben Sie den **Befehl**, jeweils ein **Argument** pro Zeile und nötige Umgebungsvariablen ein. Das Programm muss auf dem ausführenden Rechner vorhanden sein.
+
+4. Klicken Sie auf **Erstellen** und genehmigen Sie bei Bedarf die Projektkonfiguration.
+
+5. Prüfen Sie Verbindung und Erkennung über **Verbindung prüfen** und **Funktionen anzeigen**.
+
+:::note
+
+Benutzerkonfiguration gilt projektübergreifend, lokale Konfiguration nur für das gewählte Arbeitsverzeichnis. Projektkonfiguration schreibt eine teilbare `.mcp.json` und erfordert eine lokale Freigabe. Bearbeiten Sie vorhandene Server über deren Bearbeitungsaktion und **Speichern**.
+
+:::
+
+## CLI-Automatisierung
 
 ```bash
 iac-code mcp add --transport http yuque https://mcp.example.com/yuque/mcp
-```
-
-Wenn der server OAuth verwendet, starten Sie den authorization flow:
-
-```bash
 iac-code mcp auth yuque
-```
-
-Nach der Autorisierung fuehren Sie einen begrenzten health check aus:
-
-```bash
 iac-code mcp get yuque --check
 ```
 
-## Stdio-Server
-
-Für stdio-Server setzen Sie den Unterprozessbefehl hinter `--`. Ein Remote-HTTP-Server benötigt keinen Wrapper: Fügen Sie ihn wie oben gezeigt mit `--transport http` hinzu.
-
 ```bash
 iac-code mcp add local-files --scope user -- npx -y @modelcontextprotocol/server-filesystem ./templates
-```
-
-Danach pruefen Sie den configured server ohne Verbindung:
-
-```bash
 iac-code mcp get local-files --config-only
 ```
 
 ## Naechste Schritte
 
-- Verwenden Sie [MCP-Konfiguration](./configuration.md) fuer scopes, project files, headers, OAuth options und advanced JSON forms.
-- Verwenden Sie [OAuth und Sicherheit](./oauth-and-security.md) fuer token storage, reset und approval behavior.
-- Verwenden Sie [Fehlerbehebung](./troubleshooting.md), wenn ein server pending approval, needs auth oder connection failed ist.
+- [MCP-Konfiguration](./configuration.md) beschreibt Geltungsbereiche, Projektdateien, Header, OAuth und erweiterte JSON-Formate.
+- [OAuth und Sicherheit](./oauth-and-security.md) beschreibt Tokenspeicherung, Zurücksetzen und Freigaben.
+- Die [Fehlerbehebung](./troubleshooting.md) hilft bei ausstehenden Freigaben, Authentifizierungsbedarf und Verbindungsfehlern.

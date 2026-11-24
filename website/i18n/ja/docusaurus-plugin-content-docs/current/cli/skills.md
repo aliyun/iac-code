@@ -1,11 +1,29 @@
 ---
 title: Skills
-description: Create and use reusable prompt templates as slash commands.
+description: 入力欄でスキルを選び、プラグインで管理します。必要に応じて独自のスキルも作成できます。
 ---
 
 # Skills
 
-Skills are reusable prompt templates that extend IaC Code with custom slash commands. They let you package complex instructions, tool configurations, and workflow patterns into named commands that can be invoked during a conversation.
+## スキルの管理
+
+1. サイドバーまたは設定から**プラグイン → スキル**を開きます。
+
+2. 上部でプロジェクトを選び、名前や説明でスキルを検索します。
+
+3. ユーザー・プロジェクトのスキルはスイッチで有効・無効を切り替えます。組み込みスキルは常に有効です。変更は自動保存されます。
+
+### 会話でスキルを選択・実行する
+
+1. 会話に戻り、`$` とスキル名の一部を入力します。`/` の候補にもスキルが表示されます。
+
+2. スキルを選ぶと、入力欄付近にスキルのチップが表示されます。
+
+3. 依頼や引数を追加して送信し、その後の質問や承認カードに回答します。
+
+無効化されたスキルは `settings.yml` の `disabled_skills` に保存されます。組み込みスキルは常に有効に固定され、無効化リストには書き込まれません。
+
+以降はスキル作成者向けです。組み込みスキルを使うだけなら `SKILL.md` の作成は不要です。
 
 ## Skill File Formats
 
@@ -76,16 +94,6 @@ paths:
 | `context` | No | `"inline"` | Execution mode: `inline` or `fork` |
 | `agent` | No | `"general-purpose"` | Agent type for fork mode |
 | `paths` | No | `[]` | Glob patterns for path-based auto-activation |
-
-## スキルの管理
-
-Web 版とデスクトップ版では、**設定 → プラグイン → スキル**を開くと、スキルの検索やユーザー・プロジェクトのスキルの有効化と無効化ができます。
-
-インタラクティブ REPL で `/skills` を実行すると、スキル管理ピッカーを開けます。ピッカーには検出された組み込みスキル、ユーザースキル、プロジェクトスキルが表示され、ソース、サイズ、有効状態を確認できます。名前または説明で検索し、名前/ソース/サイズで並べ替え、ユーザースキルまたはプロジェクトスキルを有効化・無効化できます。
-
-無効化されたスキルは `settings.yml` の `disabled_skills` に保存されます。組み込みスキルは常に有効に固定され、無効化リストには書き込まれません。
-
-オートコンプリートと呼び出し対象をスキルだけに絞りたい場合は `$<skill-name>` を使用します。スキル名が通常のテキストと重なる場合や、組み込み Slash コマンドを避けたい場合に便利です。
 
 ## Execution Modes
 
@@ -179,7 +187,7 @@ Review the current project and generate a pre-deployment checklist covering:
 If a stack name is provided, also check the current stack status.
 ```
 
-Save this as `~/.iac-code/skills/checklist/SKILL.md` or `.iac-code/skills/checklist/SKILL.md` in your project. Then invoke it with `/checklist` in the REPL — or with `$checklist`, which is identical but filters autocomplete suggestions to skills only.
+`~/.iac-code/skills/checklist/SKILL.md` またはプロジェクトの `.iac-code/skills/checklist/SKILL.md` に保存し、Web またはデスクトップの入力欄で `/checklist` または `$checklist` を呼び出します。`$` は候補をスキルだけに絞ります。
 
 ## Permissions
 

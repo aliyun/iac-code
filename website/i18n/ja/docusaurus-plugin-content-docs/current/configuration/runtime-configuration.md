@@ -5,9 +5,9 @@ description: ランタイム設定の優先順位とローカルファイル。
 
 # 設定
 
-IaC Code は CLI 引数、環境変数、およびランタイム設定ディレクトリ内のファイルから設定を読み取ります。
+通常のデスクトップと Web の設定には設定画面と入力欄を使います。本ページは保存ファイル、プロジェクト上書き、自動化設定のリファレンスです。
 
-設定の優先順位：
+以下はコマンドライン起動時の優先順位です。Web・デスクトップの会話で明示的に選んだ項目は、その会話のコントロールで管理します。
 
 ```text
 CLI 引数 > 環境変数 > 設定ファイル
@@ -95,7 +95,7 @@ IaC Code は設定可能な出力トークン上限を設けません。Chat Com
 
 Alibaba Cloud DashScope と DashScope Token Plan では、IaC Code は `glm-5.2` と `kimi-k2.7-code` に組み込みで `thinkingBudget=8192` を設定しています。
 
-対話 REPL では、`/thinking_enabled on` または `/thinking_enabled off` で provider 単位の `thinkingEnabled` 値を永続化できます。引数なしで `/thinking_enabled` を実行すると、コンソール UI が利用できる場合は有効化/無効化ピッカーが開きます。ワンショット headless 実行では、`--thinking-enabled` または `--no-thinking-enabled` でそのリクエストだけ thinking を上書きでき、`settings.yml` は書き換えません。
+Web とデスクトップでは、入力欄の Thinking コントロールで現在の会話の推論を切り替えます。単発 headless 実行は `--thinking-enabled` または `--no-thinking-enabled` で今回のリクエストだけを上書きし、`settings.yml` は変更しません。
 
 A2A リクエストは、`message.metadata.iac_code.thinking` または `iac-code a2a-client call` の `--thinking-enabled`、`--thinking-effort`、`--thinking-budget` フラグを通じて、この設定を 1 回の message turn だけ上書きできます。明示的な A2A thinking metadata が送信されない場合、runtime は上記の設定と provider の通常のデフォルトを使用します。DashScope compatible-mode の base URL を持つ汎用 `openai_compatible` provider では、明示的な thinking ポリシーがある場合にのみ、iac-code は DashScope ネイティブの thinking wire format に切り替えます。
 

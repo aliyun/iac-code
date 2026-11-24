@@ -704,6 +704,140 @@ h3 {
   padding: 0 0.35rem;
 }
 
+.wiki-search-summary {
+  width: max-content;
+  max-width: min(40rem, 100%);
+  margin: -0.1rem 0 0.02rem;
+  color: var(--codex-muted);
+}
+
+.wiki-search-summary > summary::-webkit-details-marker {
+  display: none;
+}
+
+.wiki-search-summary > summary:hover {
+  color: var(--codex-text);
+}
+
+.wiki-search-summary > summary::after {
+  content: "›";
+  opacity: 0;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.wiki-search-summary > summary:hover::after,
+.wiki-search-summary[open] > summary::after {
+  opacity: 1;
+}
+
+.wiki-search-summary[open] > summary::after {
+  transform: rotate(90deg);
+}
+
+.wiki-search-icon {
+  justify-self: start;
+  width: 0.82rem;
+  height: 0.82rem;
+  margin-left: -0.1rem;
+  opacity: 0.68;
+}
+
+.wiki-search-icon:not(.thread-spinner) {
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='m16 16 4.5 4.5'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='m16 16 4.5 4.5'/%3E%3C/svg%3E") center / contain no-repeat;
+}
+
+.wiki-search-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  margin: 0 0 0.6rem;
+  color: var(--codex-muted);
+}
+
+.wiki-search-content {
+  margin: 0.35rem 0 0.6rem 0.82rem;
+  padding: 0 0 0 0.75rem;
+  border-left: 1px solid var(--codex-border);
+  color: var(--codex-text);
+  font-size: 0.82rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.wiki-search-content:empty {
+  display: none;
+}
+
+.wiki-search-heading {
+  margin: 10px 0 6px;
+  color: var(--codex-muted);
+  font-size: 12px;
+}
+
+.wiki-search-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wiki-search-keywords > span {
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--codex-hover);
+  overflow-wrap: anywhere;
+}
+
+.wiki-search-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wiki-search-files > li + li {
+  margin-top: 8px;
+}
+
+.wiki-search-files > li > span,
+.wiki-search-files > li > small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.wiki-search-files small {
+  color: var(--codex-muted);
+}
+
+.wiki-search-files > li > span {
+  font-weight: 500;
+}
+
+.wiki-search-excerpts {
+  margin: 0.35rem 0 0.75rem;
+  padding: 0;
+  list-style: none;
+}
+
+.wiki-search-excerpts > li {
+  display: grid;
+  grid-template-columns: 2.3em minmax(0, 1fr);
+  column-gap: 0.6em;
+}
+
+.wiki-search-line-number {
+  color: var(--codex-muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  user-select: none;
+}
+
+.wiki-search-excerpts p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .message-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -7997,6 +8131,7 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
   color: var(--codex-muted);
 }
 
+.wiki-search-summary > summary,
 .message-thinking summary {
   display: grid;
   /* 图标列宽/间距与工具行(.tool-group-summary / .tool-card-row)对齐,否则灯泡列比下方
@@ -8019,6 +8154,7 @@ body.dev-highlight-tool-errors .message-tool-cards .tool-stack-progress-cell-sta
   display: none;
 }
 
+.wiki-search-label,
 .message-thinking-label {
   min-width: 0;
   overflow: hidden;

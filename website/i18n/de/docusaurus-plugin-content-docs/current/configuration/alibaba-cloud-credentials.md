@@ -5,7 +5,27 @@ description: Alibaba Cloud-Anmeldedaten einschließlich ECS-RAM-Rollen-Authentif
 
 # Alibaba Cloud-Anmeldedaten
 
-Öffnen Sie in Web oder Desktop **Einstellungen → Cloud-Anmeldedaten**, um die Alibaba-Cloud-Authentifizierung und die Standardregion festzulegen.
+Diese Schritte gelten für Desktop und Web; beide verwenden dieselbe Gesprächsoberfläche.
+
+## Cloud-Zugriff in Desktop oder Web einrichten
+
+1. Öffnen Sie **Einstellungen → Cloud-Anmeldedaten** und wählen Sie **Alibaba Cloud**.
+
+2. Wählen Sie die Region für Abfragen und Bereitstellungen, beispielsweise `cn-hangzhou`.
+
+3. Wählen Sie das Anmeldeverfahren und füllen Sie die zugehörigen Felder aus.
+
+4. Klicken Sie für AccessKey, STS oder RAM-/ECS-RAM-Rollen auf **Cloud-Anmeldedaten speichern**. Folgen Sie für OAuth der Browseranmeldung weiter unten.
+
+5. Beschreiben Sie anschließend die Cloud-Aufgabe im Gespräch. Das Speichern richtet nur den Zugriff ein; es erstellt keine Ressourcen und erweitert keine RAM-Rechte.
+
+| Verfahren | Eingaben |
+|---|---|
+| AccessKey | `AccessKeyId` und `AccessKeySecret`. |
+| STS Token | `AccessKeyId`, `AccessKeySecret` und `StsToken` derselben temporären Zugangsdaten. |
+| RAM-Rolle | Quellschlüssel `AccessKeyId` und `AccessKeySecret`, Ziel `RamRoleArn` und optional `RamSessionName`. |
+| ECS-RAM-Rolle | Optionaler Rollenname; leer wird die Rolle auf der ausführenden ECS-Instanz ermittelt. |
+| OAuth-Browseranmeldung | Kontostandort wählen und im Browser autorisieren; Token nicht manuell eingeben. |
 
 Alibaba Cloud-Anmeldedaten werden fuer Operationen benoetigt, die Cloud-Ressourcen ueberpruefen oder verwalten.
 
@@ -15,10 +35,7 @@ Die Tools `resolve_cloud_resource_selector` und `select_cloud_resource` verwende
 
 Verwenden Sie **ECS RAM Role**, wenn IaC Code auf einer Alibaba-Cloud-ECS-Instanz mit zugewiesener RAM-Rolle ausgeführt wird. IaC Code bezieht temporäre STS-Anmeldedaten vom Metadatendienst der ECS-Instanz (IMDS), aktualisiert sie automatisch und speichert weder AccessKey-ID, AccessKey-Secret noch STS-Token in der Konfiguration.
 
-Sie können diesen Modus über jede Benutzeroberfläche konfigurieren:
-
-- Öffnen Sie in der Web- oder Desktop-App **Einstellungen > Cloud-Anmeldedaten**, wählen Sie **Alibaba Cloud** und anschließend **ECS RAM Role** als Authentifizierungsmethode.
-- Führen Sie im REPL `/auth` aus und wählen Sie **IaC-Cloud-Service konfigurieren**, danach **Alibaba Cloud** und **ECS RAM Role**.
+Öffnen Sie in der Web- oder Desktop-App **Einstellungen > Cloud-Anmeldedaten**, wählen Sie **Alibaba Cloud** und anschließend **ECS RAM Role** als Authentifizierungsmethode.
 
 Wählen Sie die Region für Cloud-API-Aufrufe. Der Name der ECS-RAM-Rolle ist optional: Lassen Sie ihn leer, damit die der Instanz zugewiesene Rolle über IMDS automatisch erkannt wird. Ein in IaC Code gespeicherter Rollenname hat Vorrang vor `ALIBABA_CLOUD_ECS_METADATA`; wenn beide fehlen, lässt IaC Code den Rollennamen von IMDS ermitteln.
 
@@ -37,13 +54,15 @@ Die Konfiguration kann auf jedem Rechner gespeichert werden. Cloud-API-Aufrufe s
 
 ## OAuth-Browser-Anmeldung
 
-Öffnen Sie in Web oder Desktop **Einstellungen → Cloud-Anmeldedaten**, wählen Sie Alibaba Cloud und **OAuth-Browser-Anmeldung** und starten Sie die Autorisierung. IaC Code öffnet den Browserablauf, tauscht den Code mit PKCE aus und speichert die OAuth-Zugangsdaten in `.cloud-credentials.yml`.
+1. Öffnen Sie **Einstellungen → Cloud-Anmeldedaten**, wählen Sie **Alibaba Cloud** und **OAuth-Browseranmeldung**.
 
-Während der Einrichtung können Sie die China- oder International-OAuth-Site wählen. IaC Code speichert die ausgewählte Site zusammen mit dem Refresh Token, damit spätere Aktualisierungen denselben Endpunkt verwenden.
+2. Wählen Sie die Region und die zum Konto passende **Anmeldeseite**: China oder International.
+
+3. Klicken Sie auf **Mit Browser anmelden** und schließen Sie Anmeldung und Autorisierung auf Alibaba Cloud ab.
+
+4. Kehren Sie zu IaC Code zurück und warten Sie auf die Erfolgsmeldung. Zugangsdaten und Standort werden durch den Anmeldevorgang gespeichert.
 
 OAuth-Zugangsdaten werden automatisch erneuert, wenn das Zugriffstoken oder die STS-Zugangsdaten bald ablaufen. Läuft das Aktualisierungstoken ab oder wird es widerrufen, autorisieren Sie den Zugriff erneut unter **Einstellungen → Cloud-Anmeldedaten**.
-
-Für die Einrichtung im Terminal starten Sie `iac-code tui` und führen `/auth` aus.
 
 ## Umgebungsvariablen
 

@@ -10,7 +10,7 @@ description: Lancer le serveur ACP et connecter votre premier client.
 
 1. **iac-code installé** -- Consultez le guide d'[Installation](../getting-started/installation.md).
 
-2. **Identifiants LLM configurés** -- Consultez le guide d'[Authentification](../configuration/authentication.md) pour configurer les identifiants de votre fournisseur de modèles via la commande `/auth`.
+2. **Identifiants LLM configurés** — Configurez **Paramètres → Modèles** dans bureau ou web, ou fournissez les paramètres pour l’automatisation. Voir [Authentification](../configuration/authentication.md).
 
 3. **SDK Python ACP** (optionnel, pour les clients programmatiques)
 

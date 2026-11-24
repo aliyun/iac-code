@@ -15001,3 +15001,23 @@ msgstr "Pesquisa Wiki em segundo plano"
 #: src/iac_code/ui/wiki_search.py
 msgid "Wiki search"
 msgstr "Pesquisa Wiki"
+
+#: src/iac_code/tools/path_safety.py
+msgid "The iac-code installation directory is read-only. Write generated files under {cwd}."
+msgstr "O diretório de instalação do iac-code é somente leitura. Salve os arquivos gerados em {cwd}."
+
+#: src/iac_code/tools/path_safety.py
+msgid "Files can only be written under {cwd}."
+msgstr "Só é permitido gravar em {cwd} e em seus subdiretórios."
+
+#: src/iac_code/tools/safe_file_io.py
+msgid "Safe writes do not support symbolic links, hard links, or non-regular files: {path}"
+msgstr "A gravação segura não aceita links simbólicos, links físicos ou arquivos especiais: {path}"
+
+#: src/iac_code/tools/safe_file_io.py
+msgid "The file or its directory changed during the write. Retry the operation."
+msgstr "O arquivo ou seu diretório foi alterado durante a gravação. Tente novamente."
+
+#: src/iac_code/tools/safe_file_io.py
+msgid "Safe file writes are not supported on this platform."
+msgstr "Esta plataforma não oferece suporte à gravação segura de arquivos."

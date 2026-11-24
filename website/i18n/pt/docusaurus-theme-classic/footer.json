@@ -7,17 +7,9 @@
     "message": "Primeiros passos",
     "description": "The label of footer link with label=Getting Started linking to /docs/getting-started/installation"
   },
-  "link.item.label.CLI Overview": {
-    "message": "Visao geral do CLI",
-    "description": "The label of footer link with label=CLI Overview linking to /docs/cli/usage"
-  },
   "link.item.label.Pipeline Mode": {
     "message": "Modo pipeline",
     "description": "The label of footer link with label=Pipeline Mode linking to /docs/automation/pipeline-mode"
-  },
-  "link.item.label.Slash Commands": {
-    "message": "Comandos slash",
-    "description": "The label of footer link with label=Slash Commands linking to /docs/cli/commands"
   },
   "link.title.Community": {
     "message": "Comunidade",
@@ -50,5 +42,17 @@
   "copyright": {
     "message": "Copyright © 2026 Colaboradores do IaC Code.",
     "description": "The footer copyright"
+  },
+  "link.item.label.Desktop App": {
+    "message": "Aplicativo Desktop",
+    "description": "The label of footer link with label=Desktop App linking to /docs/desktop-app"
+  },
+  "link.item.label.Web App": {
+    "message": "Aplicativo Web",
+    "description": "The label of footer link with label=Web App linking to /docs/web-app"
+  },
+  "link.item.label.Common Actions": {
+    "message": "Operações comuns",
+    "description": "The label of footer link with label=Common Actions linking to /docs/cli/commands"
   }
 }

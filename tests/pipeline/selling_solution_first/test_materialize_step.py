@@ -783,6 +783,29 @@ class TestStepToolScope:
 
 
 class TestPromptContract:
+    @pytest.mark.parametrize("surface", ["a2a", "a2a_rich", "web", "repl"])
+    def test_template_paths_stay_relative_to_workspace(self, loaded, step, tmp_path, surface):
+        context = PipelineContext(loaded.context_dependencies)
+        context.set_conclusion("solution_selection", copy.deepcopy(SOLUTION_SELECTION))
+        executor = StepExecutor(
+            provider_manager=MagicMock(),
+            base_tool_registry=ToolRegistry(),
+            pipeline=loaded,
+            pipeline_dir=_pipeline_dir(),
+            cwd=str(tmp_path),
+            surface=surface,
+        )
+
+        prompt = executor._build_full_system_prompt(step, context)
+
+        assert f"模板路径：`{TEMPLATE_PATH}`" in prompt
+        assert "模板绝对路径" not in prompt
+        assert "Resolve relative paths in this skill relative to the base directory above." not in prompt
+        assert "Resolve skill resource links (references, scripts) relative to this directory." in prompt
+        assert "Resolve generated output paths relative to the working directory" in prompt
+        # Existing session/artifact paths retain their stored relative form.
+        assert context.get_conclusion("solution_selection") == SOLUTION_SELECTION
+
     def test_resource_selector_guidance_is_progressive_and_respects_cancel(self, prompt_text, skill_text):
         # The prompt keeps the trigger condition; the skill owns the call order and
         # the cancel/empty-list outcomes so they exist exactly once.

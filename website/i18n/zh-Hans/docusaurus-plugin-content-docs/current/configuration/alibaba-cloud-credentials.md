@@ -5,7 +5,27 @@ description: 配置阿里云凭证，包括 ECS RAM Role 授权。
 
 # 阿里云凭证
 
-在 Web 或桌面版打开**设置 → 云凭证**，配置阿里云认证方式和默认地域。
+以下步骤同时适用于桌面版和 Web，两者使用同一套对话界面。
+
+## 在桌面版或 Web 中配置云访问
+
+1. 打开**设置 → 云凭证**，选择**阿里云**。
+
+2. 选择资源查询和部署使用的地域，例如 `cn-hangzhou`。
+
+3. 选择认证方式，按下表填写对应字段。
+
+4. 使用 AccessKey、STS、RAM 角色或 ECS RAM 角色时，单击**保存云凭证**；使用 OAuth 时，按下方“OAuth 浏览器登录”的步骤完成授权。
+
+5. 返回对话并描述云资源任务。保存凭证只完成访问配置，不会创建资源，也不会增加账号的 RAM 权限。
+
+| 认证方式 | 需要填写的内容 |
+|---|---|
+| AccessKey | `AccessKeyId` 和 `AccessKeySecret`。 |
+| STS Token | 同一组临时凭证的 `AccessKeyId`、`AccessKeySecret` 和 `StsToken`。 |
+| RAM 角色 | 来源 `AccessKeyId`、`AccessKeySecret`，目标 `RamRoleArn`，以及可选的 `RamSessionName`。 |
+| ECS RAM 角色 | 可选的角色名称；留空时从运行 IaC Code 的 ECS 实例元数据中发现。 |
+| OAuth 浏览器登录 | 选择账号所属登录站点，在浏览器完成授权，无需手工填写令牌。 |
 
 需要检查或管理云资源时，必须配置阿里云凭证。
 
@@ -15,10 +35,7 @@ description: 配置阿里云凭证，包括 ECS RAM Role 授权。
 
 当 IaC Code 运行在已绑定 RAM 角色的阿里云 ECS 实例上时，可以使用 **ECS RAM Role**。IaC Code 会从 ECS 实例元数据服务（IMDS）获取临时 STS 凭证并自动刷新，配置文件中不会保存 AccessKey ID、AccessKey Secret 或 STS token。
 
-所有用户界面都可以配置该模式：
-
-- 在 Web 或 Desktop 应用中打开 **设置 > 云凭证**，选择 **Alibaba Cloud**，再将认证方式设为 **ECS RAM Role**。
-- 在 REPL 中运行 `/auth`，依次选择 **配置 IaC 云服务**、**Alibaba Cloud** 和 **ECS RAM Role**。
+在 Web 或 Desktop 应用中打开 **设置 > 云凭证**，选择 **Alibaba Cloud**，再将认证方式设为 **ECS RAM Role**。
 
 请选择云 API 调用使用的地域。ECS RAM 角色名称是可选的：留空时会通过 IMDS 自动发现实例绑定的角色。IaC Code 中保存的角色名称优先于 `ALIBABA_CLOUD_ECS_METADATA`；两者均未设置时，IaC Code 会请求 IMDS 自动发现角色名称。
 
@@ -37,13 +54,15 @@ aliyun:
 
 ## OAuth 浏览器登录
 
-在 Web 或桌面版打开**设置 → 云凭证**，选择 Alibaba Cloud 和 **OAuth 浏览器登录**，然后发起授权。IaC Code 会打开浏览器授权流程，使用 PKCE 交换授权码，并将 OAuth 凭证保存到 `.cloud-credentials.yml`。
+1. 打开**设置 → 云凭证**，选择**阿里云**和 **OAuth 浏览器登录**。
 
-配置过程中可以选择中国站或国际站 OAuth。IaC Code 会把所选站点与 refresh token 一起保存，后续刷新会继续使用同一 endpoint。
+2. 选择地域，在**登录站点**中选择账号所属的中国站或国际站。
+
+3. 单击**用浏览器登录**，在打开的阿里云页面完成登录与授权。
+
+4. 返回 IaC Code，等待登录成功提示。登录流程会保存凭证和所选站点。
 
 当 access token 或 STS 凭证即将过期时，OAuth 凭证会自动刷新。如果 refresh token 过期或被撤销，请在**设置 → 云凭证**中重新授权。
-
-使用终端配置时，启动 `iac-code tui` 后运行 `/auth`。
 
 ## 环境变量
 

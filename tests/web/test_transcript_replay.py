@@ -369,7 +369,6 @@ def test_normal_web_reload_preserves_inline_or_externalized_visible_content(tmp_
     storage = ResultStorage(
         storage_dir=str(tmp_path / "tool-results"),
         max_inline_chars=50_000,
-        preview_chars=2_000,
     )
     new_result = storage.process("new", new_content)
     old_result = storage.process("old", old_content)

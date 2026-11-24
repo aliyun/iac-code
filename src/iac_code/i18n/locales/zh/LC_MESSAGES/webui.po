@@ -4451,3 +4451,43 @@ msgstr "费用估算"
 #~ "Role created, but the current identity"
 #~ " still needs sts:AssumeRole permission."
 #~ msgstr "角色已创建，但当前身份仍需 sts:AssumeRole 权限。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Search keywords"
+msgstr "检索关键词"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Matched documents"
+msgstr "命中文档"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search in progress"
+msgstr "Wiki 搜索中"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search completed"
+msgstr "Wiki 搜索完成"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search not needed"
+msgstr "无需 Wiki 搜索"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search failed"
+msgstr "Wiki 搜索失败"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search cancelled"
+msgstr "Wiki 搜索已取消"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search interrupted"
+msgstr "Wiki 搜索已中断"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Matched {count} files"
+msgstr "命中 {count} 个文件"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Duration: {seconds}s"
+msgstr "耗时 {seconds}s"

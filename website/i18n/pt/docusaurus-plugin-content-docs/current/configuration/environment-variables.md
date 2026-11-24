@@ -5,7 +5,7 @@ description: Todas as variaveis de ambiente suportadas e regras de precedencia.
 
 # Variaveis de ambiente
 
-O IaC Code le a configuracao a partir de argumentos do CLI, variaveis de ambiente e arquivos de configuracao. A precedencia e:
+Desktop e Web podem ser configurados sem variáveis de ambiente. As variáveis abaixo são para CI, serviços e substituições na inicialização. Para a linha de comando, a prioridade é:
 
 ```text
 CLI arguments > environment variables > configuration files

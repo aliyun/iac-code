@@ -6,7 +6,7 @@ description: IaC Code の機能と始め方。
 
 # 概要
 
-IaC Code は、クラウドインフラの設計、生成、デプロイ、管理を支援する AI アシスタントです。Desktop アプリ、ローカル Web アプリ、対話型ターミナル、自動化インターフェイスから利用でき、別のエージェントの Skill としても組み込めます。アーキテクチャはマルチクラウドワークフローを想定して設計されており、現在のリリースでは Alibaba Cloud ROS と Terraform ワークフローをサポートしています。
+IaC Code は、クラウドインフラの設計、生成、デプロイ、管理を支援する AI アシスタントです。Desktop アプリ、ローカル Web アプリ、自動化インターフェイスから利用でき、別のエージェントの Skill としても組み込めます。アーキテクチャはマルチクラウドワークフローを想定して設計されており、現在のリリースでは Alibaba Cloud ROS と Terraform ワークフローをサポートしています。
 
 主な機能：
 
@@ -17,7 +17,7 @@ IaC Code は、クラウドインフラの設計、生成、デプロイ、管�
 用途に合う入口を選んでください。
 
 - すぐに使える GUI には [Desktop アプリ](./desktop-app.md)をダウンロードします。
-- [インストール](./getting-started/installation.md)と[クイックスタート](./getting-started/quick-start.md)に従って、REPL、ヘッドレスモード、またはローカル [Web アプリ](./web-app.md)を使います。
+- [インストール](./getting-started/installation.md)と[クイックスタート](./getting-started/quick-start.md)に従って、ローカル [Web アプリ](./web-app.md)または headless 自動化を使用します。
 - [IaC Code 公式 Skills の概要](./a2a/skill-overview.md)で配布方法を選び、対応エージェントに Alibaba Cloud インフラ機能を追加します。
 - 他のアプリやサービスへの統合には [ACP](./acp/overview.md)、[A2A](./a2a/overview.md)、[AG-UI](./agui/overview.md)を使います。
 

@@ -1,45 +1,80 @@
 ---
-title: Commandes slash
-description: Référence complète des commandes interactives intégrées.
+title: Opérations courantes
+description: Utiliser les paramètres, les menus de conversation et le champ de saisie sur bureau et web.
 ---
 
-# Commandes slash
+# Opérations courantes
 
-Cette page décrit les commandes de l’[interface de terminal](./interactive-mode.md), lancée avec `iac-code tui`. Web et Desktop disposent de leurs propres menus de commandes et paramètres.
+Ces étapes s’appliquent à Desktop et à Web, qui utilisent la même interface de conversation.
 
-Les commandes slash contrôlent IaC Code depuis l'intérieur d'une session interactive. Tapez `/` pour voir les commandes disponibles, puis continuez à taper pour filtrer la liste. Une commande n'est reconnue que lorsqu'elle apparaît au début de votre message.
+## Démarrer une conversation
 
-La liste `/` inclut à la fois les commandes intégrées et toutes les skills que vous avez configurées. Pour restreindre les suggestions aux skills uniquement, utilisez `$` à la place — `$<nom>` liste et invoque exclusivement des skills, et taper `$` suivi du nom d'une commande intégrée (par exemple `$help`) affiche une erreur pointant vers l'équivalent `/`.
+1. Ouvrez Desktop ou lancez `iac-code` dans un terminal interactif pour ouvrir Web.
 
-Le texte après le nom de la commande est transmis comme arguments. Dans le tableau ci-dessous, `<arg>` indique un argument obligatoire et `[arg]` indique un argument optionnel.
+2. Cliquez sur **Nouvelle discussion** dans la barre latérale. Sous la saisie, choisissez le répertoire du projet contenant vos fichiers ou destiné aux modèles générés.
 
-| Commande | Fonction |
+3. Avant le premier envoi, choisissez **Mode normal** ou **Mode pipeline**. Pour Pipeline, sélectionnez aussi le pipeline.
+
+4. Saisissez votre demande et envoyez-la. La conversation apparaît sous son projet dans la barre latérale ; vous pouvez y poursuivre le travail.
+
+## Joindre un fichier existant ou une image
+
+1. Ouvrez une conversation du projet contenant le fichier.
+
+2. Tapez `@` puis une partie du nom du fichier et sélectionnez le résultat. Une référence apparaît près de la saisie. Pour une image, utilisez le bouton de pièce jointe.
+
+3. Ajoutez une instruction, par exemple « Vérifie ce modèle ROS et explique ses paramètres », contrôlez les références sélectionnées et envoyez.
+
+## Choisir le modèle et le raisonnement
+
+1. Suivez d’abord les [étapes de configuration du modèle](../configuration/llm-providers.md).
+
+2. Dans la conversation, ouvrez le sélecteur de modèle sous la saisie et choisissez un fournisseur et un modèle disponibles.
+
+3. Si le modèle le permet, sélectionnez l’effort de raisonnement et activez ou désactivez **Réflexion** pour cette conversation.
+
+4. Vérifiez le modèle affiché avant d’envoyer la demande suivante. Les options de raisonnement dépendent du modèle.
+
+## Répondre à une demande d’autorisation
+
+1. Avant l’envoi, ouvrez le contrôle des permissions dans la saisie et choisissez le mode voulu.
+
+2. Lorsqu’une carte d’approbation apparaît, vérifiez le nom de l’outil et l’opération proposée, notamment le fichier ou l’API cloud ciblé.
+
+3. Approuvez ou refusez dans la carte. Une approbation permet la poursuite de l’opération ; un refus est transmis à l’assistant. Répondez séparément aux cartes de questions.
+
+## Modifier les instructions et gérer la mémoire
+
+1. Ouvrez **Paramètres → Mémoire** et choisissez le projet en haut.
+
+2. Dans **Mémoire du projet**, saisissez les instructions propres à ce projet et cliquez sur son bouton **Enregistrer**.
+
+3. Dans **Mémoire de l’utilisateur**, saisissez les préférences communes aux projets et cliquez sur le bouton **Enregistrer** correspondant. Vérifiez le message de confirmation.
+
+4. Activez ou désactivez **Mémoire automatique → Enregistrement automatique** pour permettre à l’assistant de mémoriser des faits utiles. Le changement est enregistré automatiquement.
+
+5. Recherchez les entrées dans la **Bibliothèque de mémoire** pour les consulter. Pour retirer une entrée obsolète, utilisez sa commande de suppression et confirmez.
+
+## Changer la langue ou l’apparence
+
+1. Ouvrez **Paramètres → Général**.
+
+2. Choisissez la **Langue**. Elle est enregistrée automatiquement, puis la page se recharge.
+
+3. Cliquez sur un thème dans **Palette de couleurs**. L’interface change et enregistre ce choix automatiquement.
+
+## Autres tâches
+
+Consultez les procédures de [gestion des sessions](./sessions.md), des [skills](./skills.md) et le [démarrage MCP](../mcp/quick-start.md).
+
+## Raccourcis facultatifs
+
+Dans une conversation normale existante, `/` affiche quelques raccourcis :
+
+| Raccourci | Fonction |
 |---|---|
-| `/auth` | Configurer l'accès au fournisseur de modèles et les identifiants Alibaba Cloud via le flux d'authentification interactif. Utilisez cette commande lors de la première configuration d'IaC Code, du changement de clés API, du changement de fournisseur ou de la mise à jour de l'accès cloud. Alias : `/login`. |
-| `/clear` | Effacer l'historique de conversation actuel et réinitialiser le gestionnaire de contexte actif. En mode interactif, cela efface également l'écran du terminal et réaffiche la bannière d'accueil. Utilisez cette commande lorsque vous souhaitez démarrer une nouvelle requête sans quitter le REPL. |
-| `/compact` | Résumer la conversation actuelle pour réduire l'utilisation du contexte tout en préservant les échanges récents. Utilisez cette commande après une longue session lorsque vous souhaitez continuer à travailler avec moins de contexte accumulé. Si la conversation est vide ou trop courte, la commande signale qu'il n'y a rien à compacter. |
-| `/debug [on\|off\|status]` | Inspecter ou modifier la journalisation de débogage à l'exécution pour la session active. `/debug` et `/debug status` indiquent si la journalisation est activée et, lorsqu'elle est activée, le chemin du fichier journal. `/debug on` active la journalisation pour la session en cours. `/debug off` la désactive. |
-| `/effort [level]` | Afficher ou modifier l'effort de réflexion pour le modèle actif lorsque le modèle sélectionné prend en charge le contrôle d'effort. Avec un niveau, il applique la valeur demandée si elle est valide pour le modèle. Sans niveau, il ouvre un sélecteur interactif dans le REPL, ou affiche l'effort actuel dans les contextes non interactifs. |
-| `/thinking_enabled [on\|off]` | Afficher ou modifier si le provider actif doit demander le thinking. Avec `on` ou `off`, la commande persiste `thinkingEnabled` pour le provider actif et reconfigure le provider du REPL en cours d'exécution. Sans argument, elle ouvre un sélecteur interactif Activer/Désactiver dans le REPL, ou affiche la valeur actuelle dans les contextes non interactifs. |
-| `/exit` | Quitter le REPL interactif. Alias : `/quit`, `/q`. |
-| `/help` | Afficher les commandes disponibles et les raccourcis clavier courants dans le REPL. Alias : `/?`. |
-| `/memory` | Ouvrir le sélecteur de mémoire. Modifiez les fichiers `AGENTS.md` de projet ou d'utilisateur, activez ou désactivez auto-memory, et ouvrez le dossier auto-memory du projet lorsque auto-memory est activé. |
-| `/mcp [enable\|disable\|reconnect ...]` | Gérer les serveurs MCP depuis le REPL interactif. Sans argument, ouvre le gestionnaire MCP pour l'état, les diagnostics, les tools, resources, prompts, l'authentification OAuth, l'approbation, l'activation/désactivation, la reconnexion et la suppression. Les actions rapides peuvent activer, désactiver ou reconnecter les serveurs configurés. |
-| `/model [model_name]` | Afficher ou changer le modèle actif. Avec `model_name`, il bascule directement vers ce modèle pour le fournisseur actif. Sans argument, il ouvre un sélecteur de modèle interactif lorsqu'un fournisseur est configuré, ou affiche le modèle actuel lorsqu'aucune interface console n'est disponible. |
-| `/rename <nom>` | Nommer la session actuelle. Les noms apparaissent dans la bannière d'accueil, l'indication de sortie et le sélecteur `/resume`, et peuvent être utilisés avec `/resume` ou `--resume` lorsqu'ils identifient une session de façon unique. |
-| `/resume [id-de-session\|préfixe-id-unique\|nom-de-session-unique]` | Reprendre une session précédente. Avec un argument, IaC Code le résout comme identifiant exact, préfixe d'identifiant unique ou nom de session unique. Sans argument, il ouvre le sélecteur de session interactif. Les sessions inter-projets affichent une commande `cd ... && iac-code tui --resume <id>` au lieu de basculer le projet courant à chaud. |
-| `/skills` | Ouvrir le sélecteur de gestion des compétences. Recherchez par nom ou description, triez par nom/source/taille et activez ou désactivez les compétences utilisateur ou projet. Les compétences intégrées restent verrouillées et activées. |
-| `/status` | Afficher l'ID de session actuel, le fournisseur, le modèle, la région Alibaba Cloud, le répertoire de travail, l'utilisation enregistrée des tokens d'API, le nombre de tours et l'utilisation du contexte. En mode debug, affiche également les compteurs de side calls de mémoire et leur consommation de tokens. |
+| `/status` | Afficher l’état de la session. |
+| `/compact` | Résumer la conversation pour réduire le contexte. |
+| `/mcp` | Afficher l’état MCP ; gérez les connexions dans **Modules d’extension → MCP**. |
 
-La liste exacte des commandes peut varier entre les versions. Utilisez `/help` ou tapez `/` dans le REPL pour inspecter les commandes disponibles dans votre version installée.
-
-## Mémoire
-
-Utilisez `/memory` pour modifier les fichiers mémoire que IaC Code charge dans la conversation :
-
-- La mémoire de projet est enregistrée dans `AGENTS.md` à la racine du projet par défaut.
-- La mémoire utilisateur est enregistrée dans `AGENTS.md` dans le répertoire de configuration d'exécution, `~/.iac-code/` par défaut.
-- Définissez `IAC_CODE_INSTRUCTION_MEMORY_FILE` pour utiliser un autre nom de fichier, par exemple `IAC-CODE.md`.
-- L'éditeur est un éditeur plein écran compact de style Vim. Utilisez `i`, `a` ou `o` pour entrer en mode insertion, `Esc` pour revenir au mode normal, `:wq` pour enregistrer et `:q!` pour abandonner.
-- La ligne `Auto-memory` se bascule avec `Enter`. Lorsque auto-memory est activé, IaC Code peut rappeler des mémoires de sujet du projet comme contexte de conversation masqué.
-- L'option de dossier auto-memory n'apparaît que lorsque auto-memory est activé.
+Pipeline masque `/compact` ; ces raccourcis ne sont pas proposés dans le brouillon d’une nouvelle conversation. Les suggestions proposent aussi les skills : sélectionnez-en un, ajoutez votre demande et envoyez. Voir [Skills](./skills.md).

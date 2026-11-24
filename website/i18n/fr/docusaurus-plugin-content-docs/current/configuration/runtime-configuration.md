@@ -5,9 +5,9 @@ description: Ordre de configuration à l'exécution et fichiers locaux.
 
 # Configuration
 
-IaC Code lit la configuration depuis les arguments CLI, les variables d'environnement et les fichiers dans le répertoire de configuration à l'exécution.
+Gérez les préférences habituelles de bureau et web dans les paramètres et les contrôles de saisie. Cette page référence les fichiers enregistrés, les surcharges de projet et la configuration d’automatisation.
 
-Priorité de configuration :
+La priorité ci-dessous concerne le démarrage en ligne de commande. Les sélections explicites d’une conversation web ou de bureau se gèrent avec ses propres contrôles.
 
 ```text
 Arguments CLI > variables d'environnement > fichiers de configuration
@@ -95,7 +95,7 @@ Les valeurs valides définies au niveau du modèle sous `providers.<provider>.mo
 
 Pour Alibaba Cloud DashScope et DashScope Token Plan, IaC Code définit une valeur intégrée `thinkingBudget=8192` pour `glm-5.2` et `kimi-k2.7-code`.
 
-Dans le REPL interactif, `/thinking_enabled on` ou `/thinking_enabled off` permet de persister la valeur `thinkingEnabled` au niveau du provider. Exécuter `/thinking_enabled` sans argument ouvre le sélecteur Activer/Désactiver lorsqu'une interface console est disponible. Les exécutions headless ponctuelles peuvent remplacer le thinking pour cette requête avec `--thinking-enabled` ou `--no-thinking-enabled`, sans réécrire `settings.yml`.
+Dans Web et bureau, le contrôle Thinking du champ de saisie règle le raisonnement de la conversation active. Une exécution headless ponctuelle peut le remplacer avec `--thinking-enabled` ou `--no-thinking-enabled`, sans réécrire `settings.yml`.
 
 Les requêtes A2A peuvent remplacer ces réglages pour un seul tour de message via `message.metadata.iac_code.thinking` ou les flags `--thinking-enabled`, `--thinking-effort` et `--thinking-budget` de `iac-code a2a-client call`. Si aucune métadonnée de thinking A2A explicite n'est envoyée, le runtime utilise les réglages ci-dessus et les valeurs par défaut normales du provider. Pour les providers génériques `openai_compatible` avec une base URL en mode compatible DashScope, iac-code ne bascule vers le format wire natif de thinking DashScope que lorsqu'une politique de thinking explicite est présente.
 

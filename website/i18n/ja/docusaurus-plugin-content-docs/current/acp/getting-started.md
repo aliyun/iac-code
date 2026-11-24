@@ -10,7 +10,7 @@ description: ACP サーバーの起動と最初のクライアント接続。
 
 1. **iac-code がインストール済み** — [インストール](../getting-started/installation.md)ガイドをご覧ください。
 
-2. **LLM 認証情報が設定済み** — [認証](../configuration/authentication.md)ガイドを参照し、`/auth` コマンドでモデルプロバイダーの認証情報を設定してください。
+2. **LLM 認証情報の設定** — デスクトップや Web の**設定 → モデル**で設定するか、自動化環境にモデル設定を渡します。[認証](../configuration/authentication.md)を参照してください。
 
 3. **Python ACP SDK**（任意、プログラムクライアント用）
 

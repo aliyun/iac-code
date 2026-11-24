@@ -1,30 +1,22 @@
 ---
 title: Schnellstart
-description: Konfigurieren Sie IaC Code und fuehren Sie Ihre erste Eingabe aus.
+description: Desktop oder Web starten, Zugriff einrichten und die erste Anfrage senden.
 ---
 
 # Schnellstart
 
-Starten Sie `iac-code` in einem Terminal, um die lokale Web-App und den Browser zu öffnen. Konfigurieren Sie bei der ersten Verwendung den LLM-Anbieter und die Alibaba-Cloud-Zugangsdaten in den Einstellungen.
+Diese Schritte gelten für Desktop und Web; beide verwenden dieselbe Gesprächsoberfläche.
 
-```bash
-iac-code
-```
+1. Öffnen Sie [Desktop](../desktop-app.md) oder starten Sie Web mit `iac-code` in einem interaktiven Terminal.
 
-Dann fragen Sie nach Infrastruktur:
+2. Klicken Sie auf **Neuer Chat** und wählen Sie unter der Eingabe das Zielverzeichnis der Vorlage.
 
-```text
-Create a VPC and two ECS instances
-```
+3. Befolgen Sie die [Modellkonfiguration](../configuration/llm-providers.md) und legen Sie das aktuelle Modell fest. Für Cloud-Abfragen oder Bereitstellungen richten Sie auch [Cloud-Zugangsdaten](../configuration/alibaba-cloud-credentials.md) ein.
 
-Fuer eine einmalige Eingabe verwenden Sie den nicht-interaktiven Modus:
+4. Wählen Sie **Normaler Modus** und senden Sie: „Erzeuge eine VPC-ROS-Vorlage in templates/vpc.yml, ohne sie bereitzustellen.“
 
-```bash
-iac-code --prompt "Create an OSS Bucket"
-```
+5. Verfolgen Sie den Ablauf im Gespräch. Klappen Sie bei einer Wiki-Suche den Eintrag für Suchbegriffe und Treffer auf. Prüfen und beantworten Sie Freigabekarten für Schreibzugriffe.
 
-Sie koennen die Eingabe auch von der Standardeingabe lesen:
+6. Klicken Sie nach dem Schreiben unter **Ausgabe** auf den Dateinamen, um die Vorschau zu öffnen. Lassen Sie anschließend Parameter erklären oder prüfen. Das Gespräch bleibt in der Seitenleiste gespeichert.
 
-```bash
-echo "Create a VPC and two ECS instances" | iac-code --prompt -
-```
+Für geführte Planung und Bereitstellung erstellen Sie ein Gespräch im [Pipeline-Modus](../automation/pipeline-mode.md). Siehe auch [Häufige Aktionen](../cli/commands.md) und [Headless-Automatisierung](../automation/non-interactive-mode.md).

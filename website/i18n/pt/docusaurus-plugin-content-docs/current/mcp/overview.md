@@ -14,7 +14,7 @@ Use o MCP quando quiser que o Código IaC chame um recurso local ou remoto que n
 
 | Surface | MCP support |
 |---|---|
-| REPL interativo | Carrega servidores de projetos de usuários, locais e aprovados. Avisa antes de confiar nos servidores `.mcp.json` do novo projeto. |
+| Web / Desktop | Carrega servidores configurados e aprovados; gerencie aprovações de projeto pendentes nas configurações de MCP. |
 | Modo não interativo | Carrega servidores de projetos de usuários, locais e aprovados. Nunca solicita; servidores de projetos pendentes são ignorados com avisos. |
 | Servidor ACP | Aceita configurações de servidor MCP de sessão de clientes ACP e expõe recursos MCP descobertos dentro dessa sessão. |
 | Servidor A2A | Carrega o MCP durante o tempo de execução normal e pode publicar avisos do MCP e o progresso da ferramenta em metadados de tarefas A2A. |
@@ -52,7 +52,7 @@ At runtime IaC Code:
 6. Registra esses recursos nos registros de ferramentas e comandos existentes.
 7. Injeta instruções do servidor conectado no prompt do agente como orientação no escopo do servidor.
 8. Converte os resultados da ferramenta MCP em resultados normais da ferramenta IaC Code, armazenando artefatos binários e artefatos de texto grandes no diretório de configuração de tempo de execução.
-9. Desconecta clientes MCP quando o tempo de execução REPL, headless run, sessão ACP ou A2A é fechado.
+9. Desconecta clientes MCP quando o tempo de execução Web / Desktop, headless run, sessão ACP ou A2A é fechado.
 
 Um servidor MCP com falha não bloqueia outros servidores configurados. As falhas de conexão e descoberta permanecem visíveis como avisos do MCP.
 

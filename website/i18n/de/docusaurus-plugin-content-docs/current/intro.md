@@ -6,7 +6,7 @@ description: Was IaC Code macht und wo Sie anfangen koennen.
 
 # Ueberblick
 
-IaC Code ist ein KI-Assistent zum Planen, Erstellen, Bereitstellen und Verwalten von Cloud-Infrastruktur. Er ist als Desktop-App, lokale Web-App, interaktives Terminal, Automatisierungsschnittstelle oder als Skill in einem anderen Agenten nutzbar. Die Architektur ist fuer Multicloud-Workflows ausgelegt; die aktuelle Version unterstuetzt Alibaba Cloud ROS und Terraform.
+IaC Code ist ein KI-Assistent zum Planen, Erstellen, Bereitstellen und Verwalten von Cloud-Infrastruktur. Er ist als Desktop-App, lokale Web-App, Automatisierungsschnittstelle oder als Skill in einem anderen Agenten nutzbar. Die Architektur ist fuer Multicloud-Workflows ausgelegt; die aktuelle Version unterstuetzt Alibaba Cloud ROS und Terraform.
 
 Kernfunktionen:
 
@@ -17,7 +17,7 @@ Kernfunktionen:
 Waehlen Sie den passenden Einstieg:
 
 - Laden Sie die [Desktop-App](./desktop-app.md) fuer eine sofort nutzbare grafische Anwendung herunter.
-- Folgen Sie [Installation](./getting-started/installation.md) und [Schnellstart](./getting-started/quick-start.md) fuer REPL, Headless-Modus oder die lokale [Web-App](./web-app.md).
+- Folgen Sie [Installation](./getting-started/installation.md) und [Schnellstart](./getting-started/quick-start.md) für die lokale [Web-App](./web-app.md) und Headless-Automatisierung.
 - Waehlen Sie im [Ueberblick ueber offizielle IaC Code Skills](./a2a/skill-overview.md) eine Distribution, um einem kompatiblen Agenten Alibaba-Cloud-Infrastrukturfaehigkeiten zu geben.
 - Verwenden Sie [ACP](./acp/overview.md), [A2A](./a2a/overview.md) oder [AG-UI](./agui/overview.md) zur Integration in eine Anwendung oder einen Dienst.
 

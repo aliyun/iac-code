@@ -74,7 +74,7 @@ Later tasks reuse the verified local copy.
 ## Configure the Model and Alibaba Cloud Identity
 
 The Skill uses the standard IaC Code configuration directory, `~/.iac-code/` by default. If you already configured
-IaC Code in the REPL, Web app, or Desktop app, the Skill reuses those settings. You can set `IAC_CODE_CONFIG_DIR` to
+IaC Code in Web app, or Desktop app, the Skill reuses those settings. You can set `IAC_CODE_CONFIG_DIR` to
 select another configuration directory.
 
 For automated environments, inject model settings and Alibaba Cloud credentials through a secret-management

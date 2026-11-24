@@ -1,18 +1,16 @@
 ---
 title: 认证
-description: 使用认证流程配置 LLM 和云凭证。
+description: 在桌面版或 Web 的设置中配置模型和云访问。
 ---
 
 # 认证
 
-在终端运行 `iac-code`，即可启动本地 Web 应用并打开浏览器。首次使用时，在设置中配置 LLM 提供商和阿里云凭证。
+打开桌面版，或在交互终端运行 `iac-code` 打开 Web，然后在设置中配置模型和所需的云凭证。
 
-- **设置 → 模型**：选择提供商，填写 API Key，并选择模型。
-- **设置 → 云凭证**：选择阿里云、认证方式和地域。
+- [在桌面版或 Web 中配置模型](./llm-providers.md)
+- [在桌面版或 Web 中配置云访问](./alibaba-cloud-credentials.md)
 
 Web、桌面版和 headless 共用这些已保存的凭证。
-
-使用终端配置时，启动 `iac-code tui` 后运行 `/auth`。
 
 运行时配置存储在用户配置目录下：
 

@@ -399,7 +399,7 @@ class TestStreamJsonWriter:
         assert "file_content" in rendered
         assert "sha256-value" in rendered
 
-    def test_tool_result_preserves_externalized_file_content_preview(self, tmp_path) -> None:
+    def test_tool_result_preserves_externalized_file_reference(self, tmp_path) -> None:
         stream = io.StringIO()
         writer = StreamJsonWriter(stream)
         raw_result = json.dumps(
@@ -414,19 +414,19 @@ class TestStreamJsonWriter:
             ResultStorage(
                 storage_dir=str(tmp_path / "tool-results"),
                 max_inline_chars=10,
-                preview_chars=180,
             )
             .process("tu_1", raw_result)
             .content
         )
-        assert "ROSTemplateFormatVersion" in preview
+        reference = preview.split("Complete output saved as ", 1)[1].splitlines()[0]
+        assert reference.startswith("tool-result://local/") and reference.endswith("/tu_1.txt")
         writer.handle(ToolResultEvent(tool_use_id="tu_1", tool_name="infraguard_scan", result=preview))
 
         data = json.loads(stream.getvalue())
         rendered = json.dumps(data, ensure_ascii=False)
-        assert "ROSTemplateFormatVersion" in rendered
-        assert "file_content" in rendered
-        assert "sha256-value" in rendered
+        assert reference in rendered
+        assert "file_content" not in rendered
+        assert "sha256-value" not in rendered
 
     def test_subagent_tool_event_omits_raw_child_input(self) -> None:
         stream = io.StringIO()

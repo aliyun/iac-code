@@ -8,6 +8,8 @@ description: 诊断 MCP 配置、连接、认证和能力发现问题。
 
 MCP warnings 通常不是 fatal；除非你需要的所有 capabilities 都不可用。某个 server 失败不应阻止其他 MCP servers 或内置 IaC Code tools 工作。
 
+在**插件 → MCP**中选择项目，查看服务器的连接、认证和审批状态。可点击**检查所有连接**或单个服务器的检查操作，再查看能力或完成认证。下方命令用于终端自动化诊断。
+
 ## Inspect Configuration
 
 不连接服务器，查看已配置的 servers：
@@ -90,13 +92,11 @@ Symptom:
 Project MCP server 'name' is pending approval.
 ```
 
-Fix:
+在**插件 → MCP**中选择项目，批准待审批的服务器。终端自动化可使用：
 
 ```bash
 iac-code mcp approve name
 ```
-
-或者在该项目中启动交互式 REPL，并在出现提示时回答“y”。按 Enter 表示`N`并拒绝服务器。
 
 如果审批曾经有效但停止了，请检查`.mcp.json`是否发生更改。批准与配置签名相关。
 
@@ -150,7 +150,7 @@ Symptom:
 MCP server 'name' requires authentication.
 ```
 
-Fix:
+在**插件 → MCP**中点击该服务器的**认证**。终端自动化可使用：
 
 ```bash
 iac-code mcp auth name --scope user
@@ -169,7 +169,7 @@ MCP auth failed for 'name':
 这表示 OAuth flow 已启动但没有正常完成：callback URL 可能不完整，authorization code 可能过期，或者
 authorization server 返回了错误。新 flow 在完成前失败时，IaC Code 会恢复之前的 auth state。
 
-Fix:
+在**插件 → MCP**中重试**认证**或**重新认证**；仅在已保存的认证状态失效时清除认证。对应 CLI 命令：
 
 ```bash
 iac-code mcp auth name --scope user
@@ -187,7 +187,7 @@ Symptom:
 invalid_client
 ```
 
-IaC 代码清除该服务器存储的 OAuth 客户端和令牌状态。再次运行身份验证：
+IaC Code 会清除无效的客户端与令牌状态。在**插件 → MCP**中点击**重新认证**，或使用：
 
 ```bash
 iac-code mcp auth name
@@ -201,10 +201,7 @@ Symptom:
 insufficient_scope
 ```
 
-服务器请求额外的 OAuth 范围。在当前会话中，打开`/mcp`并选择`认证`或
-该服务器的`重新认证`； IaC 代码包括该流程中服务器质询报告的范围。的
-独立的`iac-code mcp auth name`命令启动正常的身份验证流程，并且不携带来自
-previous session.
+服务器要求额外的 OAuth scope 时，应完成当前会话提供的授权链接，以授予本次请求的 scope。**插件 → MCP → 重新认证**和 `iac-code mcp auth name` 发起的是常规授权，不携带上一会话中仅由 challenge 提供的 scope。
 
 ## Scope Ambiguity
 

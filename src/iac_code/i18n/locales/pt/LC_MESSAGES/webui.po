@@ -4641,3 +4641,43 @@ msgstr "Custo estimado"
 #~ "A função foi criada, mas a "
 #~ "identidade atual ainda precisa da "
 #~ "permissão sts:AssumeRole."
+
+#: src/iac_code/web/static/js/app.js
+msgid "Search keywords"
+msgstr "Palavras-chave de pesquisa"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Matched documents"
+msgstr "Documentos encontrados"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search in progress"
+msgstr "Pesquisa na Wiki em andamento"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search completed"
+msgstr "Pesquisa na Wiki concluída"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search not needed"
+msgstr "Pesquisa na Wiki desnecessária"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search failed"
+msgstr "Falha na pesquisa na Wiki"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search cancelled"
+msgstr "Pesquisa na Wiki cancelada"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search interrupted"
+msgstr "Pesquisa na Wiki interrompida"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Matched {count} files"
+msgstr "{count} arquivos encontrados"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Duration: {seconds}s"
+msgstr "Duração: {seconds} s"

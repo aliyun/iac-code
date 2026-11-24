@@ -17,6 +17,7 @@ from iac_code.mcp.manager import mcp_status_metadata
 from iac_code.mcp.prompt_dispatch import mcp_prompt_command_stream
 from iac_code.services.agent_factory import AgentFactoryOptions, create_agent_runtime
 from iac_code.services.telemetry import flush_telemetry, use_session_id
+from iac_code.services.wiki_auto_search import async_local_ui_auto_search, local_ui_auto_search
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
     CloudResourceSelectionEvent,
@@ -288,14 +289,15 @@ def create_session_agent_runtime(
     model_selection: WebModelSelection | None = None,
     disable_external_services: bool = False,
 ) -> Any:
-    return create_agent_runtime(
-        agent_factory_options_for_session(
-            session,
-            manager,
-            model_selection=model_selection,
-            disable_external_services=disable_external_services,
+    with local_ui_auto_search():
+        return create_agent_runtime(
+            agent_factory_options_for_session(
+                session,
+                manager,
+                model_selection=model_selection,
+                disable_external_services=disable_external_services,
+            )
         )
-    )
 
 
 def attach_session_permission_context(runtime: Any, session: WebSession) -> None:
@@ -500,6 +502,7 @@ class WebSessionRuntime:
         self.manager = manager
         self.lifecycle_owner = lifecycle_owner
 
+    @async_local_ui_auto_search()
     async def start_turn(self, request: WebTurnRequest) -> dict[str, Any]:
         if self.session.turn_lock.locked():
             return dict(TURN_ALREADY_RUNNING)
@@ -721,6 +724,7 @@ class WebSessionRuntime:
                                 self.session.active_turn_floor_sequence = None
         return {"accepted": True, "turnId": turn_id, "inputConsumed": True}
 
+    @async_local_ui_auto_search()
     async def resume_permission(self, checkpoint: dict[str, Any]) -> dict[str, Any]:
         """Resume one persisted normal-Web permission without appending user input."""
 

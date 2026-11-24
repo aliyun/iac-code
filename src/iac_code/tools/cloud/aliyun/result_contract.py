@@ -31,7 +31,7 @@ ALIYUN_MIGRATED_RESULT_TOOLS = frozenset(
 
 _BODY_FORMATS = frozenset({"json", "text", "xml", "binary_base64_json", "headers_only_json", "empty"})
 _RESPONSE_MODES = frozenset({"json", "text", "xml", "binary", "headers_only"})
-_CONTENT_STATES = frozenset({"inline_final", "externalized_preview"})
+_CONTENT_STATES = frozenset({"inline_final", "externalized_preview", "externalized_reference"})
 _HEADER_COUNT_LIMIT = 64
 _HEADER_VALUE_BYTES_LIMIT = 8192
 _HEADERS_JSON_BYTES_LIMIT = 32768
@@ -95,7 +95,7 @@ def with_aliyun_content_state(metadata: Any, *, externalized: bool) -> dict[str,
     aliyun_http = sanitize_aliyun_http_metadata(metadata.get(ALIYUN_HTTP_METADATA_KEY), include_content_state=False)
     if aliyun_http is None:
         return dict(metadata)
-    aliyun_http["content_state"] = "externalized_preview" if externalized else "inline_final"
+    aliyun_http["content_state"] = "externalized_reference" if externalized else "inline_final"
     result = dict(metadata)
     result[ALIYUN_HTTP_METADATA_KEY] = aliyun_http
     return result
@@ -204,7 +204,7 @@ def render_aliyun_result(
         return None
     if verbose:
         return content.strip()
-    if metadata.get("content_state") == "externalized_preview":
+    if metadata.get("content_state") in {"externalized_preview", "externalized_reference"}:
         lines = content.strip().splitlines()
         return _("Received response ({count} lines)").format(count=len(lines))
 

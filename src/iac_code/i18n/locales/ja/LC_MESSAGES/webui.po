@@ -4462,3 +4462,43 @@ msgstr "概算費用"
 #~ "Role created, but the current identity"
 #~ " still needs sts:AssumeRole permission."
 #~ msgstr "ロールは作成されましたが、現在の ID には引き続き sts:AssumeRole 権限が必要です。"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Search keywords"
+msgstr "検索キーワード"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Matched documents"
+msgstr "一致したドキュメント"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search in progress"
+msgstr "Wiki を検索中"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search completed"
+msgstr "Wiki の検索完了"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search not needed"
+msgstr "Wiki の検索は不要"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search failed"
+msgstr "Wiki の検索に失敗"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search cancelled"
+msgstr "Wiki の検索をキャンセルしました"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Wiki search interrupted"
+msgstr "Wiki の検索が中断されました"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Matched {count} files"
+msgstr "{count} 件のファイルが一致"
+
+#: src/iac_code/web/static/js/app.js
+msgid "Duration: {seconds}s"
+msgstr "所要時間：{seconds} 秒"
