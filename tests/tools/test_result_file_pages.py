@@ -64,24 +64,32 @@ async def test_character_pages_reconstruct_complete_original(tmp_path, original)
 
 
 @pytest.mark.asyncio
-async def test_line_range_continues_within_a_long_line(tmp_path):
-    original = "before\n" + "x" * 80_000 + "\nafter\n"
+@pytest.mark.parametrize("newline", ["\n", "\r\n"], ids=["lf", "crlf"])
+async def test_line_range_continues_within_a_long_line(tmp_path, newline):
+    prefix = "before" + newline
+    selected_line = "x" * 80_000 + newline
+    original = prefix + selected_line + "after" + newline
     path = tmp_path / "long.txt"
-    path.write_text(original, encoding="utf-8")
+    path.write_bytes(original.encode("utf-8"))
     query = {"path": str(path), "start_line": 2, "end_line": 2}
     end_offsets = []
+    chunks = []
     while True:
         result = await ReadFileTool().execute(tool_input=query, context=ToolContext(cwd=str(tmp_path)))
         assert not result.is_error
         assert len(result.content) <= 20_000
         assert "before" not in result.content and "after" not in result.content
         page = result.metadata["file_page"]
+        expected = original[page["start_char"] : page["end_char"]]
+        assert expected in result.content.split("\n\n", 1)[1]
+        chunks.append(expected)
         end_offsets.append(page["end_char"])
         if not page["has_more"]:
             break
         query["cursor"] = page["next_cursor"]
     assert end_offsets == sorted(set(end_offsets))
-    assert end_offsets[-1] == len("before\n" + "x" * 80_000 + "\n")
+    assert end_offsets[-1] == len(prefix + selected_line)
+    assert "".join(chunks) == selected_line
 
 
 @pytest.mark.asyncio
