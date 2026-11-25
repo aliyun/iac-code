@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -9,7 +10,9 @@ import shutil
 import stat
 import sys
 import tempfile
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager, suppress
 from pathlib import Path
@@ -22,6 +25,8 @@ from iac_code.utils.path_locks import PathLockRegistry
 logger = logging.getLogger(__name__)
 _PATH_LOCKS = PathLockRegistry()
 _FILE_OPEN = os.open
+_SNAPSHOT_WRITES: OrderedDict[Path, tuple[bytes, tuple[int, ...]]] = OrderedDict()
+_SNAPSHOT_GUARD = threading.Lock()
 
 
 def _path_lock(path: Path):
@@ -291,6 +296,7 @@ def atomic_write_bytes(
     durable: bool = True,
     replace_attempts: int = 3,
     _safe_replace: Callable[[str | Path, str | Path], None] | None = None,
+    _published_signature: list[tuple[int, ...]] | None = None,
 ) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -302,12 +308,25 @@ def atomic_write_bytes(
             handle.flush()
             if durable:
                 os.fsync(handle.fileno())
+            written = os.fstat(handle.fileno()) if _published_signature is not None else None
         if _safe_replace is None:
             safe_replace(tmp_path, target, attempts=replace_attempts)
         else:
             _safe_replace(tmp_path, target)
         if durable:
             fsync_parent_dir(target)
+        if written is not None and _published_signature is not None:
+            try:
+                published = target.lstat()
+                # Atomic concurrent replacements have a different inode. An
+                # edited/deleted file must not inherit this write's cache proof.
+                def identity(info: os.stat_result) -> tuple[int, ...]:
+                    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+                if identity(published) == identity(written):
+                    _published_signature.append(_snapshot_signature(published))
+            except OSError:
+                pass
     except Exception:
         try:
             tmp_path.unlink()
@@ -324,6 +343,7 @@ def atomic_write_text(
     durable: bool = True,
     replace_attempts: int = 3,
     _safe_replace: Callable[[str | Path, str | Path], None] | None = None,
+    _published_signature: list[tuple[int, ...]] | None = None,
 ) -> None:
     atomic_write_bytes(
         path,
@@ -331,6 +351,7 @@ def atomic_write_text(
         durable=durable,
         replace_attempts=replace_attempts,
         _safe_replace=_safe_replace,
+        _published_signature=_published_signature,
     )
 
 
@@ -343,6 +364,48 @@ def atomic_write_json(
 ) -> None:
     content = json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
     atomic_write_text(path, content, durable=durable, replace_attempts=replace_attempts)
+
+
+def _snapshot_signature(info: os.stat_result) -> tuple[int, ...]:
+    return (
+        info.st_dev, info.st_ino, info.st_mode, info.st_nlink, info.st_size,
+        info.st_mtime_ns, info.st_ctime_ns, getattr(info, "st_file_attributes", 0),
+    )
+
+
+def _remember_snapshot(target: Path, digest: bytes, signature: tuple[int, ...]) -> None:
+    with _SNAPSHOT_GUARD:
+        _SNAPSHOT_WRITES[target] = (digest, signature)
+        while len(_SNAPSHOT_WRITES) > 256:
+            _SNAPSHOT_WRITES.popitem(last=False)
+
+
+def write_snapshot_text(path: str | Path, content: str) -> None:
+    """Skip only an unchanged file this process has already durably written.
+
+    For task/context mirrors, not execution fences, permissions or commit markers.
+    Replacements, external edits, deletion and process restarts force a fresh write.
+    Retain digests and file identities only, bounded independently of session size.
+    """
+    target = Path(path).absolute()
+    digest = hashlib.sha256(content.encode("utf-8")).digest()
+    with _path_lock(target):
+        with _SNAPSHOT_GUARD:
+            previous = _SNAPSHOT_WRITES.pop(target, None)
+        if previous is not None and previous[0] == digest:
+            try:
+                info = target.lstat()
+                signature = _snapshot_signature(info) if stat.S_ISREG(info.st_mode) else None
+            except OSError:
+                signature = None
+            if signature is not None and previous[1] == signature:
+                _remember_snapshot(target, digest, signature)
+                return
+        published: list[tuple[int, ...]] = []
+        atomic_write_text(target, content, durable=True, _published_signature=published)
+        if not published:
+            return
+        _remember_snapshot(target, digest, published[0])
 
 
 @contextmanager

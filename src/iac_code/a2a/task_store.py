@@ -48,7 +48,6 @@ from iac_code.services.session_backup import SessionBackupService
 from iac_code.services.session_layout import SessionPaths, ensure_session_owned_parent
 from iac_code.services.session_storage import SessionStorage
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
-from iac_code.utils.file_security import atomic_write_text
 from iac_code.utils.public_errors import sanitize_strict_text
 
 logger = logging.getLogger(__name__)
@@ -2097,8 +2096,10 @@ def _load_session_context_snapshot(*, cwd: str, session_id: str) -> A2AContextSn
 
 
 def _write_session_snapshot(session_dir: Path, path: Path, data: dict[str, Any]) -> None:
+    from iac_code.utils.state_io import write_snapshot_text
+
     ensure_session_owned_parent(session_dir, path)
-    atomic_write_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
+    write_snapshot_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
 
 
 @timed_phase("runtime_close")

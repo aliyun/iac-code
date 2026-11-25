@@ -16,13 +16,12 @@ from string import Formatter
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
-import yaml
-
 from iac_code.tools.cloud.aliyun.api_contract import (
     ApiContractError,
     CanonicalWireContract,
     validate_host_parameter_values,
 )
+from iac_code.utils.bundled_data import load_bundled_data
 from iac_code.utils.file_security import ensure_private_dir
 from iac_code.utils.state_io import cross_process_file_lock, fsync_parent_dir
 
@@ -253,9 +252,11 @@ class EndpointResolver:
         overrides_path: Path = _OVERRIDES_PATH,
         cache_writer: Callable[[Path, Mapping[str, Any]], None] = lambda path, document: _atomic_json(path, document),
     ) -> None:
-        catalog = _read_json(catalog_path)
-        unavailable = _read_json(unavailable_path)
-        endpoint_overrides = yaml.safe_load(overrides_path.read_text(encoding="utf-8")) or {}
+        catalog = load_bundled_data(catalog_path, format="json")
+        unavailable = load_bundled_data(unavailable_path, format="json")
+        if not isinstance(catalog, Mapping) or not isinstance(unavailable, Mapping):
+            raise EndpointResolutionError("invalid_endpoint_catalog")
+        endpoint_overrides = load_bundled_data(overrides_path, format="yaml") or {}
         if not isinstance(endpoint_overrides, Mapping):
             raise EndpointResolutionError("invalid_endpoint_overrides")
         self._catalog = catalog

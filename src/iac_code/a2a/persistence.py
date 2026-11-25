@@ -11,7 +11,7 @@ from typing import Any, cast
 
 from iac_code.a2a.types import validate_protocol_id
 from iac_code.services.telemetry.attributes import normalize_telemetry_channel
-from iac_code.utils.file_security import atomic_write_text
+from iac_code.utils.state_io import write_snapshot_text
 
 _INTERRUPTED_RESTORE_STATES = {"submitted", "working", "auth-required"}
 _FILESYSTEM_SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -236,7 +236,7 @@ class A2APersistenceStore:
 
     @staticmethod
     def _write_json(path: Path, data: dict[str, object]) -> None:
-        atomic_write_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
+        write_snapshot_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
 
     @staticmethod
     def _read_json(path: Path) -> dict[str, object] | None:
