@@ -2101,6 +2101,7 @@ def _write_session_snapshot(session_dir: Path, path: Path, data: dict[str, Any])
     atomic_write_text(path, json.dumps(data, ensure_ascii=False, sort_keys=True))
 
 
+@timed_phase("runtime_close")
 async def _close_runtime(runtime: Any | None) -> None:
     if runtime is None:
         return

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Iterator, TextIO, cast
 
 from iac_code.i18n import _
+from iac_code.services.first_token_timing import timed_phase
 from iac_code.utils.path_locks import PathLockRegistry
 
 logger = logging.getLogger(__name__)
@@ -282,6 +283,7 @@ def fsync_parent_dir(path: Path) -> None:
         os.close(fd)
 
 
+@timed_phase("state_file_write")
 def atomic_write_bytes(
     path: str | Path,
     content: bytes,
