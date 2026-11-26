@@ -547,15 +547,12 @@ class _FixtureServer:
 
 
 def _pipeline_journal_events(config_dir: Path) -> list[dict[str, Any]]:
+    from iac_code.a2a.pipeline_journal import A2APipelineJournal
+
     matches = sorted(config_dir.rglob("a2a/pipeline/a2a-events.jsonl"))
     if len(matches) != 1:
         raise AssertionError("expected exactly one Pipeline journal, found {}".format(len(matches)))
-    events: list[dict[str, Any]] = []
-    for line in matches[0].read_text(encoding="utf-8").splitlines():
-        value = json.loads(line)
-        if isinstance(value, dict):
-            events.append(value)
-    return events
+    return A2APipelineJournal(matches[0].parent).read_all_strict()
 
 
 def _pipeline_snapshot_permission(config_dir: Path, input_id: str) -> dict[str, Any]:

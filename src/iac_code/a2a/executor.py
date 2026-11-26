@@ -1771,6 +1771,13 @@ class IacCodeA2AExecutor(AgentExecutor):
                 # attachment so its live continuation stays execution-bound.
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        from iac_code.a2a.first_display_persistence import bind_first_display_persistence
+
+        bind_first_display_persistence(
+            getattr(context, "task_id", None) or "",
+            getattr(context, "context_id", None) or "",
+            namespace=id(self._task_store),
+        )
         message = getattr(context, "message", None)
         if (
             not progress_enabled()

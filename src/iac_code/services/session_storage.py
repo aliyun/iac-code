@@ -719,6 +719,7 @@ class SessionStorage:
                     updated_at=_utc_now(),
                     schema_version=current.schema_version,
                     layout_version=current.layout_version,
+                    prompt_time=current.prompt_time,
                 ),
             )
 
@@ -1050,6 +1051,7 @@ class SessionStorage:
             git_branch=git_branch,
             created_at=current.created_at if current else now,
             updated_at=now,
+            prompt_time=current.prompt_time if current else None,
             layout_version=SESSION_LAYOUT_VERSION_V2
             if was_new or legacy_file_wins
             else current.layout_version

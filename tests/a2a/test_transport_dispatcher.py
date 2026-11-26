@@ -2582,9 +2582,12 @@ async def test_message_stream_pending_permission_boundary_aclose_without_generat
 async def test_inactive_input_response_projects_final_reply_and_consumed_permission() -> None:
     call_context = ServerCallContext()
     task = Task(
-        id="task-reply", context_id="ctx-reply",
-        status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED,
-                          message=Message(role=Role.ROLE_AGENT, parts=[Part(text="permission needed")])),
+        id="task-reply",
+        context_id="ctx-reply",
+        status=TaskStatus(
+            state=TaskState.TASK_STATE_INPUT_REQUIRED,
+            message=Message(role=Role.ROLE_AGENT, parts=[Part(text="permission needed")]),
+        ),
     )
     ParseDict({"iac_code": {"input": {"kind": "permission"}}}, task.metadata)
     store = A2ATaskStore()
@@ -2597,24 +2600,29 @@ async def test_inactive_input_response_projects_final_reply_and_consumed_permiss
     class Executor:
         async def execute(self, _request_context, event_queue):
             final = TaskStatusUpdateEvent(
-                task_id=task.id, context_id=task.context_id,
-                status=TaskStatus(state=TaskState.TASK_STATE_WORKING,
-                                  message=Message(role=Role.ROLE_AGENT, parts=[Part(text="final reply")])),
+                task_id=task.id,
+                context_id=task.context_id,
+                status=TaskStatus(
+                    state=TaskState.TASK_STATE_WORKING,
+                    message=Message(role=Role.ROLE_AGENT, parts=[Part(text="final reply")]),
+                ),
             )
             ParseDict({"iac_code": {"assistantFinal": {"complete": True}}}, final.metadata)
             await event_queue.enqueue_event(final)
-            await event_queue.enqueue_event(TaskStatusUpdateEvent(
-                task_id=task.id, context_id=task.context_id,
-                status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
-            ))
+            await event_queue.enqueue_event(
+                TaskStatusUpdateEvent(
+                    task_id=task.id,
+                    context_id=task.context_id,
+                    status=TaskStatus(state=TaskState.TASK_STATE_INPUT_REQUIRED),
+                )
+            )
 
     handler = IacCodeRequestHandler.__new__(IacCodeRequestHandler)
     handler.task_store = store
     handler.agent_executor = Executor()
     handler._request_context_builder = RequestContextBuilder()
     handler._detached_message_producers = set()
-    params = SimpleNamespace(message=SimpleNamespace(task_id=task.id, context_id=task.context_id),
-                             configuration=None)
+    params = SimpleNamespace(message=SimpleNamespace(task_id=task.id, context_id=task.context_id), configuration=None)
 
     events = await _collect_async(handler._on_inactive_input_response_send_stream(params, call_context, task=task))
 
@@ -4632,7 +4640,10 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
 
     second_task = asyncio.create_task(consume_second_stream())
     for _ in range(_STREAM_TEST_TIMEOUT * 100):
-        if pipeline.interrupts:
+        if pipeline.interrupts and any(
+            event.get("eventType") == "interrupt_classified"
+            for event in A2APipelineJournal(pipeline.session.session_dir).read_all()
+        ):
             break
         await asyncio.sleep(0.01)
 
@@ -4657,8 +4668,9 @@ async def test_dispatcher_routes_second_pipeline_stream_as_interrupt(monkeypatch
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("executor_workers", [1, 4])
+@pytest.mark.parametrize("source_finishes_during_persistence", [False, True])
 async def test_dispatcher_resumes_candidate_selection_submitted_during_input_backup(
-    monkeypatch, tmp_path, executor_workers
+    monkeypatch, tmp_path, executor_workers, source_finishes_during_persistence
 ) -> None:
     monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
     monkeypatch.setenv("IAC_CODE_A2A_EXTREME_PERFORMANCE", "true")
@@ -4666,6 +4678,20 @@ async def test_dispatcher_resumes_candidate_selection_submitted_during_input_bac
     loop.set_default_executor(ThreadPoolExecutor(max_workers=executor_workers))
     backup_started = asyncio.Event()
     release_backup = threading.Event()
+    source_finished = threading.Event()
+    if source_finishes_during_persistence:
+        from iac_code.a2a.pipeline_snapshot import A2APipelineSnapshotStore
+
+        save = A2APipelineSnapshotStore.save
+
+        def wait_for_source_end(self, snapshot, **kwargs):
+            # A real filesystem stall must not prevent a finite source from draining,
+            # or force its close path to hold the lock needed by the incoming answer.
+            if snapshot.get("pendingInput") is not None:
+                assert source_finished.wait(3), "source could not drain during persistence"
+            return save(self, snapshot, **kwargs)
+
+        monkeypatch.setattr(A2APipelineSnapshotStore, "save", wait_for_source_end)
 
     class BlockingBackupService(SessionBackupService):
         def __init__(self) -> None:
@@ -4698,6 +4724,7 @@ async def test_dispatcher_resumes_candidate_selection_submitted_during_input_bac
                     "options": [{"candidate_index": 0, "name": "方案 A"}],
                 },
             )
+            source_finished.set()
 
         async def resume(self, prompt: str):
             self.resume_prompts.append(normalize_pipeline_user_input(prompt).display_text)

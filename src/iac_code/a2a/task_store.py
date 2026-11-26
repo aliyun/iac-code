@@ -6,6 +6,7 @@ import json
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ from iac_code.a2a.execution_control import (
     current_execution_termination_reason,
     persisted_natural_handoff_admits_input_recovery,
 )
+from iac_code.a2a.first_display_persistence import bind_first_display_persistence, first_display_persistence
 from iac_code.a2a.metadata_redaction import strip_llm_headers_from_metadata
 from iac_code.a2a.metrics import A2AMetrics, NoOpA2AMetrics
 from iac_code.a2a.persistence import A2AContextSnapshot, A2APersistenceStore, A2ATaskSnapshot
@@ -72,6 +74,7 @@ class A2ATaskStore(TaskStore):
         self._tasks: dict[str, A2ATaskRecord] = {}
         self._task_persistence_dirty: set[str] = set()
         self._contexts: dict[str, A2AContextRecord] = {}
+        self._context_snapshot_versions: OrderedDict[str, A2AContextSnapshot] = OrderedDict()
         self._pending_context_telemetry_channels: dict[str, str] = {}
         # Request headers may contain credentials, so context bindings stay in memory
         # instead of being mirrored into plaintext A2A/session snapshots.
@@ -157,6 +160,7 @@ class A2ATaskStore(TaskStore):
     async def save(self, task: Task, context: ServerCallContext | None = None) -> None:
         owner = self._owner(context)
         task_id = validate_protocol_id(task.id)
+        bind_first_display_persistence(task_id, task.context_id, namespace=id(self))
         _strip_task_llm_headers(task)
         async with self._mutation_lock:
             self._save_locked(task, owner=owner, task_id=task_id)
@@ -254,7 +258,8 @@ class A2ATaskStore(TaskStore):
                         output_text=list(output_text),
                         updated_at=updated_at,
                         expected_permission_backup_generation=expected_permission_backup_generation,
-                        artifacts=list(record.artifacts) if record is not None
+                        artifacts=list(record.artifacts)
+                        if record is not None
                         else (list(persisted_task.artifacts) if persisted_task is not None else []),
                     )
                     context_snapshot = A2AContextSnapshot(
@@ -439,7 +444,25 @@ class A2ATaskStore(TaskStore):
             record.updated_at = incoming_updated_at
             record.touch()
         record.artifacts = [MessageToDict(artifact) for artifact in task.artifacts]
+        window = first_display_persistence(task_id, task.context_id, namespace=id(self))
+        if (
+            not persist_shared_snapshot
+            and next_state in {TASK_STATE_SUBMITTED, TASK_STATE_WORKING}
+            and window is not None
+            and window.defer(
+                ("sdk_task", id(self), task_id),
+                lambda: self._flush_sdk_projection(task_id),
+            )
+        ):
+            return
         self._mirror_task(record, persist_shared_snapshot=persist_shared_snapshot)
+
+    async def _flush_sdk_projection(self, task_id: str) -> None:
+        async with self._mutation_lock:
+            record = self._tasks.get(task_id)
+            if record is not None:
+                # Use the current record, never a captured pre-backup/previous-turn copy.
+                self._mirror_task(record, persist_shared_snapshot=False)
 
     def _restore_rejected_sdk_projection(
         self,
@@ -1759,8 +1782,9 @@ class A2ATaskStore(TaskStore):
                 or bool(self._permission_wait_active_probe and self._permission_wait_active_probe())
             )
 
-    def mirror_task(self, record: A2ATaskRecord) -> None:
-        record.updated_at = time.time()
+    def mirror_task(self, record: A2ATaskRecord, *, refresh_timestamp: bool = True) -> None:
+        if refresh_timestamp:
+            record.updated_at = time.time()
         self._mirror_task(record)
 
     def mirror_context(self, record: A2AContextRecord) -> None:
@@ -1872,6 +1896,8 @@ class A2ATaskStore(TaskStore):
                 logger.exception("A2A cleanup loop failed")
 
     def _mirror_task(self, record: A2ATaskRecord, *, persist_shared_snapshot: bool = True) -> None:
+        if window := first_display_persistence(record.task_id, record.context_id, namespace=id(self)):
+            window.discard(("sdk_task", id(self), record.task_id))
         if self._execution_is_terminating(record.context_id):
             # Final snapshots are committed after all execution participants drain.
             # This also covers SDK saves and executor finally blocks on slow OSS.
@@ -1904,6 +1930,13 @@ class A2ATaskStore(TaskStore):
             telemetry_channel=record.telemetry_channel,
             active_task_id=record.active_task_id,
         )
+        previous = self._context_snapshot_versions.pop(record.context_id, None)
+        if previous is not None and replace(snapshot, updated_at=previous.updated_at) == previous:
+            snapshot = previous
+        self._context_snapshot_versions[record.context_id] = snapshot
+        while len(self._context_snapshot_versions) > 256:
+            self._context_snapshot_versions.popitem(last=False)
+        # Always invoke the verified writer: deletion, external replacement and failures must repair/retry.
         self._persist_context_snapshot(snapshot)
 
     def _persist_context_snapshot(self, snapshot: A2AContextSnapshot) -> None:

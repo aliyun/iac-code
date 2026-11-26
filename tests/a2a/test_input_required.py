@@ -1832,10 +1832,15 @@ async def test_pipeline_permission_uses_same_input_envelope_and_waits_serially(
     )
     monkeypatch.setattr("iac_code.a2a.input_required.emit_permission_boundary_audit", lambda *_args, **_kwargs: True)
     publishing = asyncio.create_task(publisher.publish(request))
-    for _ in range(20):
-        if queue.events:
-            break
-        await asyncio.sleep(0)
+
+    async def wait_for_publication():
+        while not queue.events:
+            if publishing.done():
+                await publishing
+                raise AssertionError("Permission publication ended without an event")
+            await asyncio.sleep(0.001)
+
+    await asyncio.wait_for(wait_for_publication(), timeout=3)
     dumped = MessageToDict(queue.events[0], preserving_proto_field_name=False)
     assert dumped["status"]["state"] == "TASK_STATE_INPUT_REQUIRED"
     assert dumped["metadata"]["iac_code"]["input"]["kind"] == "permission"

@@ -296,3 +296,224 @@ async def test_adopted_wiki_duration_includes_prefetch_time(tmp_path, monkeypatc
         work = start_work(manager, tmp_path, [])
         await work.task
     assert work.snapshot["elapsed_ms"] >= 2000
+
+
+@pytest.mark.asyncio
+async def test_worker_ready_prefetch_runs_during_tools_setup_and_is_adopted_once(tmp_path, monkeypatch):
+    import threading
+
+    manager = Manager()
+    root_usage, step_usage = [], []
+    tools_finished = threading.Event()
+    monkeypatch.setattr(wiki, "search", _no_search)
+
+    @wiki.keyword_preparation_scope
+    async def execute():
+        early = wiki.current_keyword_preparation()
+
+        def prepare_tools():
+            early.start_from_thread(manager, "ECS", lambda *args: root_usage.append(args))
+            assert not tools_finished.is_set()
+
+        await asyncio.to_thread(prepare_tools)
+        await asyncio.wait_for(manager.started.wait(), 2)
+        assert not tools_finished.is_set()
+        tools_finished.set()
+        work = start_work(manager, tmp_path, step_usage)
+        manager.release.set()
+        await work.task
+
+    await execute()
+    assert manager.calls == 1 and len(step_usage) == 1 and not root_usage
+    assert wiki._KEYWORD_PREFETCH.get() is None
+
+
+async def _no_search(*args, **kwargs):
+    return []
+
+
+@pytest.mark.asyncio
+async def test_worker_ready_prefetch_is_drained_on_request_cancellation():
+    manager = Manager()
+
+    @wiki.keyword_preparation_scope
+    async def execute():
+        early = wiki.current_keyword_preparation()
+        await asyncio.to_thread(early.start_from_thread, manager, "ECS", lambda *args: None)
+        await manager.started.wait()
+        await asyncio.Event().wait()
+
+    request = asyncio.create_task(execute())
+    await manager.started.wait()
+    request.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await request
+    assert manager.closed.is_set()
+
+
+@pytest.mark.asyncio
+async def test_late_worker_callback_after_owner_close_does_not_launch_inference():
+    manager = Manager()
+    holders = []
+
+    @wiki.keyword_preparation_scope
+    async def execute():
+        holders.append(wiki.current_keyword_preparation())
+
+    await execute()
+    await asyncio.to_thread(holders[0].start_from_thread, manager, "ECS", lambda *args: None)
+    await asyncio.sleep(0)
+    assert manager.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_completed_unused_worker_prefetch_records_usage_exactly_once():
+    manager = Manager()
+    usage = []
+
+    @wiki.keyword_preparation_scope
+    async def execute():
+        early = wiki.current_keyword_preparation()
+        await asyncio.to_thread(early.start_from_thread, manager, "ECS", lambda *args: usage.append(args))
+        await manager.started.wait()
+        manager.release.set()
+        await manager.closed.wait()
+        await early.aclose()
+        await early.aclose()
+
+    await execute()
+    assert manager.calls == 1 and len(usage) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("initialization_fails", [False, True])
+async def test_executor_starts_after_provider_config_before_tools_and_drains_failed_setup(
+    tmp_path,
+    monkeypatch,
+    initialization_fails,
+):
+    import threading
+    from types import SimpleNamespace
+
+    from iac_code.a2a.executor import IacCodeA2AExecutor
+    from iac_code.a2a.task_store import A2ATaskStore
+    from iac_code.providers.manager import ProviderManager
+    from iac_code.types.stream_events import TextDeltaEvent
+    from tests.a2a.fakes import FakeEventQueue, FakeRequestContext
+    from tests.a2a.test_pipeline_executor import FakePipeline, _fake_runtime
+
+    monkeypatch.setenv("IAC_CODE_MODE", "pipeline")
+    monkeypatch.setenv("IAC_CODE_PIPELINE_NAME", "selling_solution_first")
+    monkeypatch.setenv("IAC_CODE_WIKI_AUTO_SEARCH", "true")
+    inference_started, tools_started, inference_closed = threading.Event(), threading.Event(), threading.Event()
+    root_usage, step_usage, configurations = [], [], []
+
+    class Provider:
+        _PROVIDER_KEY = "openai"
+
+        async def complete(self, *args, **kwargs):
+            from iac_code.providers.request_headers import get_provider_request_headers
+
+            assert get_provider_request_headers() == {"X-Fixture-Request": "request-scoped"}
+            inference_started.set()
+            try:
+                assert await asyncio.to_thread(tools_started.wait, 3)
+                if initialization_fails:
+                    await asyncio.Event().wait()
+                return NonStreamingResponse(
+                    message_id="fixture",
+                    text='{"keywords":["ECS"]}',
+                    tool_uses=[],
+                    stop_reason="end_turn",
+                    usage=Usage(input_tokens=7),
+                )
+            finally:
+                inference_closed.set()
+
+    monkeypatch.setattr("iac_code.providers.manager.create_provider", lambda *args, **kwargs: Provider())
+    manager = ProviderManager(model="fixture", credentials={}, ignore_llm_source=True)
+    reconfigure = manager.reconfigure
+
+    def configured(*args, **kwargs):
+        configurations.append(args[0])
+        return reconfigure(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "reconfigure", configured)
+    runtime = _fake_runtime()
+    runtime.provider_manager = manager
+    runtime.agent_loop = SimpleNamespace(_record_session_usage=lambda *args: root_usage.append(args))
+
+    class Pipeline(FakePipeline):
+        async def run(self, prompt):
+            work = start_work(manager, tmp_path, step_usage, query="hello")
+            await work.task
+            yield TextDeltaEvent(text="answer")
+
+    pipeline = Pipeline([], session_dir=tmp_path / "pipeline")
+
+    def create_runtime(options):
+        assert options.provider_ready is not None
+        options.provider_ready(manager)
+        tools_started.set()
+        assert inference_started.wait(3), "inference did not begin during initialization"
+        assert configurations == ["fixture"]
+        if initialization_fails:
+            raise RuntimeError("fixture initialization failure")
+        return runtime
+
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_agent_runtime", create_runtime)
+    monkeypatch.setattr("iac_code.a2a.pipeline_executor.create_pipeline", lambda *args, **kwargs: pipeline)
+    monkeypatch.setattr(wiki, "search", _no_search)
+    store = A2ATaskStore()
+    executor = IacCodeA2AExecutor(task_store=store, model="fixture")
+    queue = FakeEventQueue()
+    await executor.execute(
+        FakeRequestContext(
+            metadata={
+                "iac_code": {
+                    "cwd": str(tmp_path),
+                    "llm_headers": {"X-Fixture-Request": "request-scoped"},
+                }
+            }
+        ),
+        queue,
+    )
+    assert inference_closed.is_set()
+    assert configurations == ["fixture"]  # No second reconfigure while the side request is in flight.
+    if initialization_fails:
+        assert not step_usage and not root_usage
+    else:
+        assert len(step_usage) == 1 and not root_usage
+        assert "".join(store._tasks["task-1"].output_text) == "answer"
+
+
+@pytest.mark.asyncio
+async def test_concurrent_early_prefetch_headers_are_isolated_and_do_not_leak_to_owner():
+    from iac_code.providers.request_headers import get_provider_request_headers, use_provider_request_headers
+
+    observed = []
+
+    class HeaderManager(Manager):
+        async def complete(self, **kwargs):
+            observed.append(get_provider_request_headers())
+            return NonStreamingResponse(
+                message_id="fixture", text='{"keywords":[]}', tool_uses=[], stop_reason="end_turn", usage=Usage()
+            )
+
+    @wiki.keyword_preparation_scope
+    async def execute(value):
+        early = wiki.current_keyword_preparation()
+        manager = HeaderManager()
+        await asyncio.to_thread(
+            early.start_from_thread, manager, "ECS", lambda *args: None, headers={"X-Fixture": value}
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        if early.prefetch is not None:
+            await early.prefetch.task
+        assert get_provider_request_headers() == {"X-Owner": "unchanged"}
+
+    with use_provider_request_headers({"X-Owner": "unchanged"}):
+        await asyncio.gather(execute("one"), execute("two"))
+        assert get_provider_request_headers() == {"X-Owner": "unchanged"}
+    assert sorted(row["X-Fixture"] for row in observed) == ["one", "two"]

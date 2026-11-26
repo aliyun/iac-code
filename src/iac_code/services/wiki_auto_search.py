@@ -19,6 +19,7 @@ from collections.abc import Callable
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -375,7 +376,9 @@ class _KeywordPrefetch:
     closed: bool = False
 
 
-_KEYWORD_PREFETCH: ContextVar[_KeywordPrefetch | None] = ContextVar("wiki_keyword_prefetch", default=None)
+_KEYWORD_PREFETCH: ContextVar[_KeywordPrefetch | KeywordPreparation | None] = ContextVar(
+    "wiki_keyword_prefetch", default=None
+)
 
 
 async def _extract_keywords(manager: Any, query: str, recent: list[str], work: WikiWork) -> _KeywordResult:
@@ -390,10 +393,17 @@ async def _extract_keywords(manager: Any, query: str, recent: list[str], work: W
                 lease = side.begin_request(PROMPT)
                 adapter = ProviderManager.model_only_request_adapter(side, lease)
             response = await side.complete(
-                messages=[ProviderMessage.user(json.dumps(
-                    extraction_input(query, recent, TokenCounter(side.get_model_name())), ensure_ascii=False,
-                ))],
-                system=PROMPT, tools=None, cache_policy="no_explicit_cache",
+                messages=[
+                    ProviderMessage.user(
+                        json.dumps(
+                            extraction_input(query, recent, TokenCounter(side.get_model_name())),
+                            ensure_ascii=False,
+                        )
+                    )
+                ],
+                system=PROMPT,
+                tools=None,
+                cache_policy="no_explicit_cache",
                 **({"lease": lease} if lease is not None else {}),
             )
         policy = {}
@@ -412,6 +422,98 @@ async def _extract_keywords(manager: Any, query: str, recent: list[str], work: W
             side.release_request(lease)
 
 
+class KeywordPreparation:
+    """Own a worker-started inference task on the request event loop."""
+
+    def __init__(self):
+        self.loop = asyncio.get_running_loop()
+        self.prefetch: _KeywordPrefetch | None = None
+        self.record_usage: Callable[..., None] = lambda *args: None
+        self.closed = False
+
+    def start_from_thread(
+        self,
+        manager: Any,
+        query: str,
+        record_usage: Callable[..., None],
+        *,
+        headers: dict[str, str] | None = None,
+    ) -> None:
+        # An early request precedes the owner's late header activation. Scope its validated
+        # snapshot inside the child task, never enter the owner's ExitStack from another context.
+        request_headers = dict(headers) if headers is not None else None
+
+        async def extract(work: WikiWork):
+            if request_headers is None:
+                return await _extract_keywords(manager, query, [], work)
+            from iac_code.providers.request_headers import use_provider_request_headers
+
+            with use_provider_request_headers(request_headers):
+                return await _extract_keywords(manager, query, [], work)
+
+        def start() -> None:
+            if self.closed or self.prefetch is not None:
+                return
+            work = WikiWork({})
+            self.record_usage = record_usage
+            self.prefetch = _KeywordPrefetch(
+                manager,
+                query,
+                asyncio.create_task(extract(work)),
+                work,
+            )
+
+        self.loop.call_soon_threadsafe(start)
+
+    def has_manager(self, manager: Any) -> bool:
+        return self.prefetch is not None and self.prefetch.manager is manager
+
+    async def aclose(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        if self.prefetch is not None:
+            await _close_keyword_prefetch(self.prefetch, self.record_usage)
+
+
+def keyword_preparation_scope(function):
+    @wraps(function)
+    async def scoped(*args, **kwargs):
+        preparation = KeywordPreparation()
+        token = _KEYWORD_PREFETCH.set(preparation)
+        try:
+            return await function(*args, **kwargs)
+        finally:
+            _KEYWORD_PREFETCH.reset(token)
+            await preparation.aclose()
+
+    return scoped
+
+
+def current_keyword_preparation() -> KeywordPreparation | None:
+    value = _KEYWORD_PREFETCH.get()
+    return value if isinstance(value, KeywordPreparation) else None
+
+
+async def _close_keyword_prefetch(prefetch: _KeywordPrefetch, record_usage: Callable[..., None]) -> None:
+    prefetch.closed = True
+    if not prefetch.used and not prefetch.task.done():
+        prefetch.task.cancel()
+
+    async def settle():
+        try:
+            return await prefetch.task
+        except (asyncio.CancelledError, Exception):
+            return None
+
+    result = await await_task_to_completion(asyncio.create_task(settle()))
+    if result is not None and not prefetch.used:
+        try:
+            record_usage(result.response.usage, result.response.usage_attribution)
+        except Exception:
+            pass
+
+
 @asynccontextmanager
 async def prefetch_wiki_keywords(manager: Any, query: str, record_usage: Callable[..., None]):
     """Request-owned inference only; the step still searches with its own read permissions.
@@ -428,23 +530,7 @@ async def prefetch_wiki_keywords(manager: Any, query: str, record_usage: Callabl
         yield
     finally:
         _KEYWORD_PREFETCH.reset(token)
-        prefetch.closed = True
-        if not prefetch.used and not prefetch.task.done():
-            prefetch.task.cancel()
-
-        async def settle():
-            try:
-                return await prefetch.task
-            except (asyncio.CancelledError, Exception):
-                return None
-
-        # Capture child cancellation separately from a new owner cancellation.
-        result = await await_task_to_completion(asyncio.create_task(settle()))
-        if result is not None and not prefetch.used:
-            try:
-                record_usage(result.response.usage, result.response.usage_attribution)
-            except Exception:
-                pass
+        await _close_keyword_prefetch(prefetch, record_usage)
 
 
 class WikiAutoSearch:
@@ -559,9 +645,15 @@ class WikiAutoSearch:
                 work.emit("extracting")
                 try:
                     prefetch = _KEYWORD_PREFETCH.get()
+                    if isinstance(prefetch, KeywordPreparation):
+                        prefetch = prefetch.prefetch
                     if (
-                        prefetch is not None and not prefetch.used and not prefetch.closed
-                        and prefetch.manager is self.manager and prefetch.query == query and not recent
+                        prefetch is not None
+                        and not prefetch.used
+                        and not prefetch.closed
+                        and prefetch.manager is self.manager
+                        and prefetch.query == query
+                        and not recent
                     ):
                         prefetch.used = True
                         started = min(started, prefetch.started)

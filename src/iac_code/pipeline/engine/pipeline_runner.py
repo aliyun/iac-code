@@ -66,6 +66,7 @@ from iac_code.pipeline.engine.user_input import (
 from iac_code.services.permission_wait import PermissionWaitCheckpointStore, RecoveredPermissionAuditBoundary
 from iac_code.services.session_backup import BackupReason, SessionBackupBlocked, SessionBackupService
 from iac_code.services.session_metadata import SESSION_JSONL_FILENAME, SESSION_METADATA_FILENAME
+from iac_code.services.session_prompt_time import SessionPromptTime
 from iac_code.services.session_storage import PIPELINE_USER_HISTORY_KEY
 from iac_code.types.stream_events import (
     AskUserQuestionEvent,
@@ -682,6 +683,7 @@ class PipelineRunner:
         self._session_storage = session_storage
         self._session_id = session_id
         self._cwd = cwd or os.getcwd()
+        self._prompt_time = SessionPromptTime(session_storage, self._cwd, session_id)
         self._backup_service = backup_service or self._default_backup_service(session_storage)
         self._permission_context_getter = permission_context_getter
         self._memory_content_getter = memory_content_getter
@@ -782,6 +784,7 @@ class PipelineRunner:
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
             aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
+            prompt_time=self._prompt_time,
         )
         self._apply_telemetry_correlation(self._step_executor)
 
@@ -1484,6 +1487,7 @@ class PipelineRunner:
         if was_pause_confirmation:
             if pipeline_input.acceptance is not None:
                 pipeline_input.acceptance.accept()
+            self._prompt_time.begin_turn()
             self._set_pending_input_kind(None)
             current_step = getattr(self.state_machine, "current_step", None)
             step_id = getattr(current_step, "step_id", None)
@@ -2953,6 +2957,7 @@ class PipelineRunner:
             surface=self._surface,
             tool_context_env_overrides=self._tool_context_env_overrides,
             aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
+            prompt_time=self._prompt_time,
         )
         self._apply_telemetry_correlation(sub_context_executor)
         sub_context_dependencies = sub_context_executor._sub_context_dependencies(sub_spec)
@@ -2999,6 +3004,7 @@ class PipelineRunner:
                 surface=self._surface,
                 tool_context_env_overrides=self._tool_context_env_overrides,
                 aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
+                prompt_time=self._prompt_time,
             )
             self._apply_telemetry_correlation(step_executor)
             agent_context = step_executor.build_agent_loop_context(
@@ -3264,6 +3270,7 @@ class PipelineRunner:
         self, user_input: str | list[ContentBlock] | PipelineUserInput
     ) -> AsyncGenerator[StreamEvent | PipelineEvent | StepResult, None]:
         """Start the pipeline from the first step."""
+        self._prompt_time.begin_turn()
         pipeline_started_at = self._observability.now()
         await execution_checkpoint()
         await self._start_mcp_reconnect_tasks()
@@ -3393,6 +3400,7 @@ class PipelineRunner:
         if pipeline_input.acceptance is not None:
             pipeline_input.acceptance.accept()
         wait_started_at = self._waiting_input_started_at.pop(step.step_id, None)
+        self._prompt_time.begin_turn()
         wait_duration_ms = self._observability.duration_ms(wait_started_at) if wait_started_at is not None else None
         self._waiting_input_options_by_step.pop(step.step_id, None)
         if step.ui_mode == "candidate_selection":
@@ -3642,6 +3650,7 @@ class PipelineRunner:
         resume_messages = _without_tool_result(resume_messages, tool_use_id)
         if input_acceptance is not None:
             input_acceptance.accept()
+        self._prompt_time.begin_turn()
         self.acknowledge_pending_ask_user_question(tool_use_id)
         answer_text = payload["free_text"] or payload["selected_label"] or payload["selected_id"]
         if payload["selected_id"] and payload["free_text"]:
@@ -3885,6 +3894,8 @@ class PipelineRunner:
 
         if self._is_judgment_error_verdict(verdict):
             return self._apply_interrupt_judge_failure_policy(verdict)
+
+        self._prompt_time.begin_turn()
 
         acceptance = pipeline_input.acceptance
         if acceptance is not None:
@@ -5641,6 +5652,7 @@ class PipelineRunner:
             backup_service=self._backup_service,
             tool_context_env_overrides=self._tool_context_env_overrides,
             aliyun_delegated_executor_factory=self._aliyun_delegated_executor_factory,
+            prompt_time=self._prompt_time,
         )
         self._apply_telemetry_correlation(executor)
         return executor
