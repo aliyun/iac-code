@@ -882,6 +882,7 @@ class A2ATaskStore(TaskStore):
             self._pending_context_telemetry_channels.pop(context_id, None)
             return record
 
+    @timed_phase("context_channel_resolve")
     async def resolve_context_telemetry_channel(
         self,
         context_id: str,

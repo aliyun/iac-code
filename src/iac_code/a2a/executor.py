@@ -1771,6 +1771,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 # attachment so its live continuation stays execution-bound.
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        mark_timing("a2a_executor_entered", once=True)
         from iac_code.a2a.first_display_persistence import bind_first_display_persistence
 
         bind_first_display_persistence(
@@ -4806,6 +4807,7 @@ class IacCodeA2AExecutor(AgentExecutor):
                 text="Task not running.",
             )
 
+    @timed_phase("workspace_prepare")
     def _resolve_cwd(self, metadata: Any | None) -> str:
         if metadata is not None and hasattr(metadata, "DESCRIPTOR"):
             metadata = MessageToDict(metadata, preserving_proto_field_name=False)

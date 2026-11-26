@@ -120,6 +120,7 @@ from iac_code.a2a.task_store import A2ATaskStore
 from iac_code.a2a.types import TASK_STATE_CANCELED
 from iac_code.i18n import _
 from iac_code.pipeline.config import RunMode
+from iac_code.services.first_token_timing import mark_timing, timed_phase
 from iac_code.services.permission_wait import PermissionWaitCheckpointStore
 from iac_code.services.session_backup import SessionBackupPublishing, SessionBackupService
 from iac_code.services.session_backup_staging import (
@@ -577,6 +578,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         self._validate_extensions(context)
         return await super().on_list_tasks(params, context)
 
+    @timed_phase("sdk_task_prepare")
     async def _setup_active_task(self, params: SendMessageRequest, call_context):
         active_task, request_context = await super()._setup_active_task(params, call_context)
         PipelineLifecycleEventQueueCarrier.attach(request_context)
@@ -804,6 +806,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
         return result
 
     async def on_message_send(self, params: SendMessageRequest, context):
+        mark_timing("a2a_handler_entered", once=True)
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
         permission_response = parse_permission_response(params.message)
@@ -881,6 +884,7 @@ class IacCodeRequestHandler(DefaultRequestHandler):
             await stream.aclose()
 
     async def _on_message_send_stream_unfiltered(self, params: SendMessageRequest, context):
+        mark_timing("a2a_handler_entered", once=True)
         self._validate_extensions(context)
         self._validate_pipeline_message_request(params)
         permission_response = parse_permission_response(params.message)
