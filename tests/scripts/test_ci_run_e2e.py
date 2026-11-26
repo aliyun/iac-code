@@ -170,8 +170,8 @@ def test_catalog_includes_headless_surfaces_and_excludes_browser_desktop() -> No
     live = run_e2e.select_cases(run_e2e.parse_args(["--suite", "live", "--list"]))
     assert len(full) == 86
     assert any(case.name == "ros-agent-handoff-reply-contract" for case in full)
-    assert len(live) == 164
-    assert len(run_e2e.CASES) == 250
+    assert len(live) == 165
+    assert len(run_e2e.CASES) == 251
     assert {case.name for case in full if case.name.startswith("output-limit-")} == {
         "output-limit-" + scenario for scenario in run_e2e.OUTPUT_LIMIT_SCENARIOS
     }

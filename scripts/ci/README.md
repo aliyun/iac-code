@@ -79,6 +79,13 @@ uv run --no-sync python scripts/ci/run_e2e.py \
   --credential-source-dir /path/to/test-config --jobs 2 --retries 0
 ```
 
+`resource-plan-intent-a2a` 使用真实多模态模型和本地 A2A HTTP/SSE，验证云资源清单图片分析的部署意图澄清。四个独立上下文覆盖：意愿不明后选择生成部署方案、意愿不明后选择仅咨询、首轮明确部署、首轮明确仅咨询。检查先解读再提问、确认前不结束、选择部署后展示候选，以及明确意图时不重复询问。只复制 LLM 凭证，不接收云凭证、不选择候选或进入 Step2；CI 默认使用合成图片，私有原图可通过 runner 的 `--image` 参数复放，不提交原图。单次 CI 只分配一个多模态模型。
+
+```bash
+uv run --no-sync python scripts/ci/run_e2e.py --case resource-plan-intent-a2a \
+  --case-model resource-plan-intent-a2a=qwen3.8-flash --credential-source-dir /path/to/test-config
+```
+
 `promotional-offer-followup-a2a` 通过生产 HTTP/SSE A2A Server 验证真实模型：先为“最低 2G、推荐 4G”的旅游 Agent 规划服务器，再保留会话追问活动商品，最后明确咨询活动购买资格。流程验收检查方案展示、续聊不误推进；第三轮明确暂不部署、仅咨询活动时，须展示同地域助手链接；允许保留原方案与候选批次、停留在 Step1，也允许 `rejected` 分流并在结束原因中保存链接，两者均不得误推进部署。最低值／推荐值提取单列为 `model_quality.minimum_memory_extraction` 非阻塞观察，保留 `failed` 与原始约束；无方案时记为 `not_exercised`，不再影响 E2E 退出码。公开 JSON、Markdown 和 HTML 报告保留观察状态，完整输入、输出和约束证据仍在私有用例目录。测试不替换模型或工具结果、不选择部署方案，仅复制 LLM 凭证与 settings，不接收云凭证、不查询实际活动资格；首轮历史附图中的规格以文本复现。四模型覆盖需分别指定每个 `--text-model` 运行，不把单次调度当成四模型全覆盖。
 
 ```bash

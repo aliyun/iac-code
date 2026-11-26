@@ -28,6 +28,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 CLOUD_REFRESH_SECONDS = 600
 LLM_ONLY_RUNNERS = frozenset({
     "smoke", "ros_awareness", "promotional_offer_followup", "plan_cost_refresh", "knowledge_wiki_normal",
+    "resource_plan_intent",
 })
 SAFE_LIVE_AUDIT_NOTE = re.compile(
     r"credential audit: source=(?:llm|cloud); "
@@ -349,6 +350,10 @@ LIVE_CASES = tuple(
     )
     for scenario in ROS_AWARENESS_SCENARIOS
 ) + (
+    Case(
+        "resource-plan-intent-a2a", "scripts/ci/run_resource_plan_intent_a2a.py", (), 1800, "live",
+        live_runner="resource_plan_intent", group="readonly", multimodal=True,
+    ),
     Case(
         "promotional-offer-followup-a2a", "scripts/ci/run_promotional_offer_followup_a2a.py", (), 1200, "live",
         live_runner="promotional_offer_followup", group="readonly",
@@ -1629,6 +1634,7 @@ def run_case(
             _prepare_cloud_credentials(cloud_credential_helper, source_config_dir, cloud_credential_python)
         if case.live_runner in {
             "ros_awareness", "promotional_offer_followup", "plan_cost_refresh", "knowledge_wiki_normal",
+            "resource_plan_intent",
         }:
             command.append("--allow-real-llm")
         elif case.live_runner not in LLM_ONLY_RUNNERS:

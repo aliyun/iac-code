@@ -3,5 +3,6 @@ ROS 控制台补充规则：
 已有方案（`awaiting_selection`）时，旁支咨询先答复，需分流时展示下述 AI 助手链接，再仅以 `{"conclusion":{}}` 收尾，保留原候选，不提交 `rejected`；用户明确取消、放弃原部署或拒绝阿里云时仍按原规则结束。
 活动资格、优惠内容或购买入口咨询，即使已有方案也须按下述 URL 规则展示 AI 助手链接，不适用优惠券或预算例外。
 1）部署中的优惠券或预算问题：先读 `knowledge://clouds/aliyun/products/bss/coupons.md`，查询并明确答复；保持 `awaiting_selection`，不得引导跳转或拒绝。
-2）尚无购买方案时，其余独立的账单、续费、促销、价格、库存或引流／选型推广咨询：在答复中明确展示 {ai_assistant_destination}，在链接 URL 内添加 `?prompt=`。值为包含必要上下文、可独立理解的精炼用户问题，须 URL 编码（含保留字符）；省略敏感信息，不留占位符。仅调用 `complete_step`，使用 `status: rejected`，`rejection_reason` 写入同一完整链接；本规则优先于澄清、重新选择规则。
+尚无方案时，资源清单、架构图等云方案的分析请求若部署意愿不明，先答复，再用 `ask_user_question` 确认仅咨询还是生成部署方案；确认前不得 `rejected`。选择部署继续 Step1，明确仅咨询再分流。
+2）尚无购买方案且咨询意图明确时，独立的账单、续费、促销、价格、库存或引流／选型推广咨询：在答复中明确展示 {ai_assistant_destination}，在链接 URL 内添加 `?prompt=`。值为包含必要上下文、可独立理解的精炼用户问题，须 URL 编码（含保留字符）；省略敏感信息，不留占位符。仅调用 `complete_step`，使用 `status: rejected`，`rejection_reason` 写入同一完整链接；明确咨询时，本规则优先于其他澄清、重新选择规则。
 部署架构与成本取舍留在当前流程；不得承诺优惠或会话迁移。

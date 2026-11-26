@@ -106,6 +106,11 @@ def test_enabled_awareness_uses_session_region(monkeypatch, value):
     assert "包含必要上下文、可独立理解的精炼用户问题" in supplement
     assert "URL 编码（含保留字符）" in supplement
     assert "云资源的购买、创建、部署请求留在当前流程" in supplement
+    assert "资源清单、架构图等云方案的分析请求若部署意愿不明" in supplement
+    assert "`ask_user_question` 确认仅咨询还是生成部署方案" in supplement
+    assert "确认前不得 `rejected`" in supplement
+    assert "选择部署继续 Step1，明确仅咨询再分流" in supplement
+    assert "尚无购买方案且咨询意图明确时" in supplement
 
 
 @pytest.mark.parametrize("region", ["", "../cn-beijing", "cn-beijing/chat?token=bad", "https://example.com"])
@@ -157,7 +162,7 @@ async def test_pipeline_prompt_uses_each_concurrent_callers_console_region(execu
         assert f"https://ros.console.aliyun.com/{own}/chat" in skill_and_step
         assert "ROS 控制台补充规则" in skill_and_step
         assert "ros_agent_awareness" not in prompt
-        assert "优先于澄清、重新选择规则" in prompt
+        assert "明确咨询时，本规则优先于其他澄清、重新选择规则" in prompt
         assert "使用 `status: rejected`" in prompt
 
 
